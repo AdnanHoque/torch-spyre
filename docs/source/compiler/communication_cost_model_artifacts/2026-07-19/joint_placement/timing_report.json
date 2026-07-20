@@ -1,0 +1,3356 @@
+{
+  "gate": "pass",
+  "winner": "joint_all",
+  "inventory_gate": true,
+  "run_gate": true,
+  "pair_gate": true,
+  "repeatability_gate": true,
+  "run_reports": [
+    {
+      "block": 1,
+      "label": "lx_default",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_1/1_lx_default",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 213.635,
+      "mean_us": 213.69496666666666,
+      "manifest": "3325057b9a033736f4fb9caad26660919dfb66cd15d9c6af089eb20764ab1e8b"
+    },
+    {
+      "block": 1,
+      "label": "lx_joint",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_1/2_lx_joint",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 203.12,
+      "mean_us": 202.9744,
+      "manifest": "a23a097d2c3778baf97a810135e6a4b5ef8cb78e4c2521f930833c8980c13958"
+    },
+    {
+      "block": 1,
+      "label": "hbm_joint",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_1/3_hbm_joint",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 1765.202,
+      "mean_us": 1766.1987666666669,
+      "manifest": "ad985d6659c8992020454cb543b064e139b5fe80e05eef6af4b02e4e19545462"
+    },
+    {
+      "block": 1,
+      "label": "hbm_default",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_1/4_hbm_default",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 1737.9355,
+      "mean_us": 1738.6290666666669,
+      "manifest": "1954d4ff00b808858acc4078b252996716f0330e76f602a7d7e3bb659114c7c1"
+    },
+    {
+      "block": 2,
+      "label": "lx_joint",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_2/1_lx_joint",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 203.09949999999998,
+      "mean_us": 202.8705,
+      "manifest": "dfd1330b823b1c8d18667adb3c4562f19252f918041c234aa006ba18a4ae60cb"
+    },
+    {
+      "block": 2,
+      "label": "hbm_default",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_2/2_hbm_default",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 1738.953,
+      "mean_us": 1737.9911,
+      "manifest": "9fb2331401932d5d0b42391c8da29bdb1ac964e5c709f5f1e3ba44441f0185fc"
+    },
+    {
+      "block": 2,
+      "label": "lx_default",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_2/3_lx_default",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 213.787,
+      "mean_us": 213.7801,
+      "manifest": "b7f3d1ce11e756fef6b2da65fa140041e95f6d273ca844f70304ef9c1426e418"
+    },
+    {
+      "block": 2,
+      "label": "hbm_joint",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_2/4_hbm_joint",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 1764.6435,
+      "mean_us": 1764.3085666666666,
+      "manifest": "f624ce484470573e6e296bf63907381dbe815dc8e295a4a0d62116bc10396275"
+    },
+    {
+      "block": 3,
+      "label": "hbm_default",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_3/1_hbm_default",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 1739.088,
+      "mean_us": 1740.2387,
+      "manifest": "5e6af27c3057746bb9cc592b955873a1d4157690eac8b05036fca5c2c7b69a52"
+    },
+    {
+      "block": 3,
+      "label": "hbm_joint",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_3/2_hbm_joint",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 1764.1995,
+      "mean_us": 1764.2368,
+      "manifest": "847c9d00b68a04cf893c1543fee4e514564a5cbfa453338ba5b72cea1eed1271"
+    },
+    {
+      "block": 3,
+      "label": "lx_joint",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_3/3_lx_joint",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 203.452,
+      "mean_us": 203.44226666666665,
+      "manifest": "273da3701db2693f9885f183a70e2f8cd722f74b22212d01e2f86de3fb39fce2"
+    },
+    {
+      "block": 3,
+      "label": "lx_default",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_3/4_lx_default",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 213.56799999999998,
+      "mean_us": 213.54396666666668,
+      "manifest": "604c6d831d36e7b4e543562af3388e0e62851b21a99d610804e9e8152edcef70"
+    },
+    {
+      "block": 4,
+      "label": "hbm_joint",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_4/1_hbm_joint",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 1764.3895,
+      "mean_us": 1763.2156,
+      "manifest": "0a965b87eb8848cd10c0cb708c97416b2a4beefd3a09abf42dc8a922007f8eac"
+    },
+    {
+      "block": 4,
+      "label": "lx_default",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_4/2_lx_default",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 213.647,
+      "mean_us": 213.49446666666665,
+      "manifest": "54153c917d9fdc5bcd9c01a8bd05ab93d1c94b0941c2d70fb710fe17fe28b70f"
+    },
+    {
+      "block": 4,
+      "label": "hbm_default",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_4/3_hbm_default",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 1741.6195,
+      "mean_us": 1742.3344666666667,
+      "manifest": "6e79ab24755aec1dbb0f2cacd5cfef345dfcdc8002c7492dcfee90f81ce785a6"
+    },
+    {
+      "block": 4,
+      "label": "lx_joint",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_4/4_lx_joint",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 203.541,
+      "mean_us": 203.42843333333334,
+      "manifest": "3536750f7c8c388fa17cd904485e1a1df01e72530702e972a055abb2eb0b0e16"
+    },
+    {
+      "block": 5,
+      "label": "lx_default",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_5/1_lx_default",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 212.996,
+      "mean_us": 212.87223333333336,
+      "manifest": "d7729eed17fc9960987dd8d06579a8c196a40b074e7b7d2d0434a158919c6b9e"
+    },
+    {
+      "block": 5,
+      "label": "lx_joint",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_5/2_lx_joint",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 202.487,
+      "mean_us": 202.4908,
+      "manifest": "1fa5803d2fe69881a3c7b8c2c92a585be78ddc3c26b676ce0ec638abe956dcfa"
+    },
+    {
+      "block": 5,
+      "label": "hbm_default",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_5/3_hbm_default",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 1739.5575,
+      "mean_us": 1738.9571,
+      "manifest": "24786a6690c532ba3edc398e7af2d3ba71da58727167198125f2b02863b6c1ee"
+    },
+    {
+      "block": 5,
+      "label": "hbm_joint",
+      "path": "/home/adnan/codex-isolated/placement_contract_cdx_refresh_closed_20260719_005237Z/results/joint_closed_attention_timing_node4_20260719_v1/block_5/4_hbm_joint",
+      "checks": {
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "correctness": true,
+        "materialization": true,
+        "wrong_route_negative": true,
+        "trace_qc": true,
+        "thirty_events": true,
+        "mode": true,
+        "shuffle_count": true,
+        "restickify_path": true,
+        "candidate_flag": true,
+        "actual_and_expected_finite": true,
+        "finite_timing_values": true,
+        "summary_trace_mean_agrees": true
+      },
+      "pass": true,
+      "median_us": 1765.567,
+      "mean_us": 1765.3278,
+      "manifest": "3431535515fde953d6090352951362c2011776a063035c35edf416ab7b14cbb8"
+    }
+  ],
+  "pair_reports": [
+    {
+      "pass": true,
+      "checks": {
+        "expected_root_sets": true,
+        "exact_target_delta": true,
+        "default_interleaved": true,
+        "joint_expected_embeddings": true,
+        "all_allocation_components_preserved": true
+      },
+      "changed_roots": [
+        "0_mul",
+        "10_mul",
+        "11_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_shuffle",
+        "4_batchmatmul",
+        "5_max",
+        "6_sub",
+        "7_exp",
+        "8_sum",
+        "9_reciprocal"
+      ],
+      "target_roots": [
+        "0_mul",
+        "10_mul",
+        "11_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_shuffle",
+        "4_batchmatmul",
+        "5_max",
+        "6_sub",
+        "7_exp",
+        "8_sum",
+        "9_reciprocal"
+      ],
+      "root_comparison": {
+        "0_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "1_mul": {
+          "semantic_equal": true,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_interleaved"
+        },
+        "2_ReStickifyOpHBM": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "3_shuffle": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "4_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "5_max": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "6_sub": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "7_exp": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "8_sum": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "9_reciprocal": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "10_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "11_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        }
+      },
+      "route_checks": {
+        "default_hops_2048": true,
+        "default_max_directed_40": true,
+        "joint_hops_672": true,
+        "joint_max_directed_16": true,
+        "default_shuffle_maps_match_adjacent_roots": true,
+        "joint_shuffle_maps_match_adjacent_roots": true
+      },
+      "route_metrics": {
+        "default": {
+          "source_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 8
+          },
+          "destination_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 1
+          },
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "mean_remote_distance": 9.142857142857142,
+          "max_directed_link_units": 40,
+          "max_combined_segment_units": 64,
+          "clockwise_units": [
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40
+          ],
+          "counterclockwise_units": [
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24
+          ],
+          "combined_segment_units": [
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64
+          ],
+          "routing_model": "shortest path, clockwise at 16-hop tie",
+          "source": "SHUFFLE scheduleTree allocation coordinate maps"
+        },
+        "joint": {
+          "source_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 8
+          },
+          "destination_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 1
+          },
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "mean_remote_distance": 3.0,
+          "max_directed_link_units": 16,
+          "max_combined_segment_units": 32,
+          "clockwise_units": [
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0
+          ],
+          "counterclockwise_units": [
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0
+          ],
+          "combined_segment_units": [
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0
+          ],
+          "routing_model": "shortest path, clockwise at 16-hop tie",
+          "source": "SHUFFLE scheduleTree allocation coordinate maps"
+        }
+      },
+      "adjacent_root_inferred_route_metrics": {
+        "default": {
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "mean_remote_distance": 9.142857142857142,
+          "max_directed_link_units": 40,
+          "max_combined_segment_units": 64,
+          "routing_model": "shortest path, clockwise at 16-hop tie"
+        },
+        "joint": {
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "mean_remote_distance": 3.0,
+          "max_directed_link_units": 16,
+          "max_combined_segment_units": 32,
+          "routing_model": "shortest path, clockwise at 16-hop tie"
+        }
+      },
+      "block": 1,
+      "mode": "lx"
+    },
+    {
+      "pass": true,
+      "checks": {
+        "expected_root_sets": true,
+        "exact_target_delta": true,
+        "default_interleaved": true,
+        "joint_expected_embeddings": true,
+        "all_allocation_components_preserved": true
+      },
+      "changed_roots": [
+        "0_mul",
+        "10_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_batchmatmul",
+        "4_max",
+        "5_sub",
+        "6_exp",
+        "7_sum",
+        "8_reciprocal",
+        "9_mul"
+      ],
+      "target_roots": [
+        "0_mul",
+        "10_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_batchmatmul",
+        "4_max",
+        "5_sub",
+        "6_exp",
+        "7_sum",
+        "8_reciprocal",
+        "9_mul"
+      ],
+      "root_comparison": {
+        "0_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "1_mul": {
+          "semantic_equal": true,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_interleaved"
+        },
+        "2_ReStickifyOpHBM": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "3_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "4_max": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "5_sub": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "6_exp": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "7_sum": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "8_reciprocal": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "9_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "10_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        }
+      },
+      "block": 1,
+      "mode": "hbm"
+    },
+    {
+      "pass": true,
+      "checks": {
+        "expected_root_sets": true,
+        "exact_target_delta": true,
+        "default_interleaved": true,
+        "joint_expected_embeddings": true,
+        "all_allocation_components_preserved": true
+      },
+      "changed_roots": [
+        "0_mul",
+        "10_mul",
+        "11_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_shuffle",
+        "4_batchmatmul",
+        "5_max",
+        "6_sub",
+        "7_exp",
+        "8_sum",
+        "9_reciprocal"
+      ],
+      "target_roots": [
+        "0_mul",
+        "10_mul",
+        "11_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_shuffle",
+        "4_batchmatmul",
+        "5_max",
+        "6_sub",
+        "7_exp",
+        "8_sum",
+        "9_reciprocal"
+      ],
+      "root_comparison": {
+        "0_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "1_mul": {
+          "semantic_equal": true,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_interleaved"
+        },
+        "2_ReStickifyOpHBM": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "3_shuffle": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "4_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "5_max": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "6_sub": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "7_exp": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "8_sum": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "9_reciprocal": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "10_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "11_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        }
+      },
+      "route_checks": {
+        "default_hops_2048": true,
+        "default_max_directed_40": true,
+        "joint_hops_672": true,
+        "joint_max_directed_16": true,
+        "default_shuffle_maps_match_adjacent_roots": true,
+        "joint_shuffle_maps_match_adjacent_roots": true
+      },
+      "route_metrics": {
+        "default": {
+          "source_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 8
+          },
+          "destination_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 1
+          },
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "mean_remote_distance": 9.142857142857142,
+          "max_directed_link_units": 40,
+          "max_combined_segment_units": 64,
+          "clockwise_units": [
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40
+          ],
+          "counterclockwise_units": [
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24
+          ],
+          "combined_segment_units": [
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64
+          ],
+          "routing_model": "shortest path, clockwise at 16-hop tie",
+          "source": "SHUFFLE scheduleTree allocation coordinate maps"
+        },
+        "joint": {
+          "source_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 8
+          },
+          "destination_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 1
+          },
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "mean_remote_distance": 3.0,
+          "max_directed_link_units": 16,
+          "max_combined_segment_units": 32,
+          "clockwise_units": [
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0
+          ],
+          "counterclockwise_units": [
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0
+          ],
+          "combined_segment_units": [
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0
+          ],
+          "routing_model": "shortest path, clockwise at 16-hop tie",
+          "source": "SHUFFLE scheduleTree allocation coordinate maps"
+        }
+      },
+      "adjacent_root_inferred_route_metrics": {
+        "default": {
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "mean_remote_distance": 9.142857142857142,
+          "max_directed_link_units": 40,
+          "max_combined_segment_units": 64,
+          "routing_model": "shortest path, clockwise at 16-hop tie"
+        },
+        "joint": {
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "mean_remote_distance": 3.0,
+          "max_directed_link_units": 16,
+          "max_combined_segment_units": 32,
+          "routing_model": "shortest path, clockwise at 16-hop tie"
+        }
+      },
+      "block": 2,
+      "mode": "lx"
+    },
+    {
+      "pass": true,
+      "checks": {
+        "expected_root_sets": true,
+        "exact_target_delta": true,
+        "default_interleaved": true,
+        "joint_expected_embeddings": true,
+        "all_allocation_components_preserved": true
+      },
+      "changed_roots": [
+        "0_mul",
+        "10_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_batchmatmul",
+        "4_max",
+        "5_sub",
+        "6_exp",
+        "7_sum",
+        "8_reciprocal",
+        "9_mul"
+      ],
+      "target_roots": [
+        "0_mul",
+        "10_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_batchmatmul",
+        "4_max",
+        "5_sub",
+        "6_exp",
+        "7_sum",
+        "8_reciprocal",
+        "9_mul"
+      ],
+      "root_comparison": {
+        "0_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "1_mul": {
+          "semantic_equal": true,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_interleaved"
+        },
+        "2_ReStickifyOpHBM": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "3_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "4_max": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "5_sub": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "6_exp": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "7_sum": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "8_reciprocal": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "9_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "10_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        }
+      },
+      "block": 2,
+      "mode": "hbm"
+    },
+    {
+      "pass": true,
+      "checks": {
+        "expected_root_sets": true,
+        "exact_target_delta": true,
+        "default_interleaved": true,
+        "joint_expected_embeddings": true,
+        "all_allocation_components_preserved": true
+      },
+      "changed_roots": [
+        "0_mul",
+        "10_mul",
+        "11_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_shuffle",
+        "4_batchmatmul",
+        "5_max",
+        "6_sub",
+        "7_exp",
+        "8_sum",
+        "9_reciprocal"
+      ],
+      "target_roots": [
+        "0_mul",
+        "10_mul",
+        "11_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_shuffle",
+        "4_batchmatmul",
+        "5_max",
+        "6_sub",
+        "7_exp",
+        "8_sum",
+        "9_reciprocal"
+      ],
+      "root_comparison": {
+        "0_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "1_mul": {
+          "semantic_equal": true,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_interleaved"
+        },
+        "2_ReStickifyOpHBM": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "3_shuffle": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "4_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "5_max": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "6_sub": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "7_exp": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "8_sum": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "9_reciprocal": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "10_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "11_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        }
+      },
+      "route_checks": {
+        "default_hops_2048": true,
+        "default_max_directed_40": true,
+        "joint_hops_672": true,
+        "joint_max_directed_16": true,
+        "default_shuffle_maps_match_adjacent_roots": true,
+        "joint_shuffle_maps_match_adjacent_roots": true
+      },
+      "route_metrics": {
+        "default": {
+          "source_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 8
+          },
+          "destination_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 1
+          },
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "mean_remote_distance": 9.142857142857142,
+          "max_directed_link_units": 40,
+          "max_combined_segment_units": 64,
+          "clockwise_units": [
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40
+          ],
+          "counterclockwise_units": [
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24
+          ],
+          "combined_segment_units": [
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64
+          ],
+          "routing_model": "shortest path, clockwise at 16-hop tie",
+          "source": "SHUFFLE scheduleTree allocation coordinate maps"
+        },
+        "joint": {
+          "source_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 8
+          },
+          "destination_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 1
+          },
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "mean_remote_distance": 3.0,
+          "max_directed_link_units": 16,
+          "max_combined_segment_units": 32,
+          "clockwise_units": [
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0
+          ],
+          "counterclockwise_units": [
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0
+          ],
+          "combined_segment_units": [
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0
+          ],
+          "routing_model": "shortest path, clockwise at 16-hop tie",
+          "source": "SHUFFLE scheduleTree allocation coordinate maps"
+        }
+      },
+      "adjacent_root_inferred_route_metrics": {
+        "default": {
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "mean_remote_distance": 9.142857142857142,
+          "max_directed_link_units": 40,
+          "max_combined_segment_units": 64,
+          "routing_model": "shortest path, clockwise at 16-hop tie"
+        },
+        "joint": {
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "mean_remote_distance": 3.0,
+          "max_directed_link_units": 16,
+          "max_combined_segment_units": 32,
+          "routing_model": "shortest path, clockwise at 16-hop tie"
+        }
+      },
+      "block": 3,
+      "mode": "lx"
+    },
+    {
+      "pass": true,
+      "checks": {
+        "expected_root_sets": true,
+        "exact_target_delta": true,
+        "default_interleaved": true,
+        "joint_expected_embeddings": true,
+        "all_allocation_components_preserved": true
+      },
+      "changed_roots": [
+        "0_mul",
+        "10_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_batchmatmul",
+        "4_max",
+        "5_sub",
+        "6_exp",
+        "7_sum",
+        "8_reciprocal",
+        "9_mul"
+      ],
+      "target_roots": [
+        "0_mul",
+        "10_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_batchmatmul",
+        "4_max",
+        "5_sub",
+        "6_exp",
+        "7_sum",
+        "8_reciprocal",
+        "9_mul"
+      ],
+      "root_comparison": {
+        "0_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "1_mul": {
+          "semantic_equal": true,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_interleaved"
+        },
+        "2_ReStickifyOpHBM": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "3_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "4_max": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "5_sub": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "6_exp": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "7_sum": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "8_reciprocal": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "9_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "10_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        }
+      },
+      "block": 3,
+      "mode": "hbm"
+    },
+    {
+      "pass": true,
+      "checks": {
+        "expected_root_sets": true,
+        "exact_target_delta": true,
+        "default_interleaved": true,
+        "joint_expected_embeddings": true,
+        "all_allocation_components_preserved": true
+      },
+      "changed_roots": [
+        "0_mul",
+        "10_mul",
+        "11_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_shuffle",
+        "4_batchmatmul",
+        "5_max",
+        "6_sub",
+        "7_exp",
+        "8_sum",
+        "9_reciprocal"
+      ],
+      "target_roots": [
+        "0_mul",
+        "10_mul",
+        "11_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_shuffle",
+        "4_batchmatmul",
+        "5_max",
+        "6_sub",
+        "7_exp",
+        "8_sum",
+        "9_reciprocal"
+      ],
+      "root_comparison": {
+        "0_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "1_mul": {
+          "semantic_equal": true,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_interleaved"
+        },
+        "2_ReStickifyOpHBM": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "3_shuffle": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "4_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "5_max": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "6_sub": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "7_exp": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "8_sum": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "9_reciprocal": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "10_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "11_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        }
+      },
+      "route_checks": {
+        "default_hops_2048": true,
+        "default_max_directed_40": true,
+        "joint_hops_672": true,
+        "joint_max_directed_16": true,
+        "default_shuffle_maps_match_adjacent_roots": true,
+        "joint_shuffle_maps_match_adjacent_roots": true
+      },
+      "route_metrics": {
+        "default": {
+          "source_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 8
+          },
+          "destination_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 1
+          },
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "mean_remote_distance": 9.142857142857142,
+          "max_directed_link_units": 40,
+          "max_combined_segment_units": 64,
+          "clockwise_units": [
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40
+          ],
+          "counterclockwise_units": [
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24
+          ],
+          "combined_segment_units": [
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64
+          ],
+          "routing_model": "shortest path, clockwise at 16-hop tie",
+          "source": "SHUFFLE scheduleTree allocation coordinate maps"
+        },
+        "joint": {
+          "source_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 8
+          },
+          "destination_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 1
+          },
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "mean_remote_distance": 3.0,
+          "max_directed_link_units": 16,
+          "max_combined_segment_units": 32,
+          "clockwise_units": [
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0
+          ],
+          "counterclockwise_units": [
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0
+          ],
+          "combined_segment_units": [
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0
+          ],
+          "routing_model": "shortest path, clockwise at 16-hop tie",
+          "source": "SHUFFLE scheduleTree allocation coordinate maps"
+        }
+      },
+      "adjacent_root_inferred_route_metrics": {
+        "default": {
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "mean_remote_distance": 9.142857142857142,
+          "max_directed_link_units": 40,
+          "max_combined_segment_units": 64,
+          "routing_model": "shortest path, clockwise at 16-hop tie"
+        },
+        "joint": {
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "mean_remote_distance": 3.0,
+          "max_directed_link_units": 16,
+          "max_combined_segment_units": 32,
+          "routing_model": "shortest path, clockwise at 16-hop tie"
+        }
+      },
+      "block": 4,
+      "mode": "lx"
+    },
+    {
+      "pass": true,
+      "checks": {
+        "expected_root_sets": true,
+        "exact_target_delta": true,
+        "default_interleaved": true,
+        "joint_expected_embeddings": true,
+        "all_allocation_components_preserved": true
+      },
+      "changed_roots": [
+        "0_mul",
+        "10_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_batchmatmul",
+        "4_max",
+        "5_sub",
+        "6_exp",
+        "7_sum",
+        "8_reciprocal",
+        "9_mul"
+      ],
+      "target_roots": [
+        "0_mul",
+        "10_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_batchmatmul",
+        "4_max",
+        "5_sub",
+        "6_exp",
+        "7_sum",
+        "8_reciprocal",
+        "9_mul"
+      ],
+      "root_comparison": {
+        "0_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "1_mul": {
+          "semantic_equal": true,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_interleaved"
+        },
+        "2_ReStickifyOpHBM": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "3_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "4_max": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "5_sub": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "6_exp": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "7_sum": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "8_reciprocal": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "9_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "10_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        }
+      },
+      "block": 4,
+      "mode": "hbm"
+    },
+    {
+      "pass": true,
+      "checks": {
+        "expected_root_sets": true,
+        "exact_target_delta": true,
+        "default_interleaved": true,
+        "joint_expected_embeddings": true,
+        "all_allocation_components_preserved": true
+      },
+      "changed_roots": [
+        "0_mul",
+        "10_mul",
+        "11_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_shuffle",
+        "4_batchmatmul",
+        "5_max",
+        "6_sub",
+        "7_exp",
+        "8_sum",
+        "9_reciprocal"
+      ],
+      "target_roots": [
+        "0_mul",
+        "10_mul",
+        "11_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_shuffle",
+        "4_batchmatmul",
+        "5_max",
+        "6_sub",
+        "7_exp",
+        "8_sum",
+        "9_reciprocal"
+      ],
+      "root_comparison": {
+        "0_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "1_mul": {
+          "semantic_equal": true,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_interleaved"
+        },
+        "2_ReStickifyOpHBM": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "3_shuffle": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "4_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "5_max": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "6_sub": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "7_exp": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "8_sum": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "9_reciprocal": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "10_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "11_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        }
+      },
+      "route_checks": {
+        "default_hops_2048": true,
+        "default_max_directed_40": true,
+        "joint_hops_672": true,
+        "joint_max_directed_16": true,
+        "default_shuffle_maps_match_adjacent_roots": true,
+        "joint_shuffle_maps_match_adjacent_roots": true
+      },
+      "route_metrics": {
+        "default": {
+          "source_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 8
+          },
+          "destination_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 1
+          },
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "mean_remote_distance": 9.142857142857142,
+          "max_directed_link_units": 40,
+          "max_combined_segment_units": 64,
+          "clockwise_units": [
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40,
+            40
+          ],
+          "counterclockwise_units": [
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24,
+            24
+          ],
+          "combined_segment_units": [
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64
+          ],
+          "routing_model": "shortest path, clockwise at 16-hop tie",
+          "source": "SHUFFLE scheduleTree allocation coordinate maps"
+        },
+        "joint": {
+          "source_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 8
+          },
+          "destination_splits": {
+            "in": 1,
+            "x": 4,
+            "out": 1
+          },
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "mean_remote_distance": 3.0,
+          "max_directed_link_units": 16,
+          "max_combined_segment_units": 32,
+          "clockwise_units": [
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0
+          ],
+          "counterclockwise_units": [
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0,
+            7,
+            12,
+            15,
+            16,
+            15,
+            12,
+            7,
+            0
+          ],
+          "combined_segment_units": [
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0,
+            14,
+            24,
+            30,
+            32,
+            30,
+            24,
+            14,
+            0
+          ],
+          "routing_model": "shortest path, clockwise at 16-hop tie",
+          "source": "SHUFFLE scheduleTree allocation coordinate maps"
+        }
+      },
+      "adjacent_root_inferred_route_metrics": {
+        "default": {
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "mean_remote_distance": 9.142857142857142,
+          "max_directed_link_units": 40,
+          "max_combined_segment_units": 64,
+          "routing_model": "shortest path, clockwise at 16-hop tie"
+        },
+        "joint": {
+          "local_relations": 32,
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "mean_remote_distance": 3.0,
+          "max_directed_link_units": 16,
+          "max_combined_segment_units": 32,
+          "routing_model": "shortest path, clockwise at 16-hop tie"
+        }
+      },
+      "block": 5,
+      "mode": "lx"
+    },
+    {
+      "pass": true,
+      "checks": {
+        "expected_root_sets": true,
+        "exact_target_delta": true,
+        "default_interleaved": true,
+        "joint_expected_embeddings": true,
+        "all_allocation_components_preserved": true
+      },
+      "changed_roots": [
+        "0_mul",
+        "10_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_batchmatmul",
+        "4_max",
+        "5_sub",
+        "6_exp",
+        "7_sum",
+        "8_reciprocal",
+        "9_mul"
+      ],
+      "target_roots": [
+        "0_mul",
+        "10_batchmatmul",
+        "2_ReStickifyOpHBM",
+        "3_batchmatmul",
+        "4_max",
+        "5_sub",
+        "6_exp",
+        "7_sum",
+        "8_reciprocal",
+        "9_mul"
+      ],
+      "root_comparison": {
+        "0_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "1_mul": {
+          "semantic_equal": true,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_interleaved"
+        },
+        "2_ReStickifyOpHBM": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "3_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "4_max": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "5_sub": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "6_exp": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "7_sum": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "8_reciprocal": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "9_mul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        },
+        "10_batchmatmul": {
+          "semantic_equal": false,
+          "allocation_signature_equal": true,
+          "default_embedding": "head_interleaved",
+          "joint_embedding": "head_contiguous"
+        }
+      },
+      "block": 5,
+      "mode": "hbm"
+    }
+  ],
+  "semantic_repeatability": {
+    "lx_default": {
+      "semantic_rootset_sha256_by_block": [
+        "17f57cce1b7b95773dfd67e4cc485c562651a42500a1150b2d32fc859ad78798",
+        "17f57cce1b7b95773dfd67e4cc485c562651a42500a1150b2d32fc859ad78798",
+        "17f57cce1b7b95773dfd67e4cc485c562651a42500a1150b2d32fc859ad78798",
+        "17f57cce1b7b95773dfd67e4cc485c562651a42500a1150b2d32fc859ad78798",
+        "17f57cce1b7b95773dfd67e4cc485c562651a42500a1150b2d32fc859ad78798"
+      ],
+      "identical": true
+    },
+    "lx_joint": {
+      "semantic_rootset_sha256_by_block": [
+        "21f570be8fc986d7e6ac7fc32ac819b12b60499080f6445fddaddead7da0330f",
+        "21f570be8fc986d7e6ac7fc32ac819b12b60499080f6445fddaddead7da0330f",
+        "21f570be8fc986d7e6ac7fc32ac819b12b60499080f6445fddaddead7da0330f",
+        "21f570be8fc986d7e6ac7fc32ac819b12b60499080f6445fddaddead7da0330f",
+        "21f570be8fc986d7e6ac7fc32ac819b12b60499080f6445fddaddead7da0330f"
+      ],
+      "identical": true
+    },
+    "hbm_default": {
+      "semantic_rootset_sha256_by_block": [
+        "3f20ae05c822642a7e05c5d8397fe4276681b7efaea5a491e73884bc823005bb",
+        "3f20ae05c822642a7e05c5d8397fe4276681b7efaea5a491e73884bc823005bb",
+        "3f20ae05c822642a7e05c5d8397fe4276681b7efaea5a491e73884bc823005bb",
+        "3f20ae05c822642a7e05c5d8397fe4276681b7efaea5a491e73884bc823005bb",
+        "3f20ae05c822642a7e05c5d8397fe4276681b7efaea5a491e73884bc823005bb"
+      ],
+      "identical": true
+    },
+    "hbm_joint": {
+      "semantic_rootset_sha256_by_block": [
+        "ec076c622aaba2da95ae317890aa8e3f65ab4121b185cc4b037beec33b95dd53",
+        "ec076c622aaba2da95ae317890aa8e3f65ab4121b185cc4b037beec33b95dd53",
+        "ec076c622aaba2da95ae317890aa8e3f65ab4121b185cc4b037beec33b95dd53",
+        "ec076c622aaba2da95ae317890aa8e3f65ab4121b185cc4b037beec33b95dd53",
+        "ec076c622aaba2da95ae317890aa8e3f65ab4121b185cc4b037beec33b95dd53"
+      ],
+      "identical": true
+    }
+  },
+  "timing": {
+    "scope": "whole fused attention kernel; the raw LX default-minus-joint delta is the candidate placement effect, while the difference-in-differences is only an LX-specific residual under an additive HBM-control assumption; neither is causal SHUFFLE-root time or ring bandwidth",
+    "interval_interpretation": "Student-t intervals are descriptive across five serial blocks on one device, not population-confidence or independent-device intervals",
+    "condition_stats": {
+      "lx_default": {
+        "process_median_us": {
+          "count": 5,
+          "mean": 213.5266,
+          "median": 213.635,
+          "stdev": 0.3071258699621329,
+          "mad": 0.06700000000000728,
+          "min": 212.996,
+          "max": 213.787,
+          "values": [
+            213.635,
+            213.787,
+            213.56799999999998,
+            213.647,
+            212.996
+          ]
+        },
+        "process_mean_us_sensitivity": {
+          "count": 5,
+          "mean": 213.47714666666667,
+          "median": 213.54396666666668,
+          "stdev": 0.3570403724448385,
+          "mad": 0.15099999999998204,
+          "min": 212.87223333333336,
+          "max": 213.7801,
+          "values": [
+            213.69496666666666,
+            213.7801,
+            213.54396666666668,
+            213.49446666666665,
+            212.87223333333336
+          ]
+        }
+      },
+      "lx_joint": {
+        "process_median_us": {
+          "count": 5,
+          "mean": 203.13989999999998,
+          "median": 203.12,
+          "stdev": 0.4143048998020675,
+          "mad": 0.33199999999999363,
+          "min": 202.487,
+          "max": 203.541,
+          "values": [
+            203.12,
+            203.09949999999998,
+            203.452,
+            203.541,
+            202.487
+          ]
+        },
+        "process_mean_us_sensitivity": {
+          "count": 5,
+          "mean": 203.04128,
+          "median": 202.9744,
+          "stdev": 0.4022887593369808,
+          "mad": 0.45403333333334217,
+          "min": 202.4908,
+          "max": 203.44226666666665,
+          "values": [
+            202.9744,
+            202.8705,
+            203.44226666666665,
+            203.42843333333334,
+            202.4908
+          ]
+        }
+      },
+      "hbm_default": {
+        "process_median_us": {
+          "count": 5,
+          "mean": 1739.4307000000001,
+          "median": 1739.088,
+          "stdev": 1.3590610085643644,
+          "mad": 0.4694999999999254,
+          "min": 1737.9355,
+          "max": 1741.6195,
+          "values": [
+            1737.9355,
+            1738.953,
+            1739.088,
+            1741.6195,
+            1739.5575
+          ]
+        },
+        "process_mean_us_sensitivity": {
+          "count": 5,
+          "mean": 1739.6300866666668,
+          "median": 1738.9571,
+          "stdev": 1.7193974788667397,
+          "mad": 0.9660000000001219,
+          "min": 1737.9911,
+          "max": 1742.3344666666667,
+          "values": [
+            1738.6290666666669,
+            1737.9911,
+            1740.2387,
+            1742.3344666666667,
+            1738.9571
+          ]
+        }
+      },
+      "hbm_joint": {
+        "process_median_us": {
+          "count": 5,
+          "mean": 1764.8003,
+          "median": 1764.6435,
+          "stdev": 0.5708535933144568,
+          "mad": 0.44399999999996,
+          "min": 1764.1995,
+          "max": 1765.567,
+          "values": [
+            1765.202,
+            1764.6435,
+            1764.1995,
+            1764.3895,
+            1765.567
+          ]
+        },
+        "process_mean_us_sensitivity": {
+          "count": 5,
+          "mean": 1764.657506666667,
+          "median": 1764.3085666666666,
+          "stdev": 1.1404630198594203,
+          "mad": 1.0192333333334318,
+          "min": 1763.2156,
+          "max": 1766.1987666666669,
+          "values": [
+            1766.1987666666669,
+            1764.3085666666666,
+            1764.2368,
+            1763.2156,
+            1765.3278
+          ]
+        }
+      }
+    },
+    "paired_block_effects": [
+      {
+        "block": 1,
+        "lx_default_minus_joint_process_median_us": 10.514999999999986,
+        "lx_reduction_percent_process_median": 4.921946310295591,
+        "hbm_default_minus_joint_process_median_us": -27.26649999999995,
+        "difference_in_differences_process_median_us": 37.78149999999994,
+        "lx_default_minus_joint_process_mean_us": 10.720566666666656,
+        "hbm_default_minus_joint_process_mean_us": -27.56970000000001,
+        "difference_in_differences_process_mean_us": 38.29026666666667
+      },
+      {
+        "block": 2,
+        "lx_default_minus_joint_process_median_us": 10.687500000000028,
+        "lx_reduction_percent_process_median": 4.999134652715099,
+        "hbm_default_minus_joint_process_median_us": -25.69049999999993,
+        "difference_in_differences_process_median_us": 36.37799999999996,
+        "lx_default_minus_joint_process_mean_us": 10.909600000000012,
+        "hbm_default_minus_joint_process_mean_us": -26.317466666666633,
+        "difference_in_differences_process_mean_us": 37.227066666666644
+      },
+      {
+        "block": 3,
+        "lx_default_minus_joint_process_median_us": 10.115999999999985,
+        "lx_reduction_percent_process_median": 4.736664668864243,
+        "hbm_default_minus_joint_process_median_us": -25.111499999999978,
+        "difference_in_differences_process_median_us": 35.227499999999964,
+        "lx_default_minus_joint_process_mean_us": 10.101700000000022,
+        "hbm_default_minus_joint_process_mean_us": -23.998099999999795,
+        "difference_in_differences_process_mean_us": 34.09979999999982
+      },
+      {
+        "block": 4,
+        "lx_default_minus_joint_process_median_us": 10.105999999999995,
+        "lx_reduction_percent_process_median": 4.730232579909849,
+        "hbm_default_minus_joint_process_median_us": -22.769999999999982,
+        "difference_in_differences_process_median_us": 32.875999999999976,
+        "lx_default_minus_joint_process_mean_us": 10.066033333333309,
+        "hbm_default_minus_joint_process_mean_us": -20.88113333333331,
+        "difference_in_differences_process_mean_us": 30.947166666666618
+      },
+      {
+        "block": 5,
+        "lx_default_minus_joint_process_median_us": 10.509000000000015,
+        "lx_reduction_percent_process_median": 4.933895472215447,
+        "hbm_default_minus_joint_process_median_us": -26.009500000000116,
+        "difference_in_differences_process_median_us": 36.51850000000013,
+        "lx_default_minus_joint_process_mean_us": 10.381433333333348,
+        "hbm_default_minus_joint_process_mean_us": -26.370699999999943,
+        "difference_in_differences_process_mean_us": 36.75213333333329
+      }
+    ],
+    "primary_process_median_effects_us": {
+      "difference_in_differences": {
+        "count": 5,
+        "mean": 35.756299999999996,
+        "median": 36.37799999999996,
+        "stdev": 1.8469334246258085,
+        "mad": 1.1504999999999939,
+        "min": 32.875999999999976,
+        "max": 37.78149999999994,
+        "values": [
+          37.78149999999994,
+          36.37799999999996,
+          35.227499999999964,
+          32.875999999999976,
+          36.51850000000013
+        ],
+        "student_t_95_ci": [
+          33.46302925956294,
+          38.049570740437055
+        ],
+        "positive_count": 5,
+        "negative_count": 0
+      },
+      "lx_default_minus_joint": {
+        "count": 5,
+        "mean": 10.386700000000001,
+        "median": 10.509000000000015,
+        "stdev": 0.2617106226350146,
+        "mad": 0.17850000000001387,
+        "min": 10.105999999999995,
+        "max": 10.687500000000028,
+        "values": [
+          10.514999999999986,
+          10.687500000000028,
+          10.115999999999985,
+          10.105999999999995,
+          10.509000000000015
+        ],
+        "student_t_95_ci": [
+          10.061743341926611,
+          10.711656658073391
+        ],
+        "positive_count": 5,
+        "negative_count": 0
+      },
+      "lx_reduction_percent": {
+        "count": 5,
+        "mean": 4.8643747368000465,
+        "median": 4.921946310295591,
+        "stdev": 0.12309735311147509,
+        "mad": 0.07718834241950745,
+        "min": 4.730232579909849,
+        "max": 4.999134652715099,
+        "values": [
+          4.921946310295591,
+          4.999134652715099,
+          4.736664668864243,
+          4.730232579909849,
+          4.933895472215447
+        ],
+        "student_t_95_ci": [
+          4.711529185167351,
+          5.017220288432742
+        ],
+        "positive_count": 5,
+        "negative_count": 0
+      },
+      "hbm_default_minus_joint": {
+        "count": 5,
+        "mean": -25.36959999999999,
+        "median": -25.69049999999993,
+        "stdev": 1.6534217701481997,
+        "mad": 0.5789999999999509,
+        "min": -27.26649999999995,
+        "max": -22.769999999999982,
+        "values": [
+          -27.26649999999995,
+          -25.69049999999993,
+          -25.111499999999978,
+          -22.769999999999982,
+          -26.009500000000116
+        ],
+        "student_t_95_ci": [
+          -27.422594285839352,
+          -23.31660571416063
+        ],
+        "positive_count": 0,
+        "negative_count": 5
+      }
+    },
+    "process_mean_sensitivity_effects_us": {
+      "difference_in_differences": {
+        "count": 5,
+        "mean": 35.463286666666605,
+        "median": 36.75213333333329,
+        "stdev": 2.958812991875133,
+        "mad": 1.538133333333377,
+        "min": 30.947166666666618,
+        "max": 38.29026666666667,
+        "values": [
+          38.29026666666667,
+          37.227066666666644,
+          34.09979999999982,
+          30.947166666666618,
+          36.75213333333329
+        ],
+        "student_t_95_ci": [
+          31.78943509723768,
+          39.13713823609553
+        ],
+        "positive_count": 5,
+        "negative_count": 0
+      },
+      "lx_default_minus_joint": {
+        "count": 5,
+        "mean": 10.43586666666667,
+        "median": 10.381433333333348,
+        "stdev": 0.3731234395091158,
+        "mad": 0.3154000000000394,
+        "min": 10.066033333333309,
+        "max": 10.909600000000012,
+        "values": [
+          10.720566666666656,
+          10.909600000000012,
+          10.101700000000022,
+          10.066033333333309,
+          10.381433333333348
+        ],
+        "student_t_95_ci": [
+          9.97257272494224,
+          10.8991606083911
+        ],
+        "positive_count": 5,
+        "negative_count": 0
+      },
+      "hbm_default_minus_joint": {
+        "count": 5,
+        "mean": -25.02741999999994,
+        "median": -26.317466666666633,
+        "stdev": 2.6543832590432372,
+        "mad": 1.252233333333379,
+        "min": -27.56970000000001,
+        "max": -20.88113333333331,
+        "values": [
+          -27.56970000000001,
+          -26.317466666666633,
+          -23.998099999999795,
+          -20.88113333333331,
+          -26.370699999999943
+        ],
+        "student_t_95_ci": [
+          -28.32327213018871,
+          -21.73156786981117
+        ],
+        "positive_count": 0,
+        "negative_count": 5
+      }
+    }
+  }
+}

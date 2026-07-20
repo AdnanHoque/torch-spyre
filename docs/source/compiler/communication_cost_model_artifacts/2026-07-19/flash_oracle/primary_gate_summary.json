@@ -1,0 +1,70 @@
+{
+  "default_off": {
+    "unset_report": "/home/adnan/codex-isolated/s2_ceiling_refresh_llvm2213_2a20_19280_20260719/results/refresh_gates_v1/default_unset/report.json",
+    "explicit_false_report": "/home/adnan/codex-isolated/s2_ceiling_refresh_llvm2213_2a20_19280_20260719/results/refresh_gates_v1/default_false/report.json",
+    "unset_environment": {
+      "SPYRE_TEST_PRESEEDED_LX_RELAYOUT": null,
+      "SPYRE_TEST_LX_RELAYOUT_PRESEED_ONLY": null
+    },
+    "explicit_false_environment": {
+      "SPYRE_TEST_PRESEEDED_LX_RELAYOUT": "0",
+      "SPYRE_TEST_LX_RELAYOUT_PRESEED_ONLY": "0"
+    },
+    "gates": {
+      "unset_exact": true,
+      "explicit_false_exact": true,
+      "both_configs_resolve_false": true,
+      "operation_inventory_identical": true,
+      "stable_artifacts_bit_identical": true
+    },
+    "all_gates": true
+  },
+  "synthetic_compile_orders": {
+    "normal_first": {
+      "all_gates": true,
+      "negative_gates": {
+        "negative_wrong_preseed_mismatches": true,
+        "negative_after_positive_mismatches": true,
+        "correct_preseed_exact": true,
+        "restore_exact": true
+      }
+    },
+    "oracle_first": {
+      "all_gates": true,
+      "negative_gates": {
+        "negative_wrong_preseed_mismatches": true,
+        "negative_after_positive_mismatches": true,
+        "correct_preseed_exact": true,
+        "restore_exact": true
+      }
+    }
+  },
+  "full_compile_orders": {
+    "normal_prefix_oracle": {
+      "all_gates": true,
+      "negative_gates": {
+        "wrong_preseed_mismatches": true,
+        "correct_preseed_matches": true,
+        "repeat_without_reseed_mismatches": true,
+        "restore_matches": true
+      }
+    },
+    "oracle_prefix_normal": {
+      "all_gates": true,
+      "negative_gates": {
+        "wrong_preseed_mismatches": true,
+        "correct_preseed_matches": true,
+        "repeat_without_reseed_mismatches": true,
+        "restore_matches": true
+      }
+    }
+  },
+  "gates": {
+    "default_off_artifact_identity": true,
+    "synthetic_both_compile_orders": true,
+    "synthetic_wrong_preseed_negatives": true,
+    "full_both_compile_orders": true,
+    "full_wrong_preload_and_reseed_negatives": true
+  },
+  "all_gates": true
+}

@@ -1,0 +1,84 @@
+{
+  "package": "final_evidence_cross_node_cdx_replay_3x3_20260719_v2",
+  "scope": "cross_node_descriptive_replay_not_primary",
+  "pooled_with_primary": false,
+  "pins": {
+    "torch_base": "2a20cf3b7ac8aadf629314e40e5059ad82471911",
+    "torch_measured": "24adc85c04da91d61b13b295d6092438cf2029b4",
+    "torch_tree": "a8d42ce8818c50b96389dd8d681d8505989193cd",
+    "deeptools": "19280fd7c6bbd91000c63c2a6719a0253e513f4a",
+    "llvm": "22.1.3",
+    "perf": "3d33ca0ab3ec94f6713cb05bef2deb70d18fb170"
+  },
+  "environment": {
+    "pod": "adnan-cdx-spyre-dev-pf",
+    "node": "p1-worker-19",
+    "co_located_pod": "groved-dev"
+  },
+  "replay": {
+    "all_gates": true,
+    "triple_count": 3,
+    "process_count": 9,
+    "orders": [
+      ["hbm", "lx", "oracle"],
+      ["lx", "oracle", "hbm"],
+      ["oracle", "hbm", "lx"]
+    ],
+    "primary_ratio_of_mean_paired_deltas_percent": {
+      "estimate": 54.48112203901502,
+      "bootstrap95_low": 53.07842320700253,
+      "bootstrap95_high": 56.067069652924275,
+      "exact_resamples": 27
+    },
+    "mean_paired_deltas_us": {
+      "hbm_minus_lx": 36.274166666666645,
+      "hbm_minus_oracle": 66.58116666666665,
+      "lx_minus_oracle": 30.307
+    }
+  },
+  "compatibility_with_primary": {
+    "scope": "descriptive_cross_node_compatibility_only",
+    "pooled_environments": false,
+    "primary_triples": 5,
+    "replay_triples": 3,
+    "replay_minus_primary_recovery_percentage_points": -5.390462316455775,
+    "independent_environment_bootstrap95_low": -7.201139643051114,
+    "independent_environment_bootstrap95_high": -3.283723475524475,
+    "independent_cross_product_draws": 84375,
+    "warning": "Separate node and time; descriptive only, not pooled or causal."
+  },
+  "integrity": {
+    "pre_post_identity": "PASS",
+    "pre_post_runtime_closure": "PASS",
+    "pre_post_harness": "PASS",
+    "pre_active_builder_bytes": 0,
+    "post_active_builder_bytes": 0,
+    "runtime_manifest_sha256": "a12856b2fdf27840e1878cd73202fa69951ab90466bf2887a717e4a0d33749bc",
+    "identity_manifest_sha256": "187f817f15630ff29cfe10572a3676dd19580ecac1b95bed08c3a277db8b726e",
+    "harness_manifest_sha256": "205ea0a1ad8059073de3329fd5269664cb66568cbddc69fbc988d019bda7b8b6"
+  },
+  "runtime_hashes": {
+    "source_dxp_sha256": "9db9a004330eb1653cb72cac421f931e36284b865229f0a13f224a50419209c1",
+    "lane_local_rpath_relocated_dxp_sha256": "5da587a5c321a580611358e33908995370f220d46f803f6370b78a1c5d8f0741",
+    "torch_spyre_C_so_sha256": "01af447bb29f1ac7458bd173fb5be89771faad127fdda27b5112c4433cc2bbde"
+  },
+  "packaging_correction": {
+    "supersedes": "final_evidence_cross_node_cdx_replay_3x3_20260719_v1",
+    "timing_rerun": false,
+    "raw_evidence_changed": false,
+    "issue": "V1 bundled a p1-worker-4 primary-node guard helper and the runner accepted a generic PASS marker.",
+    "resolution": "V2 packages the exact p1-worker-19 CDX+groved acquisition helper and fail-closed exact-field validation.",
+    "guard_self_test": {
+      "status": "PASS",
+      "actual_pre_run_cdx_guard": "ACCEPTED",
+      "stale_p1_worker_4_guard": "REJECTED"
+    },
+    "script_sha256": {
+      "measured_v1/run_full_attention_cross_node_replay_v1.sh": "760b3e5714c7ea66533f5c9d2580256a235aa1899e01bbe78ce6ab1dda3096cb",
+      "capture_cdx_cross_node_guard.sh": "f069426de3ecf15d39b50c6c629088be8cd4d3c8b92c16bcd7788c80d7bbeec5",
+      "validate_cdx_cross_node_guard.sh": "95c94ea088e09c008b44b901e246b430aecc7424175a05c8fdc5e85a8bccbb2f",
+      "guard_validation_self_test.sh": "8e10c40a7c832653822f32f91773edbb83129157c25e4335816611f8c3e6cc44",
+      "run_full_attention_cross_node_replay.sh": "52ba54bc8c19b23ad2a92f20e565fa27e3ebf8d30bdf2cc11696c87af833427c"
+    }
+  }
+}

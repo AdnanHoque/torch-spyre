@@ -1,0 +1,486 @@
+{
+  "schema_version": 1,
+  "scope": {
+    "cores": 32,
+    "head_cohorts": 4,
+    "producer_shards_per_cohort": 8,
+    "consumer_shards_per_cohort": 8,
+    "relation_rule": "all producer and consumer cores with equal head",
+    "routing": "shortest path on 32-core bidirectional ring, clockwise tie at 16",
+    "candidate_family": "source and destination independently choose interleaved or contiguous mixed-radix order, head/lane reversals, and all ring rotations",
+    "candidate_count": 65536,
+    "status": "offline route model; runtime legality must be established separately"
+  },
+  "architecture_reference": {
+    "source": "user-supplied MICRO 2026 manuscript, Figure 3 and PDF pages 3-4, On-chip Ring Interconnect paragraphs",
+    "spad_ring_bytes_per_cycle_each_direction": 128,
+    "spad_ring_pair_base_bytes_per_cycle": 256,
+    "spad_ring_pair_segmented_max_bytes_per_cycle": 4096,
+    "lpddr5_peak_gb_per_second": 204.0,
+    "working_frequency_ghz_unverified": 1.5,
+    "conditional_peaks_gb_per_second": {
+      "directed_spad_link": 192.0,
+      "cw_plus_ccw_pair_base": 384.0,
+      "segmented_pair_max": 6144.0
+    },
+    "warning": "design peaks and a working clock assumption, not live measured frequency or achieved utilization"
+  },
+  "named_representatives": {
+    "production_default": {
+      "local_relations": 32,
+      "remote_relations": 224,
+      "total_hop_units": 2048,
+      "mean_remote_distance": 9.142857142857142,
+      "max_directed_link_units": 40,
+      "max_combined_segment_units": 64
+    },
+    "source_only_contiguous": {
+      "local_relations": 8,
+      "remote_relations": 248,
+      "total_hop_units": 2048,
+      "mean_remote_distance": 8.258064516129032,
+      "max_directed_link_units": 38,
+      "max_combined_segment_units": 72
+    },
+    "destination_only_contiguous": {
+      "local_relations": 8,
+      "remote_relations": 248,
+      "total_hop_units": 2048,
+      "mean_remote_distance": 8.258064516129032,
+      "max_directed_link_units": 38,
+      "max_combined_segment_units": 72
+    },
+    "joint_contiguous": {
+      "local_relations": 32,
+      "remote_relations": 224,
+      "total_hop_units": 672,
+      "mean_remote_distance": 3.0,
+      "max_directed_link_units": 16,
+      "max_combined_segment_units": 32
+    }
+  },
+  "global_optima_in_family": {
+    "minimum_max_directed_link_units": 16,
+    "minimum_total_hop_units": 672,
+    "joint_minimum_count": 256,
+    "representative": {
+      "source_order": "contiguous",
+      "destination_order": "contiguous",
+      "source_reverse_head": false,
+      "destination_reverse_head": false,
+      "source_reverse_lane": false,
+      "destination_reverse_lane": false,
+      "source_rotation": 0,
+      "destination_rotation": 0,
+      "source_mapping_sha256": "7f8340d09ff5cb63837a74a7d73fc19d340863ca94d298d7cc75212292394140",
+      "destination_mapping_sha256": "9ec153a811d094d78146d38edb398edcc321ff7bb40d0fe163bae096861a3373"
+    },
+    "representative_metrics": {
+      "local_relations": 32,
+      "remote_relations": 224,
+      "total_hop_units": 672,
+      "mean_remote_distance": 3.0,
+      "max_directed_link_units": 16,
+      "max_combined_segment_units": 32
+    }
+  },
+  "fixed_production_destination": {
+    "minimum_total_hop_units_while_preserving_32_local_relations": 2048,
+    "production_default_total_hop_units": 2048,
+    "strict_hop_improvement_possible": false,
+    "interpretation": "Within this structured family, preserving the production consumer embedding and all 32 local relations leaves no source-only total-hop improvement. The large route reduction requires joint source and consumer cohort remapping."
+  },
+  "unique_metric_tuples": [
+    {
+      "max_directed_link_units": 16,
+      "max_combined_segment_units": 32,
+      "total_hop_units": 672,
+      "remote_relations": 224,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 20,
+      "max_combined_segment_units": 32,
+      "total_hop_units": 704,
+      "remote_relations": 228,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 25,
+      "max_combined_segment_units": 34,
+      "total_hop_units": 792,
+      "remote_relations": 232,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 30,
+      "max_combined_segment_units": 36,
+      "total_hop_units": 928,
+      "remote_relations": 236,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 32,
+      "max_combined_segment_units": 64,
+      "total_hop_units": 2048,
+      "remote_relations": 256,
+      "candidate_count": 6144
+    },
+    {
+      "max_directed_link_units": 36,
+      "max_combined_segment_units": 40,
+      "total_hop_units": 1104,
+      "remote_relations": 240,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 36,
+      "max_combined_segment_units": 64,
+      "total_hop_units": 2048,
+      "remote_relations": 240,
+      "candidate_count": 4096
+    },
+    {
+      "max_directed_link_units": 36,
+      "max_combined_segment_units": 64,
+      "total_hop_units": 2048,
+      "remote_relations": 256,
+      "candidate_count": 4096
+    },
+    {
+      "max_directed_link_units": 38,
+      "max_combined_segment_units": 72,
+      "total_hop_units": 2048,
+      "remote_relations": 248,
+      "candidate_count": 32768
+    },
+    {
+      "max_directed_link_units": 40,
+      "max_combined_segment_units": 64,
+      "total_hop_units": 2048,
+      "remote_relations": 224,
+      "candidate_count": 2048
+    },
+    {
+      "max_directed_link_units": 42,
+      "max_combined_segment_units": 44,
+      "total_hop_units": 1312,
+      "remote_relations": 244,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 48,
+      "max_combined_segment_units": 96,
+      "total_hop_units": 2048,
+      "remote_relations": 242,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 49,
+      "max_combined_segment_units": 50,
+      "total_hop_units": 1544,
+      "remote_relations": 248,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 52,
+      "max_combined_segment_units": 96,
+      "total_hop_units": 2048,
+      "remote_relations": 240,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 52,
+      "max_combined_segment_units": 98,
+      "total_hop_units": 2048,
+      "remote_relations": 244,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 55,
+      "max_combined_segment_units": 96,
+      "total_hop_units": 2048,
+      "remote_relations": 242,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 55,
+      "max_combined_segment_units": 100,
+      "total_hop_units": 2048,
+      "remote_relations": 246,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 56,
+      "max_combined_segment_units": 56,
+      "total_hop_units": 1792,
+      "remote_relations": 252,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 58,
+      "max_combined_segment_units": 98,
+      "total_hop_units": 2048,
+      "remote_relations": 244,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 58,
+      "max_combined_segment_units": 104,
+      "total_hop_units": 2048,
+      "remote_relations": 248,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 60,
+      "max_combined_segment_units": 100,
+      "total_hop_units": 2048,
+      "remote_relations": 246,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 60,
+      "max_combined_segment_units": 108,
+      "total_hop_units": 2048,
+      "remote_relations": 250,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 62,
+      "max_combined_segment_units": 104,
+      "total_hop_units": 2048,
+      "remote_relations": 248,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 62,
+      "max_combined_segment_units": 114,
+      "total_hop_units": 2048,
+      "remote_relations": 252,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 63,
+      "max_combined_segment_units": 108,
+      "total_hop_units": 2048,
+      "remote_relations": 250,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 63,
+      "max_combined_segment_units": 120,
+      "total_hop_units": 2048,
+      "remote_relations": 254,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 64,
+      "max_combined_segment_units": 64,
+      "total_hop_units": 2048,
+      "remote_relations": 256,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 64,
+      "max_combined_segment_units": 114,
+      "total_hop_units": 2048,
+      "remote_relations": 252,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 64,
+      "max_combined_segment_units": 120,
+      "total_hop_units": 2048,
+      "remote_relations": 254,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 64,
+      "max_combined_segment_units": 120,
+      "total_hop_units": 3392,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 64,
+      "max_combined_segment_units": 128,
+      "total_hop_units": 2048,
+      "remote_relations": 256,
+      "candidate_count": 512
+    },
+    {
+      "max_directed_link_units": 70,
+      "max_combined_segment_units": 72,
+      "total_hop_units": 2304,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 70,
+      "max_combined_segment_units": 112,
+      "total_hop_units": 3304,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 72,
+      "max_combined_segment_units": 72,
+      "total_hop_units": 2304,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 72,
+      "max_combined_segment_units": 128,
+      "total_hop_units": 3424,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 74,
+      "max_combined_segment_units": 80,
+      "total_hop_units": 2552,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 74,
+      "max_combined_segment_units": 104,
+      "total_hop_units": 3168,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 76,
+      "max_combined_segment_units": 88,
+      "total_hop_units": 2784,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 76,
+      "max_combined_segment_units": 96,
+      "total_hop_units": 2992,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 78,
+      "max_combined_segment_units": 80,
+      "total_hop_units": 2552,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 78,
+      "max_combined_segment_units": 120,
+      "total_hop_units": 3392,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 82,
+      "max_combined_segment_units": 88,
+      "total_hop_units": 2784,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 82,
+      "max_combined_segment_units": 112,
+      "total_hop_units": 3304,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 84,
+      "max_combined_segment_units": 96,
+      "total_hop_units": 2992,
+      "remote_relations": 256,
+      "candidate_count": 256
+    },
+    {
+      "max_directed_link_units": 84,
+      "max_combined_segment_units": 104,
+      "total_hop_units": 3168,
+      "remote_relations": 256,
+      "candidate_count": 256
+    }
+  ],
+  "preregistered_runtime_candidate": {
+    "name": "joint_contiguous_closed_attention_cohort",
+    "source_order": "contiguous",
+    "destination_order": "contiguous",
+    "required_scope": "K producer/ReStickify source, SHUFFLE destination, scaled-Q producer, first BMM, and every LX-resident score-path consumer until the next materialization boundary",
+    "modeled_metrics": {
+      "local_relations": 32,
+      "remote_relations": 224,
+      "total_hop_units": 672,
+      "mean_remote_distance": 3.0,
+      "max_directed_link_units": 16,
+      "max_combined_segment_units": 32
+    },
+    "conditional_1p5ghz_paper_peak_context": {
+      "source_bytes_per_relation": 131072,
+      "max_directed_link_bytes": 2097152,
+      "aggregate_hop_bytes": 88080384,
+      "directed_link_unicast_service_us": 10.922666666666666,
+      "segmented_aggregate_unicast_service_us": 14.336,
+      "conditional_unicast_network_service_us": 14.336,
+      "exclusions": [
+        "endpoint injection and ejection limits",
+        "L1 bank conflicts and local layout work",
+        "synchronization, launch, protocol, and routing overhead",
+        "proof that live ring clock equals 1.5 GHz",
+        "proof that this mapping realizes the paper's 4096 B/cycle segmented peak",
+        "proof that 4096 B/cycle counts the same bidirectional directed-link hop traffic used here",
+        "compiler multicast, coalescing, chunking, or shared-path reuse that reduces relation-summed hop bytes"
+      ]
+    },
+    "structural_gates": [
+      "exactly one K SHUFFLE and no query SHUFFLE",
+      "all targeted roots use the same head-contiguous embedding",
+      "all non-target roots preserve semantic mapping and allocation component",
+      "no LX-to-HBM spill introduced in the score path",
+      "value-sensitive CPU equality and wrong-route negative control"
+    ],
+    "timing_gate": "only after structural closure; four-block Williams square plus a zero-linear-DiD-position fifth block, 30 warm events per process"
+  },
+  "conditional_unicast_service_comparison": {
+    "production_default": {
+      "source_bytes_per_relation": 131072,
+      "max_directed_link_bytes": 5242880,
+      "aggregate_hop_bytes": 268435456,
+      "directed_link_unicast_service_us": 27.30666666666667,
+      "segmented_aggregate_unicast_service_us": 43.690666666666665,
+      "conditional_unicast_network_service_us": 43.690666666666665,
+      "exclusions": [
+        "endpoint injection and ejection limits",
+        "L1 bank conflicts and local layout work",
+        "synchronization, launch, protocol, and routing overhead",
+        "proof that live ring clock equals 1.5 GHz",
+        "proof that this mapping realizes the paper's 4096 B/cycle segmented peak",
+        "proof that 4096 B/cycle counts the same bidirectional directed-link hop traffic used here",
+        "compiler multicast, coalescing, chunking, or shared-path reuse that reduces relation-summed hop bytes"
+      ]
+    },
+    "joint_contiguous": {
+      "source_bytes_per_relation": 131072,
+      "max_directed_link_bytes": 2097152,
+      "aggregate_hop_bytes": 88080384,
+      "directed_link_unicast_service_us": 10.922666666666666,
+      "segmented_aggregate_unicast_service_us": 14.336,
+      "conditional_unicast_network_service_us": 14.336,
+      "exclusions": [
+        "endpoint injection and ejection limits",
+        "L1 bank conflicts and local layout work",
+        "synchronization, launch, protocol, and routing overhead",
+        "proof that live ring clock equals 1.5 GHz",
+        "proof that this mapping realizes the paper's 4096 B/cycle segmented peak",
+        "proof that 4096 B/cycle counts the same bidirectional directed-link hop traffic used here",
+        "compiler multicast, coalescing, chunking, or shared-path reuse that reduces relation-summed hop bytes"
+      ]
+    },
+    "status": "conditional unicast route-model service estimates only; not measured root time, proven physical traffic, a lower bound under multicast, or a utilization estimate"
+  }
+}

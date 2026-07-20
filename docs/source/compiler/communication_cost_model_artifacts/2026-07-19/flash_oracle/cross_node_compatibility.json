@@ -1,0 +1,62 @@
+{
+  "scope": "descriptive_cross_node_compatibility_only",
+  "pooled_environments": false,
+  "primary_environment": {
+    "pod": "adnan-spyre-dev-pf",
+    "node": "p1-worker-4",
+    "triple_count": 5,
+    "report": "/home/adnan/codex-isolated/s2_ceiling_refresh_llvm2213_2a20_19280_20260719/results/full_attention_oracle_timing_refresh_v2/report.json"
+  },
+  "replay_environment": {
+    "pod": "adnan-cdx-spyre-dev-pf",
+    "node": "p1-worker-19",
+    "triple_count": 3,
+    "report": "/home/adnan/codex-isolated/s2_ceiling_refresh_llvm2213_2a20_19280_20260719/results/cross_node_cdx_full_replay_3x3_v1/report.json"
+  },
+  "uncertainty_design": "exact paired-triple bootstrap within each environment; independent cross-product of environment bootstrap draws",
+  "warning": "This is a descriptive compatibility check across separate nodes and times, not a pooled or causal estimate. The replay has only three triples, so its exact bootstrap support is coarse.",
+  "recovery_percent": {
+    "replay": 54.48112203901502,
+    "primary": 59.871584355470794,
+    "replay_minus_primary": -5.390462316455775,
+    "independent_environment_bootstrap95_low": -7.201139643051114,
+    "independent_environment_bootstrap95_high": -3.283723475524475,
+    "unit": "percentage_points",
+    "replay_within_environment_resamples": 27,
+    "primary_within_environment_resamples": 3125,
+    "independent_cross_product_draws": 84375
+  },
+  "hbm_minus_lx_us": {
+    "replay": 36.274166666666645,
+    "primary": 44.702400000000004,
+    "replay_minus_primary": -8.42823333333336,
+    "independent_environment_bootstrap95_low": -10.502833333333385,
+    "independent_environment_bootstrap95_high": -6.326933333333336,
+    "unit": "us",
+    "replay_within_environment_resamples": 27,
+    "primary_within_environment_resamples": 3125,
+    "independent_cross_product_draws": 84375
+  },
+  "hbm_minus_oracle_us": {
+    "replay": 66.58116666666665,
+    "primary": 74.66380000000001,
+    "replay_minus_primary": -8.082633333333362,
+    "independent_environment_bootstrap95_low": -9.81003333333338,
+    "independent_environment_bootstrap95_high": -6.480466666666686,
+    "unit": "us",
+    "replay_within_environment_resamples": 27,
+    "primary_within_environment_resamples": 3125,
+    "independent_cross_product_draws": 84375
+  },
+  "lx_minus_oracle_us": {
+    "replay": 30.307,
+    "primary": 29.961399999999998,
+    "replay_minus_primary": 0.345600000000001,
+    "independent_environment_bootstrap95_low": -0.736333333333345,
+    "independent_environment_bootstrap95_high": 1.2622666666666866,
+    "unit": "us",
+    "replay_within_environment_resamples": 27,
+    "primary_within_environment_resamples": 3125,
+    "independent_cross_product_draws": 84375
+  }
+}

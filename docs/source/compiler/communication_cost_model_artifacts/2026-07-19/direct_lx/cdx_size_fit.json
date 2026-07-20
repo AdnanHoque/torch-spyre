@@ -1,0 +1,38 @@
+{
+  "schema": "direct_lx_three_payload_linear_fit_v1",
+  "scope": "whole precompiled one-direction bundle service plus local carrier",
+  "inputs": [
+    {
+      "payload_bytes": 131072,
+      "median_kernel_us": 1.11,
+      "effective_GBps": 118.08288288288288,
+      "result_sha256": "37b020f6ece776a22f191199fe9d72dc4c3b0d1e42b267808b7134b644887529"
+    },
+    {
+      "payload_bytes": 262144,
+      "median_kernel_us": 2.07,
+      "effective_GBps": 126.63961352657005,
+      "result_sha256": "83fdc24b7b7c1e171d0188b0ae08e5145c2de7fd64ef2ab88606a86597e1661b"
+    },
+    {
+      "payload_bytes": 524288,
+      "median_kernel_us": 3.9915,
+      "effective_GBps": 131.35112113240635,
+      "source_result": "../direct_lx_quick_two_case_100ops_20260719_v1/single_ccw_b524288/result.json"
+    }
+  ],
+  "fit": {
+    "formula": "T_us = fixed_us + payload_bytes / bytes_per_us",
+    "fixed_us": 0.14925,
+    "bytes_per_us": 136457.1853504369,
+    "sustained_decimal_GBps": 136.4571853504369,
+    "maximum_absolute_residual_us": 0.0003214285714286,
+    "adjacent_pair_slopes_decimal_GBps": [136.53333333333333, 136.42674993494666]
+  },
+  "conditional_1p5GHz": {
+    "fixed_cycles": 223.875,
+    "sustained_bytes_per_cycle": 90.97145690029127,
+    "efficiency_of_128_bytes_per_cycle_direction": 0.7107145070335256
+  },
+  "caveat": "This is an empirical endpoint-to-endpoint bundle-service model, not a counter measurement of physical ring occupancy or active-link bandwidth."
+}

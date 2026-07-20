@@ -1,0 +1,626 @@
+{
+  "bundle": "/home/adnan/codex-isolated/direct_lx_v8_bound_smoke_2a20_19280_llvm2213_20260719_v5/campaign_v1/compile_smoke/full_duplex_b524288/bundle",
+  "device_events": [
+    {
+      "count": 100,
+      "device_time_per_iteration_us": 4.10511000000002,
+      "device_time_total_us": 410.511000000002,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0"
+    }
+  ],
+  "iterations": 100,
+  "kernel_duration_us_max": 4.109,
+  "kernel_duration_us_mean": 4.10511,
+  "kernel_duration_us_median": 4.106,
+  "kernel_duration_us_min": 4.043,
+  "kernel_trace_event_count": 100,
+  "kernel_trace_events": [
+    {
+      "correlation": 21,
+      "duration_us": 4.043,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096203663.213
+    },
+    {
+      "correlation": 22,
+      "duration_us": 4.104,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096203733.882
+    },
+    {
+      "correlation": 23,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096203778.056
+    },
+    {
+      "correlation": 24,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096203813.012
+    },
+    {
+      "correlation": 25,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096203847.409
+    },
+    {
+      "correlation": 26,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096203881.141
+    },
+    {
+      "correlation": 27,
+      "duration_us": 4.109,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096203915.443
+    },
+    {
+      "correlation": 28,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096203948.453
+    },
+    {
+      "correlation": 29,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096203982.083
+    },
+    {
+      "correlation": 30,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204016.232
+    },
+    {
+      "correlation": 31,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204049.406
+    },
+    {
+      "correlation": 32,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204082.64
+    },
+    {
+      "correlation": 33,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204116.864
+    },
+    {
+      "correlation": 34,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204150.229
+    },
+    {
+      "correlation": 35,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204183.874
+    },
+    {
+      "correlation": 36,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204216.15
+    },
+    {
+      "correlation": 37,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204250.962
+    },
+    {
+      "correlation": 38,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204284.563
+    },
+    {
+      "correlation": 39,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204319.126
+    },
+    {
+      "correlation": 40,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204351.01
+    },
+    {
+      "correlation": 41,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204384.524
+    },
+    {
+      "correlation": 42,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204417.806
+    },
+    {
+      "correlation": 43,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204452.378
+    },
+    {
+      "correlation": 44,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204484.624
+    },
+    {
+      "correlation": 45,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204516.301
+    },
+    {
+      "correlation": 46,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204551.23
+    },
+    {
+      "correlation": 47,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204589.596
+    },
+    {
+      "correlation": 48,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204622.321
+    },
+    {
+      "correlation": 49,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204655.251
+    },
+    {
+      "correlation": 50,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204687.483
+    },
+    {
+      "correlation": 51,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204720.791
+    },
+    {
+      "correlation": 52,
+      "duration_us": 4.103,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204753.898
+    },
+    {
+      "correlation": 53,
+      "duration_us": 4.103,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204785.933
+    },
+    {
+      "correlation": 54,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204818.736
+    },
+    {
+      "correlation": 55,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204851.672
+    },
+    {
+      "correlation": 56,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204884.902
+    },
+    {
+      "correlation": 57,
+      "duration_us": 4.104,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204917.875
+    },
+    {
+      "correlation": 58,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204949.893
+    },
+    {
+      "correlation": 59,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096204982.754
+    },
+    {
+      "correlation": 60,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205015.671
+    },
+    {
+      "correlation": 61,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205048.144
+    },
+    {
+      "correlation": 62,
+      "duration_us": 4.104,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205079.536
+    },
+    {
+      "correlation": 63,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205112.103
+    },
+    {
+      "correlation": 64,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205143.4
+    },
+    {
+      "correlation": 65,
+      "duration_us": 4.108,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205176.002
+    },
+    {
+      "correlation": 66,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205208.741
+    },
+    {
+      "correlation": 67,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205240.797
+    },
+    {
+      "correlation": 68,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205273.689
+    },
+    {
+      "correlation": 69,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205307.781
+    },
+    {
+      "correlation": 70,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205340.661
+    },
+    {
+      "correlation": 71,
+      "duration_us": 4.108,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205373.81
+    },
+    {
+      "correlation": 72,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205404.818
+    },
+    {
+      "correlation": 73,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205437.865
+    },
+    {
+      "correlation": 74,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205472.189
+    },
+    {
+      "correlation": 75,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205504.2
+    },
+    {
+      "correlation": 76,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205537.305
+    },
+    {
+      "correlation": 77,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205573.972
+    },
+    {
+      "correlation": 78,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205606.581
+    },
+    {
+      "correlation": 79,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205640.109
+    },
+    {
+      "correlation": 80,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205672.465
+    },
+    {
+      "correlation": 81,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205705.377
+    },
+    {
+      "correlation": 82,
+      "duration_us": 4.104,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205738.676
+    },
+    {
+      "correlation": 83,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205771.198
+    },
+    {
+      "correlation": 84,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205803.947
+    },
+    {
+      "correlation": 85,
+      "duration_us": 4.104,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205836.172
+    },
+    {
+      "correlation": 86,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205868.82
+    },
+    {
+      "correlation": 87,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205902.289
+    },
+    {
+      "correlation": 88,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205933.628
+    },
+    {
+      "correlation": 89,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096205966.721
+    },
+    {
+      "correlation": 90,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206000.371
+    },
+    {
+      "correlation": 91,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206031.853
+    },
+    {
+      "correlation": 92,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206064.412
+    },
+    {
+      "correlation": 93,
+      "duration_us": 4.108,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206096.928
+    },
+    {
+      "correlation": 94,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206129.675
+    },
+    {
+      "correlation": 95,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206162.196
+    },
+    {
+      "correlation": 96,
+      "duration_us": 4.108,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206194.203
+    },
+    {
+      "correlation": 97,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206226.657
+    },
+    {
+      "correlation": 98,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206259.346
+    },
+    {
+      "correlation": 99,
+      "duration_us": 4.104,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206292.199
+    },
+    {
+      "correlation": 100,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206324.094
+    },
+    {
+      "correlation": 101,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206355.586
+    },
+    {
+      "correlation": 102,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206390.036
+    },
+    {
+      "correlation": 103,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206423.006
+    },
+    {
+      "correlation": 104,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206454.592
+    },
+    {
+      "correlation": 105,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206486.757
+    },
+    {
+      "correlation": 106,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206519.441
+    },
+    {
+      "correlation": 107,
+      "duration_us": 4.107,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206551.8
+    },
+    {
+      "correlation": 108,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206586.984
+    },
+    {
+      "correlation": 109,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206618.247
+    },
+    {
+      "correlation": 110,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206651.468
+    },
+    {
+      "correlation": 111,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206684.49
+    },
+    {
+      "correlation": 112,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206718.212
+    },
+    {
+      "correlation": 113,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206750.43
+    },
+    {
+      "correlation": 114,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206783.707
+    },
+    {
+      "correlation": 115,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206815.674
+    },
+    {
+      "correlation": 116,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206849.146
+    },
+    {
+      "correlation": 117,
+      "duration_us": 4.105,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206881.442
+    },
+    {
+      "correlation": 118,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206914.848
+    },
+    {
+      "correlation": 119,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206947.381
+    },
+    {
+      "correlation": 120,
+      "duration_us": 4.106,
+      "name": "bundle/spyreCodeDir/bundle.mlir#0",
+      "timestamp_us": 1547096206978.706
+    }
+  ],
+  "status": "pass",
+  "trace": "/tmp/quick_lx_20260719_root/full_duplex_b524288/kineto_trace.json",
+  "wall_us_max": 108.265,
+  "wall_us_mean": 32.50715,
+  "wall_us_median": 31.508000000000003,
+  "wall_us_min": 29.521,
+  "warmup": 10
+}

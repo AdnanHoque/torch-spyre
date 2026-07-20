@@ -1,0 +1,1351 @@
+{
+  "bundle": "/home/adnan/codex-isolated/direct_lx_v8_bound_smoke_2a20_19280_llvm2213_20260719_v5/campaign_v1/compile_smoke/full_duplex_b524288/bundle",
+  "bundle_components_sha256": {
+    "sdsc_0.json": "c9a313e354efe536afca1acdac996f8c90248a6812aabed3421ebef63e607edc",
+    "spyreCodeDir/init_binary.bin": "e3c769087dbbabfb1cbd681d77c39591129f96a67deec353111630458bdf0654",
+    "spyreCodeDir/spyrecode.json": "03e12dfdc0c0aaaa0deabb3a99a377163eefedf2c13e8e197eb83a6553f45139"
+  },
+  "case": "full_duplex_b524288",
+  "conditional_1p5GHz_128B_cycle_direction": {
+    "balanced_duplex_aggregate_peak_GB_per_s": 384.0,
+    "efficiency": 0.6650430264653353,
+    "per_direction_peak_GB_per_s": 192.0
+  },
+  "device_candidate_count": 100,
+  "durations_us": [
+    4.021,
+    4.104,
+    4.107,
+    4.106,
+    4.106,
+    4.108,
+    4.105,
+    4.107,
+    4.107,
+    4.105,
+    4.106,
+    4.106,
+    4.104,
+    4.066,
+    4.105,
+    4.105,
+    4.108,
+    4.107,
+    4.107,
+    4.106,
+    4.106,
+    4.106,
+    4.108,
+    4.106,
+    4.107,
+    4.106,
+    4.107,
+    4.107,
+    4.107,
+    4.105,
+    4.105,
+    4.079,
+    4.104,
+    4.106,
+    4.105,
+    4.107,
+    4.106,
+    4.106,
+    4.107,
+    4.106,
+    4.106,
+    4.106,
+    4.105,
+    4.106,
+    4.106,
+    4.107,
+    4.106,
+    4.104,
+    4.105,
+    4.105,
+    4.104,
+    4.107,
+    4.105,
+    4.106,
+    4.107,
+    4.106,
+    4.104,
+    4.105,
+    4.105,
+    4.105,
+    4.104,
+    4.105,
+    4.106,
+    4.106,
+    4.105,
+    4.107,
+    4.106,
+    4.106,
+    4.106,
+    4.105,
+    4.107,
+    4.106,
+    4.104,
+    4.106,
+    4.104,
+    4.106,
+    4.105,
+    4.106,
+    4.107,
+    4.106,
+    4.106,
+    4.106,
+    4.106,
+    4.104,
+    4.107,
+    4.107,
+    4.106,
+    4.105,
+    4.105,
+    4.106,
+    4.105,
+    4.106,
+    4.106,
+    4.105,
+    4.106,
+    4.106,
+    4.107,
+    4.107,
+    4.105,
+    4.105
+  ],
+  "exact_kernel_event_count": 100,
+  "host_wall_median_us_diagnostic_only": 31.972,
+  "kernel_events": [
+    {
+      "args": {
+        "context": "2065",
+        "correlation": 21,
+        "device": 0,
+        "queued": 1782171444224849207,
+        "stream": 1,
+        "submitted": 1784515492153825287
+      },
+      "dur_us": 4.021,
+      "ts": 1547704153828.202
+    },
+    {
+      "args": {
+        "context": "2066",
+        "correlation": 22,
+        "device": 0,
+        "queued": 1782171444224849133,
+        "stream": 1,
+        "submitted": 1784515492153889342
+      },
+      "dur_us": 4.104,
+      "ts": 1547704153891.719
+    },
+    {
+      "args": {
+        "context": "2067",
+        "correlation": 23,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492153936073
+      },
+      "dur_us": 4.107,
+      "ts": 1547704153938.331
+    },
+    {
+      "args": {
+        "context": "2068",
+        "correlation": 24,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492153975480
+      },
+      "dur_us": 4.106,
+      "ts": 1547704153977.923
+    },
+    {
+      "args": {
+        "context": "2069",
+        "correlation": 25,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154011285
+      },
+      "dur_us": 4.106,
+      "ts": 1547704154013.489
+    },
+    {
+      "args": {
+        "context": "2070",
+        "correlation": 26,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154045787
+      },
+      "dur_us": 4.108,
+      "ts": 1547704154048.254
+    },
+    {
+      "args": {
+        "context": "2071",
+        "correlation": 27,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154079603
+      },
+      "dur_us": 4.105,
+      "ts": 1547704154082.122
+    },
+    {
+      "args": {
+        "context": "2072",
+        "correlation": 28,
+        "device": 0,
+        "queued": 1782171444224849133,
+        "stream": 1,
+        "submitted": 1784515492154114282
+      },
+      "dur_us": 4.107,
+      "ts": 1547704154116.51
+    },
+    {
+      "args": {
+        "context": "2073",
+        "correlation": 29,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154149045
+      },
+      "dur_us": 4.107,
+      "ts": 1547704154151.237
+    },
+    {
+      "args": {
+        "context": "2074",
+        "correlation": 30,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154183301
+      },
+      "dur_us": 4.105,
+      "ts": 1547704154185.449
+    },
+    {
+      "args": {
+        "context": "2075",
+        "correlation": 31,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154217093
+      },
+      "dur_us": 4.106,
+      "ts": 1547704154219.532
+    },
+    {
+      "args": {
+        "context": "2076",
+        "correlation": 32,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154251648
+      },
+      "dur_us": 4.106,
+      "ts": 1547704154253.792
+    },
+    {
+      "args": {
+        "context": "2077",
+        "correlation": 33,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154284964
+      },
+      "dur_us": 4.104,
+      "ts": 1547704154287.239
+    },
+    {
+      "args": {
+        "context": "2078",
+        "correlation": 34,
+        "device": 0,
+        "queued": 1782171444224849158,
+        "stream": 1,
+        "submitted": 1784515492154318680
+      },
+      "dur_us": 4.066,
+      "ts": 1547704154321.029
+    },
+    {
+      "args": {
+        "context": "2079",
+        "correlation": 35,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492154352569
+      },
+      "dur_us": 4.105,
+      "ts": 1547704154354.751
+    },
+    {
+      "args": {
+        "context": "2080",
+        "correlation": 36,
+        "device": 0,
+        "queued": 1782171444224849133,
+        "stream": 1,
+        "submitted": 1784515492154385975
+      },
+      "dur_us": 4.105,
+      "ts": 1547704154388.156
+    },
+    {
+      "args": {
+        "context": "2081",
+        "correlation": 37,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492154421295
+      },
+      "dur_us": 4.108,
+      "ts": 1547704154423.514
+    },
+    {
+      "args": {
+        "context": "2082",
+        "correlation": 38,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154455621
+      },
+      "dur_us": 4.107,
+      "ts": 1547704154457.752
+    },
+    {
+      "args": {
+        "context": "2083",
+        "correlation": 39,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492154489018
+      },
+      "dur_us": 4.107,
+      "ts": 1547704154491.191
+    },
+    {
+      "args": {
+        "context": "2084",
+        "correlation": 40,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492154521718
+      },
+      "dur_us": 4.106,
+      "ts": 1547704154523.941
+    },
+    {
+      "args": {
+        "context": "2085",
+        "correlation": 41,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492154554530
+      },
+      "dur_us": 4.106,
+      "ts": 1547704154556.859
+    },
+    {
+      "args": {
+        "context": "2086",
+        "correlation": 42,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492154590310
+      },
+      "dur_us": 4.106,
+      "ts": 1547704154593.032
+    },
+    {
+      "args": {
+        "context": "2087",
+        "correlation": 43,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154623871
+      },
+      "dur_us": 4.108,
+      "ts": 1547704154625.993
+    },
+    {
+      "args": {
+        "context": "2088",
+        "correlation": 44,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492154658232
+      },
+      "dur_us": 4.106,
+      "ts": 1547704154660.62
+    },
+    {
+      "args": {
+        "context": "2089",
+        "correlation": 45,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154691100
+      },
+      "dur_us": 4.107,
+      "ts": 1547704154693.574
+    },
+    {
+      "args": {
+        "context": "2090",
+        "correlation": 46,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154724640
+      },
+      "dur_us": 4.106,
+      "ts": 1547704154726.833
+    },
+    {
+      "args": {
+        "context": "2091",
+        "correlation": 47,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492154758894
+      },
+      "dur_us": 4.107,
+      "ts": 1547704154761.174
+    },
+    {
+      "args": {
+        "context": "2092",
+        "correlation": 48,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492154791570
+      },
+      "dur_us": 4.107,
+      "ts": 1547704154793.77
+    },
+    {
+      "args": {
+        "context": "2093",
+        "correlation": 49,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154824417
+      },
+      "dur_us": 4.107,
+      "ts": 1547704154826.782
+    },
+    {
+      "args": {
+        "context": "2094",
+        "correlation": 50,
+        "device": 0,
+        "queued": 1782171444224849156,
+        "stream": 1,
+        "submitted": 1784515492154858057
+      },
+      "dur_us": 4.105,
+      "ts": 1547704154860.441
+    },
+    {
+      "args": {
+        "context": "2095",
+        "correlation": 51,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154891847
+      },
+      "dur_us": 4.105,
+      "ts": 1547704154894.13
+    },
+    {
+      "args": {
+        "context": "2096",
+        "correlation": 52,
+        "device": 0,
+        "queued": 1782171444224849326,
+        "stream": 1,
+        "submitted": 1784515492154925401
+      },
+      "dur_us": 4.079,
+      "ts": 1547704154927.565
+    },
+    {
+      "args": {
+        "context": "2097",
+        "correlation": 53,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492154957997
+      },
+      "dur_us": 4.104,
+      "ts": 1547704154960.194
+    },
+    {
+      "args": {
+        "context": "2098",
+        "correlation": 54,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492154992364
+      },
+      "dur_us": 4.106,
+      "ts": 1547704154994.846
+    },
+    {
+      "args": {
+        "context": "2099",
+        "correlation": 55,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492155025609
+      },
+      "dur_us": 4.105,
+      "ts": 1547704155027.818
+    },
+    {
+      "args": {
+        "context": "2100",
+        "correlation": 56,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155059134
+      },
+      "dur_us": 4.107,
+      "ts": 1547704155061.389
+    },
+    {
+      "args": {
+        "context": "2101",
+        "correlation": 57,
+        "device": 0,
+        "queued": 1782171444224849133,
+        "stream": 1,
+        "submitted": 1784515492155091440
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155093.605
+    },
+    {
+      "args": {
+        "context": "2102",
+        "correlation": 58,
+        "device": 0,
+        "queued": 1782171444224849133,
+        "stream": 1,
+        "submitted": 1784515492155124588
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155126.755
+    },
+    {
+      "args": {
+        "context": "2103",
+        "correlation": 59,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155157023
+      },
+      "dur_us": 4.107,
+      "ts": 1547704155159.176
+    },
+    {
+      "args": {
+        "context": "2104",
+        "correlation": 60,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492155190934
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155193.167
+    },
+    {
+      "args": {
+        "context": "2105",
+        "correlation": 61,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155224098
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155226.252
+    },
+    {
+      "args": {
+        "context": "2106",
+        "correlation": 62,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155256649
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155258.876
+    },
+    {
+      "args": {
+        "context": "2107",
+        "correlation": 63,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155290443
+      },
+      "dur_us": 4.105,
+      "ts": 1547704155292.668
+    },
+    {
+      "args": {
+        "context": "2108",
+        "correlation": 64,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155322138
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155324.258
+    },
+    {
+      "args": {
+        "context": "2109",
+        "correlation": 65,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155359484
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155361.632
+    },
+    {
+      "args": {
+        "context": "2110",
+        "correlation": 66,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492155393283
+      },
+      "dur_us": 4.107,
+      "ts": 1547704155395.514
+    },
+    {
+      "args": {
+        "context": "2111",
+        "correlation": 67,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155426301
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155428.497
+    },
+    {
+      "args": {
+        "context": "2112",
+        "correlation": 68,
+        "device": 0,
+        "queued": 1782171444224849133,
+        "stream": 1,
+        "submitted": 1784515492155459763
+      },
+      "dur_us": 4.104,
+      "ts": 1547704155462.064
+    },
+    {
+      "args": {
+        "context": "2113",
+        "correlation": 69,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155494965
+      },
+      "dur_us": 4.105,
+      "ts": 1547704155497.289
+    },
+    {
+      "args": {
+        "context": "2114",
+        "correlation": 70,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492155529021
+      },
+      "dur_us": 4.105,
+      "ts": 1547704155531.383
+    },
+    {
+      "args": {
+        "context": "2115",
+        "correlation": 71,
+        "device": 0,
+        "queued": 1782171444224849133,
+        "stream": 1,
+        "submitted": 1784515492155567381
+      },
+      "dur_us": 4.104,
+      "ts": 1547704155569.626
+    },
+    {
+      "args": {
+        "context": "2116",
+        "correlation": 72,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155602901
+      },
+      "dur_us": 4.107,
+      "ts": 1547704155605.081
+    },
+    {
+      "args": {
+        "context": "2117",
+        "correlation": 73,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155636909
+      },
+      "dur_us": 4.105,
+      "ts": 1547704155638.97
+    },
+    {
+      "args": {
+        "context": "2118",
+        "correlation": 74,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155674103
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155676.391
+    },
+    {
+      "args": {
+        "context": "2119",
+        "correlation": 75,
+        "device": 0,
+        "queued": 1782171444224849133,
+        "stream": 1,
+        "submitted": 1784515492155707279
+      },
+      "dur_us": 4.107,
+      "ts": 1547704155709.504
+    },
+    {
+      "args": {
+        "context": "2120",
+        "correlation": 76,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155740342
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155742.66
+    },
+    {
+      "args": {
+        "context": "2121",
+        "correlation": 77,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492155773540
+      },
+      "dur_us": 4.104,
+      "ts": 1547704155775.706
+    },
+    {
+      "args": {
+        "context": "2122",
+        "correlation": 78,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155807482
+      },
+      "dur_us": 4.105,
+      "ts": 1547704155809.886
+    },
+    {
+      "args": {
+        "context": "2123",
+        "correlation": 79,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492155840321
+      },
+      "dur_us": 4.105,
+      "ts": 1547704155842.624
+    },
+    {
+      "args": {
+        "context": "2124",
+        "correlation": 80,
+        "device": 0,
+        "queued": 1782171444224849227,
+        "stream": 1,
+        "submitted": 1784515492155874643
+      },
+      "dur_us": 4.105,
+      "ts": 1547704155877.032
+    },
+    {
+      "args": {
+        "context": "2125",
+        "correlation": 81,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155907898
+      },
+      "dur_us": 4.104,
+      "ts": 1547704155910.097
+    },
+    {
+      "args": {
+        "context": "2126",
+        "correlation": 82,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492155941126
+      },
+      "dur_us": 4.105,
+      "ts": 1547704155943.517
+    },
+    {
+      "args": {
+        "context": "2127",
+        "correlation": 83,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492155974404
+      },
+      "dur_us": 4.106,
+      "ts": 1547704155976.737
+    },
+    {
+      "args": {
+        "context": "2128",
+        "correlation": 84,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492156008461
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156010.615
+    },
+    {
+      "args": {
+        "context": "2129",
+        "correlation": 85,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156041445
+      },
+      "dur_us": 4.105,
+      "ts": 1547704156043.626
+    },
+    {
+      "args": {
+        "context": "2130",
+        "correlation": 86,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156073824
+      },
+      "dur_us": 4.107,
+      "ts": 1547704156076.119
+    },
+    {
+      "args": {
+        "context": "2131",
+        "correlation": 87,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156107395
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156109.644
+    },
+    {
+      "args": {
+        "context": "2132",
+        "correlation": 88,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156141064
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156143.209
+    },
+    {
+      "args": {
+        "context": "2133",
+        "correlation": 89,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156174441
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156176.626
+    },
+    {
+      "args": {
+        "context": "2134",
+        "correlation": 90,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156206793
+      },
+      "dur_us": 4.105,
+      "ts": 1547704156208.963
+    },
+    {
+      "args": {
+        "context": "2135",
+        "correlation": 91,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492156239922
+      },
+      "dur_us": 4.107,
+      "ts": 1547704156242.397
+    },
+    {
+      "args": {
+        "context": "2136",
+        "correlation": 92,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156273400
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156275.497
+    },
+    {
+      "args": {
+        "context": "2137",
+        "correlation": 93,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156306190
+      },
+      "dur_us": 4.104,
+      "ts": 1547704156308.378
+    },
+    {
+      "args": {
+        "context": "2138",
+        "correlation": 94,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156338682
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156340.964
+    },
+    {
+      "args": {
+        "context": "2139",
+        "correlation": 95,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156372101
+      },
+      "dur_us": 4.104,
+      "ts": 1547704156374.497
+    },
+    {
+      "args": {
+        "context": "2140",
+        "correlation": 96,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156405319
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156407.536
+    },
+    {
+      "args": {
+        "context": "2141",
+        "correlation": 97,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156439209
+      },
+      "dur_us": 4.105,
+      "ts": 1547704156441.507
+    },
+    {
+      "args": {
+        "context": "2142",
+        "correlation": 98,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492156473251
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156475.513
+    },
+    {
+      "args": {
+        "context": "2143",
+        "correlation": 99,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492156505410
+      },
+      "dur_us": 4.107,
+      "ts": 1547704156507.82
+    },
+    {
+      "args": {
+        "context": "2144",
+        "correlation": 100,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156539299
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156541.662
+    },
+    {
+      "args": {
+        "context": "2145",
+        "correlation": 101,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492156575381
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156577.432
+    },
+    {
+      "args": {
+        "context": "2146",
+        "correlation": 102,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156610077
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156612.249
+    },
+    {
+      "args": {
+        "context": "2147",
+        "correlation": 103,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156643789
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156645.987
+    },
+    {
+      "args": {
+        "context": "2148",
+        "correlation": 104,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156675949
+      },
+      "dur_us": 4.104,
+      "ts": 1547704156678.236
+    },
+    {
+      "args": {
+        "context": "2149",
+        "correlation": 105,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156708565
+      },
+      "dur_us": 4.107,
+      "ts": 1547704156710.856
+    },
+    {
+      "args": {
+        "context": "2150",
+        "correlation": 106,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492156741995
+      },
+      "dur_us": 4.107,
+      "ts": 1547704156744.313
+    },
+    {
+      "args": {
+        "context": "2151",
+        "correlation": 107,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156773832
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156775.897
+    },
+    {
+      "args": {
+        "context": "2152",
+        "correlation": 108,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156806426
+      },
+      "dur_us": 4.105,
+      "ts": 1547704156808.482
+    },
+    {
+      "args": {
+        "context": "2153",
+        "correlation": 109,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492156838358
+      },
+      "dur_us": 4.105,
+      "ts": 1547704156840.587
+    },
+    {
+      "args": {
+        "context": "2154",
+        "correlation": 110,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492156872279
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156874.456
+    },
+    {
+      "args": {
+        "context": "2155",
+        "correlation": 111,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492156905687
+      },
+      "dur_us": 4.105,
+      "ts": 1547704156908.055
+    },
+    {
+      "args": {
+        "context": "2156",
+        "correlation": 112,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156938006
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156940.263
+    },
+    {
+      "args": {
+        "context": "2157",
+        "correlation": 113,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492156971226
+      },
+      "dur_us": 4.106,
+      "ts": 1547704156973.453
+    },
+    {
+      "args": {
+        "context": "2158",
+        "correlation": 114,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492157005341
+      },
+      "dur_us": 4.105,
+      "ts": 1547704157007.658
+    },
+    {
+      "args": {
+        "context": "2159",
+        "correlation": 115,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492157037535
+      },
+      "dur_us": 4.106,
+      "ts": 1547704157040.024
+    },
+    {
+      "args": {
+        "context": "2160",
+        "correlation": 116,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492157071643
+      },
+      "dur_us": 4.106,
+      "ts": 1547704157073.844
+    },
+    {
+      "args": {
+        "context": "2161",
+        "correlation": 117,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492157107175
+      },
+      "dur_us": 4.107,
+      "ts": 1547704157109.491
+    },
+    {
+      "args": {
+        "context": "2162",
+        "correlation": 118,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492157140327
+      },
+      "dur_us": 4.107,
+      "ts": 1547704157142.702
+    },
+    {
+      "args": {
+        "context": "2163",
+        "correlation": 119,
+        "device": 0,
+        "queued": 1782171444224849131,
+        "stream": 1,
+        "submitted": 1784515492157173924
+      },
+      "dur_us": 4.105,
+      "ts": 1547704157176.191
+    },
+    {
+      "args": {
+        "context": "2164",
+        "correlation": 120,
+        "device": 0,
+        "queued": 1782171444224849132,
+        "stream": 1,
+        "submitted": 1784515492157207440
+      },
+      "dur_us": 4.105,
+      "ts": 1547704157209.805
+    }
+  ],
+  "kernel_name": "bundle/spyreCodeDir/bundle.mlir#0",
+  "measured_operations": 100,
+  "numerators": {
+    "aggregate_injected_and_delivered_bytes_per_operation": 1048576,
+    "bottleneck_direction_bytes_per_operation": 524288
+  },
+  "pod": "adnan-clc-spyre-dev-pf",
+  "prior_full_window_correctness": {
+    "path": "/home/adnan/codex-isolated/direct_lx_v8_attempt5_two_case_correctness_2a20_19280_llvm2213_20260719_v1/results/full_duplex_b524288/correctness_summary.json",
+    "sha256": "2d4849848369480e27d833bbdd0edcf734c29bf22f0e4ae2b74eeb6c438d3204",
+    "status": "pass"
+  },
+  "rates_decimal_GB_per_s": {
+    "aggregate": 255.37652216268876,
+    "per_direction_or_bottleneck": 127.68826108134438
+  },
+  "statistics_us": {
+    "max": 4.108,
+    "mean": 4.10431,
+    "median": 4.106,
+    "min": 4.021,
+    "stdev": 0.009726247939976625
+  },
+  "status": "pass",
+  "timing_scope": "whole operation bundle; no helper kernels in profiled interval",
+  "torch_spyre": "/home/adnan/codex-isolated/direct_lx_v8_bound_smoke_2a20_19280_llvm2213_20260719_v5/runtime/torch-clean/torch_spyre/__init__.py",
+  "torch_version": "2.11.0+aiu.kineto.1.1.2",
+  "trace": "/home/adnan/codex-isolated/direct_lx_quick_two_case_clc_100ops_2a20_19280_llvm2213_20260719_v1/results_run2/full_duplex_b524288/trace.json",
+  "trace_sha256": "62f8e4a8934a1080b6dc4ed941c2fcff4524e1fc2dcdda1a58027cca4fa86c99",
+  "warmups": 10
+}

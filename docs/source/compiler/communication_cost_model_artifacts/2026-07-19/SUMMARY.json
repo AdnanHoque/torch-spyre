@@ -1,0 +1,81 @@
+{
+  "schema": "torch_spyre_communication_cost_model_summary_v1",
+  "units": {
+    "bandwidth": "decimal GB/s",
+    "time": "us",
+    "bytes": "B"
+  },
+  "direct_lx": {
+    "one_way": [
+      {"payload_bytes": 131072, "median_us": 1.11, "effective_GBps": 118.082883},
+      {"payload_bytes": 262144, "median_us": 2.07, "effective_GBps": 126.639614},
+      {"payload_bytes": 524288, "median_us": 3.9915, "effective_GBps": 131.351121}
+    ],
+    "linear_fit": {
+      "formula": "T_us = fixed_us + payload_bytes / bytes_per_us",
+      "fixed_us": 0.14925,
+      "bytes_per_us": 136457.1853504369,
+      "sustained_GBps": 136.4571853504369,
+      "maximum_absolute_residual_us": 0.0003214285714286
+    },
+    "balanced_duplex_512KiB_per_direction": {
+      "aggregate_payload_bytes": 1048576,
+      "median_us": 4.105,
+      "aggregate_GBps": 255.438733,
+      "retention_of_twice_one_way": 0.97235
+    },
+    "distance8_512KiB": {
+      "payload_bytes": 524288,
+      "median_us": 4.023,
+      "effective_GBps": 130.322645
+    }
+  },
+  "conditional_peak_overlay": {
+    "frequency_GHz": 1.1,
+    "bytes_per_cycle_per_direction": 128,
+    "peak_GBps_per_direction": 140.8,
+    "peak_GBps_balanced_pair": 281.6,
+    "efficiency": {
+      "one_way_512KiB": 0.93289,
+      "one_way_fitted_slope": 0.96916,
+      "balanced_duplex_512KiB_per_direction": 0.90710,
+      "distance8_512KiB": 0.92559
+    },
+    "qualification": "Conditional on the SPad ring cycle using a historical same-PF 1.1 GHz RNG readback."
+  },
+  "flash_full_attention": {
+    "shape": {"B": 1, "H": 4, "Lq": 512, "Lk": 4096, "D": 128},
+    "group_size": 8,
+    "source_bytes_per_core": 131072,
+    "fresh_process_triples": 5,
+    "accepted_events_per_condition": 30,
+    "mean_of_process_medians_us": {
+      "hbm": 257.4222,
+      "lx": 212.7198,
+      "preseeded_no_shuffle_oracle": 182.7584
+    },
+    "hbm_over_lx_ratio_of_means": 1.21015,
+    "hbm_to_oracle_opportunity_recovered_by_lx": 0.5987158436,
+    "lx_minus_oracle_us": 29.9614,
+    "remaining_opportunity_fraction": 0.4012841564,
+    "lx_inverse_time_efficiency_vs_oracle": 0.85915,
+    "maximum_further_speedup_to_oracle": 1.16394
+  },
+  "joint_placement": {
+    "route_metrics": {
+      "default": {"hop_units": 2048, "mean_remote_distance": 9.142857, "max_directed_link_units": 40, "max_combined_segment_units": 64},
+      "joint": {"hop_units": 672, "mean_remote_distance": 3.0, "max_directed_link_units": 16, "max_combined_segment_units": 32}
+    },
+    "whole_fused_kernel_us": {"default": 213.5266, "joint": 203.1399},
+    "paired_gain_us": 10.3867,
+    "paired_gain_t95_us": [10.061743, 10.711657],
+    "reduction_fraction": 0.048644,
+    "speedup": 1.05113,
+    "scope": "Whole closed-region placement effect, not isolated SHUFFLE time."
+  },
+  "next_flash_experiment": {
+    "design": "Paired 2x2 placement by handoff factorial",
+    "arms": ["default_shuffle", "default_oracle", "joint_shuffle", "joint_oracle"],
+    "primary_estimand": "(default_shuffle - default_oracle) - (joint_shuffle - joint_oracle)"
+  }
+}

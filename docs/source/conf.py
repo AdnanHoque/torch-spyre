@@ -45,7 +45,14 @@ myst_heading_anchors = 3
 templates_path = ["_templates"]
 
 # Patterns to exclude when looking for source files
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    # Reviewer-facing measurement artifacts are versioned beside the compiler
+    # documents but are not Sphinx source pages.
+    "compiler/communication_cost_model_artifacts/**",
+]
 
 # The suffix(es) of source filenames
 source_suffix = {

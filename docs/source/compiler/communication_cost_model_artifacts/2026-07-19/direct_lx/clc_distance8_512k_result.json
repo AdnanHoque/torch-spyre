@@ -1,0 +1,1399 @@
+{
+  "bundle": "/home/adnan/codex-isolated/direct_lx_distance_ccw_d8_b524288_2a20_19280_llvm2213_20260719_v1/bundle",
+  "bundle_components_sha256": {
+    "sdsc_0.json": "40347b14642966a6b5fba6597685d64eed09ed4b9a1cd6b14b3b2c127ce46ee1",
+    "spyreCodeDir/init_binary.bin": "e363e578123b1fbee98d0f3e8e539c65b2d75b127fcba5c991f28cc626d100d0",
+    "spyreCodeDir/spyrecode.json": "03e12dfdc0c0aaaa0deabb3a99a377163eefedf2c13e8e197eb83a6553f45139"
+  },
+  "byte_scopes": {
+    "H_max_bottleneck_link_bytes": 524288,
+    "H_sum_hop_bytes": 4194304,
+    "delivered_bytes": 524288,
+    "injected_bytes": 524288
+  },
+  "case": "distance_ccw_d8_b524288",
+  "conditional_1p5GHz_128B_cycle_direction_efficiency": 0.6787637749606431,
+  "device": 0,
+  "durations_us": [
+    4.023,
+    4.022,
+    4.022,
+    4.023,
+    4.023,
+    4.026,
+    4.023,
+    4.023,
+    4.023,
+    4.027,
+    4.024,
+    4.024,
+    4.023,
+    4.024,
+    4.024,
+    4.023,
+    4.023,
+    4.023,
+    4.022,
+    4.02,
+    4.02,
+    4.023,
+    4.024,
+    4.022,
+    4.021,
+    4.023,
+    4.022,
+    4.021,
+    4.022,
+    4.022,
+    4.021,
+    4.023,
+    4.022,
+    4.023,
+    4.022,
+    4.024,
+    4.021,
+    4.026,
+    4.022,
+    4.023,
+    4.02,
+    4.023,
+    4.024,
+    4.022,
+    4.022,
+    4.023,
+    4.027,
+    4.021,
+    4.021,
+    4.024,
+    4.022,
+    4.022,
+    4.025,
+    4.023,
+    4.023,
+    4.019,
+    4.025,
+    4.025,
+    4.025,
+    4.024,
+    4.023,
+    4.023,
+    4.02,
+    4.026,
+    4.023,
+    4.023,
+    4.021,
+    4.022,
+    4.024,
+    4.021,
+    4.024,
+    4.024,
+    4.023,
+    4.023,
+    4.022,
+    4.024,
+    4.022,
+    4.023,
+    4.022,
+    4.023,
+    4.022,
+    4.022,
+    4.021,
+    4.024,
+    4.025,
+    4.021,
+    4.023,
+    4.022,
+    4.024,
+    4.023,
+    4.022,
+    4.021,
+    4.022,
+    4.024,
+    4.023,
+    4.023,
+    4.021,
+    4.021,
+    4.021,
+    4.025
+  ],
+  "exact_kernel_events": 100,
+  "full_window_shape": [
+    32,
+    262144
+  ],
+  "host_wall_median_us_diagnostic_only": 42.210499999999996,
+  "kernel_events": [
+    {
+      "args": {
+        "context": "3133",
+        "correlation": 67,
+        "device": 0,
+        "queued": 1782171444224849214,
+        "stream": 1,
+        "submitted": 1784515927325417746
+      },
+      "dur_us": 4.023,
+      "ts": 1548139325418.089
+    },
+    {
+      "args": {
+        "context": "3134",
+        "correlation": 68,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927325526142
+      },
+      "dur_us": 4.022,
+      "ts": 1548139325526.497
+    },
+    {
+      "args": {
+        "context": "3135",
+        "correlation": 69,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927325576279
+      },
+      "dur_us": 4.022,
+      "ts": 1548139325576.68
+    },
+    {
+      "args": {
+        "context": "3136",
+        "correlation": 70,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927325627234
+      },
+      "dur_us": 4.023,
+      "ts": 1548139325627.59
+    },
+    {
+      "args": {
+        "context": "3137",
+        "correlation": 71,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927325678379
+      },
+      "dur_us": 4.023,
+      "ts": 1548139325678.735
+    },
+    {
+      "args": {
+        "context": "3138",
+        "correlation": 72,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927325723090
+      },
+      "dur_us": 4.026,
+      "ts": 1548139325723.44
+    },
+    {
+      "args": {
+        "context": "3139",
+        "correlation": 73,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927325771313
+      },
+      "dur_us": 4.023,
+      "ts": 1548139325771.808
+    },
+    {
+      "args": {
+        "context": "3140",
+        "correlation": 74,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927325819273
+      },
+      "dur_us": 4.023,
+      "ts": 1548139325819.627
+    },
+    {
+      "args": {
+        "context": "3141",
+        "correlation": 75,
+        "device": 0,
+        "queued": 1782171444224849139,
+        "stream": 1,
+        "submitted": 1784515927325866157
+      },
+      "dur_us": 4.023,
+      "ts": 1548139325866.513
+    },
+    {
+      "args": {
+        "context": "3142",
+        "correlation": 76,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927325912079
+      },
+      "dur_us": 4.027,
+      "ts": 1548139325912.573
+    },
+    {
+      "args": {
+        "context": "3143",
+        "correlation": 77,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927325958218
+      },
+      "dur_us": 4.024,
+      "ts": 1548139325958.73
+    },
+    {
+      "args": {
+        "context": "3144",
+        "correlation": 78,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326007459
+      },
+      "dur_us": 4.024,
+      "ts": 1548139326007.816
+    },
+    {
+      "args": {
+        "context": "3145",
+        "correlation": 79,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326049386
+      },
+      "dur_us": 4.023,
+      "ts": 1548139326049.738
+    },
+    {
+      "args": {
+        "context": "3146",
+        "correlation": 80,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927326089880
+      },
+      "dur_us": 4.024,
+      "ts": 1548139326090.231
+    },
+    {
+      "args": {
+        "context": "3147",
+        "correlation": 81,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927326137602
+      },
+      "dur_us": 4.024,
+      "ts": 1548139326138.131
+    },
+    {
+      "args": {
+        "context": "3148",
+        "correlation": 82,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927326179305
+      },
+      "dur_us": 4.023,
+      "ts": 1548139326179.66
+    },
+    {
+      "args": {
+        "context": "3149",
+        "correlation": 83,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326223316
+      },
+      "dur_us": 4.023,
+      "ts": 1548139326223.67
+    },
+    {
+      "args": {
+        "context": "3150",
+        "correlation": 84,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927326267882
+      },
+      "dur_us": 4.023,
+      "ts": 1548139326268.235
+    },
+    {
+      "args": {
+        "context": "3151",
+        "correlation": 85,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326315272
+      },
+      "dur_us": 4.022,
+      "ts": 1548139326315.792
+    },
+    {
+      "args": {
+        "context": "3152",
+        "correlation": 86,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326360663
+      },
+      "dur_us": 4.02,
+      "ts": 1548139326361.019
+    },
+    {
+      "args": {
+        "context": "3153",
+        "correlation": 87,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326404679
+      },
+      "dur_us": 4.02,
+      "ts": 1548139326405.034
+    },
+    {
+      "args": {
+        "context": "3154",
+        "correlation": 88,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326450702
+      },
+      "dur_us": 4.023,
+      "ts": 1548139326451.057
+    },
+    {
+      "args": {
+        "context": "3155",
+        "correlation": 89,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927326495351
+      },
+      "dur_us": 4.024,
+      "ts": 1548139326495.709
+    },
+    {
+      "args": {
+        "context": "3156",
+        "correlation": 90,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927326538927
+      },
+      "dur_us": 4.022,
+      "ts": 1548139326539.282
+    },
+    {
+      "args": {
+        "context": "3157",
+        "correlation": 91,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326598616
+      },
+      "dur_us": 4.021,
+      "ts": 1548139326598.969
+    },
+    {
+      "args": {
+        "context": "3158",
+        "correlation": 92,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927326640308
+      },
+      "dur_us": 4.023,
+      "ts": 1548139326640.663
+    },
+    {
+      "args": {
+        "context": "3159",
+        "correlation": 93,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326686822
+      },
+      "dur_us": 4.022,
+      "ts": 1548139326687.175
+    },
+    {
+      "args": {
+        "context": "3160",
+        "correlation": 94,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326727997
+      },
+      "dur_us": 4.021,
+      "ts": 1548139326728.352
+    },
+    {
+      "args": {
+        "context": "3161",
+        "correlation": 95,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927326772932
+      },
+      "dur_us": 4.022,
+      "ts": 1548139326773.408
+    },
+    {
+      "args": {
+        "context": "3162",
+        "correlation": 96,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326816861
+      },
+      "dur_us": 4.022,
+      "ts": 1548139326817.217
+    },
+    {
+      "args": {
+        "context": "3163",
+        "correlation": 97,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927326858371
+      },
+      "dur_us": 4.021,
+      "ts": 1548139326858.726
+    },
+    {
+      "args": {
+        "context": "3164",
+        "correlation": 98,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326900283
+      },
+      "dur_us": 4.023,
+      "ts": 1548139326900.816
+    },
+    {
+      "args": {
+        "context": "3165",
+        "correlation": 99,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927326942800
+      },
+      "dur_us": 4.022,
+      "ts": 1548139326943.155
+    },
+    {
+      "args": {
+        "context": "3166",
+        "correlation": 100,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927326987948
+      },
+      "dur_us": 4.023,
+      "ts": 1548139326988.302
+    },
+    {
+      "args": {
+        "context": "3167",
+        "correlation": 101,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927327029412
+      },
+      "dur_us": 4.022,
+      "ts": 1548139327029.769
+    },
+    {
+      "args": {
+        "context": "3168",
+        "correlation": 102,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927327075949
+      },
+      "dur_us": 4.024,
+      "ts": 1548139327076.302
+    },
+    {
+      "args": {
+        "context": "3169",
+        "correlation": 103,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927327119672
+      },
+      "dur_us": 4.021,
+      "ts": 1548139327120.027
+    },
+    {
+      "args": {
+        "context": "3170",
+        "correlation": 104,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927327167867
+      },
+      "dur_us": 4.026,
+      "ts": 1548139327168.216
+    },
+    {
+      "args": {
+        "context": "3171",
+        "correlation": 105,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927327212970
+      },
+      "dur_us": 4.022,
+      "ts": 1548139327213.378
+    },
+    {
+      "args": {
+        "context": "3172",
+        "correlation": 106,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927327257125
+      },
+      "dur_us": 4.023,
+      "ts": 1548139327257.521
+    },
+    {
+      "args": {
+        "context": "3173",
+        "correlation": 107,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927327298564
+      },
+      "dur_us": 4.02,
+      "ts": 1548139327298.923
+    },
+    {
+      "args": {
+        "context": "3174",
+        "correlation": 108,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927327347619
+      },
+      "dur_us": 4.023,
+      "ts": 1548139327348.145
+    },
+    {
+      "args": {
+        "context": "3175",
+        "correlation": 109,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927327390922
+      },
+      "dur_us": 4.024,
+      "ts": 1548139327391.38
+    },
+    {
+      "args": {
+        "context": "3176",
+        "correlation": 110,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927327433881
+      },
+      "dur_us": 4.022,
+      "ts": 1548139327434.236
+    },
+    {
+      "args": {
+        "context": "3177",
+        "correlation": 111,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927327477661
+      },
+      "dur_us": 4.022,
+      "ts": 1548139327478.161
+    },
+    {
+      "args": {
+        "context": "3178",
+        "correlation": 112,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927327518812
+      },
+      "dur_us": 4.023,
+      "ts": 1548139327519.242
+    },
+    {
+      "args": {
+        "context": "3179",
+        "correlation": 113,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927327567646
+      },
+      "dur_us": 4.027,
+      "ts": 1548139327567.999
+    },
+    {
+      "args": {
+        "context": "3180",
+        "correlation": 114,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927327608971
+      },
+      "dur_us": 4.021,
+      "ts": 1548139327609.411
+    },
+    {
+      "args": {
+        "context": "3181",
+        "correlation": 115,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927327649407
+      },
+      "dur_us": 4.021,
+      "ts": 1548139327649.761
+    },
+    {
+      "args": {
+        "context": "3182",
+        "correlation": 116,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927327697967
+      },
+      "dur_us": 4.024,
+      "ts": 1548139327698.319
+    },
+    {
+      "args": {
+        "context": "3183",
+        "correlation": 117,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927327738613
+      },
+      "dur_us": 4.022,
+      "ts": 1548139327738.971
+    },
+    {
+      "args": {
+        "context": "3184",
+        "correlation": 118,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927327784866
+      },
+      "dur_us": 4.022,
+      "ts": 1548139327785.356
+    },
+    {
+      "args": {
+        "context": "3185",
+        "correlation": 119,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927327833689
+      },
+      "dur_us": 4.025,
+      "ts": 1548139327834.043
+    },
+    {
+      "args": {
+        "context": "3186",
+        "correlation": 120,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927327880281
+      },
+      "dur_us": 4.023,
+      "ts": 1548139327880.633
+    },
+    {
+      "args": {
+        "context": "3187",
+        "correlation": 121,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927327924069
+      },
+      "dur_us": 4.023,
+      "ts": 1548139327924.427
+    },
+    {
+      "args": {
+        "context": "3188",
+        "correlation": 122,
+        "device": 0,
+        "queued": 1782171444224849139,
+        "stream": 1,
+        "submitted": 1784515927327970404
+      },
+      "dur_us": 4.019,
+      "ts": 1548139327970.76
+    },
+    {
+      "args": {
+        "context": "3189",
+        "correlation": 123,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927328010419
+      },
+      "dur_us": 4.025,
+      "ts": 1548139328010.772
+    },
+    {
+      "args": {
+        "context": "3190",
+        "correlation": 124,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927328054573
+      },
+      "dur_us": 4.025,
+      "ts": 1548139328054.925
+    },
+    {
+      "args": {
+        "context": "3191",
+        "correlation": 125,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927328098650
+      },
+      "dur_us": 4.025,
+      "ts": 1548139328099.003
+    },
+    {
+      "args": {
+        "context": "3192",
+        "correlation": 126,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927328142399
+      },
+      "dur_us": 4.024,
+      "ts": 1548139328143.187
+    },
+    {
+      "args": {
+        "context": "3193",
+        "correlation": 127,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927328188433
+      },
+      "dur_us": 4.023,
+      "ts": 1548139328188.786
+    },
+    {
+      "args": {
+        "context": "3194",
+        "correlation": 128,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927328231617
+      },
+      "dur_us": 4.023,
+      "ts": 1548139328231.974
+    },
+    {
+      "args": {
+        "context": "3195",
+        "correlation": 129,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927328276360
+      },
+      "dur_us": 4.02,
+      "ts": 1548139328276.717
+    },
+    {
+      "args": {
+        "context": "3196",
+        "correlation": 130,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927328318040
+      },
+      "dur_us": 4.026,
+      "ts": 1548139328318.558
+    },
+    {
+      "args": {
+        "context": "3197",
+        "correlation": 131,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927328363536
+      },
+      "dur_us": 4.023,
+      "ts": 1548139328363.887
+    },
+    {
+      "args": {
+        "context": "3198",
+        "correlation": 132,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927328403941
+      },
+      "dur_us": 4.023,
+      "ts": 1548139328404.295
+    },
+    {
+      "args": {
+        "context": "3199",
+        "correlation": 133,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927328447962
+      },
+      "dur_us": 4.021,
+      "ts": 1548139328448.317
+    },
+    {
+      "args": {
+        "context": "3200",
+        "correlation": 134,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927328493130
+      },
+      "dur_us": 4.022,
+      "ts": 1548139328493.483
+    },
+    {
+      "args": {
+        "context": "3201",
+        "correlation": 135,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927328536977
+      },
+      "dur_us": 4.024,
+      "ts": 1548139328537.614
+    },
+    {
+      "args": {
+        "context": "3202",
+        "correlation": 136,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927328581161
+      },
+      "dur_us": 4.021,
+      "ts": 1548139328581.527
+    },
+    {
+      "args": {
+        "context": "3203",
+        "correlation": 137,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927328626500
+      },
+      "dur_us": 4.024,
+      "ts": 1548139328626.85
+    },
+    {
+      "args": {
+        "context": "3204",
+        "correlation": 138,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927328670831
+      },
+      "dur_us": 4.024,
+      "ts": 1548139328671.334
+    },
+    {
+      "args": {
+        "context": "3205",
+        "correlation": 139,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927328712410
+      },
+      "dur_us": 4.023,
+      "ts": 1548139328712.936
+    },
+    {
+      "args": {
+        "context": "3206",
+        "correlation": 140,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927328756241
+      },
+      "dur_us": 4.023,
+      "ts": 1548139328756.751
+    },
+    {
+      "args": {
+        "context": "3207",
+        "correlation": 141,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927328796816
+      },
+      "dur_us": 4.022,
+      "ts": 1548139328797.171
+    },
+    {
+      "args": {
+        "context": "3208",
+        "correlation": 142,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927328841033
+      },
+      "dur_us": 4.024,
+      "ts": 1548139328841.385
+    },
+    {
+      "args": {
+        "context": "3209",
+        "correlation": 143,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927328885062
+      },
+      "dur_us": 4.022,
+      "ts": 1548139328885.415
+    },
+    {
+      "args": {
+        "context": "3210",
+        "correlation": 144,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927328927130
+      },
+      "dur_us": 4.023,
+      "ts": 1548139328927.584
+    },
+    {
+      "args": {
+        "context": "3211",
+        "correlation": 145,
+        "device": 0,
+        "queued": 1782171444224849134,
+        "stream": 1,
+        "submitted": 1784515927328971030
+      },
+      "dur_us": 4.022,
+      "ts": 1548139328971.383
+    },
+    {
+      "args": {
+        "context": "3212",
+        "correlation": 146,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329012466
+      },
+      "dur_us": 4.023,
+      "ts": 1548139329012.821
+    },
+    {
+      "args": {
+        "context": "3213",
+        "correlation": 147,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329054510
+      },
+      "dur_us": 4.022,
+      "ts": 1548139329054.863
+    },
+    {
+      "args": {
+        "context": "3214",
+        "correlation": 148,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927329096721
+      },
+      "dur_us": 4.022,
+      "ts": 1548139329097.076
+    },
+    {
+      "args": {
+        "context": "3215",
+        "correlation": 149,
+        "device": 0,
+        "queued": 1782171444224849135,
+        "stream": 1,
+        "submitted": 1784515927329140210
+      },
+      "dur_us": 4.021,
+      "ts": 1548139329140.567
+    },
+    {
+      "args": {
+        "context": "3216",
+        "correlation": 150,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329183849
+      },
+      "dur_us": 4.024,
+      "ts": 1548139329184.204
+    },
+    {
+      "args": {
+        "context": "3217",
+        "correlation": 151,
+        "device": 0,
+        "queued": 1782171444224849134,
+        "stream": 1,
+        "submitted": 1784515927329224712
+      },
+      "dur_us": 4.025,
+      "ts": 1548139329225.064
+    },
+    {
+      "args": {
+        "context": "3218",
+        "correlation": 152,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329269494
+      },
+      "dur_us": 4.021,
+      "ts": 1548139329269.847
+    },
+    {
+      "args": {
+        "context": "3219",
+        "correlation": 153,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927329310005
+      },
+      "dur_us": 4.023,
+      "ts": 1548139329310.361
+    },
+    {
+      "args": {
+        "context": "3220",
+        "correlation": 154,
+        "device": 0,
+        "queued": 1782171444224849139,
+        "stream": 1,
+        "submitted": 1784515927329350403
+      },
+      "dur_us": 4.022,
+      "ts": 1548139329351.075
+    },
+    {
+      "args": {
+        "context": "3221",
+        "correlation": 155,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329390528
+      },
+      "dur_us": 4.024,
+      "ts": 1548139329390.883
+    },
+    {
+      "args": {
+        "context": "3222",
+        "correlation": 156,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927329434713
+      },
+      "dur_us": 4.023,
+      "ts": 1548139329435.108
+    },
+    {
+      "args": {
+        "context": "3223",
+        "correlation": 157,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329479064
+      },
+      "dur_us": 4.022,
+      "ts": 1548139329479.414
+    },
+    {
+      "args": {
+        "context": "3224",
+        "correlation": 158,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329523081
+      },
+      "dur_us": 4.021,
+      "ts": 1548139329523.434
+    },
+    {
+      "args": {
+        "context": "3225",
+        "correlation": 159,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329567134
+      },
+      "dur_us": 4.022,
+      "ts": 1548139329567.493
+    },
+    {
+      "args": {
+        "context": "3226",
+        "correlation": 160,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329618977
+      },
+      "dur_us": 4.024,
+      "ts": 1548139329619.331
+    },
+    {
+      "args": {
+        "context": "3227",
+        "correlation": 161,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927329659391
+      },
+      "dur_us": 4.023,
+      "ts": 1548139329659.744
+    },
+    {
+      "args": {
+        "context": "3228",
+        "correlation": 162,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927329703658
+      },
+      "dur_us": 4.023,
+      "ts": 1548139329704.084
+    },
+    {
+      "args": {
+        "context": "3229",
+        "correlation": 163,
+        "device": 0,
+        "queued": 1782171444224849138,
+        "stream": 1,
+        "submitted": 1784515927329743394
+      },
+      "dur_us": 4.021,
+      "ts": 1548139329743.748
+    },
+    {
+      "args": {
+        "context": "3230",
+        "correlation": 164,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329787159
+      },
+      "dur_us": 4.021,
+      "ts": 1548139329787.514
+    },
+    {
+      "args": {
+        "context": "3231",
+        "correlation": 165,
+        "device": 0,
+        "queued": 1782171444224849136,
+        "stream": 1,
+        "submitted": 1784515927329831015
+      },
+      "dur_us": 4.021,
+      "ts": 1548139329831.547
+    },
+    {
+      "args": {
+        "context": "3232",
+        "correlation": 166,
+        "device": 0,
+        "queued": 1782171444224849137,
+        "stream": 1,
+        "submitted": 1784515927329871142
+      },
+      "dur_us": 4.025,
+      "ts": 1548139329871.499
+    }
+  ],
+  "kernel_name": "bundle/spyreCodeDir/bundle.mlir#0",
+  "measured_operations": 100,
+  "one_operation_full_window_correctness": {
+    "destination": {
+      "actual_sha256": "3e895a9a13505e77a89287ffa74362b630064b3e1d7ab914ee969152163f550c",
+      "expected_sha256": "3e895a9a13505e77a89287ffa74362b630064b3e1d7ab914ee969152163f550c",
+      "mismatch_count": 0,
+      "pass": true
+    },
+    "destination_change_mask_exact": true,
+    "source": {
+      "actual_sha256": "e1be39141d38a445627e879d2cc991d23b1741e8f1c6f7be9d5dd5f3dd2475e9",
+      "expected_sha256": "e1be39141d38a445627e879d2cc991d23b1741e8f1c6f7be9d5dd5f3dd2475e9",
+      "mismatch_count": 0,
+      "pass": true
+    },
+    "source_unchanged": true
+  },
+  "pod": "adnan-clc-spyre-dev-pf",
+  "post_timing_full_window_correctness": {
+    "destination": {
+      "actual_sha256": "3e895a9a13505e77a89287ffa74362b630064b3e1d7ab914ee969152163f550c",
+      "expected_sha256": "3e895a9a13505e77a89287ffa74362b630064b3e1d7ab914ee969152163f550c",
+      "mismatch_count": 0,
+      "pass": true
+    },
+    "destination_change_mask_exact": true,
+    "source": {
+      "actual_sha256": "e1be39141d38a445627e879d2cc991d23b1741e8f1c6f7be9d5dd5f3dd2475e9",
+      "expected_sha256": "e1be39141d38a445627e879d2cc991d23b1741e8f1c6f7be9d5dd5f3dd2475e9",
+      "mismatch_count": 0,
+      "pass": true
+    },
+    "source_unchanged": true
+  },
+  "precheck": {
+    "destination": {
+      "actual_sha256": "0f0cdf999ab683ba022c282d3c3a53ec93eca1d233a31a0be4f98765148dfe23",
+      "expected_sha256": "0f0cdf999ab683ba022c282d3c3a53ec93eca1d233a31a0be4f98765148dfe23",
+      "mismatch_count": 0,
+      "pass": true
+    },
+    "source": {
+      "actual_sha256": "e1be39141d38a445627e879d2cc991d23b1741e8f1c6f7be9d5dd5f3dd2475e9",
+      "expected_sha256": "e1be39141d38a445627e879d2cc991d23b1741e8f1c6f7be9d5dd5f3dd2475e9",
+      "mismatch_count": 0,
+      "pass": true
+    }
+  },
+  "rates_decimal_GB_per_s": {
+    "bottleneck_link_service": 130.32264479244347,
+    "hop_byte_work": 1042.5811583395478,
+    "injected_or_delivered": 130.32264479244347
+  },
+  "statistics_us": {
+    "max": 4.027,
+    "mean": 4.02278,
+    "median": 4.023,
+    "min": 4.019,
+    "stdev": 0.0015080926477983787
+  },
+  "status": "pass",
+  "stream": 1,
+  "trace": "/home/adnan/codex-isolated/direct_lx_distance_ccw_d8_b524288_2a20_19280_llvm2213_20260719_v1/measurement/trace.json",
+  "transfer": {
+    "destination_core": 8,
+    "direction": "ccw",
+    "minimum_hops": 8,
+    "payload_bytes": 524288,
+    "source_core": 0
+  },
+  "warmups": 10
+}

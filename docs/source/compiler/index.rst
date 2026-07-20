@@ -58,4 +58,7 @@ test coverage, bug classification), see :doc:`/contributing/op_enablement`.
    span_overflow_hint_analysis
    work_division_planning
    scratchpad_planning
+   lx_ring_measurement_methodology
+   communication_cost_model
+   joint_ring_placement
    simulated_annealing_layout

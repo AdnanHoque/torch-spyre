@@ -1,0 +1,41 @@
+{
+  "schema": "torch_spyre_communication_cost_model_provenance_v1",
+  "created_date": "2026-07-19",
+  "documentation_branch_base": {
+    "torch_commit": "8e8324febe7bb6b266652b9aeda3c778e3b22935",
+    "note": "Later rewritten feature head; not remeasured by this package."
+  },
+  "measured_stack": {
+    "torch_base_commit": "2a20cf3b7ac8aadf629314e40e5059ad82471911",
+    "torch_measured_commit": "24adc85c04da91d61b13b295d6092438cf2029b4",
+    "torch_measured_tree": "a8d42ce8818c50b96389dd8d681d8505989193cd",
+    "deeptools_commit": "19280fd7c6bbd91000c63c2a6719a0253e513f4a",
+    "llvm_version": "22.1.3"
+  },
+  "clock_overlay": {
+    "sanitized_readback_MHz": {
+      "RPD": 1100,
+      "RNG": 1100,
+      "SOC": 1000,
+      "DDR": 6400
+    },
+    "raw_log_sha256": "994e254f9ef4e74d1c6e3e19dc3224fbbd2fb49df5f1751a431f28db4e81b594",
+    "raw_log_included": false,
+    "raw_log_exclusion_reason": "Contains card serial, wafer, and ECID data.",
+    "qualification": "Historical readback on the same CDX PF; not captured inside the promoted timing process; SPad cycle to RNG clock binding is not formally established."
+  },
+  "claim_policy": {
+    "canonical": "Raw decimal GB/s and device-kernel microseconds.",
+    "conditional": "Percent of 128 bytes per cycle per direction at 1.1 GHz.",
+    "not_claimed": [
+      "Ring-active-cycle utilization",
+      "Hardware-counter stall attribution",
+      "Performance equivalence of the later rewritten Torch feature head",
+      "Matched single-stream HBM-to-LX speedup"
+    ]
+  },
+  "privacy_and_size_policy": {
+    "include": "Compact result, gate, preregistration, and independent-audit files.",
+    "exclude": "Traces, binaries, caches, output tensors, raw logs, device identifiers, and superseded results."
+  }
+}

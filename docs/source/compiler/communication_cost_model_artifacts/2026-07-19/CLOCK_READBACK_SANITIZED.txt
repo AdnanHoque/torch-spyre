@@ -1,0 +1,19 @@
+Sanitized clock readback provenance
+===================================
+
+Source log SHA-256:
+994e254f9ef4e74d1c6e3e19dc3224fbbd2fb49df5f1751a431f28db4e81b594
+
+Original source lines: 113-121
+
+RPD Clock = 1100 MHz
+RNG Clock = 1100 MHz
+SOC Clock = 1000 MHz
+DDR Clock = 6400 MHz
+
+Scope and limitations:
+- The original log was captured on the same historical CDX PF as the promoted
+  direct-LX environment, but not inside the promoted timing process.
+- Device serial, wafer, ECID, ANSI, and unrelated runtime lines are omitted.
+- The available evidence does not formally bind the SPad-ring cycle to the RNG
+  clock domain. Raw GB/s remains canonical; peak percentages are conditional.

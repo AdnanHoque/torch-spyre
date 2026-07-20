@@ -1,0 +1,3 @@
+# This copied evidence is kept byte-for-byte so its recorded source hash remains
+# verifiable; do not normalize the source note's terminal blank line.
+docs/source/compiler/communication_cost_model_artifacts/2026-07-19/joint_placement/independent_audit.md -whitespace

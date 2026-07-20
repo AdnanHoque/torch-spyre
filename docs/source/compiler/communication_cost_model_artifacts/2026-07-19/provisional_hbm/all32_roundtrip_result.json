@@ -1,0 +1,116 @@
+{
+  "schema": "exact_head_hbm_roundtrip_524288b_per_core_salvaged_v1",
+  "status": "pass_with_postprocessing_salvage",
+  "execution": {
+    "pod": "adnan-spyre-dev-pf",
+    "warmups": 10,
+    "timed_roundtrips": 100,
+    "timed_kernel_events": 200,
+    "compile_attempts": 0,
+    "benchmark_attempts": 1,
+    "benchmark_retries": 0
+  },
+  "operation": {
+    "dependency": "source LX -> HBM bridge tensor -> destination LX",
+    "stream": 1,
+    "active_cores": 32,
+    "elements_per_core": 262144,
+    "bytes_per_core_per_leg": 524288,
+    "logical_payload_bytes_per_roundtrip": 16777216,
+    "physical_hbm_bytes_per_roundtrip": 33554432,
+    "byte_scope": "Each leg moves 524288 bytes on each of 32 cores. The dependent roundtrip writes 16777216 bytes to HBM and reads 16777216 bytes from HBM."
+  },
+  "provenance": {
+    "torch_head": "2a20cf3b7ac8aadf629314e40e5059ad82471911",
+    "deeptools_head": "19280fd7c6bbd91000c63c2a6719a0253e513f4a",
+    "helper_compiler_llvm_path": "/opt/ibm/spyre/deeptools/lib/libLLVM.so.20.0git",
+    "helper_compiler_llvm_sha256": "ebf21239dfc7ca612f99b540ae1b4bacecf57c90360f6d112c4d338a208dd53a",
+    "direct_lx_comparison_compiler_llvm_path": "/home/adnan/dt-inductor/build/llvm/lib/libLLVM.so.22.1",
+    "toolchain_caveat": "The helper bundles were generated from the exact Torch and Deeptools heads but compiled with the frozen installed LLVM 20 helper closure. The direct-LX comparison bundle was compiled with the managed LLVM 22.1.x closure, so this is not an LLVM-matched A/B.",
+    "frozen_helper_manifest": "frozen_helper_manifest_v1.json",
+    "benchmark_script": "hbm_roundtrip_benchmark.py",
+    "benchmark_script_sha256": "c4b2ff5c2e2006f8351fbcb3bdf1f6245f274fb1c24a9cdd8e3b90f67f6a951f"
+  },
+  "correctness": {
+    "status": "pass",
+    "full_window_shape": [32, 262144],
+    "pre_seed_source_exact": true,
+    "pre_seed_destination_exact": true,
+    "pre_timing_source_exact": true,
+    "pre_timing_destination_exact": true,
+    "post_timing_source_exact": true,
+    "post_timing_destination_exact": true,
+    "evidence_note": "All checks are hard failures executed before trace parsing. Execution reached parse_trace, proving every before-and-after full-window gate passed. Raw correctness digests were not serialized because the stricter first parser rejected ancillary launch events after correctness completed."
+  },
+  "kernel_timing_us": {
+    "lx_to_hbm_leg": {
+      "count": 100,
+      "minimum": 450.996,
+      "p10": 451.1467,
+      "median": 451.4035,
+      "mean": 451.42323,
+      "p90": 451.6917,
+      "maximum": 452.198,
+      "stdev": 0.2231904045
+    },
+    "hbm_to_lx_leg": {
+      "count": 100,
+      "minimum": 553.659,
+      "p10": 556.3317,
+      "median": 558.0805,
+      "mean": 558.22257,
+      "p90": 560.3745,
+      "maximum": 563.675,
+      "stdev": 1.8261467091
+    },
+    "summed_roundtrip": {
+      "count": 100,
+      "minimum": 1005.342,
+      "p10": 1007.6768,
+      "median": 1009.486,
+      "mean": 1009.6458,
+      "p90": 1012.0909,
+      "maximum": 1015.235,
+      "stdev": 1.8950497448
+    },
+    "roundtrip_envelope_including_inter_kernel_gap": {
+      "count": 100,
+      "minimum": 1059.1689453125,
+      "p10": 1064.3431640625,
+      "median": 1106.9390869140625,
+      "mean": 1099.1616772460939,
+      "p90": 1115.952734375,
+      "maximum": 1182.2080078125,
+      "stdev": 23.9404853286
+    },
+    "median_inter_kernel_gap": 98.1490478515625
+  },
+  "bandwidth_GBps": {
+    "lx_to_hbm_physical": 37.1667831552,
+    "hbm_to_lx_physical": 30.0623583874,
+    "roundtrip_physical_from_summed_kernel_time": 33.239125654,
+    "roundtrip_effective_logical_payload_from_summed_kernel_time": 16.619562827,
+    "roundtrip_physical_from_pair_envelope": 30.3128079916
+  },
+  "trace": {
+    "path": "kineto_trace.json",
+    "sha256": "cb86fe4a28203cde1e64e884f35b90f5727d867fda3eeb093d44765a94414b55",
+    "source_reader_kernel_events": 100,
+    "destination_writer_kernel_events": 100,
+    "gpu_memcpy_htod_events": 200,
+    "gpu_memcpy_htod_bytes_each": 4224,
+    "gpu_memcpy_htod_bytes_total": 844800,
+    "gpu_memset_events": 200,
+    "gpu_memset_bytes_each": 8192,
+    "gpu_memset_bytes_total": 1638400,
+    "aiu_launch_dmi_control_block_runtime_events": 200,
+    "aiu_launch_control_block_runtime_events": 200,
+    "extra_event_note": "The HtoD and memset records are per-launch control/setup traffic, not the 16 MiB HBM payload leg. They caused the initial exact-200-device-event parser to fail after the benchmark and correctness checks. Kernel timing was salvaged from the 200 named, ordered, non-overlapping kernel events."
+  },
+  "comparison_boundary": {
+    "direct_lx_one_way_bytes": 524288,
+    "direct_lx_one_way_median_us": 3.9915,
+    "direct_lx_one_way_GBps": 131.3511211324,
+    "scope_warning": "The HBM result is an all-32-core aggregate service measurement; the direct-LX result is one 0-to-1 route. Their latency ratio is not an apples-to-apples algorithm speedup."
+  }
+}

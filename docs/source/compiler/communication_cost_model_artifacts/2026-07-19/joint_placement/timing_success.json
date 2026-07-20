@@ -1,0 +1,11 @@
+{
+  "gate": "pass",
+  "campaign_body_exit_code": 0,
+  "closure_after_exit_code": 0,
+  "closure_compare_exit_code": 0,
+  "active_builder_exit_code": 0,
+  "effective_exit_code": 0,
+  "timing_report_sha256": "9d05d9e66508b4a51fc472c9a3aac55aaee7bbc66fbdb687666a71b9cd523a17",
+  "closure_before_sha256": "320ec80fa853d065c4e97f31d87a79a7ae6c105efab98d8cc3907163e45906e2",
+  "closure_after_sha256": "a1e864f11cce7bf17ebfd92064a200e833ecb0b9eca528fe0246c0fc6caa03f5"
+}
