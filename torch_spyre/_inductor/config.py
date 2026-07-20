@@ -29,6 +29,9 @@ global_stick_optimizer: bool = os.environ.get("GLOBAL_STICK_OPTIMIZER", "1") == 
 
 allow_all_ops_in_lx_planning: bool = False
 
+# Fraction of Deeptools' post-program/debug LX capacity reserved for the DXP
+# backend. The Torch frontend owns ``1 - dxp_lx_frac_avail`` from address zero.
+# Torch forwards the configured value to DXP so their reservations cannot drift.
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))

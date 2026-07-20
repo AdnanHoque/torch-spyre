@@ -14,9 +14,13 @@
 
 """Tests for layout solvers"""
 
+import os
 import unittest
 from unittest import TestCase
+from unittest.mock import patch
 
+from torch_spyre._inductor import config
+from torch_spyre._inductor.scratchpad.allocator import _lx_planning_size
 from torch_spyre._inductor.scratchpad.plan_solver import (
     MemoryPlanSolver,
     CoreDivision,
@@ -45,10 +49,55 @@ from torch_spyre._inductor.scratchpad.firstfit_bestfit_solver import (
 from torch_spyre._inductor.scratchpad.simulated_annealing import (
     SimulatedAnnealingLayoutSolver,
 )
+from torch_spyre.execution.async_compile import SpyreAsyncCompile
 
 LARGE_SIZE = 512
 SMALL_SIZE = 10
 ALIGNMENT = 128
+
+
+class TestLxPlanningContract(TestCase):
+    def test_matches_deeptools_frontend_reservation(self):
+        # Deeptools removes 64 KiB for program/debug data before applying the
+        # frontend/backend partition, then rounds the frontend reservation up to
+        # its 128-byte allocation granularity.
+        cases = ((0.0, 2_031_616), (0.2, 1_625_344), (1.0, 0))
+        for fraction, expected in cases:
+            with self.subTest(fraction=fraction):
+                with config.patch({"dxp_lx_frac_avail": fraction}):
+                    self.assertEqual(_lx_planning_size(), expected)
+
+    def test_rejects_invalid_backend_fraction(self):
+        for fraction in (-0.01, 1.01, float("nan")):
+            with self.subTest(fraction=fraction):
+                with config.patch({"dxp_lx_frac_avail": fraction}):
+                    with self.assertRaisesRegex(
+                        ValueError, "DXP_LX_FRAC_AVAIL must be >=0 and <=1"
+                    ):
+                        _lx_planning_size()
+
+    def test_forwards_configured_lx_fraction_to_dxp(self):
+        with (
+            config.patch({"dxp_lx_frac_avail": 0.375}),
+            patch.dict(
+                os.environ,
+                {"DXP_LX_FRAC_AVAIL": "0.9", "SPYRE_TEST_ENV": "preserved"},
+            ),
+            patch(
+                "torch_spyre.execution.async_compile.get_output_dir",
+                return_value="/tmp/test_bundle",
+            ),
+            patch("torch_spyre.execution.async_compile.generate_bundle"),
+            patch("torch_spyre.execution.async_compile.subprocess.run") as run,
+            patch("torch_spyre.execution.async_compile.SpyreSDSCKernelRunner"),
+        ):
+            SpyreAsyncCompile().sdsc("test_kernel", [])
+
+            run.assert_called_once()
+            backend_env = run.call_args.kwargs["env"]
+            self.assertEqual(backend_env["DXP_LX_FRAC_AVAIL"], "0.375")
+            self.assertEqual(backend_env["SPYRE_TEST_ENV"], "preserved")
+            self.assertEqual(os.environ["DXP_LX_FRAC_AVAIL"], "0.9")
 
 
 def _two_gap_buffers():
