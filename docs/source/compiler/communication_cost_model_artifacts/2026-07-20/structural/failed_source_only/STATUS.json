@@ -1,0 +1,7 @@
+{
+  "candidate": "source_only",
+  "probe_exit_code": 1,
+  "all_gates": false,
+  "normal_correct": false,
+  "report_sha256": "ad7b5c33c52170aa5fa05790b92d37c0fc5c33666a4cb484848bd6f6167b1892"
+}

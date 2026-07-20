@@ -1,0 +1,7 @@
+{
+  "candidate": "destination_closed",
+  "probe_exit_code": 0,
+  "all_gates": true,
+  "normal_correct": true,
+  "report_sha256": "3e404cd197b4262afe0f7f20cdb1cdcf01dbf1a4974176e49d256d095ae41920"
+}

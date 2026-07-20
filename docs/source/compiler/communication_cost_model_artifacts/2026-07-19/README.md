@@ -1,7 +1,8 @@
 # Communication cost-model evidence, 2026-07-19
 
 This directory is the compact reviewer-facing evidence package for the LX ring
-measurement, Flash no-SHUFFLE oracle, and joint-placement conclusions.
+measurement, Flash no-SHUFFLE oracle, and the historical first placement
+prototype.
 It is an evidence snapshot and index, not a self-contained reproduction archive:
 the original compiler closures, bundles, traces, and acquisition scripts remain
 in the historical experiment roots named inside the copied result records.
@@ -55,7 +56,21 @@ campaign.
 - Offline permutation and route-load audit.
 - Timing and structural preregistrations.
 - Full timing and structural reports plus terminal success records.
-- An independent audit of the paired timing claim.
+- An independent audit that predates a stronger device-value gate.
+
+:::{warning}
+The original `joint_all` prototype was later invalidated. It assigned a new
+mapping to a synthetic local-LX source view while the actual scaled-K producer
+retained the default mapping, with no transfer between them. A strengthened
+device test found 241,384/262,144 mismatches. Historical files named `success`
+mean only that the obsolete gates returned zero; their timing values do not
+support a performance claim. See `joint_placement/INVALIDATED.md` and the
+corrected 2026-07-20 evidence package.
+:::
+
+The `2,048 -> 672` hop-unit and `40 -> 16` maximum-directed-load values remain
+useful only as software shortest-path route proxies. They are not realized link
+traffic or elapsed-time evidence.
 
 The experimental placement patches are intentionally not included as production
 code. They were test controls; the production design requires a typed automatic
@@ -83,6 +98,10 @@ SPad-ring cycle has not been formally bound to the RNG domain. Raw GB/s is
 therefore canonical; the 1.1 GHz efficiencies are explicit conditional
 calculations.
 
+Some immutable raw result JSONs retain an older unverified 1.5 GHz context
+field. Those fields are not promoted and must not be mixed with the curated
+1.1 GHz overlay.
+
 ## Deliberate exclusions
 
 The package excludes:
@@ -96,6 +115,9 @@ The package excludes:
 - historical direct-LX results affected by an incorrect byte numerator or
   incomplete/overlapping correctness windows.
 
-`SHA256SUMS` covers the byte-for-byte copied immutable evidence. `SUMMARY.json`,
-`PROVENANCE.json`, and `CLOCK_READBACK_SANITIZED.txt` are curated indexes or
-extracts and are reviewed as source text.
+`SHA256SUMS` is the current package manifest. The copied raw reports remain
+byte-for-byte historical evidence; the manifest's `independent_audit.md` entry
+covers the amended audit with the prominent superseded verdict. The original
+audit hash is retained in `INVALIDATED.md`. `SUMMARY.json`, `PROVENANCE.json`,
+`CLOCK_READBACK_SANITIZED.txt`, this README, and the invalidation notice are
+curated source text outside the manifest.

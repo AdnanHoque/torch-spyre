@@ -61,21 +61,27 @@
     "lx_inverse_time_efficiency_vs_oracle": 0.85915,
     "maximum_further_speedup_to_oracle": 1.16394
   },
-  "joint_placement": {
-    "route_metrics": {
+  "historical_joint_placement": {
+    "status": "invalid_for_performance_claim",
+    "reason": "unclosed local-LX producer-to-source placement boundary",
+    "timing_reusable": false,
+    "route_proxy_reusable": true,
+    "route_proxy": {
+      "qualification": "Equal-payload software shortest-path proxy; not realized link traffic or runtime evidence.",
       "default": {"hop_units": 2048, "mean_remote_distance": 9.142857, "max_directed_link_units": 40, "max_combined_segment_units": 64},
       "joint": {"hop_units": 672, "mean_remote_distance": 3.0, "max_directed_link_units": 16, "max_combined_segment_units": 32}
     },
-    "whole_fused_kernel_us": {"default": 213.5266, "joint": 203.1399},
-    "paired_gain_us": 10.3867,
-    "paired_gain_t95_us": [10.061743, 10.711657],
-    "reduction_fraction": 0.048644,
-    "speedup": 1.05113,
-    "scope": "Whole closed-region placement effect, not isolated SHUFFLE time."
+    "strengthened_device_gate": {
+      "mismatches": 241384,
+      "elements": 262144,
+      "maximum_absolute_error": 0.943985,
+      "mean_absolute_error": 0.135225
+    }
   },
-  "next_flash_experiment": {
-    "design": "Paired 2x2 placement by handoff factorial",
-    "arms": ["default_shuffle", "default_oracle", "joint_shuffle", "joint_oracle"],
-    "primary_estimand": "(default_shuffle - default_oracle) - (joint_shuffle - joint_oracle)"
+  "replacement_experiment": {
+    "status": "completed_in_2026-07-20_package",
+    "design": "Paired 2x2 coherent placement by handoff factorial",
+    "arms": ["lx_default", "oracle_default", "lx_coherent", "oracle_coherent"],
+    "primary_estimand": "(lx_default - oracle_default) - (lx_coherent - oracle_coherent)"
   }
 }

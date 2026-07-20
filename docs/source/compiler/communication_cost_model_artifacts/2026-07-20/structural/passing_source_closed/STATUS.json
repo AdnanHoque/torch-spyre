@@ -1,0 +1,7 @@
+{
+  "candidate": "source_closed",
+  "probe_exit_code": 0,
+  "all_gates": true,
+  "normal_correct": true,
+  "report_sha256": "4beaf29ea938183e6e9db2b3560bf3dac1ed9a2d49ed9b4d72767db884de19e1"
+}

@@ -1,0 +1,12 @@
+{
+  "gate": "fail_as_expected_negative_control",
+  "timing_collected": false,
+  "all_gates": false,
+  "normal_correct": false,
+  "mismatch_count_at_rtol_1e2_atol_1e2": 241384,
+  "element_count": 262144,
+  "max_abs_error": 0.9439849853515625,
+  "mean_abs_error": 0.1352253556251526,
+  "raw_report_sha256": "4d8b0c469e536dfe0ab3a700a2fb25b27126065a779e7e5fcd118bd12b1396c5",
+  "disposition": "quarantined; no performance claim is valid for this placement"
+}

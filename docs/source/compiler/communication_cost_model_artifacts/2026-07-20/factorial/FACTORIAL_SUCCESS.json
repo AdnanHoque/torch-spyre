@@ -1,0 +1,7 @@
+{
+  "gate": "pass",
+  "factorial_report_sha256": "2cc39275e80c249ce16c187f419a93cfd3451788b0502d8d997c67ab312c72bd",
+  "structural_default_success_sha256": "80b6735a4cdf5f662ecaf51e8c075b3507864042f4897b023bbae92727b037a9",
+  "structural_coherent_success_sha256": "3e2421e710bfb3097904d4c2daf5837b8dd7d216a6da09cbeb2da310e1d0fb10",
+  "vcoded_report_sha256": "ca6b64b95b19c0fa9cb0fd1cdfec0a00bf17c11ba0adea2bf65d99b2ba98cc3d"
+}

@@ -1,0 +1,14 @@
+{
+  "gate": "pass",
+  "placement": "joint_coherent",
+  "reports": [
+    {
+      "compile_order": "normal_prefix_oracle",
+      "sha256": "0edd7479a483807dcd8a789a36355c47089d69d8fdfcd2165aeb40109412025c"
+    },
+    {
+      "compile_order": "oracle_prefix_normal",
+      "sha256": "9f091d600257c1b846bfb723c847985ea4f90296f96a5492f39d829519ec3f59"
+    }
+  ]
+}

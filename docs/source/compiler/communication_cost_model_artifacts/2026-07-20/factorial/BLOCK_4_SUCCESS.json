@@ -1,0 +1,32 @@
+{
+  "gate": "pass",
+  "block": 4,
+  "order": [
+    "oracle_coherent",
+    "lx_default",
+    "oracle_default",
+    "lx_coherent"
+  ],
+  "runs": [
+    {
+      "label": "oracle_coherent",
+      "summary_sha256": "2c021ef60a47758fd79d73b113096e03b7efe0002eff6b831d637eaedc7c47a7",
+      "trace_qc_sha256": "221b18c83281a43c39d6f4a66c5da81db9eb6773cda433d3e2c02d12f6f9088e"
+    },
+    {
+      "label": "lx_default",
+      "summary_sha256": "cb2f032916b744638453393ff0c82f7873709d122f0bb80e3743fe0e39bb9a4b",
+      "trace_qc_sha256": "33bc2a53187f476afa27210c1471dfa8bf28d16ed1b304ed9784e7e301dc70bc"
+    },
+    {
+      "label": "oracle_default",
+      "summary_sha256": "ea9f947ca5e0c4601404662ecd8fbea8265545fdd2fb9322a552511f1f36bccc",
+      "trace_qc_sha256": "49996fce1d2ef4937152facd56437d2366c703522daa19a8cab6aeaae50cd2f9"
+    },
+    {
+      "label": "lx_coherent",
+      "summary_sha256": "f0e4a08c090ab5340500e7ca041a5331c36cc356af3fd31b912f8433527213a7",
+      "trace_qc_sha256": "c2a73849d2a1f68cdd97b477fac01076c9ba40262234937425395361cf4a5f81"
+    }
+  ]
+}

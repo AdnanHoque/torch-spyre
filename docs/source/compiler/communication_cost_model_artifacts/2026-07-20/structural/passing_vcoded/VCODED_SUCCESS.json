@@ -1,0 +1,6 @@
+{
+  "probe_exit_code": 0,
+  "all_gates": true,
+  "normal_correct": true,
+  "report_sha256": "ca6b64b95b19c0fa9cb0fd1cdfec0a00bf17c11ba0adea2bf65d99b2ba98cc3d"
+}

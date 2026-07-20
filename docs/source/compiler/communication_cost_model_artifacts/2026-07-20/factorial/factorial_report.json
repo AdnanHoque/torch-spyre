@@ -1,0 +1,3005 @@
+{
+  "schema_version": 1,
+  "gate": "pass",
+  "estimand": "(lx_default - oracle_default) - (lx_coherent - oracle_coherent), using process medians within each block",
+  "structural": {
+    "default": [
+      {
+        "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/factorial_20260720_v1/structural_default/normal_prefix_oracle/report.json",
+        "sha256": "c9243dff21761439106fae10e0aea3c5033e1d5fbc5936f88a723c51b1182de2",
+        "checks": {
+          "all_oracle_gates": true,
+          "placement_contract": true,
+          "normal_inventory": true,
+          "route_contract": true
+        },
+        "pass": true,
+        "gate_count": 22,
+        "route": {
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "max_directed_link_units": 40
+        }
+      },
+      {
+        "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/factorial_20260720_v1/structural_default/oracle_prefix_normal/report.json",
+        "sha256": "a64f0c3f8addc389f3cb0e79d015d673e870ccc34dc71f593691df2790ceef93",
+        "checks": {
+          "all_oracle_gates": true,
+          "placement_contract": true,
+          "normal_inventory": true,
+          "route_contract": true
+        },
+        "pass": true,
+        "gate_count": 22,
+        "route": {
+          "remote_relations": 224,
+          "total_hop_units": 2048,
+          "max_directed_link_units": 40
+        }
+      }
+    ],
+    "joint_coherent": [
+      {
+        "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_structural_20260720_v1/normal_prefix_oracle/report.json",
+        "sha256": "0edd7479a483807dcd8a789a36355c47089d69d8fdfcd2165aeb40109412025c",
+        "checks": {
+          "all_oracle_gates": true,
+          "placement_contract": true,
+          "normal_inventory": true,
+          "route_contract": true
+        },
+        "pass": true,
+        "gate_count": 22,
+        "route": {
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "max_directed_link_units": 16
+        }
+      },
+      {
+        "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_structural_20260720_v1/oracle_prefix_normal/report.json",
+        "sha256": "9f091d600257c1b846bfb723c847985ea4f90296f96a5492f39d829519ec3f59",
+        "checks": {
+          "all_oracle_gates": true,
+          "placement_contract": true,
+          "normal_inventory": true,
+          "route_contract": true
+        },
+        "pass": true,
+        "gate_count": 22,
+        "route": {
+          "remote_relations": 224,
+          "total_hop_units": 672,
+          "max_directed_link_units": 16
+        }
+      }
+    ]
+  },
+  "vcoded_gate": {
+    "pass": true,
+    "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_vcoded_20260720_v1/report.json",
+    "sha256": "ca6b64b95b19c0fa9cb0fd1cdfec0a00bf17c11ba0adea2bf65d99b2ba98cc3d"
+  },
+  "inventory_gate": true,
+  "run_gate": true,
+  "handoff_identity_checks": [
+    {
+      "block": 1,
+      "placement": "default",
+      "equal": true
+    },
+    {
+      "block": 1,
+      "placement": "coherent",
+      "equal": true
+    },
+    {
+      "block": 2,
+      "placement": "default",
+      "equal": true
+    },
+    {
+      "block": 2,
+      "placement": "coherent",
+      "equal": true
+    },
+    {
+      "block": 3,
+      "placement": "default",
+      "equal": true
+    },
+    {
+      "block": 3,
+      "placement": "coherent",
+      "equal": true
+    },
+    {
+      "block": 4,
+      "placement": "default",
+      "equal": true
+    },
+    {
+      "block": 4,
+      "placement": "coherent",
+      "equal": true
+    },
+    {
+      "block": 5,
+      "placement": "default",
+      "equal": true
+    },
+    {
+      "block": 5,
+      "placement": "coherent",
+      "equal": true
+    }
+  ],
+  "determinism_checks": [
+    {
+      "label": "lx_default",
+      "equal": true
+    },
+    {
+      "label": "oracle_default",
+      "equal": true
+    },
+    {
+      "label": "lx_coherent",
+      "equal": true
+    },
+    {
+      "label": "oracle_coherent",
+      "equal": true
+    }
+  ],
+  "runs": [
+    {
+      "block": 1,
+      "label": "lx_default",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_1/1_lx_default",
+      "summary_sha256": "8d8f11405aca54acca1361664e3862de7213ee99831b05480b59325c6e020fe5",
+      "trace_qc_sha256": "5d6c12bf2e03bab7a1d420aac93bbfcd78a31e97bb0b6215e2fcd86b85ba821b",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 210.9805,
+      "mean_us": 210.99423333333334,
+      "root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "shuffle",
+          "0ef3318c86b7532452c772436c9993c8453fe98d9f1ed8145079d158d242f2ad"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ]
+    },
+    {
+      "block": 1,
+      "label": "lx_coherent",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_1/2_lx_coherent",
+      "summary_sha256": "b85f4665d4d305cb660b8080ba654aa1bdd663c0054db4bee711887533ff8dae",
+      "trace_qc_sha256": "f15e3d98af745a79a9efb6960d04e60e29d29207c582211b0f9660741650b701",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 198.298,
+      "mean_us": 198.516,
+      "root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "shuffle",
+          "736e13f6b18c91d1cd66406f41ddad25cd13ae9c6c9fb0df1684f7e9abae491e"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ]
+    },
+    {
+      "block": 1,
+      "label": "oracle_coherent",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_1/3_oracle_coherent",
+      "summary_sha256": "8c0a84bd8e1c4fc9e9d4252a571a691ea2f4c5dd85a15434cf46e4fc1ee600c6",
+      "trace_qc_sha256": "87749cfe1211cf078c7680dbb00a19e230585042ac0abaa198bb6d97df6a62fd",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 180.9325,
+      "mean_us": 181.06523333333334,
+      "root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ]
+    },
+    {
+      "block": 1,
+      "label": "oracle_default",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_1/4_oracle_default",
+      "summary_sha256": "0e0ac3cbe9c4d82fd7ab9cc946d42b8ec885d5449029be3a9e844537b1c2005d",
+      "trace_qc_sha256": "93f0f9f324743821480197c80ecd9102177cca954f0b7565d869c9602ca4e784",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 181.4365,
+      "mean_us": 181.3075333333333,
+      "root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ]
+    },
+    {
+      "block": 2,
+      "label": "lx_coherent",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_2/1_lx_coherent",
+      "summary_sha256": "96d99e89868fa1561c382c3d38620f77e630834c9ff9036ef1c292809d5035f6",
+      "trace_qc_sha256": "5250a7934f621d8d70cb2457afc29d11eb512a43895d969f905d09b18c08a1d8",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 198.45100000000002,
+      "mean_us": 198.47033333333331,
+      "root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "shuffle",
+          "736e13f6b18c91d1cd66406f41ddad25cd13ae9c6c9fb0df1684f7e9abae491e"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ]
+    },
+    {
+      "block": 2,
+      "label": "oracle_default",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_2/2_oracle_default",
+      "summary_sha256": "97dd5ff61ed34fc77e4e884257e3c624d2362bc7d24fefda98d0e60f2edb361b",
+      "trace_qc_sha256": "96ce8b4870a608a856b94feb0d17e4e7505fce208af1017f32b1de559349d25e",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 179.704,
+      "mean_us": 179.49286666666666,
+      "root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ]
+    },
+    {
+      "block": 2,
+      "label": "lx_default",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_2/3_lx_default",
+      "summary_sha256": "e037315ba71d6dd930feae4f213ad56cd4bc269702663e40017d078d550e21ce",
+      "trace_qc_sha256": "342cccb9a615a48afaef667a16e9503856f6491944278e551cfab11f9cbbd077",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 210.683,
+      "mean_us": 210.52213333333333,
+      "root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "shuffle",
+          "0ef3318c86b7532452c772436c9993c8453fe98d9f1ed8145079d158d242f2ad"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ]
+    },
+    {
+      "block": 2,
+      "label": "oracle_coherent",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_2/4_oracle_coherent",
+      "summary_sha256": "2380bc0110c7c25102417b7763bd7e69b3911213b06050680176192d1aaf55ed",
+      "trace_qc_sha256": "d37e5ae3228438b93b867d57cb17ddbb1ed42eaf18c43e37eb328aabfd181d0b",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 181.00549999999998,
+      "mean_us": 180.93699999999998,
+      "root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ]
+    },
+    {
+      "block": 3,
+      "label": "oracle_default",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_3/1_oracle_default",
+      "summary_sha256": "d898013d6d9f0483a74850664d1b0f84817b2132cb3671a0d7b3ddf8a00ed949",
+      "trace_qc_sha256": "e5ab6c19567461818b2abf9ca5ca47a9f0d658aa2861c2b429090db3ff70ccf8",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 180.7215,
+      "mean_us": 180.65996666666666,
+      "root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ]
+    },
+    {
+      "block": 3,
+      "label": "oracle_coherent",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_3/2_oracle_coherent",
+      "summary_sha256": "0a778c5df440aba0c44a1af934c0baa06160b772735efd44b4db9bb1250579e3",
+      "trace_qc_sha256": "d44a241960ccb2b092d0e255e8407fdf73762526490193049d68f48c9de52fea",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 182.8535,
+      "mean_us": 182.55713333333333,
+      "root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ]
+    },
+    {
+      "block": 3,
+      "label": "lx_coherent",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_3/3_lx_coherent",
+      "summary_sha256": "aac9bcac06e5bd343574a04ea18bbf02e8a4f149e1c44abf4c43fea2c894de20",
+      "trace_qc_sha256": "0d77e1c4c6a4bae040c0c66ea2d9ef6a877ec10677e9e9f83ee9b3983804f9cc",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 199.987,
+      "mean_us": 199.68043333333335,
+      "root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "shuffle",
+          "736e13f6b18c91d1cd66406f41ddad25cd13ae9c6c9fb0df1684f7e9abae491e"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ]
+    },
+    {
+      "block": 3,
+      "label": "lx_default",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_3/4_lx_default",
+      "summary_sha256": "51b8e00c24a1fefd79132389430954729a4377b7362226ad791bf950fc9843a3",
+      "trace_qc_sha256": "fa4f5010f3e74d81f4ff97319bf7fef1b976bbaa9e720499ad76e1e213ee0376",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 211.32,
+      "mean_us": 211.12546666666668,
+      "root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "shuffle",
+          "0ef3318c86b7532452c772436c9993c8453fe98d9f1ed8145079d158d242f2ad"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ]
+    },
+    {
+      "block": 4,
+      "label": "oracle_coherent",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_4/1_oracle_coherent",
+      "summary_sha256": "2c021ef60a47758fd79d73b113096e03b7efe0002eff6b831d637eaedc7c47a7",
+      "trace_qc_sha256": "221b18c83281a43c39d6f4a66c5da81db9eb6773cda433d3e2c02d12f6f9088e",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 182.4955,
+      "mean_us": 182.381,
+      "root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ]
+    },
+    {
+      "block": 4,
+      "label": "lx_default",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_4/2_lx_default",
+      "summary_sha256": "cb2f032916b744638453393ff0c82f7873709d122f0bb80e3743fe0e39bb9a4b",
+      "trace_qc_sha256": "33bc2a53187f476afa27210c1471dfa8bf28d16ed1b304ed9784e7e301dc70bc",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 209.86700000000002,
+      "mean_us": 210.03886666666668,
+      "root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "shuffle",
+          "0ef3318c86b7532452c772436c9993c8453fe98d9f1ed8145079d158d242f2ad"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ]
+    },
+    {
+      "block": 4,
+      "label": "oracle_default",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_4/3_oracle_default",
+      "summary_sha256": "ea9f947ca5e0c4601404662ecd8fbea8265545fdd2fb9322a552511f1f36bccc",
+      "trace_qc_sha256": "49996fce1d2ef4937152facd56437d2366c703522daa19a8cab6aeaae50cd2f9",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 181.2395,
+      "mean_us": 180.93893333333332,
+      "root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ]
+    },
+    {
+      "block": 4,
+      "label": "lx_coherent",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_4/4_lx_coherent",
+      "summary_sha256": "f0e4a08c090ab5340500e7ca041a5331c36cc356af3fd31b912f8433527213a7",
+      "trace_qc_sha256": "c2a73849d2a1f68cdd97b477fac01076c9ba40262234937425395361cf4a5f81",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 198.971,
+      "mean_us": 198.8425,
+      "root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "shuffle",
+          "736e13f6b18c91d1cd66406f41ddad25cd13ae9c6c9fb0df1684f7e9abae491e"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ]
+    },
+    {
+      "block": 5,
+      "label": "lx_default",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_5/1_lx_default",
+      "summary_sha256": "5688226f9b8c6ddc63f575721e75cb137894ec2733962a8e035f3d0c9b2e9bdb",
+      "trace_qc_sha256": "f7d0729d4fc8ed6a0945cdae46373be9ef19524b83dd2b42f484abbe7f453d37",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 210.90699999999998,
+      "mean_us": 210.8251,
+      "root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "shuffle",
+          "0ef3318c86b7532452c772436c9993c8453fe98d9f1ed8145079d158d242f2ad"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ]
+    },
+    {
+      "block": 5,
+      "label": "lx_coherent",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_5/2_lx_coherent",
+      "summary_sha256": "ffaba266b3a0ae3abef8f88b756eadc1d0870e072d3ed2c68a46653c100a0ae5",
+      "trace_qc_sha256": "de9a34d22f749fbc26a2f642a6ecac052af23a867b1a6a501dc92ee15748fc68",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 199.5675,
+      "mean_us": 199.52956666666665,
+      "root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "shuffle",
+          "736e13f6b18c91d1cd66406f41ddad25cd13ae9c6c9fb0df1684f7e9abae491e"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ]
+    },
+    {
+      "block": 5,
+      "label": "oracle_default",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_5/3_oracle_default",
+      "summary_sha256": "daacc70344dd2c3c45ba611b001c770b3bda081dc454d7b70414f076af443790",
+      "trace_qc_sha256": "aef34c830f09626b55acf7f221386e4373c725398e43b615ccd72b751e9580ac",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 181.01,
+      "mean_us": 181.0296,
+      "root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "d22e4707e947c738227a3ef6f7b50a35e97831c9de84b7fd7b733870204f71e0"
+        ],
+        [
+          "mul",
+          "3320b4b60779eb7282904490d3e1d782f009b98d7fc338707d5dc7a5fb9cd2d7"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "e765d0dc3593563ad0e865a8ec0d61678488c93b8cb24cfb6972470fb109ab38"
+        ],
+        [
+          "batchmatmul",
+          "d4802afdc46fa1a3f4f07e9007da340dd81697309d2eaf318de28603d48425ea"
+        ],
+        [
+          "max",
+          "653bbbdd37b55d11ffbc4e3adf7a641f2265b3745de7cdc9cef8b37a65edbd96"
+        ],
+        [
+          "sub",
+          "12a9fe59853ad0f669460533783e8e3958c1a99ec3d374ec49d9aa912add27de"
+        ],
+        [
+          "exp",
+          "43323d673fc0ec7de42c750a26ab9bcc17d922907f31043b7125ae7ff0862d99"
+        ],
+        [
+          "sum",
+          "7d00c2ba20a433f90ff8a7783402fe0d84ac2a84030b23f10f88a60fb670c532"
+        ],
+        [
+          "reciprocal",
+          "a4bc0449044b826d433e28cc965389ead112021d95976baffa0950146806d6eb"
+        ],
+        [
+          "mul",
+          "519db922d4bc47ee2e656ed9d6ad84d19737d8604c91b233fb4af32b3835446d"
+        ],
+        [
+          "batchmatmul",
+          "f1c0c14a00457c23a37f6d0995049ab14a126ef5692a9d6b64a3208552ddcda3"
+        ]
+      ]
+    },
+    {
+      "block": 5,
+      "label": "oracle_coherent",
+      "path": "/home/adnan/codex-isolated/joint_oracle_factorial_20260720_v1/results/coherent_factorial_20260720_v2/block_5/4_oracle_coherent",
+      "summary_sha256": "c5cf0be56de40b3971c65e28343807f50c0cece4f86f10f8c55b04fa6137ac65",
+      "trace_qc_sha256": "eeb5694b2ddae2474f57f2902d6badbb0c07c85929f8198977ef521d19297550",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      },
+      "pass": true,
+      "median_us": 182.14550000000003,
+      "mean_us": 182.0905,
+      "root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ],
+      "nonshuffle_root_signature": [
+        [
+          "mul",
+          "926a016c544ac2a8e25606cd4414b9089254597d1b843d5dd6393500cd044c1a"
+        ],
+        [
+          "mul",
+          "cd15385a561a327f3d3a2a94d660e30534a0441db73215be3e918ccf64086a0f"
+        ],
+        [
+          "ReStickifyOpHBM",
+          "b4e74b55df2cbe77dd7ef738ae9dc905cd0c931da7e4dbfa4677751421701d40"
+        ],
+        [
+          "batchmatmul",
+          "21f3ca82229a4883ea7635ecec2e2cc22513328a73e20a1f2197b972fbed728a"
+        ],
+        [
+          "max",
+          "5f3f03975c749d4653aeb8748464af96d9b57cc36b565ba603ef54ca7bdb5a8c"
+        ],
+        [
+          "sub",
+          "ff1e89ba548706ab98b59942fe04359761410e603377ed18184015c54be60a1b"
+        ],
+        [
+          "exp",
+          "2d306680c826b1d3418816eb818ccd9576732bb38e259bf99bd4f8a96ec51109"
+        ],
+        [
+          "sum",
+          "fd30a67e806d8371507b59c9ce4aab4fcefd564161bdcd64fd456906b09c14a7"
+        ],
+        [
+          "reciprocal",
+          "85f105cbdbfb4a6336afa4ad3b4f938c6350bdb6dc5e4fbc8e19873b7e0d294f"
+        ],
+        [
+          "mul",
+          "d4421eb4a32b66248a854a8dde5ad25e3aac8a8f14b357f3eef29b1625fdc420"
+        ],
+        [
+          "batchmatmul",
+          "4962254b29468aa7e80bc4cb52db6ff29ee278e994f79184b97d9007c72bfffc"
+        ]
+      ]
+    }
+  ],
+  "cell_process_median_stats_us": {
+    "lx_default": {
+      "count": 5,
+      "values": [
+        210.9805,
+        210.683,
+        211.32,
+        209.86700000000002,
+        210.90699999999998
+      ],
+      "mean": 210.7515,
+      "median": 210.90699999999998,
+      "stdev": 0.5447123093890842,
+      "min": 209.86700000000002,
+      "max": 211.32,
+      "student_t_95_ci": [
+        210.07515033605313,
+        211.42784966394686
+      ]
+    },
+    "oracle_default": {
+      "count": 5,
+      "values": [
+        181.4365,
+        179.704,
+        180.7215,
+        181.2395,
+        181.01
+      ],
+      "mean": 180.82229999999998,
+      "median": 181.01,
+      "stdev": 0.6795741865315311,
+      "min": 179.704,
+      "max": 181.4365,
+      "student_t_95_ci": [
+        179.97849719847517,
+        181.6661028015248
+      ]
+    },
+    "lx_coherent": {
+      "count": 5,
+      "values": [
+        198.298,
+        198.45100000000002,
+        199.987,
+        198.971,
+        199.5675
+      ],
+      "mean": 199.0549,
+      "median": 198.971,
+      "stdev": 0.7204514556859393,
+      "min": 198.298,
+      "max": 199.987,
+      "student_t_95_ci": [
+        198.16034136502128,
+        199.94945863497873
+      ]
+    },
+    "oracle_coherent": {
+      "count": 5,
+      "values": [
+        180.9325,
+        181.00549999999998,
+        182.8535,
+        182.4955,
+        182.14550000000003
+      ],
+      "mean": 181.8865,
+      "median": 182.14550000000003,
+      "stdev": 0.8745467397457981,
+      "min": 180.9325,
+      "max": 182.8535,
+      "student_t_95_ci": [
+        180.80060679851118,
+        182.97239320148884
+      ]
+    }
+  },
+  "per_block": [
+    {
+      "block": 1,
+      "median_us": {
+        "lx_default": 210.9805,
+        "oracle_default": 181.4365,
+        "lx_coherent": 198.298,
+        "oracle_coherent": 180.9325
+      },
+      "derived": {
+        "placement_gain_lx_us": 12.682500000000005,
+        "placement_gain_oracle_us": 0.5039999999999907,
+        "default_residual_us": 29.54400000000001,
+        "coherent_residual_us": 17.365499999999997,
+        "residual_interaction_us": 12.178500000000014,
+        "fraction_of_default_residual_closed": 0.41221567831031714,
+        "lx_coherent_speedup": 1.0639567721308334,
+        "oracle_coherent_speedup": 1.0027855692039849,
+        "default_oracle_rate_efficiency": 0.8599681013174203,
+        "coherent_oracle_rate_efficiency": 0.9124272559481185,
+        "coherent_max_remaining_speedup": 1.0959777817694445
+      }
+    },
+    {
+      "block": 2,
+      "median_us": {
+        "lx_default": 210.683,
+        "oracle_default": 179.704,
+        "lx_coherent": 198.45100000000002,
+        "oracle_coherent": 181.00549999999998
+      },
+      "derived": {
+        "placement_gain_lx_us": 12.231999999999971,
+        "placement_gain_oracle_us": -1.301499999999976,
+        "default_residual_us": 30.978999999999985,
+        "coherent_residual_us": 17.445500000000038,
+        "residual_interaction_us": 13.533499999999947,
+        "fraction_of_default_residual_closed": 0.43686045385583633,
+        "lx_coherent_speedup": 1.0616373815198712,
+        "oracle_coherent_speedup": 0.9928096107576843,
+        "default_oracle_rate_efficiency": 0.8529591851264697,
+        "coherent_oracle_rate_efficiency": 0.912091649827917,
+        "coherent_max_remaining_speedup": 1.096381049194638
+      }
+    },
+    {
+      "block": 3,
+      "median_us": {
+        "lx_default": 211.32,
+        "oracle_default": 180.7215,
+        "lx_coherent": 199.987,
+        "oracle_coherent": 182.8535
+      },
+      "derived": {
+        "placement_gain_lx_us": 11.332999999999998,
+        "placement_gain_oracle_us": -2.132000000000005,
+        "default_residual_us": 30.5985,
+        "coherent_residual_us": 17.133499999999998,
+        "residual_interaction_us": 13.465000000000003,
+        "fraction_of_default_residual_closed": 0.44005425102537715,
+        "lx_coherent_speedup": 1.0566686834644252,
+        "oracle_coherent_speedup": 0.9883403927187612,
+        "default_oracle_rate_efficiency": 0.8552030096536059,
+        "coherent_oracle_rate_efficiency": 0.9143269312505313,
+        "coherent_max_remaining_speedup": 1.0937006948185295
+      }
+    },
+    {
+      "block": 4,
+      "median_us": {
+        "lx_default": 209.86700000000002,
+        "oracle_default": 181.2395,
+        "lx_coherent": 198.971,
+        "oracle_coherent": 182.4955
+      },
+      "derived": {
+        "placement_gain_lx_us": 10.896000000000015,
+        "placement_gain_oracle_us": -1.2560000000000002,
+        "default_residual_us": 28.627500000000026,
+        "coherent_residual_us": 16.47550000000001,
+        "residual_interaction_us": 12.152000000000015,
+        "fraction_of_default_residual_closed": 0.4244869443716707,
+        "lx_coherent_speedup": 1.0547617491996322,
+        "oracle_coherent_speedup": 0.9931176385171141,
+        "default_oracle_rate_efficiency": 0.8635921798091171,
+        "coherent_oracle_rate_efficiency": 0.9171964758683425,
+        "coherent_max_remaining_speedup": 1.0902789383847822
+      }
+    },
+    {
+      "block": 5,
+      "median_us": {
+        "lx_default": 210.90699999999998,
+        "oracle_default": 181.01,
+        "lx_coherent": 199.5675,
+        "oracle_coherent": 182.14550000000003
+      },
+      "derived": {
+        "placement_gain_lx_us": 11.339499999999987,
+        "placement_gain_oracle_us": -1.135500000000036,
+        "default_residual_us": 29.89699999999999,
+        "coherent_residual_us": 17.42199999999997,
+        "residual_interaction_us": 12.475000000000023,
+        "fraction_of_default_residual_closed": 0.41726594641602927,
+        "lx_coherent_speedup": 1.0568203740589024,
+        "oracle_coherent_speedup": 0.9937659728074532,
+        "default_oracle_rate_efficiency": 0.858245577434604,
+        "coherent_oracle_rate_efficiency": 0.9127012163804228,
+        "coherent_max_remaining_speedup": 1.0956488082329785
+      }
+    }
+  ],
+  "contrasts": {
+    "placement_gain_lx_us": {
+      "count": 5,
+      "values": [
+        12.682500000000005,
+        12.231999999999971,
+        11.332999999999998,
+        10.896000000000015,
+        11.339499999999987
+      ],
+      "mean": 11.696599999999995,
+      "median": 11.339499999999987,
+      "stdev": 0.7347342546798747,
+      "min": 10.896000000000015,
+      "max": 12.682500000000005,
+      "student_t_95_ci": [
+        10.784306927716917,
+        12.608893072283072
+      ]
+    },
+    "placement_gain_oracle_us": {
+      "count": 5,
+      "values": [
+        0.5039999999999907,
+        -1.301499999999976,
+        -2.132000000000005,
+        -1.2560000000000002,
+        -1.135500000000036
+      ],
+      "mean": -1.0642000000000054,
+      "median": -1.2560000000000002,
+      "stdev": 0.9614611666624887,
+      "min": -2.132000000000005,
+      "max": 0.5039999999999907,
+      "student_t_95_ci": [
+        -2.258011716315809,
+        0.12961171631579838
+      ]
+    },
+    "default_residual_us": {
+      "count": 5,
+      "values": [
+        29.54400000000001,
+        30.978999999999985,
+        30.5985,
+        28.627500000000026,
+        29.89699999999999
+      ],
+      "mean": 29.9292,
+      "median": 29.89699999999999,
+      "stdev": 0.9211244894149615,
+      "min": 28.627500000000026,
+      "max": 30.978999999999985,
+      "student_t_95_ci": [
+        28.785472883629616,
+        31.072927116370387
+      ]
+    },
+    "coherent_residual_us": {
+      "count": 5,
+      "values": [
+        17.365499999999997,
+        17.445500000000038,
+        17.133499999999998,
+        16.47550000000001,
+        17.42199999999997
+      ],
+      "mean": 17.168400000000002,
+      "median": 17.365499999999997,
+      "stdev": 0.40659383910728075,
+      "min": 16.47550000000001,
+      "max": 17.445500000000038,
+      "student_t_95_ci": [
+        16.663547068089038,
+        17.673252931910966
+      ]
+    },
+    "residual_interaction_us": {
+      "count": 5,
+      "values": [
+        12.178500000000014,
+        13.533499999999947,
+        13.465000000000003,
+        12.152000000000015,
+        12.475000000000023
+      ],
+      "mean": 12.7608,
+      "median": 12.475000000000023,
+      "stdev": 0.6863591079019559,
+      "min": 12.152000000000015,
+      "max": 13.533499999999947,
+      "student_t_95_ci": [
+        11.908572605878886,
+        13.613027394121113
+      ]
+    },
+    "fraction_of_default_residual_closed": {
+      "count": 5,
+      "values": [
+        0.41221567831031714,
+        0.43686045385583633,
+        0.44005425102537715,
+        0.4244869443716707,
+        0.41726594641602927
+      ],
+      "mean": 0.42617665479584615,
+      "median": 0.4244869443716707,
+      "stdev": 0.012081969510817971,
+      "min": 0.41221567831031714,
+      "max": 0.44005425102537715,
+      "student_t_95_ci": [
+        0.4111749082268679,
+        0.4411784013648244
+      ]
+    },
+    "lx_coherent_speedup": {
+      "count": 5,
+      "values": [
+        1.0639567721308334,
+        1.0616373815198712,
+        1.0566686834644252,
+        1.0547617491996322,
+        1.0568203740589024
+      ],
+      "mean": 1.0587689920747327,
+      "median": 1.0568203740589024,
+      "stdev": 0.003853800844933875,
+      "min": 1.0547617491996322,
+      "max": 1.0639567721308334,
+      "student_t_95_ci": [
+        1.053983866309331,
+        1.0635541178401344
+      ]
+    },
+    "oracle_coherent_speedup": {
+      "count": 5,
+      "values": [
+        1.0027855692039849,
+        0.9928096107576843,
+        0.9883403927187612,
+        0.9931176385171141,
+        0.9937659728074532
+      ],
+      "mean": 0.9941638368009995,
+      "median": 0.9931176385171141,
+      "stdev": 0.005275735147602729,
+      "min": 0.9883403927187612,
+      "max": 1.0027855692039849,
+      "student_t_95_ci": [
+        0.987613146404163,
+        1.0007145271978362
+      ]
+    },
+    "default_oracle_rate_efficiency": {
+      "count": 5,
+      "values": [
+        0.8599681013174203,
+        0.8529591851264697,
+        0.8552030096536059,
+        0.8635921798091171,
+        0.858245577434604
+      ],
+      "mean": 0.8579936106682433,
+      "median": 0.858245577434604,
+      "stdev": 0.004136392497054025,
+      "min": 0.8529591851264697,
+      "max": 0.8635921798091171,
+      "student_t_95_ci": [
+        0.8528576010222112,
+        0.8631296203142754
+      ]
+    },
+    "coherent_oracle_rate_efficiency": {
+      "count": 5,
+      "values": [
+        0.9124272559481185,
+        0.912091649827917,
+        0.9143269312505313,
+        0.9171964758683425,
+        0.9127012163804228
+      ],
+      "mean": 0.9137487058550665,
+      "median": 0.9127012163804228,
+      "stdev": 0.0021101398890583383,
+      "min": 0.912091649827917,
+      "max": 0.9171964758683425,
+      "student_t_95_ci": [
+        0.9111286211236491,
+        0.9163687905864839
+      ]
+    },
+    "coherent_max_remaining_speedup": {
+      "count": 5,
+      "values": [
+        1.0959777817694445,
+        1.096381049194638,
+        1.0937006948185295,
+        1.0902789383847822,
+        1.0956488082329785
+      ],
+      "mean": 1.0943974544800745,
+      "median": 1.0956488082329785,
+      "stdev": 0.0025221824577742564,
+      "min": 1.0902789383847822,
+      "max": 1.096381049194638,
+      "student_t_95_ci": [
+        1.0912657513253552,
+        1.0975291576347939
+      ]
+    }
+  },
+  "interaction_inference": "coherent placement closes a positive part of the shuffle residual",
+  "limitations": [
+    "The oracle is a graph counterfactual with an untimed preseed prefix, not infinite hardware bandwidth.",
+    "Five fresh-process blocks support paired process-level inference; device counters are unavailable.",
+    "The result is exact-shape evidence for B1 H4 Lq512 Lk4096 D128 and group size 8."
+  ]
+}

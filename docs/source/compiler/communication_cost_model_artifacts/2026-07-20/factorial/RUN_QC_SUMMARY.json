@@ -1,0 +1,731 @@
+{
+  "schema_version": "1.0",
+  "source_factorial_report_sha256": "2cc39275e80c249ce16c187f419a93cfd3451788b0502d8d997c67ab312c72bd",
+  "gate": "pass",
+  "run_gate": true,
+  "inventory_gate": true,
+  "determinism_checks": [
+    {
+      "label": "lx_default",
+      "equal": true
+    },
+    {
+      "label": "oracle_default",
+      "equal": true
+    },
+    {
+      "label": "lx_coherent",
+      "equal": true
+    },
+    {
+      "label": "oracle_coherent",
+      "equal": true
+    }
+  ],
+  "handoff_identity_checks": [
+    {
+      "block": 1,
+      "placement": "default",
+      "equal": true
+    },
+    {
+      "block": 1,
+      "placement": "coherent",
+      "equal": true
+    },
+    {
+      "block": 2,
+      "placement": "default",
+      "equal": true
+    },
+    {
+      "block": 2,
+      "placement": "coherent",
+      "equal": true
+    },
+    {
+      "block": 3,
+      "placement": "default",
+      "equal": true
+    },
+    {
+      "block": 3,
+      "placement": "coherent",
+      "equal": true
+    },
+    {
+      "block": 4,
+      "placement": "default",
+      "equal": true
+    },
+    {
+      "block": 4,
+      "placement": "coherent",
+      "equal": true
+    },
+    {
+      "block": 5,
+      "placement": "default",
+      "equal": true
+    },
+    {
+      "block": 5,
+      "placement": "coherent",
+      "equal": true
+    }
+  ],
+  "runs": [
+    {
+      "block": 1,
+      "label": "lx_default",
+      "pass": true,
+      "median_us": 210.9805,
+      "mean_us": 210.99423333333334,
+      "summary_sha256": "8d8f11405aca54acca1361664e3862de7213ee99831b05480b59325c6e020fe5",
+      "trace_qc_sha256": "5d6c12bf2e03bab7a1d420aac93bbfcd78a31e97bb0b6215e2fcd86b85ba821b",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 1,
+      "label": "lx_coherent",
+      "pass": true,
+      "median_us": 198.298,
+      "mean_us": 198.516,
+      "summary_sha256": "b85f4665d4d305cb660b8080ba654aa1bdd663c0054db4bee711887533ff8dae",
+      "trace_qc_sha256": "f15e3d98af745a79a9efb6960d04e60e29d29207c582211b0f9660741650b701",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 1,
+      "label": "oracle_coherent",
+      "pass": true,
+      "median_us": 180.9325,
+      "mean_us": 181.06523333333334,
+      "summary_sha256": "8c0a84bd8e1c4fc9e9d4252a571a691ea2f4c5dd85a15434cf46e4fc1ee600c6",
+      "trace_qc_sha256": "87749cfe1211cf078c7680dbb00a19e230585042ac0abaa198bb6d97df6a62fd",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 1,
+      "label": "oracle_default",
+      "pass": true,
+      "median_us": 181.4365,
+      "mean_us": 181.3075333333333,
+      "summary_sha256": "0e0ac3cbe9c4d82fd7ab9cc946d42b8ec885d5449029be3a9e844537b1c2005d",
+      "trace_qc_sha256": "93f0f9f324743821480197c80ecd9102177cca954f0b7565d869c9602ca4e784",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 2,
+      "label": "lx_coherent",
+      "pass": true,
+      "median_us": 198.45100000000002,
+      "mean_us": 198.47033333333331,
+      "summary_sha256": "96d99e89868fa1561c382c3d38620f77e630834c9ff9036ef1c292809d5035f6",
+      "trace_qc_sha256": "5250a7934f621d8d70cb2457afc29d11eb512a43895d969f905d09b18c08a1d8",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 2,
+      "label": "oracle_default",
+      "pass": true,
+      "median_us": 179.704,
+      "mean_us": 179.49286666666666,
+      "summary_sha256": "97dd5ff61ed34fc77e4e884257e3c624d2362bc7d24fefda98d0e60f2edb361b",
+      "trace_qc_sha256": "96ce8b4870a608a856b94feb0d17e4e7505fce208af1017f32b1de559349d25e",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 2,
+      "label": "lx_default",
+      "pass": true,
+      "median_us": 210.683,
+      "mean_us": 210.52213333333333,
+      "summary_sha256": "e037315ba71d6dd930feae4f213ad56cd4bc269702663e40017d078d550e21ce",
+      "trace_qc_sha256": "342cccb9a615a48afaef667a16e9503856f6491944278e551cfab11f9cbbd077",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 2,
+      "label": "oracle_coherent",
+      "pass": true,
+      "median_us": 181.00549999999998,
+      "mean_us": 180.93699999999998,
+      "summary_sha256": "2380bc0110c7c25102417b7763bd7e69b3911213b06050680176192d1aaf55ed",
+      "trace_qc_sha256": "d37e5ae3228438b93b867d57cb17ddbb1ed42eaf18c43e37eb328aabfd181d0b",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 3,
+      "label": "oracle_default",
+      "pass": true,
+      "median_us": 180.7215,
+      "mean_us": 180.65996666666666,
+      "summary_sha256": "d898013d6d9f0483a74850664d1b0f84817b2132cb3671a0d7b3ddf8a00ed949",
+      "trace_qc_sha256": "e5ab6c19567461818b2abf9ca5ca47a9f0d658aa2861c2b429090db3ff70ccf8",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 3,
+      "label": "oracle_coherent",
+      "pass": true,
+      "median_us": 182.8535,
+      "mean_us": 182.55713333333333,
+      "summary_sha256": "0a778c5df440aba0c44a1af934c0baa06160b772735efd44b4db9bb1250579e3",
+      "trace_qc_sha256": "d44a241960ccb2b092d0e255e8407fdf73762526490193049d68f48c9de52fea",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 3,
+      "label": "lx_coherent",
+      "pass": true,
+      "median_us": 199.987,
+      "mean_us": 199.68043333333335,
+      "summary_sha256": "aac9bcac06e5bd343574a04ea18bbf02e8a4f149e1c44abf4c43fea2c894de20",
+      "trace_qc_sha256": "0d77e1c4c6a4bae040c0c66ea2d9ef6a877ec10677e9e9f83ee9b3983804f9cc",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 3,
+      "label": "lx_default",
+      "pass": true,
+      "median_us": 211.32,
+      "mean_us": 211.12546666666668,
+      "summary_sha256": "51b8e00c24a1fefd79132389430954729a4377b7362226ad791bf950fc9843a3",
+      "trace_qc_sha256": "fa4f5010f3e74d81f4ff97319bf7fef1b976bbaa9e720499ad76e1e213ee0376",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 4,
+      "label": "oracle_coherent",
+      "pass": true,
+      "median_us": 182.4955,
+      "mean_us": 182.381,
+      "summary_sha256": "2c021ef60a47758fd79d73b113096e03b7efe0002eff6b831d637eaedc7c47a7",
+      "trace_qc_sha256": "221b18c83281a43c39d6f4a66c5da81db9eb6773cda433d3e2c02d12f6f9088e",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 4,
+      "label": "lx_default",
+      "pass": true,
+      "median_us": 209.86700000000002,
+      "mean_us": 210.03886666666668,
+      "summary_sha256": "cb2f032916b744638453393ff0c82f7873709d122f0bb80e3743fe0e39bb9a4b",
+      "trace_qc_sha256": "33bc2a53187f476afa27210c1471dfa8bf28d16ed1b304ed9784e7e301dc70bc",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 4,
+      "label": "oracle_default",
+      "pass": true,
+      "median_us": 181.2395,
+      "mean_us": 180.93893333333332,
+      "summary_sha256": "ea9f947ca5e0c4601404662ecd8fbea8265545fdd2fb9322a552511f1f36bccc",
+      "trace_qc_sha256": "49996fce1d2ef4937152facd56437d2366c703522daa19a8cab6aeaae50cd2f9",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 4,
+      "label": "lx_coherent",
+      "pass": true,
+      "median_us": 198.971,
+      "mean_us": 198.8425,
+      "summary_sha256": "f0e4a08c090ab5340500e7ca041a5331c36cc356af3fd31b912f8433527213a7",
+      "trace_qc_sha256": "c2a73849d2a1f68cdd97b477fac01076c9ba40262234937425395361cf4a5f81",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 5,
+      "label": "lx_default",
+      "pass": true,
+      "median_us": 210.90699999999998,
+      "mean_us": 210.8251,
+      "summary_sha256": "5688226f9b8c6ddc63f575721e75cb137894ec2733962a8e035f3d0c9b2e9bdb",
+      "trace_qc_sha256": "f7d0729d4fc8ed6a0945cdae46373be9ef19524b83dd2b42f484abbe7f453d37",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 5,
+      "label": "lx_coherent",
+      "pass": true,
+      "median_us": 199.5675,
+      "mean_us": 199.52956666666665,
+      "summary_sha256": "ffaba266b3a0ae3abef8f88b756eadc1d0870e072d3ed2c68a46653c100a0ae5",
+      "trace_qc_sha256": "de9a34d22f749fbc26a2f642a6ecac052af23a867b1a6a501dc92ee15748fc68",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 5,
+      "label": "oracle_default",
+      "pass": true,
+      "median_us": 181.01,
+      "mean_us": 181.0296,
+      "summary_sha256": "daacc70344dd2c3c45ba611b001c770b3bda081dc454d7b70414f076af443790",
+      "trace_qc_sha256": "aef34c830f09626b55acf7f221386e4373c725398e43b615ccd72b751e9580ac",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    },
+    {
+      "block": 5,
+      "label": "oracle_coherent",
+      "pass": true,
+      "median_us": 182.14550000000003,
+      "mean_us": 182.0905,
+      "summary_sha256": "c5cf0be56de40b3971c65e28343807f50c0cece4f86f10f8c55b04fa6137ac65",
+      "trace_qc_sha256": "eeb5694b2ddae2474f57f2902d6badbb0c07c85929f8198977ef521d19297550",
+      "gates": {
+        "summary_and_qc_present": true,
+        "exact_shape": true,
+        "exact_source_bytes_per_core": true,
+        "thirty_runs": true,
+        "mode": true,
+        "placement_contract": true,
+        "correctness": true,
+        "warm_correct": true,
+        "finite": true,
+        "materialization": true,
+        "inventory": true,
+        "trace_qc": true,
+        "measured_events": true,
+        "event_inventory": true,
+        "finite_timing": true,
+        "oracle_strict_alternation": true
+      }
+    }
+  ],
+  "per_block": [
+    {
+      "block": 1,
+      "median_us": {
+        "lx_default": 210.9805,
+        "oracle_default": 181.4365,
+        "lx_coherent": 198.298,
+        "oracle_coherent": 180.9325
+      },
+      "derived": {
+        "placement_gain_lx_us": 12.682500000000005,
+        "placement_gain_oracle_us": 0.5039999999999907,
+        "default_residual_us": 29.54400000000001,
+        "coherent_residual_us": 17.365499999999997,
+        "residual_interaction_us": 12.178500000000014,
+        "fraction_of_default_residual_closed": 0.41221567831031714,
+        "lx_coherent_speedup": 1.0639567721308334,
+        "oracle_coherent_speedup": 1.0027855692039849,
+        "default_oracle_rate_efficiency": 0.8599681013174203,
+        "coherent_oracle_rate_efficiency": 0.9124272559481185,
+        "coherent_max_remaining_speedup": 1.0959777817694445
+      }
+    },
+    {
+      "block": 2,
+      "median_us": {
+        "lx_default": 210.683,
+        "oracle_default": 179.704,
+        "lx_coherent": 198.45100000000002,
+        "oracle_coherent": 181.00549999999998
+      },
+      "derived": {
+        "placement_gain_lx_us": 12.231999999999971,
+        "placement_gain_oracle_us": -1.301499999999976,
+        "default_residual_us": 30.978999999999985,
+        "coherent_residual_us": 17.445500000000038,
+        "residual_interaction_us": 13.533499999999947,
+        "fraction_of_default_residual_closed": 0.43686045385583633,
+        "lx_coherent_speedup": 1.0616373815198712,
+        "oracle_coherent_speedup": 0.9928096107576843,
+        "default_oracle_rate_efficiency": 0.8529591851264697,
+        "coherent_oracle_rate_efficiency": 0.912091649827917,
+        "coherent_max_remaining_speedup": 1.096381049194638
+      }
+    },
+    {
+      "block": 3,
+      "median_us": {
+        "lx_default": 211.32,
+        "oracle_default": 180.7215,
+        "lx_coherent": 199.987,
+        "oracle_coherent": 182.8535
+      },
+      "derived": {
+        "placement_gain_lx_us": 11.332999999999998,
+        "placement_gain_oracle_us": -2.132000000000005,
+        "default_residual_us": 30.5985,
+        "coherent_residual_us": 17.133499999999998,
+        "residual_interaction_us": 13.465000000000003,
+        "fraction_of_default_residual_closed": 0.44005425102537715,
+        "lx_coherent_speedup": 1.0566686834644252,
+        "oracle_coherent_speedup": 0.9883403927187612,
+        "default_oracle_rate_efficiency": 0.8552030096536059,
+        "coherent_oracle_rate_efficiency": 0.9143269312505313,
+        "coherent_max_remaining_speedup": 1.0937006948185295
+      }
+    },
+    {
+      "block": 4,
+      "median_us": {
+        "lx_default": 209.86700000000002,
+        "oracle_default": 181.2395,
+        "lx_coherent": 198.971,
+        "oracle_coherent": 182.4955
+      },
+      "derived": {
+        "placement_gain_lx_us": 10.896000000000015,
+        "placement_gain_oracle_us": -1.2560000000000002,
+        "default_residual_us": 28.627500000000026,
+        "coherent_residual_us": 16.47550000000001,
+        "residual_interaction_us": 12.152000000000015,
+        "fraction_of_default_residual_closed": 0.4244869443716707,
+        "lx_coherent_speedup": 1.0547617491996322,
+        "oracle_coherent_speedup": 0.9931176385171141,
+        "default_oracle_rate_efficiency": 0.8635921798091171,
+        "coherent_oracle_rate_efficiency": 0.9171964758683425,
+        "coherent_max_remaining_speedup": 1.0902789383847822
+      }
+    },
+    {
+      "block": 5,
+      "median_us": {
+        "lx_default": 210.90699999999998,
+        "oracle_default": 181.01,
+        "lx_coherent": 199.5675,
+        "oracle_coherent": 182.14550000000003
+      },
+      "derived": {
+        "placement_gain_lx_us": 11.339499999999987,
+        "placement_gain_oracle_us": -1.135500000000036,
+        "default_residual_us": 29.89699999999999,
+        "coherent_residual_us": 17.42199999999997,
+        "residual_interaction_us": 12.475000000000023,
+        "fraction_of_default_residual_closed": 0.41726594641602927,
+        "lx_coherent_speedup": 1.0568203740589024,
+        "oracle_coherent_speedup": 0.9937659728074532,
+        "default_oracle_rate_efficiency": 0.858245577434604,
+        "coherent_oracle_rate_efficiency": 0.9127012163804228,
+        "coherent_max_remaining_speedup": 1.0956488082329785
+      }
+    }
+  ]
+}

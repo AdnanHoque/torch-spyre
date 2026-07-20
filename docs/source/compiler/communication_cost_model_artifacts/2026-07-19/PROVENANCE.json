@@ -36,6 +36,6 @@
   },
   "privacy_and_size_policy": {
     "include": "Compact result, gate, preregistration, and independent-audit files.",
-    "exclude": "Traces, binaries, caches, output tensors, raw logs, device identifiers, and superseded results."
+    "exclude": "Traces, binaries, caches, output tensors, raw logs, device identifiers, and superseded direct-LX attempts; invalidated placement records are retained explicitly as forensic evidence."
   }
 }

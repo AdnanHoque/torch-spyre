@@ -1,0 +1,8 @@
+{
+  "gate": "pass",
+  "campaign_body_exit_code": 0,
+  "closure_after_exit_code": 0,
+  "closure_compare_exit_code": 0,
+  "effective_exit_code": 0,
+  "factorial_report_sha256": "2cc39275e80c249ce16c187f419a93cfd3451788b0502d8d997c67ab312c72bd"
+}

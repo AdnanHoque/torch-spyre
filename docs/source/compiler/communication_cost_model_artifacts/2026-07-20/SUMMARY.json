@@ -1,0 +1,100 @@
+{
+  "schema_version": "1.0",
+  "gate": "pass",
+  "scope": {
+    "operation": "experimental.flash_attn_stable_softmax",
+    "shape": "B1 H4 Lq512 Lk4096 D128",
+    "group_size": 8,
+    "source_bytes_per_core": 131072
+  },
+  "design": {
+    "conditions": [
+      "lx_default",
+      "oracle_default",
+      "lx_coherent",
+      "oracle_coherent"
+    ],
+    "fresh_process_blocks": 5,
+    "accepted_measured_events_per_condition_per_block": 30,
+    "unit_of_analysis": "fresh-process median device-kernel duration",
+    "primary_estimand": "(lx_default - oracle_default) - (lx_coherent - oracle_coherent)",
+    "interval": "two-sided Student-t 95 percent interval across five paired block contrasts"
+  },
+  "process_median_stats_us": {
+    "lx_default": {
+      "mean": 210.7515,
+      "student_t_95_ci": [210.07515033605313, 211.42784966394686]
+    },
+    "oracle_default": {
+      "mean": 180.82229999999998,
+      "student_t_95_ci": [179.97849719847517, 181.6661028015248]
+    },
+    "lx_coherent": {
+      "mean": 199.0549,
+      "student_t_95_ci": [198.16034136502128, 199.94945863497873]
+    },
+    "oracle_coherent": {
+      "mean": 181.8865,
+      "student_t_95_ci": [180.80060679851118, 182.97239320148884]
+    }
+  },
+  "primary_results": {
+    "default_shuffle_residual_us": {
+      "mean": 29.9292,
+      "student_t_95_ci": [28.785472883629616, 31.072927116370387]
+    },
+    "coherent_shuffle_residual_us": {
+      "mean": 17.168400000000002,
+      "student_t_95_ci": [16.663547068089038, 17.673252931910966]
+    },
+    "residual_interaction_us": {
+      "mean": 12.7608,
+      "student_t_95_ci": [11.908572605878886, 13.613027394121113]
+    },
+    "fraction_of_default_residual_closed": {
+      "mean": 0.42617665479584615,
+      "student_t_95_ci": [0.4111749082268679, 0.4411784013648244]
+    },
+    "lx_coherent_speedup": {
+      "mean": 1.0587689920747327,
+      "student_t_95_ci": [1.053983866309331, 1.0635541178401344]
+    },
+    "coherent_oracle_rate_efficiency": {
+      "mean": 0.9137487058550665,
+      "student_t_95_ci": [0.9111286211236491, 0.9163687905864839]
+    },
+    "coherent_max_remaining_speedup": {
+      "mean": 1.0943974544800745,
+      "student_t_95_ci": [1.0912657513253552, 1.0975291576347939]
+    }
+  },
+  "software_shortest_path_route_proxies": {
+    "warning": "These are compiler-derived shortest-path proxy quantities, not measured bytes, bandwidth, link occupancy, or hardware-counter utilization.",
+    "default": {
+      "remote_relations": 224,
+      "total_hop_units": 2048,
+      "max_directed_link_units": 40
+    },
+    "coherent": {
+      "remote_relations": 224,
+      "total_hop_units": 672,
+      "max_directed_link_units": 16
+    }
+  },
+  "correctness_evidence": {
+    "failed_incoherent_joint": true,
+    "failed_source_only": true,
+    "passed_source_closed": true,
+    "passed_destination_closed": true,
+    "passed_coherent_both_compile_orders": true,
+    "passed_adversarial_vcoded": true
+  },
+  "interpretation": "Value-correct coherent producer-to-consumer placement closes a positive, repeatable part of the measured explicit-shuffle residual for this exact shape.",
+  "invalidated_prototype": "The earlier placement changed the synthetic relayout-source mapping without changing the actual scaled-K producer mapping. It failed high-contrast correctness and was halted before timing; it is not valid performance evidence.",
+  "limitations": [
+    "The oracle is a graph counterfactual with an untimed preseed prefix, not infinite hardware bandwidth.",
+    "Hardware counters are unavailable, so route quantities are software shortest-path proxies and cannot establish physical link utilization.",
+    "Five fresh-process blocks support descriptive paired process-level inference on one device; they are not five independent hardware samples.",
+    "This is exact-shape evidence for B1 H4 Lq512 Lk4096 D128 and group size 8."
+  ]
+}

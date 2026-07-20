@@ -24,9 +24,12 @@ Physical placement answers:
 At which physical ring position does worker c execute?
 ```
 
-Represent the latter as a permutation `P(c)`. Changing `P` does not change the
-mathematics, but it changes every source-destination distance, directed-link
-hotspot, and opportunity for local delivery.
+Represent the latter as a permutation `P(c)`. Changing `P` preserves the
+mathematics only when the change covers a closed region: every unshuffled local
+producer/alias/consumer edge must retain one realized mapping, and every mapping
+change must cross an explicit materialized bridge. A legal change alters
+source-destination distance, directed-link hotspots, and opportunities for local
+delivery without changing which logical bytes an operation sees.
 
 In the measured Flash case, the default embedding interleaves four attention
 heads around the 32-core ring:
@@ -42,46 +45,64 @@ contiguous:
 head = physical_core // 8
 ```
 
-Contiguity is valuable only when the producer, SHUFFLE destination, and
-downstream consumers agree on the same embedding. Moving just one endpoint does
-not optimize a relational communication problem.
+Contiguity is valuable only when every actual producer of a locally reused LX
+view, the SHUFFLE endpoints, aliases, and downstream consumers agree on the same
+embedding. Moving or relabeling one endpoint is not merely a weak optimization;
+without a materialized bridge, it can reinterpret bytes and change values.
 
 ## What the experiment established
 
-The source-only placement experiment showed no detected timing win, while total
-modeled hop units remained 2,048. It therefore did not support source-only
-placement as the next optimization; this is not an equivalence claim.
+The original `joint_all` prototype was not a closed region. It changed the
+synthetic K relayout-source view but left the actual scaled-K producer at the
+default mapping, even though both accessed the same local LX allocation without
+a transfer between them. A strengthened high-contrast device test found
+241,384/262,144 mismatches at `atol=rtol=1e-2` and maximum absolute error
+`0.943985`. Its historical timing is therefore invalid for any performance
+claim.
 
-The minimal passing `joint_all` candidate applied one common physical embedding
-to a closed score path:
+This negative is itself useful: a source-view annotation cannot define physical
+truth independently of the operation that produced the bytes. The earlier
+low-amplitude allclose input and CPU-only wrong-route negative did not expose
+that boundary error.
 
-- Q-side producer work involved in the first matrix multiplication;
-- the synthetic K restickify source;
-- the LX SHUFFLE destination and first matrix multiplication;
-- score and stable-softmax operations; and
-- the second matrix multiplication consuming the probabilities.
+The corrected experiment established closure incrementally:
 
-Unrelated upstream scaled-K work remained at its default embedding. Structural
-gates proved that the targeted operations changed only their physical embedding,
-the non-targeted operations stayed semantically unchanged, the expected LX
-allocation components remained present, the emitted SHUFFLE maps matched the
-adjacent roots, and a deliberately wrong route failed correctness.
+- relayout source alone failed with the same high-contrast corruption;
+- actual scaled-K producer plus source view passed;
+- query producer, first BMM, score path, and second BMM passed as an independent
+  destination-side closed region; and
+- one coherent mapping across all six points passed full-device correctness in
+  both compilation orders and an adversarial V-coded test sensitive to head,
+  token, channel, second-BMM ingress, and output ordering.
 
-| Metric | Default | `joint_all` | Change |
+The corrected coherent candidate retained the modeled route improvement:
+
+| Metric | Default | Coherent | Change |
 |---|---:|---:|---:|
+| Remote relations | 224 | 224 | 0 |
 | Total hop units | 2,048 | 672 | -67.2% |
-| Mean remote distance | 9.143 | 3.000 | -67.2% |
 | Maximum directed-link units | 40 | 16 | -60.0% |
-| Maximum combined-segment units | 64 | 32 | -50.0% |
-| Whole fused LX time | 213.527 us | 203.140 us | -10.387 us |
 
-The paired five-block effect was `10.3867 us`, with a descriptive t95 interval
-of `[10.0617, 10.7117]`. That is **4.864%**, or **1.051x**, and every block
-favored joint placement.
+Those values are equal-payload shortest-path proxies derived from emitted maps,
+not measured link traffic. The corrected five-block placement-by-handoff
+factorial supplies the elapsed-time evidence:
 
-This measurement is deliberately described as a whole-region placement effect.
-It is not a causal measurement of SHUFFLE time alone because placement can also
-change compute scheduling, locality, and synchronization.
+| Condition | Mean process median |
+|---|---:|
+| LX default | 210.7515 us |
+| Oracle default | 180.8223 us |
+| LX coherent | 199.0549 us |
+| Oracle coherent | 181.8865 us |
+
+Coherent placement reduced observed LX whole-kernel time by `11.6966 us`, t95
+`[10.7843, 12.6089]`, or **5.550% / 1.05877x**. The preregistered
+difference-in-differences was `12.7608 us`, t95 `[11.9086, 13.6130]`, closing a
+mean **42.6177%** of the default graph-level handoff residual. The coherent
+residual is `17.1684 us`; its graph is at **91.3749%** of paired-oracle
+inverse-time performance and has at most **1.09440x** further graph-level
+speedup. None of these numbers is a SHUFFLE-root timer or device-peak ring
+utilization. The t95 intervals are descriptive process-block intervals from one
+device, not inference across independent devices.
 
 ## What exists in the current substrate
 
@@ -125,6 +146,11 @@ Several seams need hardening before automatic policy can rely on them:
   collide. V1 should retain the existing one-writer/one-reader/one-view boundary;
   generic multi-consumer collectives require edge-scoped S2 names and widened
   lifetime semantics.
+- Placement closure does not yet follow the complete producer/alias/allocation
+  chain. The corrected experiment showed that the real scaled-K producer can be
+  outside a superficially plausible score region while still defining the
+  bytes read by its synthetic view. Region construction must prove mapping
+  compatibility on every local no-transfer edge before cost ranking.
 
 The experimental work already demonstrated three prerequisite ideas—typed
 root placement, operand-scoped relayout-source placement, and semantic operand
@@ -164,15 +190,20 @@ communication edges. A region must include every operation whose physical
 embedding affects:
 
 - the producer allocation map;
+- every actual producer, alias, transpose/view, and allocation user on a local
+  no-transfer path;
 - the SHUFFLE source and destination maps;
 - consumers that reuse the destination allocation;
 - in-place or shared-allocation chains; and
 - boundary traffic whose cost can regress when the region moves.
 
 Use explicit graph dependence and allocation relationships, not Flash-specific
-operation names. Split a candidate region when an operation has an incompatible
-active-core set, an externally fixed placement, an unsupported backend contract,
-or a boundary whose semantics cannot be preserved.
+operation names. A region may split only at an explicit materialized bridge, a
+fixed external boundary, or an edge whose exact per-buffer physical ownership
+and byte maps are already equivalent. An incompatible active-core set,
+externally fixed placement, unsupported backend contract, or unprovable edge
+therefore rejects the candidate; it must never create an incoherent local-LX
+split.
 
 ### 3. Generate a bounded candidate set
 
@@ -247,6 +278,11 @@ A production candidate is legal only when all of these hold:
 
 - the mapping is a bijection over the exact active physical cores;
 - logical per-core slices and tensor values are unchanged;
+- every unshuffled local-LX producer-to-consumer edge has the same realized
+  per-buffer physical ownership and byte map at both ends; equality of only the
+  operation-level placement tuple is insufficient;
+- every mapping change crosses an explicit materialized bridge with compatible
+  source and destination maps;
 - every targeted operation supports the mapping;
 - producer, SHUFFLE, destination, and shared-allocation users agree;
 - in-place and lifetime constraints remain valid;
@@ -300,7 +336,8 @@ the compiler's choice.
 
 ### Compiler structural tests
 
-- Identity placement emits byte-identical default maps.
+- The currently realized default, including K-fast behavior, emits byte-identical
+  baseline maps when the optimizer declines a candidate.
 - A head-contiguous candidate emits the expected 32-core permutation.
 - Closed-region membership includes allocation and in-place dependents.
 - Partial support causes an all-or-nothing fallback.
@@ -314,19 +351,27 @@ the compiler's choice.
 
 ### Hardware correctness tests
 
-- Compare full outputs against the default path.
+- Compare full device outputs against CPU and default using high-contrast data,
+  not only near-uniform softmax inputs.
 - Check the complete destination window and source immutability.
 - Require exact SHUFFLE count and allocation maps.
+- Compile ordinary and oracle-prefixed graphs in both orders and require stable
+  identities, so cached placement state cannot create a false pass.
+- Encode head, token, and channel in V to expose second-BMM ingress or output
+  permutations.
+- Preserve a source-only negative and require actual-producer-plus-source
+  closure to restore correctness.
 - Preserve the wrong-route negative so a no-op or stale-route implementation
   cannot pass by coincidence.
 
 ### Performance tests
 
-- Run counterbalanced fresh-process default/joint pairs.
-- Require a positive paired effect on the allowlisted Flash case.
+- Run counterbalanced fresh-process default/coherent pairs.
+- Treat correctness, structure, trace quality, and provenance as execution
+  gates; report the preregistered performance effect regardless of sign.
 - Track compile time, memory fallback frequency, and unrelated-kernel
   regressions.
-- Use a placement-by-handoff factorial against both default and joint
+- Use a placement-by-handoff factorial against both default and coherent
   no-SHUFFLE oracles before claiming how much oracle residual placement closes.
 
 ## Rollout plan
@@ -338,10 +383,11 @@ the compiler's choice.
    currently emits ownership maps but cannot observe the realized STCDP
    direction, path, or multicast sharing; route-based selection remains shadow
    only until this round-trip exists.
-3. **Allowlisted Flash A/B.** Enable only the structurally proven closed region
-   under an opt-in flag.
-4. **Paired oracle decomposition.** Run the placement-by-handoff factorial and
-   add root-scoped transfer/sync/consumer markers.
+3. **Allowlisted Flash A/B.** Reproduce the corrected coherent closure as a typed
+   compiler region—not environment-driven test hints—under an opt-in flag.
+4. **Root-scoped decomposition.** The placement-by-handoff factorial is now
+   complete; add transfer/sync/consumer markers to localize the remaining
+   `17.1684 us` graph residual.
 5. **Automatic selection.** Enable the candidate search for supported regions
    only when shadow prediction matches measured ordering and the expected win
    exceeds its guardband.
@@ -354,11 +400,12 @@ The smallest production-quality slice is:
 
 1. add pure `RingTopology`, `PhysicalCorePlacement`, route-load, and cost types;
 2. adapt `LXRelayoutPlan` source/destination maps into exact transfer demands;
-3. implement identity plus dimension-major/rotation/reflection candidates;
+3. implement the currently realized default plus
+   dimension-major/rotation/reflection candidates;
 4. run the planner between work distribution and scratchpad planning in shadow
    mode;
 5. emit a complete decision record; and
-6. validate its predicted default-versus-`joint_all` ordering against the
+6. validate its predicted default-versus-coherent ordering against the
    packaged structural and timing evidence.
 
 Only after that shadow result is stable should the pass be allowed to mutate

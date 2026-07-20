@@ -58,8 +58,13 @@ measured GB/s remains authoritative.
 For each candidate, the model needs:
 
 - `N`: physical ring size;
-- `placement`: a bijection from logical worker IDs to physical core IDs;
+- each operation's requested and realized placement, represented as a bijection
+  from logical worker IDs to physical core IDs;
 - exact producer and consumer per-core slice maps;
+- every unshuffled local-LX producer, alias/view, allocation user, and consumer
+  edge, including its realized mapping at both ends;
+- every explicit bridge allowed to change mappings and its source/destination
+  maps;
 - `transport_requested` and `transport_realized`;
 - each logical delivery's payload bytes and allowed directions;
 - native multicast sharing rules, if realized;
@@ -113,7 +118,7 @@ when reporting aggregate duplex bandwidth.
 
 ## Current empirical transfer predictor
 
-The promoted 128/256/512 KiB one-way measurements give:
+The promoted 128/256/512 KiB one-way CCW measurements give:
 
 ```text
 F_one_way = 0.14925 us
@@ -149,8 +154,8 @@ subtract an unconstrained fitted constant. In all cases, clamp the result so it
 never falls below the physical service lower bound. Initially:
 
 - use `B_link_eff = B_inject_eff = B_drain_eff = 136.457 GB/s` only as a
-  provisional coefficient for the matching one-way transport, with a measured
-  error guardband;
+  provisional coefficient for the matching one-way CCW transport, with a
+  measured error guardband;
 - use `F_kind = 0.14925 us` only for the measured one-way transport kind;
 - leave other fixed costs explicit and uncalibrated rather than silently zero;
 - treat the observed 1-to-8-hop increment as a sensitivity, not a promoted
@@ -240,6 +245,8 @@ Subject to:
 ```text
 placement is bijective on active cores
 all per-core slices remain semantically identical
+every unshuffled local-LX edge has equal realized per-buffer ownership/byte maps
+every mapping change crosses an explicit materialized bridge
 LX capacity and liveness are legal
 in-place and shared-allocation constraints are preserved
 backend can realize every requested route
@@ -248,17 +255,20 @@ all boundary traffic is included
 
 The objective must count both internal improvements and boundary regressions.
 Optimizing only the SHUFFLE source is invalid because moving one endpoint can
-leave the relational route unchanged or make neighboring operations worse.
+leave the relational route unchanged, make neighboring operations worse, or
+reinterpret locally produced bytes under a different mapping. Legality is
+checked before scoring; an incoherent candidate has no finite cost.
 
 ## Flash example
 
-The measured default and joint-placement route proxies are:
+The default and corrected coherent-placement route proxies derived from emitted
+allocation maps are:
 
-| Route metric | Default | Joint |
+| Route metric | Default | Coherent |
 |---|---:|---:|
+| Remote relations | 224 | 224 |
 | Total hop units | 2,048 | 672 |
 | Maximum directed-link units | 40 | 16 |
-| Maximum combined-segment units | 64 | 32 |
 
 At 128 KiB per relation, the expanded-unicast hot-link byte proxies are 5 MiB
 and 2 MiB. If, and only if, those units match realized link copies, the 1.1 GHz
@@ -266,10 +276,26 @@ physical link lower bounds are about 37.24 us and 14.89 us. They are diagnostic
 bounds, not predictions of the fused Flash delta: actual multicast sharing,
 endpoint limits, synchronization, and overlap still need to be represented.
 
-The measured whole-fused-kernel A/B improved by 10.387 us. That validates
-placement as a useful decision variable, while also demonstrating why the
-critical-path model cannot equate a change in static hot-link load with the
-same change in elapsed time.
+An earlier lower-load candidate violated local-LX mapping coherence because the
+actual scaled-K producer and its synthetic source view used different mappings
+without a transfer. Its timing is invalid. This demonstrates why legality must
+precede scoring: a route-optimal but semantically incorrect candidate is
+rejected regardless of predicted cost.
+
+The corrected coherent candidate closes that producer boundary and passed
+strengthened value gates. In a five-block placement-by-handoff factorial it
+reduced whole-fused LX time from `210.7515 us` to `199.0549 us`, a measured
+`11.6966 us` / **1.05877x** gain. The preregistered handoff interaction was
+`12.7608 us`, t95 `[11.9086, 13.6130]`, closing a mean **42.6177%** of the
+default graph-oracle residual. The remaining paired graph residual is
+`17.1684 us`, for **91.3749%** of oracle inverse-time performance and at most
+**1.09440x** further speedup.
+
+These elapsed-time results validate closed coherent placement as a useful
+decision variable, not the static proxy as a cycle predictor. In fact, the
+default 37.24 us link proxy is larger than the measured 29.93 us graph-oracle
+residual, proving that realized sharing, path choice, overlap, and residual scope
+are not aligned well enough to compute Flash ring utilization from the proxy.
 
 ## Calibration registry
 
@@ -277,9 +303,9 @@ Every coefficient should carry its measurement scope and maturity:
 
 | Coefficient | Current value | Status |
 |---|---:|---|
-| One-way fixed cost | 0.14925 us | Measured at 128/256/512 KiB |
-| One-way effective slope | 136.457 GB/s | Measured; three-point fit |
-| 512 KiB finite one-way | 131.351 GB/s | Measured and cross-pod replicated |
+| One-way CCW fixed cost | 0.14925 us | Measured at 128/256/512 KiB |
+| One-way CCW effective slope | 136.457 GB/s | Measured; three-point fit |
+| 512 KiB finite one-way CCW | 131.351 GB/s | Measured and cross-pod replicated |
 | 512 KiB balanced duplex | 255.439 GB/s aggregate | Measured and cross-pod replicated |
 | Duplex retention | 97.235% | Measured at one payload |
 | Eight-hop finite one-way | 130.323 GB/s | Measured at one payload |
@@ -312,13 +338,26 @@ class RingTopology:
     shortest_path_tie_direction: str
 
 @dataclass(frozen=True)
+class TransferEndpoint:
+    operation_id: str
+    logical_worker: int
+    finalized_view_fingerprint: str
+
+@dataclass(frozen=True)
 class TransferDemand:
+    source: TransferEndpoint
+    destinations: tuple[TransferEndpoint, ...]
+    payload_bytes_per_destination: tuple[int, ...]
+    requested_transport: str
+    allowed_directions: tuple[str, ...]
+
+@dataclass(frozen=True)
+class RoutedDemand:
     source_core: int
     destination_cores: tuple[int, ...]
-    payload_bytes: int
-    requested_transport: str
+    payload_bytes_per_destination: tuple[int, ...]
     realized_transport: str
-    allowed_directions: tuple[str, ...]
+    route_provenance: str  # "backend_realized" or "diagnostic_assumption"
     # One exact directed-link path per realized copy. Native multicast may
     # additionally identify shared edges that carry only one copy.
     realized_paths: tuple[tuple[tuple[str, int], ...], ...]
@@ -339,20 +378,36 @@ class CostEstimate:
     assumptions: tuple[str, ...]
     missing_coefficients: tuple[str, ...]
 
-def route_demands(topology, placement, demands) -> RouteLoad: ...
+def assume_routes(
+    topology,
+    placements_by_operation,
+    demands,
+    assumption,
+) -> tuple[RoutedDemand, ...]: ...
+def load_routes(routed_demands) -> RouteLoad: ...
 def estimate_lx(load, coefficients) -> CostEstimate: ...
 def estimate_memory(write_bytes, read_bytes, coefficients) -> CostEstimate: ...
 ```
 
 Keep route construction independent of Inductor IR. An adapter should translate
-the exact emitted producer and consumer maps into `TransferDemand` objects.
-This separation allows exhaustive unit tests over small rings and makes the
-same model usable in analysis tools and compiler policy.
+the finalized emitted producer and consumer views into `TransferDemand` objects,
+including dtype, padding, fold geometry, allocation offsets, and exact byte
+ranges in the view fingerprint. Conservation tests must use those finalized
+physical bytes, not logical tensor extents. This separation allows exhaustive
+unit tests over small rings and makes the same model usable in analysis tools
+and compiler policy.
+
+`placements_by_operation` maps each endpoint's stable operation ID to its own
+candidate placement. This is intentionally not one region-wide permutation: an
+explicit bridge may connect different legal source and destination placements,
+and routing must apply each side exactly once.
 
 Until the backend provides realized direction/path/multicast data, this API is a
 shadow-analysis boundary. An explicitly labeled homogeneous expanded-unicast
-mode may construct shortest paths for diagnostics, but it must not be confused
-with realized transport or drive automatic code generation.
+mode may call `assume_routes` for diagnostics. Enabled policy must instead feed
+backend-returned `RoutedDemand` records with `route_provenance="backend_realized"`
+to `load_routes`; it must not remap already physical endpoints or confuse an
+assumed path with realized transport.
 
 ## Validation and rollout
 
@@ -362,11 +417,15 @@ Before enabling a decision policy by default:
    bounds and byte scopes to match their manifests;
 2. run property tests over ring rotations/reflections, route conservation, and
    multicast copy accounting;
-3. emit shadow predictions without changing code generation;
-4. compare predicted ordering with paired hardware A/Bs;
-5. enable only for an allowlisted Flash shape and fail closed to identity
-   placement or memory fallback; and
-6. expand only after correctness, capacity, compile-time, and performance
+3. reject any candidate whose actual producer/alias/consumer chain has a local
+   no-transfer mapping mismatch, and exercise this with adversarial
+   mapping-coded device values;
+4. emit shadow predictions without changing code generation;
+5. compare predicted ordering with paired hardware A/Bs and a paired
+   no-SHUFFLE graph oracle;
+6. enable only for an allowlisted Flash shape and fail closed to the currently
+   realized default placement or memory fallback; and
+7. expand only after correctness, capacity, compile-time, and performance
    regressions pass.
 
 Each compiled result should log the candidate set, chosen placement, requested

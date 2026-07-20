@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "captured_date": "2026-07-20",
+  "scope": "Flash coherent-placement-by-handoff 2x2 factorial",
+  "source_revisions": {
+    "torch_exact_base": "2a20cf3b7ac8aadf629314e40e5059ad82471911",
+    "torch_joint_base": "b56ebc424182760075064c6e298afd6519d0d617",
+    "torch_combined_head": "9b3449e732717c834f78ef0f8897a729c8da8f65",
+    "torch_combined_tree": "2fb5afbbe59bfa4fc95ed029710945cae3c8208f",
+    "deeptools_head": "19280fd7c6bbd91000c63c2a6719a0253e513f4a",
+    "deeptools_tree": "af105a81a1b281cb8dc7fd8d617fa65ad2b7b451",
+    "perf_head": "7ec6df0825e3a07614b82ddae5efae45eac43463",
+    "perf_tree": "7cbbb00bd8744cead23ddd97616c2857a8af5568"
+  },
+  "toolchain": {
+    "llvm_version": "22.1.3",
+    "dxp_closure_manifest_sha256": "138ec0ddee7ef35a115c6ef8c8ca4fa0524983c7b404ea77456eb46dc600323e",
+    "torch_extension_sha256": "01af447bb29f1ac7458bd173fb5be89771faad127fdda27b5112c4433cc2bbde"
+  },
+  "planner_contract": {
+    "DXP_LX_FRAC_AVAIL": "0.2",
+    "DXP_BACKEND_LX_FRAC_AVAIL": "0.2",
+    "SPYRE_LX_PLANNER_RELAYOUT": "1"
+  },
+  "clock_context": {
+    "historical_same_device_readback_GHz": 1.1,
+    "used_to_transform_factorial_timings": false
+  },
+  "raw_source_report_sha256": {
+    "factorial": "2cc39275e80c249ce16c187f419a93cfd3451788b0502d8d997c67ab312c72bd",
+    "failed_joint": "4d8b0c469e536dfe0ab3a700a2fb25b27126065a779e7e5fcd118bd12b1396c5",
+    "failed_source_only": "ad7b5c33c52170aa5fa05790b92d37c0fc5c33666a4cb484848bd6f6167b1892",
+    "passing_source_closed": "4beaf29ea938183e6e9db2b3560bf3dac1ed9a2d49ed9b4d72767db884de19e1",
+    "passing_destination_closed": "3e404cd197b4262afe0f7f20cdb1cdcf01dbf1a4974176e49d256d095ae41920",
+    "passing_coherent_normal_prefix_oracle": "0edd7479a483807dcd8a789a36355c47089d69d8fdfcd2165aeb40109412025c",
+    "passing_coherent_oracle_prefix_normal": "9f091d600257c1b846bfb723c847985ea4f90296f96a5492f39d829519ec3f59",
+    "passing_vcoded": "ca6b64b95b19c0fa9cb0fd1cdfec0a00bf17c11ba0adea2bf65d99b2ba98cc3d"
+  },
+  "redaction_policy": {
+    "allowlisted": [
+      "source revision hashes",
+      "toolchain version and closure hashes",
+      "experiment contract",
+      "aggregate timings and statistical results",
+      "correctness and QC gates",
+      "harness source"
+    ],
+    "excluded": [
+      "environment dumps",
+      "hardware and host identifiers",
+      "trace files",
+      "tensor outputs",
+      "compiler caches",
+      "console logs",
+      "credentials"
+    ]
+  }
+}

@@ -1,5 +1,13 @@
 # Independent audit: closed-attention placement timing on node 4
 
+> **Superseded verdict (2026-07-20):** The arithmetic below correctly
+> reproduces the historical campaign, but its performance conclusion is
+> withdrawn. A stronger high-contrast device test found that `joint_all` did
+> not preserve values: 241,384/262,144 elements mismatched at `1e-2` tolerance.
+> The `10.3867 us` delta therefore times a semantically incorrect graph. This
+> document is retained only as forensic history; see `INVALIDATED.md` and the
+> corrected coherent-placement package.
+
 Audit timestamp: 2026-07-19T04:09:39Z
 
 Remote result root:
@@ -10,18 +18,15 @@ The files were inspected read-only through `adnan-spyre-dev-pf`. The captured
 environment and trace names show that the campaign itself executed in
 `adnan-spyre-current-pf` on `p1-worker-4`.
 
-## Verdict
+## Historical verdict
 
-The campaign is internally valid for the narrow claim that applying the
-`joint_all` / `work_div_inner_first` placement contract reduces the timed
-duration of this exact LX full-attention fused kernel at this exact shape on
-this device. No arithmetic bug was found in the medians, paired contrasts, or
-Student-t intervals.
+No arithmetic bug was found in the medians, paired contrasts, or Student-t
+intervals, but the underlying `joint_all` graph is value-incorrect. The campaign
+therefore cannot support even a narrow placement-performance claim.
 
 It is not a measurement of SHUFFLE-root latency, ring bandwidth, or ring
-utilization. The raw LX contrast is the defensible whole-kernel placement
-effect. The DiD value is only an additive-control residual and should not be
-presented as a causal ring time.
+utilization. After the value failure, neither the raw LX contrast nor the DiD is
+defensible performance evidence; both are historical arithmetic only.
 
 ## Integrity and gates
 
@@ -105,19 +110,14 @@ balances the inferred paths.
 
 ## Interpretation and limitations
 
-1. The supported result is a 10.3867 us (4.864%, 1.05113x) improvement for the
-   whole fused LX attention kernel. `joint_all` changes the placement contract
-   across the first BMM, relayout source, stable-softmax path, and second BMM,
-   so the effect can include compute scheduling, locality, overlap, and
-   communication changes.
-2. The preregistration names DiD as primary, but the report correctly describes
-   the raw LX contrast as the candidate placement effect and DiD as an
-   LX-specific residual under an additive HBM-control assumption. This is an
-   estimand/interpretation tension, not an arithmetic error. HBM joint is slower
-   than HBM default in every block by 25.3696 us on average (1.4585%), while HBM
-   is about eight times slower than LX. Nothing in this campaign validates that
-   the HBM placement penalty transfers additively to LX. Do not call the
-   35.7563 us DiD "ring time" or "ring savings."
+1. The historical arithmetic yields 10.3867 us (4.864%, 1.05113x), but this is
+   not a supported improvement: the timed graph was semantically incorrect.
+   The value is retained only to make the invalidated record auditable.
+2. Before the value failure was known, the preregistration/report also had an
+   estimand tension: DiD assumed an additive HBM placement control that the
+   campaign did not validate. That issue is now secondary because the candidate
+   is incorrect, but it independently means the historical 35.7563 us DiD must
+   not be called "ring time" or "ring savings."
 3. The campaign cannot derive GB/s or percent-of-peak ring utilization. It has
    one fused-kernel event per iteration and static route proxies, but no
    SHUFFLE-root timer and no physical link/byte/cycle counters. The profiled
@@ -151,8 +151,8 @@ balances the inferred paths.
 - LLVM source: `e9846648fd6183ee6d8cbdb4502213fcf902a211`, version 22.1.3.
 - Perf-suite tested head: `7ec6df0825e3a07614b82ddae5efae45eac43463`, clean.
 - Structural prerequisite report SHA-256:
-  `6c36470474682118e09085c9b53338702e3e919e3d24aca73635181a7eb010d2`;
-  minimal passing candidate is `joint_all`.
+  `6c36470474682118e09085c9b53338702e3e919e3d24aca73635181a7eb010d2`.
+  It passed the obsolete gates but did not prove a closed placement region.
 
 ## Packaging requirements
 
@@ -173,4 +173,3 @@ archive should also include:
 - a generated file-level SHA-256 manifest and a SHA-256 for the final archive;
 - this audit note, especially the raw-LX-versus-DiD interpretation and the fact
   that no contemporaneous sibling-pod guard artifact exists.
-

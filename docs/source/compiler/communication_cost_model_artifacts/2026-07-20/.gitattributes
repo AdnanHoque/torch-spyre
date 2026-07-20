@@ -1,0 +1,2 @@
+# Preserve byte-exact harness evidence, including historical EOF whitespace.
+harness/* -whitespace

@@ -1,0 +1,152 @@
+{
+  "schema_version": "1.0",
+  "evidence_role": "negative control: incoherent joint placement",
+  "expected_outcome": "fail",
+  "raw_source_sha256": "4d8b0c469e536dfe0ab3a700a2fb25b27126065a779e7e5fcd118bd12b1396c5",
+  "raw_source_included": false,
+  "raw_source_exclusion_reason": "compact package omits large generated artifacts, tensors, and absolute artifact paths",
+  "scope": {
+    "op": "experimental.flash_attn_stable_softmax",
+    "B": 1,
+    "H": 4,
+    "Lq": 512,
+    "Lk": 4096,
+    "D": 128,
+    "group_size": 8,
+    "source_bytes_per_core": 131072,
+    "compile_order": "normal_prefix_oracle"
+  },
+  "value_pattern": null,
+  "placement_contract": null,
+  "compile_first_output_copied": {
+    "normal": true,
+    "prefix": false,
+    "oracle": true
+  },
+  "gate": false,
+  "gates": {
+    "normal_correct": false,
+    "wrong_preseed_mismatches": true,
+    "correct_preseed_matches": false,
+    "repeat_without_reseed_mismatches": true,
+    "restore_matches": false,
+    "all_expected_finite": true,
+    "normal_has_one_shuffle": true,
+    "prefix_is_exact_normal_through_shuffle": true,
+    "prefix_ends_at_shuffle": true,
+    "prefix_has_no_consumer_or_later_root": true,
+    "oracle_is_normal_minus_shuffle": true,
+    "prefix_root_specs_equal_normal_prefix": true,
+    "oracle_root_specs_equal_normal_minus_shuffle": true,
+    "prefix_source_allocation_equal_normal": true,
+    "prefix_s2_allocation_equal_normal": true,
+    "normal_shuffle_s2_physical_equals_consumer_s2": true,
+    "prefix_s2_physical_equals_oracle_consumer_s2": true,
+    "oracle_consumer_allocation_equals_normal_consumer": true,
+    "s2_is_lx": true,
+    "shuffle_source_is_lx": true,
+    "oracle_has_no_hidden_s2_bundle_input": true,
+    "prefix_has_fewer_bundle_inputs": true
+  },
+  "output_comparisons": {
+    "normal_vs_cpu": {
+      "allclose_rtol_1e2_atol_1e2": false,
+      "bitwise_equal": false,
+      "exact_mismatch_count": 261890,
+      "actual_finite": true,
+      "expected_finite": true,
+      "mismatch_count": 241384,
+      "element_count": 262144,
+      "max_abs_error": 0.9439849853515625,
+      "mean_abs_error": 0.1352253556251526
+    },
+    "negative_wrong_preseed_vs_cpu": {
+      "allclose_rtol_1e2_atol_1e2": false,
+      "bitwise_equal": false,
+      "exact_mismatch_count": 261759,
+      "actual_finite": true,
+      "expected_finite": true,
+      "mismatch_count": 233197,
+      "element_count": 262144,
+      "max_abs_error": 0.4910888671875,
+      "mean_abs_error": 0.09639573097229004
+    },
+    "positive_correct_preseed_vs_cpu": {
+      "allclose_rtol_1e2_atol_1e2": false,
+      "bitwise_equal": false,
+      "exact_mismatch_count": 261890,
+      "actual_finite": true,
+      "expected_finite": true,
+      "mismatch_count": 241384,
+      "element_count": 262144,
+      "max_abs_error": 0.9439849853515625,
+      "mean_abs_error": 0.1352253556251526
+    },
+    "repeat_without_reseed_vs_cpu": {
+      "allclose_rtol_1e2_atol_1e2": false,
+      "bitwise_equal": false,
+      "exact_mismatch_count": 261836,
+      "actual_finite": true,
+      "expected_finite": true,
+      "mismatch_count": 237584,
+      "element_count": 262144,
+      "max_abs_error": 0.7445068359375,
+      "mean_abs_error": 0.10960478335618973
+    },
+    "restored_after_reseed_vs_cpu": {
+      "allclose_rtol_1e2_atol_1e2": false,
+      "bitwise_equal": false,
+      "exact_mismatch_count": 261890,
+      "actual_finite": true,
+      "expected_finite": true,
+      "mismatch_count": 241384,
+      "element_count": 262144,
+      "max_abs_error": 0.9439849853515625,
+      "mean_abs_error": 0.1352253556251526
+    },
+    "negative_vs_positive": {
+      "allclose_rtol_1e2_atol_1e2": false,
+      "bitwise_equal": false,
+      "exact_mismatch_count": 261375,
+      "actual_finite": true,
+      "expected_finite": true,
+      "mismatch_count": 233541,
+      "element_count": 262144,
+      "max_abs_error": 0.5029983520507812,
+      "mean_abs_error": 0.09748227149248123
+    },
+    "repeat_without_reseed_vs_positive": {
+      "allclose_rtol_1e2_atol_1e2": false,
+      "bitwise_equal": false,
+      "exact_mismatch_count": 261483,
+      "actual_finite": true,
+      "expected_finite": true,
+      "mismatch_count": 234292,
+      "element_count": 262144,
+      "max_abs_error": 0.6524658203125,
+      "mean_abs_error": 0.09950864315032959
+    },
+    "positive_vs_normal": {
+      "allclose_rtol_1e2_atol_1e2": true,
+      "bitwise_equal": true,
+      "exact_mismatch_count": 0,
+      "actual_finite": true,
+      "expected_finite": true,
+      "mismatch_count": 0,
+      "element_count": 262144,
+      "max_abs_error": 0.0,
+      "mean_abs_error": 0.0
+    },
+    "restored_vs_normal": {
+      "allclose_rtol_1e2_atol_1e2": true,
+      "bitwise_equal": true,
+      "exact_mismatch_count": 0,
+      "actual_finite": true,
+      "expected_finite": true,
+      "mismatch_count": 0,
+      "element_count": 262144,
+      "max_abs_error": 0.0,
+      "mean_abs_error": 0.0
+    }
+  }
+}
