@@ -16,11 +16,13 @@ import dataclasses
 import math
 from typing import Any
 from collections import Counter
-from sympy import Integer, Symbol, Expr, Mod, floor
+from sympy import Integer, Symbol, Expr
 
 from torch._inductor.virtualized import V
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.constants import (
+    BATCH_MATMUL_FP8_OP,
+    BATCH_MATMUL_OP,
     IDENTITY_OP,
     INPUT_DIM_LABELS,
     OUTPUT_DIM_LABELS,
@@ -31,6 +33,11 @@ from torch_spyre._inductor.constants import (
     TOPK_OPS,
 )
 from torch_spyre._inductor import config as _spyre_config
+from torch_spyre._inductor.core_mapping import (
+    materialize_core_mapping,
+    resolve_core_mapping,
+    select_core_mapping_policy,
+)
 from torch_spyre._inductor.indirect_access import (
     compute_indirect_max_dim_sizes,
     get_index_tensor_for_value,
@@ -158,69 +165,6 @@ class SDSCSpec:
         return "SDSCSpec(\n" + "\n".join(parts) + "\n)"
 
 
-def _get_core_to_slice_mapping(
-    iteration_space, dim_splits: dict[Symbol, int], num_cores: int
-) -> dict[Symbol, Expr]:
-    core_id_sym = Symbol("core_id")
-
-    dim_to_expr: dict[str, object] = {}
-    inner_product = Integer(1)
-
-    for dim in iteration_space:
-        if dim_splits[dim] == 1:
-            expr = Integer(0)
-        elif inner_product == Integer(1):
-            expr = Mod(core_id_sym, Integer(dim_splits[dim]))
-        else:
-            expr = Mod(floor(core_id_sym / inner_product), Integer(dim_splits[dim]))
-        dim_to_expr[str(dim)] = expr
-        inner_product = inner_product * Integer(dim_splits[dim])
-
-    return dim_to_expr
-
-
-def _k_fast_core_to_slice_mapping(
-    iteration_space, dim_splits: dict[Symbol, int], num_cores: int
-) -> dict[Symbol, Expr]:
-    """K-cohort-adjacent core-to-slice mapping for matmul.
-
-    Computed directly from the same `(iteration_space, dim_splits, num_cores)`
-    inputs as `_get_core_to_slice_mapping`, by treating the K (reduction) dim
-    as the innermost/fastest-varying axis along `core_id`. K-cohort members
-    (varying `i_k`, fixed `i_m, i_n`) then sit at adjacent physical core IDs,
-    so the PSUM ring reduction traverses 1 hop per output tile instead of
-    `m * n`.
-
-    Caller is responsible for the gating decision (matmul + k_fast flag + k>1).
-    """
-    dim_list = list(iteration_space.keys())
-    k_dim = dim_list[-1]
-    reordered = {k_dim: iteration_space[k_dim]}
-    for d in dim_list[:-1]:
-        reordered[d] = iteration_space[d]
-    return _get_core_to_slice_mapping(reordered, dim_splits, num_cores)
-
-
-def _should_use_k_fast_mapping(
-    is_matmul: bool, iteration_space, dim_splits: dict[Symbol, int]
-) -> bool:
-    """Decide whether the k_fast mapping should be used for this op.
-
-    Fires only when all three hold: this op is a matmul, the feature flag is
-    on, and the planner has chosen a K-split (k > 1). When k == 1 the k_fast
-    mapping is identical to the default, so we just use the default to keep
-    the code path explicit.
-    """
-    if not is_matmul:
-        return False
-    if not _spyre_config.core_id_k_fast_emission:
-        return False
-    dim_list = list(iteration_space.keys())
-    if len(dim_list) < 3:
-        return False
-    return dim_splits[dim_list[-1]] > 1
-
-
 def _get_mask_value(op: str) -> float:
     return float("-inf") if op == "max" else float("inf") if op == "min" else 0
 
@@ -323,7 +267,7 @@ def _get_padded_iteration_space(
 
 
 def _is_matmul(op: str) -> bool:
-    return op in ("matmul", "batchmatmul", "batchmatmulfp8")
+    return op in ("matmul", BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP)
 
 
 def _is_topk(op: str) -> bool:
@@ -861,14 +805,24 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     if _is_topk(op_spec.op):
         num_inputs = 1  # topk has exactly 1 input tensor and 1 output tensor
 
-    if _should_use_k_fast_mapping(is_matmul, sdsc_iteration_space, dim_splits):
-        core_id_to_work_slice = _k_fast_core_to_slice_mapping(
-            sdsc_iteration_space, dim_splits, num_cores
-        )
-    else:
-        core_id_to_work_slice = _get_core_to_slice_mapping(
-            sdsc_iteration_space, dim_splits, num_cores
-        )
+    mapping_dims = tuple(sdsc_iteration_space)
+    mapping_splits = tuple(int(dim_splits[dim]) for dim in mapping_dims)
+    mapping_num_cores = int(num_cores)
+    reduction_axis = len(mapping_splits) - 1 if is_matmul else None
+    policy = select_core_mapping_policy(
+        mapping_splits,
+        reduction_axis=reduction_axis,
+        enable_reduction_fast=(is_matmul and _spyre_config.core_id_k_fast_emission),
+    )
+    core_mapping = resolve_core_mapping(
+        mapping_splits,
+        mapping_num_cores,
+        policy=policy,
+        reduction_axis=reduction_axis,
+    )
+    core_id_to_work_slice = materialize_core_mapping(
+        core_mapping, mapping_dims, mapping_splits, mapping_num_cores
+    )
 
     # Collect index tensor indices for indirect access
     indirect_access_indices = [
