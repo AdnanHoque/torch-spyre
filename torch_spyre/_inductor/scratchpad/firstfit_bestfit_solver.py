@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import heapq
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Optional, Callable
 
@@ -21,16 +22,13 @@ from torch_spyre._inductor.scratchpad.plan_solver import (
     MemoryPlanSolver,
     _assert_in_place_relationships,
 )
+from torch_spyre._inductor.scratchpad.utils import round_up_to_alignment
 
 __all__ = [
     "FirstFitLayoutSolver",
     "BestFitLayoutSolver",
     "_assert_in_place_relationships",
 ]
-
-
-def round_up_to_alignment(arg: int, alignment: int) -> int:
-    return ((arg + alignment - 1) // alignment) * alignment
 
 
 @dataclass(frozen=True)
@@ -151,7 +149,10 @@ class FirstFitLayoutSolver(MemoryPlanSolver):
         placed_by_name = {b.name: b for b in placed}
         for i, gap in enumerate(gaps):
             new_parents = list(gap.in_place_parents)
-            for parent_name in parent_names:
+            # Don't use the set for iteration: plan_layout reuses in_place_parents[0], so a
+            # hash-ordered append here would pick a different in-place parent (hence
+            # a different address) run-to-run under PYTHONHASHSEED.
+            for parent_name in buffer.in_place_parents:
                 parent = placed_by_name.get(parent_name)
                 if parent is None or parent.address is None:
                     continue
@@ -175,7 +176,7 @@ class FirstFitLayoutSolver(MemoryPlanSolver):
         return None
 
     def plan_layout(
-        self, buffers: list[LifetimeBoundBuffer], log_lx_usage: bool = False
+        self, buffers: Sequence[LifetimeBoundBuffer], log_lx_usage: bool = False
     ) -> list[LifetimeBoundBuffer]:
         if not buffers:
             return []
@@ -221,7 +222,7 @@ class FirstFitLayoutSolver(MemoryPlanSolver):
                     buffer.address = round_up_to_alignment(gap.start, self.alignment)
                     names_to_addresses[buffer.name] = buffer.address
 
-        return buffers
+        return list(buffers)
 
 
 class BestFitLayoutSolver(FirstFitLayoutSolver):
