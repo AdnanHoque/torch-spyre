@@ -224,6 +224,9 @@ def test_relayout_keeps_producer_inputs_live_through_shuffle(monkeypatch):
     plan = _all_gather_plan()
     producer_input = LifetimeBoundBuffer("producer_input", size=128, uses=[0, 1])
     source = LifetimeBoundBuffer("buf_k", size=128, uses=[1, 2])
+    producer_child = LifetimeBoundBuffer(
+        "producer_child", size=128, uses=[1, 2], in_place_parents=["producer_input"]
+    )
     allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
     allocator._lx_relayout_plans_by_source = {"buf_k": plan}
     monkeypatch.setattr(
@@ -232,9 +235,12 @@ def test_relayout_keeps_producer_inputs_live_through_shuffle(monkeypatch):
         lambda _: SimpleNamespace(reads=[SimpleNamespace(name="producer_input")]),
     )
 
-    allocator._append_lx_relayout_destinations(graph, [producer_input, source])
+    allocator._append_lx_relayout_destinations(
+        graph, [producer_input, source, producer_child]
+    )
 
     assert producer_input.uses == [0, 1, 2]
+    assert producer_child.in_place_parents == []
 
 
 def test_planned_restickify_source_is_eligible_for_lx_reuse(monkeypatch):

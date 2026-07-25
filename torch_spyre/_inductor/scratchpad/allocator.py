@@ -818,6 +818,14 @@ class ScratchpadAllocator:
                         producer_input.uses = sorted(
                             {*producer_input.uses, shuffle_use}
                         )
+                        # The input now stays live past its original in-place
+                        # handoff, so its storage cannot be reused there.
+                        for child in buffers:
+                            child.in_place_parents = [
+                                parent
+                                for parent in child.in_place_parents
+                                if parent != producer_input.name
+                            ]
 
             # The original graph models the consumer as reading S1 directly,
             # so S1's liveness extends through the consumer compute. The
