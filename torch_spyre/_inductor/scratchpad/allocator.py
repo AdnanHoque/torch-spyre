@@ -334,8 +334,12 @@ class ScratchpadAllocator:
             return False
         if isinstance(op.layout, MutationLayoutSHOULDREMOVE):
             return False
-        return config.allow_all_ops_in_lx_planning or (
-            self._get_op_name(op) in OP_OUTPUT_GOOD_FOR_LX_REUSE
+        # A collected relayout plan is an eligibility contract for its exact source.
+        is_lx_relayout_source = op.get_name() in self._lx_relayout_plans_by_source
+        return (
+            config.allow_all_ops_in_lx_planning
+            or self._get_op_name(op) in OP_OUTPUT_GOOD_FOR_LX_REUSE
+            or is_lx_relayout_source
         )
 
     @staticmethod

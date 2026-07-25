@@ -237,6 +237,41 @@ def test_relayout_keeps_producer_inputs_live_through_shuffle(monkeypatch):
     assert producer_input.uses == [0, 1, 2]
 
 
+def test_planned_restickify_source_is_eligible_for_lx_reuse(monkeypatch):
+    class _MutationLayout:
+        pass
+
+    class _ComputedBuffer:
+        def __init__(self, name, layout=None):
+            self.name = name
+            self.layout = SimpleNamespace() if layout is None else layout
+
+        def get_name(self):
+            return self.name
+
+    allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
+    allocator._lx_relayout_plans_by_source = {"buf_k": _all_gather_plan()}
+    source = _ComputedBuffer("buf_k")
+    unrelated = _ComputedBuffer("unrelated")
+    mutated_source = _ComputedBuffer("buf_k", _MutationLayout())
+    monkeypatch.setattr(allocator_module, "ComputedBuffer", _ComputedBuffer)
+    monkeypatch.setattr(
+        allocator_module,
+        "MutationLayoutSHOULDREMOVE",
+        _MutationLayout,
+    )
+    monkeypatch.setattr(
+        allocator_module.config,
+        "allow_all_ops_in_lx_planning",
+        False,
+    )
+    monkeypatch.setattr(allocator, "_get_op_name", lambda _: "restickify")
+
+    assert allocator._op_output_good_for_lx_reuse(source)
+    assert not allocator._op_output_good_for_lx_reuse(unrelated)
+    assert not allocator._op_output_good_for_lx_reuse(mutated_source)
+
+
 def test_all_gather_emits_standard_shuffle_fold_geometry():
     h = Symbol("h")
     lq = Symbol("lq")
