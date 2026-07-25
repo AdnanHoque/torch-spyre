@@ -242,6 +242,36 @@ class ScratchpadAllocator:
         if len(complete_relayouts) == len(self._lx_relayout_plans_by_source):
             return allocation
 
+        complete_sources = {plan.source_name for plan, _ in complete_relayouts}
+        if complete_sources:
+            # First-fit may realize a useful subset even when a larger later
+            # relayout cannot fit. Preserve every complete S1/S2 pair and drop
+            # only incomplete pairs; their sources fall back to HBM. Replanning
+            # here could move the already-complete pairs and lose that maximal
+            # subset.
+            incomplete_sources = (
+                set(self._lx_relayout_plans_by_source) - complete_sources
+            )
+            removed_names = set(incomplete_sources)
+            removed_names.update(
+                self._lx_relayout_plans_by_source[source_name].destination_name
+                for source_name in incomplete_sources
+            )
+            for buffer in allocation:
+                if buffer.name in removed_names:
+                    buffer.address = None
+                buffer.in_place_parents = [
+                    parent
+                    for parent in buffer.in_place_parents
+                    if parent not in removed_names
+                ]
+            self._lx_relayout_plans_by_source = {
+                source_name: plan
+                for source_name, plan in self._lx_relayout_plans_by_source.items()
+                if source_name in complete_sources
+            }
+            return list(allocation)
+
         # Replanning can move every buffer, so fall back every relayout pair
         # atomically rather than retaining a partially allocated pair.
         removed_names = set(self._lx_relayout_plans_by_source)

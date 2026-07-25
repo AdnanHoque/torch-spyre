@@ -74,6 +74,21 @@ def _all_gather_plan() -> LXRelayoutPlan:
     )
 
 
+def _granite_mlp_all_to_all_plan() -> LXRelayoutPlan:
+    producer_map = {str(core): {"0": core // 8, "1": core % 8} for core in range(32)}
+    consumer_map = {str(core): {"0": core, "1": 0} for core in range(32)}
+    return LXRelayoutPlan(
+        source_name="buf_mlp",
+        consumer_name="pointwise",
+        source_core_id_to_device_slice=producer_map,
+        destination_core_id_to_device_slice=consumer_map,
+        source_device_dim_splits={"0": 4, "1": 8},
+        destination_device_dim_splits={"0": 32, "1": 1},
+        destination_size_ratio=1,
+        destination_lx_address=0x44000,
+    )
+
+
 def _overlap(lhs, rhs):
     return lhs.address < rhs.address + rhs.size and rhs.address < lhs.address + lhs.size
 
@@ -166,6 +181,82 @@ def test_all_to_all_geometry_and_emission():
     assert args[0].name == args[1].name == plan.destination_name
 
 
+def test_dense_common_refinement_geometries():
+    producer_8x4 = {str(core): {"0": core // 4, "1": core % 4} for core in range(32)}
+    partition_4x8 = {str(core): {"0": core // 8, "1": core % 8} for core in range(32)}
+    partition_32x1 = {str(core): {"0": core, "1": 0} for core in range(32)}
+
+    assert (
+        _destination_size_ratio(
+            producer_8x4,
+            {"0": 8, "1": 4},
+            partition_4x8,
+            {"0": 4, "1": 8},
+        )
+        == 1
+    )
+    assert (
+        _destination_size_ratio(
+            partition_4x8,
+            {"0": 4, "1": 8},
+            partition_32x1,
+            {"0": 32, "1": 1},
+        )
+        == 1
+    )
+
+    incomplete_partition = {
+        str(core): {"0": core // 8, "1": core % 8} for core in range(32)
+    }
+    assert (
+        _destination_size_ratio(
+            incomplete_partition,
+            {"0": 8, "1": 8},
+            partition_32x1,
+            {"0": 32, "1": 1},
+        )
+        is None
+    )
+
+
+def test_granite_mlp_common_refinement_emits_standard_shuffle():
+    m = Symbol("m")
+    n = Symbol("n")
+    plan = _granite_mlp_all_to_all_plan()
+    source_arg = TensorArg(
+        is_input=True,
+        arg_index=-1,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[512, 200, 64],
+        device_coordinates=[m, floor(n / 64), Mod(n, 64)],
+        allocation={"lx": 0x24000},
+        name=plan.source_name,
+    )
+    consumer_spec = OpSpec(
+        op="silu",
+        is_reduction=False,
+        iteration_space={m: (Integer(512), 32), n: (Integer(12800), 1)},
+        args=[source_arg],
+        op_info={},
+    )
+
+    result = _materialize_explicit_lx_shuffle(source_arg, consumer_spec, plan)
+
+    assert result is not None
+    shuffle_spec, consumer_arg = result
+    root, allocations = _compile_shuffle(shuffle_spec)
+    assert root["numCoresUsed_"] == 32
+    assert consumer_arg.name == plan.destination_name
+    assert consumer_arg.allocation == {"lx": plan.destination_lx_address}
+
+    producer_geometry = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
+    consumer_geometry = allocations[1]["coordinates_"]["coreIdToWkSlice_"]
+    assert producer_geometry["0"] == {"mb": 0, "out": 0}
+    assert producer_geometry["31"] == {"mb": 3, "out": 7}
+    assert consumer_geometry["0"] == {"mb": 0, "out": 0}
+    assert consumer_geometry["31"] == {"mb": 31, "out": 0}
+
+
 def test_expanding_geometry_is_allocated_atomically_or_falls_back():
     graph = _DummyGraph("producer", "independent_1", "independent_2", "consumer")
     # GraphEditor may insert operations without updating GraphLowering's buffer map.
@@ -241,6 +332,68 @@ def test_relayout_keeps_producer_inputs_live_through_shuffle(monkeypatch):
 
     assert producer_input.uses == [0, 1, 2]
     assert producer_child.in_place_parents == []
+
+
+def test_partial_relayout_fallback_keeps_complete_pairs():
+    complete_plan = replace(
+        _all_gather_plan(), source_name="complete", consumer_name="consumer_a"
+    )
+    incomplete_plan = replace(
+        _all_gather_plan(), source_name="incomplete", consumer_name="consumer_b"
+    )
+    complete_source = LifetimeBoundBuffer("complete", size=128, uses=[0, 1])
+    complete_destination = LifetimeBoundBuffer(
+        complete_plan.destination_name, size=128, uses=[1, 2]
+    )
+    incomplete_source = LifetimeBoundBuffer("incomplete", size=128, uses=[2, 3])
+    incomplete_destination = LifetimeBoundBuffer(
+        incomplete_plan.destination_name, size=128, uses=[3, 4]
+    )
+    dependent = LifetimeBoundBuffer(
+        "dependent",
+        size=128,
+        uses=[3, 4],
+        in_place_parents=["incomplete"],
+    )
+    buffers = [
+        complete_source,
+        complete_destination,
+        incomplete_source,
+        incomplete_destination,
+        dependent,
+    ]
+
+    class _PartialLayout:
+        spill_reasons = {}
+
+        def plan_layout(self, planned_buffers, log_lx_usage=False):
+            del log_lx_usage
+            addresses = {
+                "complete": 0,
+                complete_plan.destination_name: 256,
+                "incomplete": 512,
+                incomplete_plan.destination_name: None,
+                "dependent": 640,
+            }
+            for buffer in planned_buffers:
+                buffer.address = addresses[buffer.name]
+            return list(planned_buffers)
+
+    allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
+    allocator._lx_relayout_plans_by_source = {
+        "complete": complete_plan,
+        "incomplete": incomplete_plan,
+    }
+    allocation = allocator._plan_layout_with_atomic_relayouts(_PartialLayout(), buffers)
+    by_name = {buffer.name: buffer for buffer in allocation}
+
+    assert by_name["complete"].address == 0
+    assert by_name[complete_plan.destination_name].address == 256
+    assert by_name["incomplete"].address is None
+    assert by_name[incomplete_plan.destination_name].address is None
+    assert by_name["dependent"].address == 640
+    assert by_name["dependent"].in_place_parents == []
+    assert allocator._lx_relayout_plans_by_source == {"complete": complete_plan}
 
 
 def test_planned_restickify_source_is_eligible_for_lx_reuse(monkeypatch):

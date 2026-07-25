@@ -23,6 +23,7 @@ S1 -> SHUFFLE -> S2 sequence.
 from __future__ import annotations
 
 import dataclasses
+import math
 
 import sympy
 from torch._inductor.dependencies import MemoryDep
@@ -122,16 +123,15 @@ def _destination_size_ratio(
     covers_all_cores = (
         min(fanout_values, default=0) > 0 and min(fanin_values, default=0) > 0
     )
-    producer_is_partitioned = slice_count(producer_map) == len(producer_map)
-    consumer_is_partitioned = slice_count(consumer_map) == len(consumer_map)
+    producer_is_partitioned = slice_count(producer_map) == len(
+        producer_map
+    ) and math.prod(producer_splits.values()) == len(producer_map)
+    consumer_is_partitioned = slice_count(consumer_map) == len(
+        consumer_map
+    ) and math.prod(consumer_splits.values()) == len(consumer_map)
     if transfer_count == 0 or not covers_all_cores or not uniform:
         return None
-    if (
-        producer_is_partitioned
-        and consumer_is_partitioned
-        and max_fanout <= 1
-        and max_fanin <= 1
-    ):
+    if producer_is_partitioned and consumer_is_partitioned:
         return 1
     if (
         producer_is_partitioned
