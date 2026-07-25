@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from enum import StrEnum
 
 import sympy
 from torch._inductor.dependencies import MemoryDep
@@ -41,6 +42,20 @@ from torch_spyre._inductor.scratchpad.utils import _op_num_cores, _op_short_name
 
 LX_RELAYOUT_ATTR = "_spyre_lx_relayout_inputs"
 LX_RELAYOUT_DESTINATION_PREFIX = "__spyre_lx_relayout_destination__"
+
+
+class LXCollectiveKind(StrEnum):
+    """Logical communication classes lowered through the physical SHUFFLE op."""
+
+    ALL_TO_ALL = "all_to_all"
+    ALL_GATHER = "all_gather"
+    BROADCAST = "broadcast"
+
+
+@dataclasses.dataclass(frozen=True)
+class _LXRelayoutClassification:
+    collective_kind: LXCollectiveKind
+    destination_size_ratio: int
 
 
 def make_lx_relayout_destination_name(source_name: str) -> str:
@@ -61,6 +76,7 @@ class LXRelayoutPlan:
     destination_core_id_to_device_slice: dict[str, dict[str, int]]
     source_device_dim_splits: dict[str, int]
     destination_device_dim_splits: dict[str, int]
+    collective_kind: LXCollectiveKind
     destination_size_ratio: int
     destination_lx_address: int | None = None
 
@@ -77,15 +93,17 @@ def _intervals_overlap(
     )
 
 
-def _destination_size_ratio(
+def _classify_lx_relayout(
     producer_map: dict[str, dict[str, int]],
     producer_splits: dict[str, int],
     consumer_map: dict[str, dict[str, int]],
     consumer_splits: dict[str, int],
-) -> int | None:
-    """Return S2:S1 per-core size ratio for exact uniform shuffle geometry."""
+) -> _LXRelayoutClassification | None:
+    """Classify exact, uniform geometry supported by the LX relayout path."""
 
-    if producer_map.keys() != consumer_map.keys():
+    producer_cores = set(producer_map)
+    consumer_cores = set(consumer_map)
+    if not producer_cores or not consumer_cores:
         return None
 
     def slice_count(core_map: dict[str, dict[str, int]]) -> int:
@@ -129,18 +147,61 @@ def _destination_size_ratio(
     consumer_is_partitioned = slice_count(consumer_map) == len(
         consumer_map
     ) and math.prod(consumer_splits.values()) == len(consumer_map)
-    if transfer_count == 0 or not covers_all_cores or not uniform:
-        return None
-    if producer_is_partitioned and consumer_is_partitioned:
-        return 1
     if (
-        producer_is_partitioned
+        transfer_count == 0
+        or not covers_all_cores
+        or not uniform
+        or not producer_cores.issubset(consumer_cores)
+    ):
+        return None
+
+    same_participants = producer_cores == consumer_cores
+    if same_participants and producer_is_partitioned and consumer_is_partitioned:
+        return _LXRelayoutClassification(LXCollectiveKind.ALL_TO_ALL, 1)
+
+    # A broadcast has one physical source owner and replicates that complete
+    # source slice to every participating consumer core. Keep this source map
+    # sparse: padding it with repeated owners would falsely claim that the
+    # value was already resident on every core.
+    producer_slice_count = slice_count(producer_map)
+    consumer_slice_count = slice_count(consumer_map)
+    if (
+        len(producer_map) == 1
+        and producer_is_partitioned
+        and producer_slice_count == 1
+        and not consumer_is_partitioned
+        and consumer_slice_count == 1
+        and max_fanout == len(consumer_map)
+        and max_fanin == 1
+    ):
+        return _LXRelayoutClassification(LXCollectiveKind.BROADCAST, 1)
+
+    if (
+        same_participants
+        and producer_is_partitioned
         and not consumer_is_partitioned
         and max_fanout > 1
         and max_fanin > 1
     ):
-        return max_fanin
+        return _LXRelayoutClassification(LXCollectiveKind.ALL_GATHER, max_fanin)
     return None
+
+
+def _destination_size_ratio(
+    producer_map: dict[str, dict[str, int]],
+    producer_splits: dict[str, int],
+    consumer_map: dict[str, dict[str, int]],
+    consumer_splits: dict[str, int],
+) -> int | None:
+    """Return S2:S1 per-core size ratio for supported relayout geometry."""
+
+    classification = _classify_lx_relayout(
+        producer_map,
+        producer_splits,
+        consumer_map,
+        consumer_splits,
+    )
+    return None if classification is None else classification.destination_size_ratio
 
 
 def _single_write_dep(op: ComputedBuffer, buf_name: str) -> MemoryDep | None:
@@ -287,11 +348,14 @@ def collect_lx_relayout_plans(
             )
             if consumer_has_partial or not consumer_representable:
                 continue
-            if producer_view == consumer_view:
-                continue
 
             producer_core_count = _op_num_cores(producer)
             consumer_core_count = _op_num_cores(consumer)
+            if (
+                producer_view == consumer_view
+                and producer_core_count == consumer_core_count
+            ):
+                continue
             producer_core_slices = _core_id_to_device_slice(
                 producer_view, producer_core_count
             )
@@ -315,13 +379,13 @@ def collect_lx_relayout_plans(
             consumer_core_slices, consumer_work_slice_dims = _dense_view(
                 consumer_core_slices, consumer_work_slice_dims, relayout_dims
             )
-            destination_size_ratio = _destination_size_ratio(
+            classification = _classify_lx_relayout(
                 producer_core_slices,
                 producer_work_slice_dims,
                 consumer_core_slices,
                 consumer_work_slice_dims,
             )
-            if destination_size_ratio is None:
+            if classification is None:
                 continue
 
             if is_matmul_consumer and (
@@ -338,7 +402,8 @@ def collect_lx_relayout_plans(
                     destination_core_id_to_device_slice=consumer_core_slices,
                     source_device_dim_splits=producer_work_slice_dims,
                     destination_device_dim_splits=consumer_work_slice_dims,
-                    destination_size_ratio=destination_size_ratio,
+                    collective_kind=classification.collective_kind,
+                    destination_size_ratio=classification.destination_size_ratio,
                 )
             )
 

@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 from sympy import Integer, Mod, Symbol, floor
 
+import torch_spyre._inductor.lx_relayout as lx_relayout_module
 import torch_spyre._inductor.scratchpad.allocator as allocator_module
 
 from torch_spyre._C import DataFormats
@@ -24,11 +25,14 @@ from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.constants import BATCH_MATMUL_OP
 from torch_spyre._inductor.lx_relayout import (
     LX_RELAYOUT_ATTR,
+    LXCollectiveKind,
     LXRelayoutPlan,
+    _classify_lx_relayout,
     _destination_size_ratio,
+    collect_lx_relayout_plans,
 )
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
-from torch_spyre._inductor.pass_utils import copy_fx_custom_meta
+from torch_spyre._inductor.pass_utils import PerCoreView, copy_fx_custom_meta
 from torch_spyre._inductor.propagate_hints import get_gather_dim
 from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
 from torch_spyre._inductor.scratchpad.firstfit_bestfit_solver import (
@@ -70,6 +74,7 @@ def _all_gather_plan() -> LXRelayoutPlan:
         destination_core_id_to_device_slice=consumer_map,
         source_device_dim_splits={"0": 4, "1": 8},
         destination_device_dim_splits={"0": 4, "1": 1},
+        collective_kind=LXCollectiveKind.ALL_GATHER,
         destination_size_ratio=8,
     )
 
@@ -84,6 +89,23 @@ def _granite_mlp_all_to_all_plan() -> LXRelayoutPlan:
         destination_core_id_to_device_slice=consumer_map,
         source_device_dim_splits={"0": 4, "1": 8},
         destination_device_dim_splits={"0": 32, "1": 1},
+        collective_kind=LXCollectiveKind.ALL_TO_ALL,
+        destination_size_ratio=1,
+        destination_lx_address=0x44000,
+    )
+
+
+def _broadcast_plan() -> LXRelayoutPlan:
+    producer_map = {"0": {}}
+    consumer_map = {str(core): {} for core in range(32)}
+    return LXRelayoutPlan(
+        source_name="broadcast_source",
+        consumer_name="consumer",
+        source_core_id_to_device_slice=producer_map,
+        destination_core_id_to_device_slice=consumer_map,
+        source_device_dim_splits={},
+        destination_device_dim_splits={},
+        collective_kind=LXCollectiveKind.BROADCAST,
         destination_size_ratio=1,
         destination_lx_address=0x44000,
     )
@@ -118,21 +140,25 @@ def test_gather_dim_hint_survives_metadata_copy():
 def test_all_to_all_geometry_and_emission():
     producer_map = {"0": {"0": 0}, "1": {"0": 1}}
     consumer_map = {"0": {"0": 1}, "1": {"0": 0}}
-    shuffle = _destination_size_ratio(
+    all_to_all = _classify_lx_relayout(
         producer_map,
         {"0": 2},
         consumer_map,
         {"0": 2},
     )
-    all_gather = _destination_size_ratio(
+    all_gather = _classify_lx_relayout(
         {"0": {"0": 0}, "1": {"0": 1}},
         {"0": 2},
         {"0": {"0": 0}, "1": {"0": 0}},
         {"0": 1},
     )
 
-    assert shuffle == 1
-    assert all_gather == 2
+    assert all_to_all is not None
+    assert all_to_all.collective_kind is LXCollectiveKind.ALL_TO_ALL
+    assert all_to_all.destination_size_ratio == 1
+    assert all_gather is not None
+    assert all_gather.collective_kind is LXCollectiveKind.ALL_GATHER
+    assert all_gather.destination_size_ratio == 2
 
     x = Symbol("x")
     plan = LXRelayoutPlan(
@@ -142,6 +168,7 @@ def test_all_to_all_geometry_and_emission():
         destination_core_id_to_device_slice=consumer_map,
         source_device_dim_splits={"0": 2},
         destination_device_dim_splits={"0": 2},
+        collective_kind=LXCollectiveKind.ALL_TO_ALL,
         destination_size_ratio=1,
         destination_lx_address=0x44000,
     )
@@ -179,6 +206,147 @@ def test_all_to_all_geometry_and_emission():
     )
     assert len(prefix) == 1
     assert args[0].name == args[1].name == plan.destination_name
+
+
+def test_broadcast_geometry_requires_one_physical_source_owner():
+    producer_map = {"0": {}}
+    consumer_map = {str(core): {} for core in range(32)}
+
+    classification = _classify_lx_relayout(
+        producer_map,
+        {},
+        consumer_map,
+        {},
+    )
+
+    assert classification is not None
+    assert classification.collective_kind is LXCollectiveKind.BROADCAST
+    assert classification.destination_size_ratio == 1
+
+    # Repeated producer owners would falsely claim the value already exists on
+    # every core. They are neither a partition nor a valid broadcast source.
+    padded_producer_map = {str(core): {} for core in range(32)}
+    assert (
+        _classify_lx_relayout(
+            padded_producer_map,
+            {},
+            consumer_map,
+            {},
+        )
+        is None
+    )
+
+    # Multiple independently replicated source shards are multicast cohorts,
+    # which are not yet supported by this planner.
+    multicast_producer_map = {"0": {"0": 0}, "1": {"0": 1}}
+    multicast_consumer_map = {
+        str(core): {"0": 0 if core < 16 else 1} for core in range(32)
+    }
+    assert (
+        _classify_lx_relayout(
+            multicast_producer_map,
+            {"0": 2},
+            multicast_consumer_map,
+            {"0": 2},
+        )
+        is None
+    )
+
+
+def test_planner_keeps_equal_view_edge_when_core_counts_require_broadcast(monkeypatch):
+    class _FakePointwise:
+        pass
+
+    class _FakeBuffer:
+        def __init__(self, name):
+            self.name = name
+            self.data = _FakePointwise()
+
+        def get_name(self):
+            return self.name
+
+    class _FakeDep:
+        def __init__(self, name):
+            self.name = name
+
+    producer = _FakeBuffer("broadcast_source")
+    consumer = _FakeBuffer("consumer")
+    source_write = _FakeDep(producer.name)
+    source_read = _FakeDep(producer.name)
+    consumer_write = _FakeDep(consumer.name)
+    graph = SimpleNamespace(operations=[producer, consumer])
+    whole_buffer_view = PerCoreView(work_slice_dims=(), core_to_slot=())
+
+    def read_writes(op):
+        if op is producer:
+            return SimpleNamespace(reads=[], writes=[source_write])
+        return SimpleNamespace(reads=[source_read], writes=[consumer_write])
+
+    monkeypatch.setattr(lx_relayout_module.config, "lx_planner_relayout", True)
+    monkeypatch.setattr(lx_relayout_module, "ComputedBuffer", _FakeBuffer)
+    monkeypatch.setattr(lx_relayout_module, "Pointwise", _FakePointwise)
+    monkeypatch.setattr(lx_relayout_module, "MemoryDep", _FakeDep)
+    monkeypatch.setattr(lx_relayout_module, "op_read_writes", read_writes)
+    monkeypatch.setattr(lx_relayout_module, "_is_matmul_op", lambda _: False)
+    monkeypatch.setattr(
+        lx_relayout_module,
+        "_per_core_view_on_buf",
+        lambda *_: (whole_buffer_view, False, True),
+    )
+    monkeypatch.setattr(
+        lx_relayout_module,
+        "_op_num_cores",
+        lambda op: 1 if op is producer else 32,
+    )
+
+    plans = collect_lx_relayout_plans(graph)
+
+    assert len(plans) == 1
+    plan = plans[0]
+    assert plan.collective_kind is LXCollectiveKind.BROADCAST
+    assert plan.source_core_id_to_device_slice == {"0": {}}
+    assert len(plan.destination_core_id_to_device_slice) == 32
+    assert all(
+        not per_core for per_core in plan.destination_core_id_to_device_slice.values()
+    )
+
+
+def test_broadcast_emits_one_to_all_standard_shuffle():
+    m = Symbol("m")
+    n = Symbol("n")
+    plan = _broadcast_plan()
+    source_arg = TensorArg(
+        is_input=True,
+        arg_index=-1,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[2, 64],
+        device_coordinates=[floor(n / 64), Mod(n, 64)],
+        allocation={"lx": 0x24000},
+        name=plan.source_name,
+    )
+    consumer_spec = OpSpec(
+        op="add",
+        is_reduction=False,
+        iteration_space={m: (Integer(32), 32), n: (Integer(128), 1)},
+        args=[source_arg, source_arg],
+        op_info={},
+    )
+
+    result = _materialize_explicit_lx_shuffle(source_arg, consumer_spec, plan)
+
+    assert result is not None
+    shuffle_spec, consumer_arg = result
+    assert shuffle_spec.op == "shuffle"
+    assert shuffle_spec.num_cores_override == 32
+    assert consumer_arg.allocation == {"lx": plan.destination_lx_address}
+    root, allocations = _compile_shuffle(shuffle_spec)
+    assert root["numCoresUsed_"] == 32
+
+    producer_geometry = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
+    consumer_geometry = allocations[1]["coordinates_"]["coreIdToWkSlice_"]
+    assert producer_geometry == {"0": {"out": 0}}
+    assert len(consumer_geometry) == 32
+    assert all(per_core == {"out": 0} for per_core in consumer_geometry.values())
 
 
 def test_dense_common_refinement_geometries():
@@ -308,6 +476,41 @@ def test_expanding_geometry_is_allocated_atomically_or_falls_back():
     assert by_name["scores"].address is not None
     fallback_allocator._record_successful_lx_relayouts(graph, allocation)
     assert not hasattr(graph.operations[3], LX_RELAYOUT_ATTR)
+
+
+def test_broadcast_destination_is_full_sized_and_disjoint():
+    graph = _DummyGraph("producer", "consumer")
+    plan = _broadcast_plan()
+    source = LifetimeBoundBuffer(plan.source_name, size=128 * 1024, uses=[0, 1])
+    consumer_output = LifetimeBoundBuffer(
+        "consumer_output",
+        size=128 * 1024,
+        uses=[1, 2],
+        in_place_parents=[plan.source_name],
+    )
+    allocator = ScratchpadAllocator(GreedyLayoutSolver(384 * 1024))
+    allocator._lx_relayout_plans_by_source = {plan.source_name: plan}
+    buffers = [source, consumer_output]
+
+    allocator._append_lx_relayout_destinations(graph, buffers)
+
+    destination = {buffer.name: buffer for buffer in buffers}[plan.destination_name]
+    assert destination.size == source.size
+    assert source.uses == [0, 1]
+    assert destination.uses == [1, 2]
+    assert consumer_output.uses == [2, 3]
+    assert consumer_output.in_place_parents == []
+
+    layout_planning = allocator._layout_planner_for_buffers(buffers)
+    allocation = allocator._plan_layout_with_atomic_relayouts(layout_planning, buffers)
+    by_name = {buffer.name: buffer for buffer in allocation}
+    assert all(buffer.address is not None for buffer in allocation)
+    assert not _overlap(by_name[plan.source_name], by_name[plan.destination_name])
+
+    allocator._record_successful_lx_relayouts(graph, allocation)
+    recorded = getattr(graph.operations[1], LX_RELAYOUT_ATTR)[plan.source_name]
+    assert recorded.collective_kind is LXCollectiveKind.BROADCAST
+    assert recorded.destination_lx_address == destination.address
 
 
 def test_relayout_keeps_producer_inputs_live_through_shuffle(monkeypatch):

@@ -442,8 +442,10 @@ def get_ncores_for_buffers(
                     # An LX (per-core scratchpad) buffer would then live on
                     # view_cores cores but be read by op_cores; the cores without
                     # a local copy read stale scratchpad -> wrong results. There is
-                    # no single-base LX broadcast, so treat it as a core-division
-                    # mismatch and keep the buffer in HBM (correct, just unpinned).
+                    # ordinary same-base LX reuse cannot broadcast, so treat it
+                    # as a core-division mismatch. An explicit relayout plan may
+                    # accept that mismatch below and materialize a separate,
+                    # allocator-reserved destination copy on every consumer core.
                     # This is not writer-relative: it catches broadcast reads even
                     # when the buffer has no in-graph writer (a graph input cloned
                     # into LX) or when a producer's view happens to match the

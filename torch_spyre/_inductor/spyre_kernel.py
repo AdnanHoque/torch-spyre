@@ -48,7 +48,7 @@ from .constants import (
 from . import config as _spyre_config
 from .errors import Unsupported
 from .ir import FixedTiledLayout
-from .lx_relayout import LX_RELAYOUT_ATTR, LXRelayoutPlan
+from .lx_relayout import LX_RELAYOUT_ATTR, LXCollectiveKind, LXRelayoutPlan
 from .pass_utils import (
     concretize_expr,
     concretize_index,
@@ -94,8 +94,16 @@ def _materialize_explicit_lx_shuffle(
     """Build one standard bounded S1 -> SHUFFLE -> S2 operation."""
     destination_address = plan.destination_lx_address
     destination_name = plan.destination_name
-    producer_map = plan.source_core_id_to_device_slice
-    consumer_map = plan.destination_core_id_to_device_slice
+    producer_map = {
+        core: dict(per_core)
+        for core, per_core in plan.source_core_id_to_device_slice.items()
+    }
+    consumer_map = {
+        core: dict(per_core)
+        for core, per_core in plan.destination_core_id_to_device_slice.items()
+    }
+    source_device_dim_splits = dict(plan.source_device_dim_splits)
+    destination_device_dim_splits = dict(plan.destination_device_dim_splits)
     participant_count = len(consumer_map)
     if "lx" not in source_arg.allocation or destination_address is None:
         return None
@@ -124,6 +132,26 @@ def _materialize_explicit_lx_shuffle(
     if not shuffle_iteration_space:
         return None
 
+    # A whole-buffer broadcast has no logically split tensor dimension, but
+    # the backend allocation contract still needs one unit-fold dimension to
+    # carry the sparse source owner and replicated destination owners. Anchor
+    # that physical metadata on the last non-stick device dimension without
+    # changing the logical communication geometry recorded in the plan.
+    if (
+        plan.collective_kind is LXCollectiveKind.BROADCAST
+        and not source_device_dim_splits
+        and not destination_device_dim_splits
+        and not any(producer_map.values())
+        and not any(consumer_map.values())
+    ):
+        if len(source_arg.device_coordinates) < 2:
+            return None
+        anchor_dim = str(len(source_arg.device_coordinates) - 2)
+        source_device_dim_splits[anchor_dim] = 1
+        destination_device_dim_splits[anchor_dim] = 1
+        producer_map = {core: {anchor_dim: 0} for core in producer_map}
+        consumer_map = {core: {anchor_dim: 0} for core in consumer_map}
+
     def splits_by_symbol(
         device_dim_splits: dict[str, int],
     ) -> dict[sympy.Symbol, int] | None:
@@ -147,8 +175,8 @@ def _materialize_explicit_lx_shuffle(
             splits_by_symbol[symbol] = split
         return splits_by_symbol
 
-    source_splits = splits_by_symbol(plan.source_device_dim_splits)
-    destination_splits = splits_by_symbol(plan.destination_device_dim_splits)
+    source_splits = splits_by_symbol(source_device_dim_splits)
+    destination_splits = splits_by_symbol(destination_device_dim_splits)
     if source_splits is None or destination_splits is None:
         return None
 
@@ -163,7 +191,7 @@ def _materialize_explicit_lx_shuffle(
         name=plan.source_name,
         allocation=dict(source_arg.allocation),
         allocation_core_id_to_device_slice=producer_map,
-        allocation_device_dim_splits=dict(plan.source_device_dim_splits),
+        allocation_device_dim_splits=source_device_dim_splits,
     )
     destination_input = replace(
         source_arg,
@@ -177,7 +205,7 @@ def _materialize_explicit_lx_shuffle(
         destination_input,
         is_input=False,
         allocation_core_id_to_device_slice=consumer_map,
-        allocation_device_dim_splits=dict(plan.destination_device_dim_splits),
+        allocation_device_dim_splits=destination_device_dim_splits,
     )
     shuffle = OpSpec(
         op="shuffle",
