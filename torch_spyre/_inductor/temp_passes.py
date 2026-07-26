@@ -14,6 +14,8 @@
 
 # This file contains inductor passes that are only needed as temp fixes
 
+import os
+
 import torch
 from torch._inductor.pattern_matcher import (
     Arg,
@@ -333,6 +335,46 @@ def _unflatten_bmm_batch_dims(
     # Get the original (pre-reshape) tensors
     lhs_orig = lhs_reshape.args[0]  # the expand or original tensor
     rhs_orig = rhs_reshape.args[0]
+    if os.environ.get("SPYRE_RELAYOUT_ORACLE_COMPACT_GQA", "0") == "1":
+        # Test-only SenDNN parity bridge.  PyTorch's N-D matmul decomposition
+        # expands a [B, KVH, 1, K, N] operand over the query-group dimension
+        # before flattening to bmm.  Preserve the broadcast view here so the
+        # Spyre lowering can read one compact KV head for all four query heads
+        # instead of materializing four copies.
+        expanded_rhs = rhs_orig
+        if (
+            isinstance(expanded_rhs, torch.fx.Node)
+            and expanded_rhs.op == "call_function"
+            and expanded_rhs.target == aten.clone.default
+        ):
+            expanded_rhs = expanded_rhs.args[0]
+        compact_rhs = (
+            expanded_rhs.args[0]
+            if isinstance(expanded_rhs, torch.fx.Node)
+            and expanded_rhs.op == "call_function"
+            and expanded_rhs.target == aten.expand.default
+            else None
+        )
+        expanded_shape = (
+            _node_shape(expanded_rhs)
+            if isinstance(expanded_rhs, torch.fx.Node)
+            else None
+        )
+        compact_shape = (
+            _node_shape(compact_rhs)
+            if isinstance(compact_rhs, torch.fx.Node)
+            else None
+        )
+        if (
+            expanded_shape is not None
+            and compact_shape is not None
+            and len(expanded_shape) == 5
+            and len(compact_shape) == 5
+            and _is_static_one(compact_shape[2])
+            and expanded_shape[:2] == compact_shape[:2]
+            and expanded_shape[3:] == compact_shape[3:]
+        ):
+            rhs_orig = compact_rhs
 
     # Replace the 3D bmm with a spyre.batched_matmul that accepts N-D inputs.
     # Using aten.bmm.default with >3D args would crash FakeTensorUpdater.

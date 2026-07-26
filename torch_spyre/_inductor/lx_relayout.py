@@ -23,7 +23,9 @@ S1 -> SHUFFLE -> S2 sequence.
 from __future__ import annotations
 
 import dataclasses
+import json
 import math
+import os
 from enum import StrEnum
 
 import sympy
@@ -275,6 +277,18 @@ def _work_slice_dims(view: PerCoreView) -> dict[str, int]:
     return {str(int(dim)): int(split) for dim, split in view.work_slice_dims}
 
 
+def _buffer_nbytes(graph: GraphLowering, buffer: ComputedBuffer) -> int | None:
+    """Return a conservative concrete byte size for relayout cost gating."""
+
+    try:
+        numel = graph.sizevars.size_hint(math.prod(buffer.get_size()))
+        return int(numel) * int(buffer.get_dtype().itemsize)
+    except (AttributeError, TypeError, ValueError):
+        # A configured limit fails closed for symbolic or otherwise unknown
+        # candidates; the unlimited default never consults this helper.
+        return None
+
+
 def _dense_view(
     core_map: dict[str, dict[str, int]],
     splits: dict[str, int],
@@ -310,6 +324,11 @@ def collect_lx_relayout_plans(
         return []
 
     operations = _operations_by_name(graph)
+    disabled_sources = {
+        value.strip()
+        for value in config.lx_relayout_disabled_sources.split(",")
+        if value.strip()
+    }
     read_counts: dict[str, int] = {}
     for op in graph.operations:
         for dep in op_read_writes(op).reads:
@@ -327,7 +346,15 @@ def collect_lx_relayout_plans(
             dep for dep in op_read_writes(consumer).reads if isinstance(dep, MemoryDep)
         )
         for read_index, dep in enumerate(reads):
-            if read_counts.get(dep.name, 0) != 1:
+            if dep.name in disabled_sources:
+                continue
+            read_count = read_counts.get(dep.name, 0)
+            oracle_shared_mlp_input = (
+                config.relayout_oracle_prefill_mlp_inputs
+                and dep.name == "buf52"
+                and read_count == 2
+            )
+            if read_count != 1 and not oracle_shared_mlp_input:
                 continue
             producer = operations.get(dep.name)
             if not isinstance(producer, ComputedBuffer) or producer is consumer:
@@ -387,6 +414,23 @@ def collect_lx_relayout_plans(
             )
             if classification is None:
                 continue
+            enabled_collectives = {
+                value.strip()
+                for value in config.lx_relayout_collectives.split(",")
+                if value.strip()
+            }
+            if classification.collective_kind.value not in enabled_collectives:
+                continue
+            if (
+                classification.collective_kind is LXCollectiveKind.ALL_TO_ALL
+                and config.lx_relayout_all_to_all_max_bytes >= 0
+            ):
+                producer_nbytes = _buffer_nbytes(graph, producer)
+                if (
+                    producer_nbytes is None
+                    or producer_nbytes > config.lx_relayout_all_to_all_max_bytes
+                ):
+                    continue
 
             if is_matmul_consumer and (
                 not _matmul_operand_source_good_for_lx_relayout(operations, producer)
@@ -406,6 +450,29 @@ def collect_lx_relayout_plans(
                     destination_size_ratio=classification.destination_size_ratio,
                 )
             )
+
+    dump_path = os.environ.get("SPYRE_LX_RELAYOUT_DUMP_PLANS")
+    if dump_path:
+        records = []
+        for plan in plans:
+            producer = operations[plan.source_name]
+            consumer = operations[plan.consumer_name]
+            records.append(
+                {
+                    **dataclasses.asdict(plan),
+                    "source_shape": [str(size) for size in producer.get_size()],
+                    "source_dtype": str(producer.get_dtype()),
+                    "producer_kind": _op_short_name(producer),
+                    "consumer_kind": _op_short_name(consumer),
+                    "consumer_reads": [
+                        dep.name
+                        for dep in op_read_writes(consumer).reads
+                        if isinstance(dep, MemoryDep)
+                    ],
+                }
+            )
+        with open(dump_path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(records, sort_keys=True) + "\n")
 
     return plans
 

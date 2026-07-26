@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import logging
 import math
+import os
 import time
 from bisect import bisect_right
 from collections.abc import Iterator, Sequence
@@ -149,6 +151,9 @@ class ScratchpadAllocator:
         self.layout_planning: Optional[MemoryPlanSolver] = layout_planning
         self._last_layout_planning: MemoryPlanSolver = layout_planning
         self._lx_relayout_plans_by_source: dict[str, LXRelayoutPlan] = {}
+        self._lx_relayout_alias_plans_by_source: dict[
+            str, list[LXRelayoutPlan]
+        ] = {}
 
     def plan_allocation(self, graph: GraphLowering):
         """Run pre-passes, assign LX addresses to eligible buffers, then run post-passes.
@@ -193,11 +198,59 @@ class ScratchpadAllocator:
         lifetimes: Optional[dict[str, list[int]]] = None,
     ) -> list[LifetimeBoundBuffer]:
         """Build fixed-division buffers plus any valid relayout destinations."""
-        self._lx_relayout_plans_by_source = {
-            plan.source_name: plan for plan in collect_lx_relayout_plans(graph, cache)
-        }
+        plans_by_source: dict[str, list[LXRelayoutPlan]] = {}
+        for plan in collect_lx_relayout_plans(graph, cache):
+            plans_by_source.setdefault(plan.source_name, []).append(plan)
+        self._lx_relayout_plans_by_source = {}
+        self._lx_relayout_alias_plans_by_source = {}
+        for source_name, plans in plans_by_source.items():
+            # The allocator needs one S1/S2 pair per source. Multiple consumers
+            # can share that pair only when their exact destination geometry is
+            # identical. Keep the last consumer canonical so S2's lifetime
+            # covers every earlier consumer.
+            canonical = plans[-1]
+            compatible = [
+                plan
+                for plan in plans
+                if (
+                    plan.source_core_id_to_device_slice
+                    == canonical.source_core_id_to_device_slice
+                    and plan.destination_core_id_to_device_slice
+                    == canonical.destination_core_id_to_device_slice
+                    and plan.source_device_dim_splits
+                    == canonical.source_device_dim_splits
+                    and plan.destination_device_dim_splits
+                    == canonical.destination_device_dim_splits
+                    and plan.collective_kind == canonical.collective_kind
+                    and plan.destination_size_ratio
+                    == canonical.destination_size_ratio
+                )
+            ]
+            self._lx_relayout_plans_by_source[source_name] = canonical
+            self._lx_relayout_alias_plans_by_source[source_name] = compatible
         buffers = self._generate_buffers(graph, cache, timings, lifetimes)
         self._append_lx_relayout_destinations(graph, buffers)
+        disabled_lx_buffers = {
+            name.strip()
+            for name in os.environ.get(
+                "SPYRE_RELAYOUT_ORACLE_DISABLED_LX_BUFFERS", ""
+            ).split(",")
+            if name.strip()
+        }
+        for buffer in buffers:
+            if buffer.name in disabled_lx_buffers:
+                buffer.residency_reason = "disabled by relayout replay oracle"
+        alias_source = os.environ.get("SPYRE_RELAYOUT_ORACLE_QK_OUTPUT_ALIAS", "")
+        alias_plan = self._lx_relayout_plans_by_source.get(alias_source)
+        if alias_plan is not None:
+            by_name = {buffer.name: buffer for buffer in buffers}
+            output = by_name.get(alias_plan.consumer_name)
+            destination = by_name.get(alias_plan.destination_name)
+            if output is not None and destination is not None:
+                output.in_place_parents = [
+                    *output.in_place_parents,
+                    destination.name,
+                ]
         return buffers
 
     def _solve(self, buffers: Sequence[Any]) -> Sequence[Any]:
@@ -268,6 +321,11 @@ class ScratchpadAllocator:
             self._lx_relayout_plans_by_source = {
                 source_name: plan
                 for source_name, plan in self._lx_relayout_plans_by_source.items()
+                if source_name in complete_sources
+            }
+            self._lx_relayout_alias_plans_by_source = {
+                source_name: plans
+                for source_name, plans in self._lx_relayout_alias_plans_by_source.items()
                 if source_name in complete_sources
             }
             return list(allocation)
@@ -354,10 +412,15 @@ class ScratchpadAllocator:
         """Commit relayout metadata only after all required LX storage exists."""
         clear_lx_relayout_metadata(graph)
         for plan, destination_address in self._iter_complete_lx_relayouts(allocation):
-            record_lx_relayout_plan(
-                graph,
-                replace(plan, destination_lx_address=destination_address),
-            )
+            for consumer_plan in self._lx_relayout_alias_plans_by_source.get(
+                plan.source_name, [plan]
+            ):
+                record_lx_relayout_plan(
+                    graph,
+                    replace(
+                        consumer_plan, destination_lx_address=destination_address
+                    ),
+                )
 
     def _op_output_good_for_lx_reuse(self, op: Any) -> bool:
         if not isinstance(op, ComputedBuffer):
@@ -769,7 +832,29 @@ class ScratchpadAllocator:
             ncores=ncores,
             ncores_reasons=ncores_reasons,
         )
+        disabled_lx_buffers = {
+            name.strip()
+            for name in os.environ.get(
+                "SPYRE_RELAYOUT_ORACLE_DISABLED_LX_BUFFERS", ""
+            ).split(",")
+            if name.strip()
+        }
+        for name in disabled_lx_buffers:
+            if name in reasons:
+                reasons[name] = "disabled by relayout replay oracle"
         in_place = self._determine_in_place(graph, mem_usage, lifetimes, reasons)
+        disabled_inplace = os.environ.get(
+            "SPYRE_RELAYOUT_ORACLE_DISABLED_INPLACE", ""
+        )
+        for item in disabled_inplace.split(","):
+            child, separator, parent = item.strip().partition(":")
+            if not separator:
+                continue
+            in_place[child] = [
+                candidate
+                for candidate in in_place.get(child, [])
+                if candidate != parent
+            ]
         return self._build_bound_buffers(
             graph,
             in_place,
@@ -928,8 +1013,45 @@ class ScratchpadAllocator:
         buffer_users = get_buffer_users(graph)
         graph_editor = GraphEditor(graph)
 
+        dump_path = os.environ.get("SPYRE_LX_RELAYOUT_DUMP_ALLOCATIONS")
+        if dump_path:
+            record = {
+                "graph_operation_count": len(graph.operations),
+                "graph_inputs": sorted(inputs),
+                "graph_outputs": sorted(outputs),
+                "relayout_sources": sorted(self._lx_relayout_plans_by_source),
+                "buffers": [
+                    {
+                        "allocation_index": index,
+                        "name": b.name,
+                        "size": b.size,
+                        "uses": b.uses,
+                        "first_use_is_read": b.first_use_is_read,
+                        "address": b.address,
+                        "in_place_parents": b.in_place_parents,
+                        "residency_reason": b.residency_reason,
+                        "reject_reason": self.reject_reasons.get(b.name),
+                        "is_graph_input": b.name in inputs,
+                        "is_graph_output": b.name in outputs,
+                        "is_relayout_destination": is_lx_relayout_destination(b.name),
+                    }
+                    for index, b in enumerate(buffers)
+                ],
+            }
+            with open(dump_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, sort_keys=True) + "\n")
+
         for b in buffers:
             if b.address is None or is_lx_relayout_destination(b.name):
+                continue
+
+            # Diagnostic only: a successful relayout solve can perturb the
+            # placement of unrelated graph inputs and therefore insert input
+            # clones.  Suppress only those clones while preserving the solved
+            # relayout source/destination addresses and every intermediate
+            # allocation, so correctness can be attributed to the transport
+            # edge rather than an allocator side effect.
+            if config.relayout_oracle_no_input_pinning and b.name in inputs:
                 continue
 
             buf = graph.get_buffer(b.name)
@@ -1597,6 +1719,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                 return relayout_buffers
         else:
             self._lx_relayout_plans_by_source = {}
+            self._lx_relayout_alias_plans_by_source = {}
 
         in_place = self._determine_in_place_division_invariant(graph)
         buffers = self._build_cd_bound_buffers(

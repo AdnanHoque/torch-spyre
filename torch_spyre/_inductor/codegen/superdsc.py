@@ -301,11 +301,48 @@ def _map_core_id_to_wk_slice_dims(
     for core, per_device_dim in core_id_to_device_slice.items():
         per_dim = {dim: 0 for dim in layout_dim_labels}
         for device_dim, slot in per_device_dim.items():
-            dim = device_dim_to_sdsc_dim.get(str(device_dim))
+            resolved_device_dim = str(device_dim)
+            if (
+                _spyre_config.relayout_oracle_compact_gqa
+                and resolved_device_dim not in device_dim_to_sdsc_dim
+                and set(device_dim_to_sdsc_dim) == {"0", "1", "2"}
+                and [str(dim) for dim in dim_order] == ["x", "out", "in"]
+            ):
+                # The compact transposed-K allocation keeps planner axes 3/4
+                # for token/KV-head after the singleton group axis is removed;
+                # normalized SDSC exposes those as physical out/x axes 1/2.
+                resolved_device_dim = {"3": "1", "4": "2"}.get(
+                    resolved_device_dim, resolved_device_dim
+                )
+            if (
+                (
+                    _spyre_config.relayout_oracle_p06_ramp
+                    or (
+                        _spyre_config.relayout_oracle_prefill_qk_query
+                        and _spyre_config.relayout_oracle_prefill_qk_axis_bridge
+                    )
+                )
+                and resolved_device_dim == "4"
+                and resolved_device_dim not in device_dim_to_sdsc_dim
+                and set(device_dim_to_sdsc_dim) == {"0", "1", "2", "3"}
+                and (
+                    _spyre_config.relayout_oracle_p06_ramp
+                    or [str(dim) for dim in dim_order]
+                    == ["x", "in", "y", "mb"]
+                )
+            ):
+                # P06's grouped-query view records the logical query-head
+                # cohort on planner axis 4.  Singleton removal and SDSC
+                # normalization expose that same cohort as physical x axis 3.
+                resolved_device_dim = "3"
+            dim = device_dim_to_sdsc_dim.get(resolved_device_dim)
             if dim is None:
                 if int(slot) != 0:
                     raise ValueError(
-                        f"allocation uses unmapped device dimension {device_dim}"
+                        "allocation uses unmapped device dimension "
+                        f"{device_dim}; slot={slot}; "
+                        f"device_dim_to_sdsc_dim={device_dim_to_sdsc_dim}; "
+                        f"dim_order={dim_order}; per_device_dim={per_device_dim}"
                     )
                 continue
             per_dim[str(dim)] = int(slot)
@@ -322,7 +359,29 @@ def _map_device_dim_splits(
 
     result: dict[Symbol, int] = {}
     for device_dim, split in device_dim_splits.items():
-        dim = device_dim_to_sdsc_dim.get(str(device_dim))
+        resolved_device_dim = str(device_dim)
+        if (
+            _spyre_config.relayout_oracle_compact_gqa
+            and resolved_device_dim not in device_dim_to_sdsc_dim
+            and set(device_dim_to_sdsc_dim) == {"0", "1", "2"}
+        ):
+            resolved_device_dim = {"3": "1", "4": "2"}.get(
+                resolved_device_dim, resolved_device_dim
+            )
+        if (
+            (
+                _spyre_config.relayout_oracle_p06_ramp
+                or (
+                    _spyre_config.relayout_oracle_prefill_qk_query
+                    and _spyre_config.relayout_oracle_prefill_qk_axis_bridge
+                )
+            )
+            and resolved_device_dim == "4"
+            and resolved_device_dim not in device_dim_to_sdsc_dim
+            and set(device_dim_to_sdsc_dim) == {"0", "1", "2", "3"}
+        ):
+            resolved_device_dim = "3"
+        dim = device_dim_to_sdsc_dim.get(resolved_device_dim)
         if dim is None:
             if int(split) != 1:
                 raise ValueError(
@@ -976,6 +1035,46 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
             if is_matmul and _spyre_config.core_id_k_fast_emission
             else None
         )
+    if (
+        (
+            _spyre_config.relayout_oracle_prefill_output_projection
+            or _spyre_config.relayout_oracle_prefill_mlp_inputs
+        )
+        and mapping_splits == (8, 4, 1)
+        and is_matmul
+        and tuple(int(sdsc_iteration_space[dim]) for dim in mapping_dims)
+        in ((512, 4096, 4096), (512, 12800, 4096))
+    ):
+        # Test-only SenDNN replay: output shards vary inside each contiguous
+        # four-core mb cohort.  The LX planner already models this ordering;
+        # force final compute emission to honor the same map.
+        contiguous_dim = 1
+    if (
+        _spyre_config.relayout_oracle_prefill_qk_query
+        and _spyre_config.relayout_oracle_prefill_qk_head_fast_emission
+        and not is_matmul
+        and len(mapping_splits) >= 4
+        and mapping_splits[:2] == (8, 4)
+        and [str(dim) for dim in mapping_dims[:2]] == ["mb", "x"]
+        and int(sdsc_iteration_space[mapping_dims[0]]) == 512
+        and int(sdsc_iteration_space[mapping_dims[1]]) in (8, 32)
+    ):
+        # P06 preserves 8 token cohorts x 4 query-head cohorts through rotary.
+        # Query-head shards must vary on adjacent core IDs (0..3) inside each
+        # token cohort; the LX planner's source map assumes this exact order.
+        # Generic gather_dim propagation is lost on the reduction/view boundary,
+        # so pin the final SDSC mapping for this test-only replay.
+        contiguous_dim = 1
+    if (
+        _spyre_config.relayout_oracle_prefill_mlp_inputs
+        and not is_matmul
+        and mapping_splits == (8, 4)
+        and tuple(int(sdsc_iteration_space[dim]) for dim in mapping_dims)
+        == (512, 4096)
+    ):
+        # RMSNorm's final multiply produces 1/4-hidden shards on each member of
+        # a contiguous four-core mb cohort, exactly matching SenDNN's source.
+        contiguous_dim = 1
     # TODO: Choose the mapping before LX planning and pass it through to codegen.
     core_id_to_work_slice = core_to_slice_mapping(
         mapping_dims,

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import heapq
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Optional, Callable
@@ -201,7 +202,7 @@ class FirstFitLayoutSolver(MemoryPlanSolver):
         ]
         parent_names = {p for b in buffers_filtered for p in b.in_place_parents}
 
-        def _sort_key(b: LifetimeBoundBuffer) -> tuple[float, int]:
+        def _sort_key(b: LifetimeBoundBuffer) -> tuple[float, int, int]:
             span = b.end_time - b.start_time
             discount = 0.25 * bool(b.in_place_parents) + 0.25 * (b.name in parent_names)
             # A buffer whose first use is a write (not first_use_is_read) also
@@ -210,7 +211,21 @@ class FirstFitLayoutSolver(MemoryPlanSolver):
             # reads, so count that first write as worth 0.5 of an extra use,
             # inflating the denominator to give such buffers a better score.
             uses = len(b.uses) + (0.0 if b.first_use_is_read else 0.5)
-            return (span - discount) / uses, span
+            # Diagnostic replay lever: equal-priority relayout destinations can
+            # differ by an order of magnitude in size. Placing the small view
+            # first fragments LX and may evict a later 1 MiB all-gather even
+            # when the full live set has enough aggregate capacity. Prefer the
+            # larger buffer only as the final tie-break, preserving every
+            # existing lifetime/value priority decision.
+            size_tiebreak = (
+                -b.size
+                if os.environ.get(
+                    "SPYRE_RELAYOUT_ORACLE_FIRSTFIT_LARGEST_TIE", "0"
+                )
+                == "1"
+                else 0
+            )
+            return (span - discount) / uses, span, size_tiebreak
 
         buffers_filtered.sort(key=_sort_key)
         buffers_sorted = _topological_sort(buffers_filtered)

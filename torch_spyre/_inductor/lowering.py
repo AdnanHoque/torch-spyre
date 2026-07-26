@@ -484,6 +484,19 @@ def lower_bmm(x, y):
             tmp1 = x_loader([i0, i1, i2, r0])
             tmp2 = y_loader([i0, i1, r0, i3])
             return (tmp1, tmp2)
+    elif x_ndim == 5 and y_ndim == 5 and y_size[2] == 1:
+        # Test-only compact-GQA bridge: [B, KVH, G, M, K] @
+        # [B, KVH, 1, K, N].  Keep the singleton group dimension as a
+        # broadcast so K/V remain compact in storage and are shared by the G
+        # query heads at the BMM consumer.
+        ranges = [x_size[0], x_size[1], x_size[2], x_size[3], y_size[-1]]
+
+        def inner_fn(index, reduction_index):
+            i0, i1, i2, i3, i4 = index
+            (r0,) = reduction_index
+            tmp1 = x_loader([i0, i1, i2, i3, r0])
+            tmp2 = y_loader([i0, i1, 0, r0, i4])
+            return (tmp1, tmp2)
     elif x_ndim == 3 and y_ndim == 2:
         ranges = [x_size[0], x_size[1], y_size[1]]  # B, M, N
 

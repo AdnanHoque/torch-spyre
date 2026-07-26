@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from abc import ABC, abstractmethod
 import math
+import os
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from enum import Enum
 
@@ -188,10 +189,16 @@ def _assert_in_place_relationships(
                     getattr(parent, "core_divisions", None)
                     or getattr(child, "core_divisions", None)
                 ):
-                    assert child.size <= parent.size, (
-                        f"In-place child {child.name}.size={child.size} "
-                        f"must be <= parent {parent_name}.size={parent.size}"
-                    )
+                    if (
+                        os.environ.get(
+                            "SPYRE_RELAYOUT_ORACLE_ALLOW_GROWING_INPLACE", "0"
+                        )
+                        != "1"
+                    ):
+                        assert child.size <= parent.size, (
+                            f"In-place child {child.name}.size={child.size} "
+                            f"must be <= parent {parent_name}.size={parent.size}"
+                        )
 
 
 class MemoryPlanSolver(ABC):

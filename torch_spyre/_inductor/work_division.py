@@ -740,15 +740,93 @@ def enumerate_work_division_candidates(
     return candidates
 
 
+def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+    """Return a test-only SenDNN replay split, when requested.
+
+    ``buf44`` is the attention-output -> output-projection BMM in the exact
+    Granite B1/S512 prefill graph.  Shape-gating prevents the same temporary
+    buffer number in decode specializations from matching.
+    """
+
+    name = op.get_name()
+    is_output_projection = (
+        config.relayout_oracle_prefill_output_projection and name == "buf44"
+    )
+    is_mlp_input_edge = (
+        config.relayout_oracle_prefill_mlp_inputs
+        and name in ("buf52", "buf53", "buf55")
+    )
+    is_compact_gqa_edge = (
+        config.relayout_oracle_compact_gqa
+        and name in ("buf18", "buf29", "buf66")
+    )
+    is_prefill_qk_query_edge = (
+        config.relayout_oracle_prefill_qk_query
+        and name
+        in config.relayout_oracle_prefill_qk_query_buffers.split(",")
+    )
+    is_prefill_qk_head_owned = (
+        config.relayout_oracle_prefill_qk_head_owned and name == "buf20"
+    )
+    is_p06_ramp_edge = config.relayout_oracle_p06_ramp and name in (
+        config.relayout_oracle_p06_ramp_source,
+        config.relayout_oracle_p06_ramp_consumer,
+    )
+    if (
+        not is_output_projection
+        and not is_mlp_input_edge
+        and not is_compact_gqa_edge
+        and not is_prefill_qk_query_edge
+        and not is_prefill_qk_head_owned
+        and not is_p06_ramp_edge
+    ):
+        return {}
+    shape = [str(size) for size in op.get_size()]
+    if (
+        is_output_projection
+        and shape in (["1", "512", "4096"], ["1", "512", "32", "128"])
+    ):
+        return {"mb": 8, "out": 4}
+    if is_mlp_input_edge:
+        if name == "buf52" and shape == ["1", "512", "4096"]:
+            return {"mb": 8, "out": 4}
+        if name in ("buf53", "buf55") and shape == ["1", "512", "12800"]:
+            return {"mb": 8, "out": 4}
+    if is_compact_gqa_edge:
+        if name in ("buf18", "buf66") and shape == ["1", "8", "1", "512", "128"]:
+            return {"kv_head": 4, "token": 8}
+        if name == "buf29" and shape == ["1", "512", "1024"]:
+            return {"mb": 8, "out": 4}
+    if is_prefill_qk_query_edge:
+        expected_shapes = {
+            "buf11": ["1", "512", "4096"],
+            "buf12": ["1", "512", "32", "2", "2", "64"],
+            "buf13": ["1", "512", "32", "2", "1", "64"],
+            "buf14": ["1", "8", "4", "512", "128"],
+        }
+        if shape == expected_shapes[name]:
+            return {"token": 8, "query_head_cohort": 4}
+    if is_prefill_qk_head_owned and shape == ["1", "8", "4", "512", "512"]:
+        return {"kv_head": 8, "query_group": 4}
+    if is_p06_ramp_edge and shape == ["1", "8", "4", "512", "128"]:
+        if name == config.relayout_oracle_p06_ramp_source:
+            return {"token": 8, "query_head_cohort": 4}
+        return {"token": 32}
+    return {}
+
+
 def _work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
     dim_to_split: dict[str, int] = {}
     for _, hint_dict in sorted(get_op_hints(op).items()):
         dim_to_split.update(hint_dict.get("work_div") or {})
+    dim_to_split.update(_oracle_work_div_hint_by_name(op))
     return dim_to_split
 
 
 def _has_work_div_hint(op: ComputedBuffer) -> bool:
-    return any(hint_dict.get("work_div") for hint_dict in get_op_hints(op).values())
+    return bool(_oracle_work_div_hint_by_name(op)) or any(
+        hint_dict.get("work_div") for hint_dict in get_op_hints(op).values()
+    )
 
 
 def _resolve_work_div_hint(
@@ -758,6 +836,107 @@ def _resolve_work_div_hint(
     dim_to_split = _work_div_hint_by_name(op)
     if not dim_to_split:
         return None
+    if _oracle_work_div_hint_by_name(op):
+        # Bind exact-graph oracle buffers directly to symbols instead of relying
+        # on graph-propagated names, which are absent on these fused ops.
+        symbols = list(it_space)
+        if config.relayout_oracle_p06_ramp and op.get_name() in (
+            config.relayout_oracle_p06_ramp_source,
+            config.relayout_oracle_p06_ramp_consumer,
+        ):
+            token_sym = next(
+                sym for sym in symbols if concretize_expr(it_space[sym]) == 512
+            )
+            if op.get_name() == config.relayout_oracle_p06_ramp_source:
+                head_cohort_sym = next(
+                    sym for sym in symbols if concretize_expr(it_space[sym]) == 8
+                )
+                op._spyre_oracle_gather_dim_symbol = head_cohort_sym  # type: ignore[attr-defined]
+                return {token_sym: 8, head_cohort_sym: 4}
+            return {token_sym: 32}
+        if config.relayout_oracle_prefill_qk_query and op.get_name() in (
+            "buf11",
+            "buf12",
+            "buf13",
+            "buf14",
+        ) and op.get_name() in config.relayout_oracle_prefill_qk_query_buffers.split(","):
+            expected_ranks = {"buf11": 3, "buf12": 5, "buf13": 5, "buf14": 4}
+            if len(symbols) != expected_ranks[op.get_name()]:
+                raise Unsupported(
+                    "SenDNN P06 replay expected the exact Granite query/rotary "
+                    f"iteration rank on {op.get_name()}, got {symbols}"
+                )
+            # buf11-13 iterate token then flattened query head.  buf14 is
+            # represented to work division as [KV head, query group, token,
+            # head dim], so bind its token/KV-head symbols by exact extent.
+            # This gives the same physical 64-token x 8-query-head shard at
+            # every point in the chain.
+            if op.get_name() == "buf14":
+                token_sym = next(
+                    sym for sym in symbols if concretize_expr(it_space[sym]) == 512
+                )
+                head_cohort_sym = next(
+                    sym for sym in symbols if concretize_expr(it_space[sym]) == 8
+                )
+            else:
+                token_sym, head_cohort_sym = symbols[:2]
+            op._spyre_oracle_gather_dim_symbol = head_cohort_sym  # type: ignore[attr-defined]
+            return {token_sym: 8, head_cohort_sym: 4}
+        if config.relayout_oracle_prefill_qk_head_owned and op.get_name() == "buf20":
+            # adjust_it_space_for_sticks presents this 5-D compact BMM as
+            # [KV-head, query-group, query-token, key-token sticks,
+            # head-dimension sticks].
+            expected_extents = [8, 4, 512, 8, 2]
+            actual_extents = [concretize_expr(it_space[sym]) for sym in symbols]
+            if actual_extents != expected_extents:
+                raise Unsupported(
+                    "head-owned QK replay expected compact Granite iteration "
+                    f"extents {expected_extents}, got {actual_extents} on "
+                    f"{op.get_name()}"
+                )
+            kv_head_sym, query_group_sym, _, _, _ = symbols
+            # Four query groups share one compact K head.  Keep those four
+            # cores contiguous so the K consumer view is a four-core broadcast
+            # cohort and the Q consumer view owns one full query head per core.
+            op._spyre_oracle_gather_dim_symbol = query_group_sym  # type: ignore[attr-defined]
+            return {kv_head_sym: 8, query_group_sym: 4}
+        if config.relayout_oracle_compact_gqa and op.get_name() in (
+            "buf18",
+            "buf66",
+        ):
+            if len(symbols) != 3:
+                raise Unsupported(
+                    "SenDNN compact-GQA replay expected [KV-head, token, head-dim] "
+                    f"iteration symbols, got {symbols} on {op.get_name()}"
+                )
+            kv_head_sym, token_sym = symbols[:2]
+            # SenDNN P01 assigns each core 2 KV heads x 64 tokens.  KV-head
+            # shards vary fastest inside each four-core token cohort.
+            op._spyre_oracle_gather_dim_symbol = kv_head_sym  # type: ignore[attr-defined]
+            return {kv_head_sym: 4, token_sym: 8}
+        if config.relayout_oracle_compact_gqa and op.get_name() == "buf29":
+            if len(symbols) != 3:
+                raise Unsupported(
+                    "SenDNN compact-V replay expected [token, output, reduction] "
+                    f"iteration symbols, got {symbols} on {op.get_name()}"
+                )
+            token_sym, output_sym = symbols[:2]
+            # SenDNN P02 uses 8 token shards x 4 (two-head) output shards,
+            # with output/head shards contiguous inside each token cohort.
+            op._spyre_oracle_gather_dim_symbol = output_sym  # type: ignore[attr-defined]
+            return {token_sym: 8, output_sym: 4}
+        expected_rank = 2 if op.get_name() == "buf52" else 3
+        if len(symbols) != expected_rank:
+            raise Unsupported(
+                f"SenDNN replay expected a rank-{expected_rank} iteration space, got "
+                f"{symbols} on {op.get_name()}"
+            )
+        mb_sym, out_sym = symbols[:2]
+        # SenDNN maps the four output shards inside each contiguous mb cohort.
+        # get_gather_dim consumes this private symbol in both LX planning and
+        # final SDSC emission, keeping their core maps identical.
+        op._spyre_oracle_gather_dim_symbol = out_sym  # type: ignore[attr-defined]
+        return {mb_sym: 8, out_sym: 4}
 
     loop_var_dims = getattr(op, "work_div_loop_info", {})
     splits: dict[Symbol, int] = {}

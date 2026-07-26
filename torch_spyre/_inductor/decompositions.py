@@ -15,6 +15,7 @@
 from contextlib import contextmanager
 
 import math
+import os
 from typing import Optional, Union, Sequence, Callable, TypeVar
 from typing_extensions import ParamSpec
 import torch
@@ -561,7 +562,21 @@ def spyre__sdpa_overrideable(
         raise Unsupported("Attention dropout not implemented for Spyre")
 
     expansion = num_heads // num_kvheads
-    if expansion != 1:
+    compact_gqa = (
+        expansion != 1
+        and os.environ.get("SPYRE_RELAYOUT_ORACLE_COMPACT_GQA", "0") == "1"
+    )
+    if compact_gqa:
+        # Test-only SenDNN parity oracle.  Preserve compact K/V and expose the
+        # query-group axis explicitly so both attention BMMs broadcast the
+        # single KV head over its four query heads.  This avoids materializing
+        # the 4x expanded K/V tensors before the consumer.
+        query = query.reshape(
+            batch_size, num_kvheads, expansion, max_seqlen_q, head_dim
+        )
+        key = key.unsqueeze(2)
+        value = value.unsqueeze(2)
+    elif expansion != 1:
         key = key.unsqueeze(2).expand(-1, -1, expansion, -1, -1).flatten(1, 2)
         value = value.unsqueeze(2).expand(-1, -1, expansion, -1, -1).flatten(1, 2)
 
@@ -571,8 +586,13 @@ def spyre__sdpa_overrideable(
     output = torch.zeros_like(query)
 
     # FIXME: create a sparse M tensor via reduction
+    attention_prefix = (
+        (batch_size, num_kvheads, expansion, max_seqlen_q)
+        if compact_gqa
+        else (batch_size, num_heads, max_seqlen_q)
+    )
     M_reduced = torch.full(
-        (batch_size, num_heads, max_seqlen_q, 64),
+        (*attention_prefix, 64),
         float("-inf"),
         device=query.device,
         dtype=query.dtype,
@@ -581,7 +601,7 @@ def spyre__sdpa_overrideable(
 
     # FIXME: create a sparse denominator tensor via reduction
     denominator_reduced = torch.zeros(
-        (batch_size, num_heads, max_seqlen_q, 64),
+        (*attention_prefix, 64),
         device=query.device,
         dtype=query.dtype,
     )
@@ -665,6 +685,8 @@ def spyre__sdpa_overrideable(
                         )  # batch_size, num_heads, max_seqlen_q sparse
 
     output = torch.ops.spyre.copy_f(output / denominator.unsqueeze(-1), output)
+    if compact_gqa:
+        output = output.flatten(1, 2)
     output = output.contiguous().transpose(1, 2).contiguous().transpose(1, 2)
     logsumexp = torch.empty(
         (batch_size, num_heads, max_seqlen_q), dtype=torch.float32, device="spyre"

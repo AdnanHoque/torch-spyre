@@ -33,6 +33,98 @@ allow_all_ops_in_lx_planning: bool = False
 # consumer per-core views as an explicit S1 -> SHUFFLE -> S2 sequence in LX.
 lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
 
+# Comma-separated collective kinds accepted by the LX relayout planner.  This
+# is primarily an A/B and cost-model-development control; all supported kinds
+# remain enabled by default.
+lx_relayout_collectives: str = os.environ.get(
+    "SPYRE_LX_RELAYOUT_COLLECTIVES", "all_to_all,all_gather,broadcast"
+)
+
+# Optional comma-separated buffer names whose producer -> consumer transport
+# is excluded from LX relayout planning.  This is an edge-isolation control:
+# unlike SPYRE_LX_RELAYOUT_COLLECTIVES it leaves unrelated collectives enabled.
+lx_relayout_disabled_sources: str = os.environ.get(
+    "SPYRE_LX_RELAYOUT_DISABLED_SOURCES", ""
+)
+
+# Reject dense all-to-all candidates above this total producer size when set
+# to a non-negative byte count.  The default preserves existing behavior.
+lx_relayout_all_to_all_max_bytes: int = int(
+    os.environ.get("SPYRE_LX_RELAYOUT_ALL_TO_ALL_MAX_BYTES", "-1")
+)
+
+# Test-only SenDNN replay oracle for Granite B1/S512.  This deliberately
+# hard-codes one graph-local producer/consumer edge; it is not production
+# policy and exists only to measure an exact counterfactual topology.
+relayout_oracle_prefill_output_projection: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_OUTPUT_PROJ", "0") == "1"
+)
+
+# Replay the shared RMSNorm activation -> SwiGLU gate/up projections. SenDNN
+# uses an 8x4 (mb x hidden/output) producer layout, then a four-core grouped
+# all-gather into two 8x4 BMM consumers.
+relayout_oracle_prefill_mlp_inputs: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_INPUTS", "0") == "1"
+)
+
+# Test-only SenDNN replay oracle that preserves Granite GQA K/V in compact
+# [KV-head, query-group] form through the attention BMMs.
+relayout_oracle_compact_gqa: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_COMPACT_GQA", "0") == "1"
+)
+
+# Test-only SenDNN P06 replay oracle.  Preserve the Granite prefill query in
+# 8 token cohorts x 4 query-head cohorts through projection and rotary, then
+# let the QK consumer gather the four head fragments for each 16-token shard.
+relayout_oracle_prefill_qk_query: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_QK_QUERY", "0") == "1"
+)
+
+# Optional comma-separated subset used to isolate the P06 producer chain.
+# The default keeps the complete replay behavior.
+relayout_oracle_prefill_qk_query_buffers: str = os.environ.get(
+    "SPYRE_RELAYOUT_ORACLE_PREFILL_QK_QUERY_BUFFERS",
+    "buf11,buf12,buf13,buf14",
+)
+
+relayout_oracle_prefill_qk_head_fast_emission: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_QK_HEAD_FAST_EMISSION", "1")
+    == "1"
+)
+
+relayout_oracle_prefill_qk_axis_bridge: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_QK_AXIS_BRIDGE", "1") == "1"
+)
+
+# Test-only local QK schedule probe.  Divide the exact Granite B1/S512
+# compact-GQA score BMM by KV head x query group (8 x 4) instead of by query
+# token (32).  Each four-core GQA cohort then shares only its own compact K
+# head, avoiding full-K replication on every core without changing the math.
+relayout_oracle_prefill_qk_head_owned: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_QK_HEAD_OWNED", "0") == "1"
+)
+
+# Test-only value probe for the P06 transport geometry.  The named source is
+# forced to 8 token cohorts x 4 head cohorts, while the named consumer is
+# forced to 32 token shards so an identity BMM can expose the relayout output.
+relayout_oracle_p06_ramp: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_P06_RAMP", "0") == "1"
+)
+relayout_oracle_p06_ramp_source: str = os.environ.get(
+    "SPYRE_RELAYOUT_ORACLE_P06_RAMP_SOURCE", "buf0"
+)
+relayout_oracle_p06_ramp_consumer: str = os.environ.get(
+    "SPYRE_RELAYOUT_ORACLE_P06_RAMP_CONSUMER", "buf1"
+)
+
+# Diagnostic isolation for relayout replay experiments.  Keep the allocator's
+# solved LX address map (including relayout S1/S2 storage), but do not realize
+# graph-input LX placements as clone operations.  This distinguishes relayout
+# transport failures from unrelated input-pinning side effects.
+relayout_oracle_no_input_pinning: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_NO_INPUT_PINNING", "0") == "1"
+)
+
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))

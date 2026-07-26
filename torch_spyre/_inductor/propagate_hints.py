@@ -118,6 +118,14 @@ def get_gather_dim(op: Operation) -> sympy.Symbol | None:
     """Resolve an op's named gather dimension to its loop symbol."""
 
     loop_dims = getattr(op, "work_div_loop_info", {})
+    oracle_symbol = getattr(op, "_spyre_oracle_gather_dim_symbol", None)
+    if oracle_symbol is not None:
+        return oracle_symbol
+    oracle_name = getattr(op, "_spyre_oracle_gather_dim_name", None)
+    if oracle_name is not None:
+        return next(
+            (sym for sym, names in loop_dims.items() if oracle_name in names), None
+        )
     for _, hint in sorted(get_op_hints(op).items(), reverse=True):
         name = hint.get("gather_dim")
         if name is not None:
