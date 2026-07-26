@@ -1,0 +1,1156 @@
+import abc
+import functools
+
+import math
+import os
+from typing import (
+    Any,
+    Callable,
+    Concatenate,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    TypedDict,
+    cast,
+)
+from typing_extensions import NotRequired, Unpack, Union
+
+from fms.modules.layernorm import LayerNormParameterized
+import torch
+import torch.distributed
+from torch import Tensor, nn
+from torch.distributed.distributed_c10d import ProcessGroup
+from torch.nn import functional as F
+
+from fms import distributed
+from fms.distributed.tensorparallel import (
+    copy_to_tensor_model_parallel_region,
+    reduce_from_tensor_model_parallel_region,
+)
+from fms.modules.linear import (
+    LinearModuleShardingInfo,
+    get_all_linear_type_to_sharding_maps,
+    get_linear,
+    get_linear_type,
+)
+from fms.modules.positions import PositionEncoder
+from fms.modules.tp import TPModule
+
+__sdpa_previous_flash: bool = torch.backends.cuda.flash_sdp_enabled()
+__sdpa_previous_mem_efficient: bool = torch.backends.cuda.mem_efficient_sdp_enabled()
+__sdpa_previous_math: bool = torch.backends.cuda.math_sdp_enabled()
+
+
+__type_factory_map: dict[str, dict[str, Callable]] = {}
+
+
+class AttentionKwargs(TypedDict, total=False):
+    """
+    The attention kwargs to be passed to fms model forward.
+
+    attn_name: str
+        this is the name corresponding to the attention op registered in register_attention_op
+    """
+
+    attn_name: str
+
+
+class SinkAttentionKwargs(AttentionKwargs):
+    """
+    The sinks attention kwargs to be passed to fms model forward.
+
+    attn_name: str
+        this is the name corresponding to the attention op registered in register_attention_op
+    sinks: torch.Tensor
+        this is the tensor weights for the sinks
+    sliding_window: int
+        this is the sliding window size for sinks attention
+    """
+
+    sinks: NotRequired[torch.Tensor]
+    sliding_window: NotRequired[int | None]
+
+
+# TODO: add adjusted_mask for alibi as part of attn_compute_dict
+def register_attention_op(
+    attn_type: str,
+    store_op: Callable[
+        Concatenate[
+            torch.Tensor,
+            torch.Tensor,
+            Optional[torch.Tensor],
+            Optional[torch.Tensor],
+            ...,
+        ],
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+    ],
+    compute_op: Callable[
+        Concatenate[
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            int,
+            int,
+            float,
+            float,
+            ...,
+        ],
+        torch.Tensor,
+    ],
+    is_prefill_op: Optional[Callable[..., bool]] = None,
+    compute_decode_op: Optional[
+        Callable[
+            Concatenate[
+                torch.Tensor,
+                torch.Tensor,
+                torch.Tensor,
+                int,
+                int,
+                float,
+                float,
+                ...,
+            ],
+            torch.Tensor,
+        ]
+    ] = None,
+    update_attn_kwargs_op: Optional[Callable[..., AttentionKwargs]] = None,
+    validate_attn_kwargs_op: Optional[
+        Callable[
+            Concatenate[
+                torch.Tensor,
+                torch.Tensor,
+                Optional[List[Tuple[torch.Tensor, torch.Tensor]]],
+                ...,
+            ],
+            None,
+        ]
+    ] = None,
+) -> None:
+    """Register a custom attention operation to be used within MultiHeadAttention. This method also provides the ability to register other useful constructs related to the attention type.
+
+    Args:
+        attn_type: str
+            the name for the attention_op. This should correspond directly to the AttentionKwargs implementation
+        store_op: Callable[[torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], Unpack["AttentionKwargs"]], Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]
+            This function has the following contract (keys, values, key_cache, value_cache, **attn_kwargs) -> (keys_compute, values_compute, keys_return, values_return). The intention
+            of this function is to provide a method of storing the keys in the key_cache and the values in the value_cache. The return of this method will include what keys/values to compute
+            on as well as what keys/values to return from MultiHeadAttention. Note: Reason for keeping these separate is that in some cases the keys to compute will be different than those
+            that are to be returned from MultiHeadAttention. For example, in Paged Attention, we may use sdpa as prefill (utilitizing the initial computed keys/values), but the returned cache
+            should be the larger cache that we stored to.
+        compute_op: Callable[[torch.Tensor, torch.Tensor, torch.Tensor, int, int, float, float, Unpack["AttentionKwargs"]], torch.Tensor]
+            This function has the following contract (query, key_cache, value_cache, nheads, kvheads, p_dropout, scale_factor, **attn_kwargs) -> (attn_output) --
+            query - b x qlen x h x ds, attn_output - b x qlen x h x ds. The intention of this function is perform attention computation. Note: the kv-cache may be very different in shape
+            depending on the type of attention
+        is_prefill_op: Optional[Callable[[Unpack["AttentionKwargs"]], bool]]
+            This function has the following contract (**attn_kwargs) -> bool. The intention of this function is to denote given the attention kwargs whether prefill or decode is being performed.
+            If prefill is being performed, the compute_op will be called, otherwise the compute_decode_op will be called. If set to None, this funcion will always return True.
+        compute_decode_op: Callable[[torch.Tensor, torch.Tensor, torch.Tensor, int, int, float, float, Unpack["AttentionKwargs"]], torch.Tensor]
+            This function has the following contract (query, key_cache, value_cache, nheads, kvheads, p_dropout, scale_factor, **attn_kwargs) -> (attn_output) --
+            query - b x qlen x h x ds, attn_output - b x qlen x h x ds. The intention of this function to provide a separate attention computation for decode. If this is set to something other than
+            compute_op, is_prefill_op should also be provided. If set to None, this will default to the compute_op. Note: the kv-cache may be very different in shape depending on the type of attention
+        update_attn_kwargs_op: Optional[Callable[[Unpack["AttentionKwargs"]], "AttentionKwargs"]]
+            This function has the following contract (**attn_kwargs) -> updated_attn_kwargs. The intention of this function is to act as a helper to update the attn_kwargs between each step within a
+            generation loop. If set to None, will return the attn_kwargs with no changes.
+        validate_attn_kwargs_op: Optional[Callable[[torch.Tensor, torch.Tensor, Optional[List[Tuple[torch.Tensor, torch.Tensor]]], Unpack["AttentionKwargs"]], None]]
+            This function has the following contract (input_ids, position_ids, past_key_value_states, **attn_kwargs) -> None. The intention of this function is do further validation against the
+            attn_kwargs for a given forward pass. If set to None, this function will perform no extra validation.
+    """
+    if attn_type in __type_factory_map:
+        raise KeyError(
+            f"Module mapping of attention type `{attn_type}` already registered"
+        )
+    if compute_decode_op is None:
+        compute_decode_op = compute_op
+
+    compute_dict: dict[str, Callable] = {
+        "store": store_op,
+        "is_prefill": (lambda **_: True) if is_prefill_op is None else is_prefill_op,
+        "compute_prefill": compute_op,
+        "compute_decode": compute_decode_op,
+        "update_attn_kwargs": (lambda **attn_kwargs: attn_kwargs)
+        if update_attn_kwargs_op is None
+        else update_attn_kwargs_op,
+        "validate_attn_kwargs": (lambda **_: None)
+        if validate_attn_kwargs_op is None
+        else validate_attn_kwargs_op,
+    }
+    __type_factory_map[attn_type] = compute_dict
+
+
+class SDPAAttentionKwargs(AttentionKwargs):
+    mask: NotRequired[torch.Tensor]
+    attn_algorithm: NotRequired[str]
+    is_causal_mask: bool
+    is_filling_mode: NotRequired[bool]
+    cache_update_position: NotRequired[int]
+    tokens_in_current_block: NotRequired[int]
+
+
+def _sdpa_store_op(
+    keys: torch.Tensor,
+    values: torch.Tensor,
+    key_cache: Optional[torch.Tensor],
+    value_cache: Optional[torch.Tensor],
+    **attn_kwargs,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    keys = keys.transpose(2, 1)
+    values = values.transpose(2, 1)
+
+    is_filling = attn_kwargs.get("is_filling_mode", False)
+    update_pos = attn_kwargs.get("cache_update_position", None)
+
+    if key_cache is not None and value_cache is not None and value_cache.numel() > 0:
+        if is_filling and update_pos is not None:
+            # In-place update at specific position
+            token_index = attn_kwargs.get("tokens_in_current_block", 0)
+            torch.ops.spyre.overwrite(
+                input=keys[:, :, token_index:token_index+1, :], output=key_cache, dims=[2], offsets=[update_pos]
+            )
+            torch.ops.spyre.overwrite(
+                input=values[:, :, token_index:token_index+1, :], output=value_cache, dims=[2], offsets=[update_pos]
+            )
+            return key_cache, value_cache, key_cache, value_cache
+        else:
+            # Normal concatenation
+            sliding_window = attn_kwargs.get("sliding_window", 0)
+            if sliding_window != 0:
+                sliding_window *= -1
+                sliding_window += keys.shape[2]
+            key_cache_result = torch.cat((key_cache[:, :, sliding_window:, :], keys), dim=2)
+            value_cache_result = torch.cat(
+                (value_cache[:, :, sliding_window:, :], values), dim=2
+            )
+            return (
+                key_cache_result,
+                value_cache_result,
+                key_cache_result,
+                value_cache_result,
+            )
+    else:
+        return (keys, values, keys, values)
+
+
+def _sdpa_compute_op(
+    query: torch.Tensor,
+    key_cache: torch.Tensor,
+    value_cache: torch.Tensor,
+    nheads: int,
+    kvheads: int,
+    p_dropout: float,
+    scale_factor: Optional[float],
+    **attn_kwargs,
+) -> torch.Tensor:
+    queries = query.transpose(2, 1)
+
+    # no longer transposing prior to store, so need to check this in case of no cache
+    if key_cache.shape[1] != kvheads and key_cache.shape[2] == kvheads:
+        key_cache = key_cache.transpose(2, 1)
+        value_cache = value_cache.transpose(2, 1)
+    mask = attn_kwargs.get("mask", None)
+
+    # TODO: Once we add alibi support, merge rel pos bias and mask into single float mask
+    if mask is not None:
+        # Our expected mask format is bs x q_len x k_len, so to make it broadcastable
+        # we need to create the nheads dimension
+        while len(mask.size()) != 4:  # expects bs (x nheads) x q_len x kv_len
+            mask = mask.unsqueeze(1)
+
+    # Test-only SenDNN parity hook: keep the compact KV-head representation and
+    # let SDPA express GQA instead of materializing nheads / kvheads copies.
+    # The normal FMS behavior is unchanged unless the hook is explicitly set.
+    expansion = nheads // kvheads
+    compact_gqa = (
+        expansion != 1
+        and os.environ.get("SPYRE_RELAYOUT_ORACLE_COMPACT_GQA", "0") == "1"
+    )
+    # k/v: b h l d
+    if expansion != 1 and not compact_gqa:
+        keys_e = key_cache.unsqueeze(2).expand(-1, -1, expansion, -1, -1).flatten(1, 2)
+        values_e = (
+            value_cache.unsqueeze(2).expand(-1, -1, expansion, -1, -1).flatten(1, 2)
+        )
+    else:
+        keys_e = key_cache
+        values_e = value_cache
+
+    attn_algorithm = attn_kwargs.get("attn_algorithm", None)
+
+    if attn_algorithm:
+        # Pick which fused attn kernels will run.
+        use_flash = attn_algorithm == "flash"
+        use_mem_efficient = attn_algorithm == "mem"
+        use_math = attn_algorithm == "math"
+
+        torch.backends.cuda.enable_flash_sdp(use_flash)
+        torch.backends.cuda.enable_mem_efficient_sdp(use_mem_efficient)
+        torch.backends.cuda.enable_math_sdp(use_math)
+
+    attn_mask = mask
+    if attn_mask is not None and attn_mask.dtype != torch.bool:
+        attn_mask = attn_mask.to(dtype=queries.dtype)
+
+    is_causal = attn_kwargs.get(
+        "is_causal_mask",
+        mask is None and not (key_cache.shape[2] != 1 and queries.shape[2] == 1),
+    )
+
+    # TODO: when updating to 2.7, use enable_gqa and stop using keys_e and values_e
+    attn = F.scaled_dot_product_attention(
+        queries,
+        keys_e,
+        values_e,
+        attn_mask=attn_mask if isinstance(attn_mask, torch.Tensor) else None,
+        dropout_p=p_dropout,
+        is_causal=is_causal,
+        scale=scale_factor,
+        enable_gqa=compact_gqa,
+    )
+
+    if attn_algorithm:
+        torch.backends.cuda.enable_flash_sdp(__sdpa_previous_flash)
+        torch.backends.cuda.enable_mem_efficient_sdp(__sdpa_previous_mem_efficient)
+        torch.backends.cuda.enable_math_sdp(__sdpa_previous_math)
+
+    # attn: bs x seq_len x nheads*emb_v_per_head
+    # attn: b x h x qlen x ds
+    # attn after permute: b x qlen x h x ds
+    # b x qlen x (d)
+    attn = attn.transpose(2, 1)
+    return attn
+
+
+def _math_attention_with_sinks_op(
+    query: torch.Tensor,
+    key_cache: torch.Tensor,
+    value_cache: torch.Tensor,
+    nheads: int,
+    kvheads: int,
+    p_dropout: float,
+    scale_factor: Optional[float],
+    **attn_kwargs: Unpack[SinkAttentionKwargs],
+) -> torch.Tensor:
+    queries = query.transpose(2, 1)
+
+    if key_cache.shape[1] != kvheads and key_cache.shape[2] == kvheads:
+        key_cache = key_cache.transpose(2, 1)
+        value_cache = value_cache.transpose(2, 1)
+
+    # Expand kv so black-box attn will work
+    expansion = nheads // kvheads
+    # k/v: b h l d
+    if expansion != 1:
+        keys_e = key_cache.unsqueeze(2).expand(-1, -1, expansion, -1, -1).flatten(1, 2)
+        values_e = (
+            value_cache.unsqueeze(2).expand(-1, -1, expansion, -1, -1).flatten(1, 2)
+        )
+    else:
+        keys_e = key_cache
+        values_e = value_cache
+
+    try:
+        attn_sinks = cast(torch.Tensor, attn_kwargs.get("sinks"))
+        sliding_window = cast(int, attn_kwargs.get("sliding_window", 0))
+        mask = cast(Optional[torch.Tensor], attn_kwargs.get("mask"))
+    except TypeError as e:
+        print(f"Invalid attention sinks kwargs. {e}")
+
+    # https://github.com/openai/gpt-oss/blob/main/gpt_oss/torch/model.py#L153
+    # from gpt-oss open ai implementation
+    batch, n_heads, n_tokens, d_head = queries.shape
+    kv_tokens = keys_e.shape[2]
+    S = attn_sinks.reshape(1, -1, 1, 1).expand(batch, -1, n_tokens, -1)  # type: ignore
+
+    if mask is not None:
+        # Our expected mask format is bs x q_len x k_len, so to make it broadcastable
+        # we need to create the nheads dimension
+        while len(mask.size()) < 4:  # expects bs (x nheads) x q_len x kv_len
+            mask = mask.unsqueeze(1)
+        if mask.dtype == torch.bool:
+            mask = torch.where(mask.logical_not(), -torch.inf, 0.0)
+        mask = mask.to(dtype=queries.dtype)
+        # truncate for sliding window kv_cache
+        mask = mask[..., -n_tokens:, -kv_tokens:]
+    else:
+        mask = torch.triu(
+            queries.new_full((n_tokens, kv_tokens), -torch.inf),
+            diagonal=1 + (kv_tokens - n_tokens),
+        )
+
+    if 0 < sliding_window < kv_tokens:
+        mask += torch.tril(
+            mask.new_full((n_tokens, kv_tokens), -torch.inf),
+            diagonal=(kv_tokens - n_tokens) - sliding_window,
+        )
+    QK = torch.einsum("bhqd,bhkd->bhqk", queries, keys_e)
+
+    if scale_factor is None:
+        scale_factor = 1.0 / math.sqrt(d_head)
+
+    QK *= scale_factor  # type: ignore[arg-type]
+    QK += mask
+    QK = torch.cat([QK, S], dim=-1)
+    QK = QK - QK.max(dim=-1, keepdim=True).values
+    W = torch.softmax(QK, dim=-1)
+    W = W[..., :-1]  # drop the attention sinks after done
+    attn = torch.matmul(W, values_e)
+
+    attn = attn.transpose(2, 1).contiguous()
+    return attn
+
+
+def _sdpa_update_attn_kwargs(
+    **attn_kwargs: Unpack[SDPAAttentionKwargs],
+) -> SDPAAttentionKwargs:
+    # this is updating the mask for decoding
+    mask = attn_kwargs.get("mask", None)
+    if mask is not None:
+        # get the last row of the 3d mask
+        mask = mask[:, -1:, :]
+        # extend the mask one slot
+        mask = torch.cat(
+            (
+                mask,
+                torch.zeros(mask.size(0), 1, 1, device=mask.device),
+            ),
+            dim=2,
+        )
+        if torch._dynamo.config.dynamic_shapes:
+            torch._dynamo.mark_dynamic(mask, 2)
+
+        attn_kwargs["mask"] = mask
+    return attn_kwargs
+
+
+register_attention_op(
+    "sdpa_causal",
+    _sdpa_store_op,
+    _sdpa_compute_op,
+    update_attn_kwargs_op=_sdpa_update_attn_kwargs,
+)
+register_attention_op(
+    "sdpa_with_sinks",
+    _sdpa_store_op,
+    _math_attention_with_sinks_op,
+    update_attn_kwargs_op=_sdpa_update_attn_kwargs,
+)
+register_attention_op(
+    "sdpa_bidirectional",
+    _sdpa_store_op,
+    functools.partial(_sdpa_compute_op, is_causal_mask=False),
+)
+
+
+def get_attention_type(
+    **attn_kwargs: Unpack[AttentionKwargs],
+) -> dict[str, Callable]:
+    attn_name = attn_kwargs.get("attn_name", "sdpa_causal")
+    if attn_name not in __type_factory_map:
+        # we can add sdpa default here
+        raise KeyError(f"The attention {attn_name} is not registered")
+
+    return __type_factory_map[attn_name]
+
+
+class QKV(nn.Module, metaclass=abc.ABCMeta):
+    """Simple module for applying qkv in attention"""
+
+    def __init__(
+        self,
+        emb_dim: int,
+        nheads: int,
+        kvheads: int,
+        emb_kq_per_head: int,
+        emb_v_per_head: int,
+        use_bias: bool,
+        linear_config: Optional[Mapping[str, Any]] = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.emb_dim = emb_dim
+        self.nheads = nheads
+        self.kvheads = kvheads
+        self.emb_kq_per_head = emb_kq_per_head
+        self.emb_v_per_head = emb_v_per_head
+        self.use_bias = use_bias
+        self.linear_config = linear_config
+
+    @abc.abstractmethod
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: Optional[torch.Tensor],
+        v: Optional[torch.Tensor],
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """applies query/key/value transformations on q, k, v inputs respectively and returns the resulting values
+
+        Args:
+            q: torch.Tensor
+                the query tensor
+            k: Optional[torch.Tensor]
+                the optional key tensor
+            v: Optional[torch.Tensor]
+                the optional value tensor
+
+        Returns:
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+            the query, key, and value computed
+        """
+        pass
+
+    @abc.abstractmethod
+    def reset_parameters(self):
+        """resets the query, key, and value weights for training
+
+        Args:
+            gain: int
+                gain for std in norm (default is 1)
+        """
+        pass
+
+
+class UnfusedQKV(QKV):
+    """
+    Unfused Weights implementation of QKV
+    """
+
+    def __init__(
+        self,
+        emb_dim: int,
+        nheads: int,
+        kvheads: int,
+        emb_kq_per_head: int,
+        emb_v_per_head: int,
+        use_bias: bool,
+        linear_config: Optional[Mapping[str, Any]] = None,
+        apply_norm_per_head: Optional[bool] = None,
+        norm_eps: Optional[float] = None,
+        head_dim: Optional[int] = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(
+            emb_dim,
+            nheads,
+            kvheads,
+            emb_kq_per_head,
+            emb_v_per_head,
+            use_bias,
+            linear_config,
+            *args,
+            **kwargs,
+        )
+
+        self.head_dim = head_dim or emb_kq_per_head
+        self.norm_eps = norm_eps or 1e-5
+        self.apply_norm_per_head = apply_norm_per_head
+
+        self.query = get_linear(
+            self.emb_dim,
+            self.nheads * self.emb_kq_per_head,
+            bias=use_bias,
+            linear_config=linear_config,
+        )
+        self.key = get_linear(
+            self.emb_dim,
+            self.kvheads * self.emb_kq_per_head,
+            bias=use_bias,
+            linear_config=linear_config,
+        )
+        self.value = get_linear(
+            self.emb_dim,
+            self.kvheads * self.emb_v_per_head,
+            bias=use_bias,
+            linear_config=linear_config,
+        )
+
+        # Apply normalization if enabled - this is passed as attention kwarg
+        if norm_eps and self.apply_norm_per_head:
+            self.q_norm = LayerNormParameterized(
+                head_dim,
+                elementwise_scale=True,
+                elementwise_shift=False,
+                use_mean=False,
+                eps=norm_eps,
+                use_high_precision_pow=True,
+            )
+            self.k_norm = LayerNormParameterized(
+                head_dim,
+                elementwise_scale=True,
+                elementwise_shift=False,
+                use_mean=False,
+                eps=norm_eps,
+                use_high_precision_pow=True,
+            )
+
+    def reset_parameters(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.trunc_normal_(m.weight, mean=0.0, std=0.02)
+                if self.use_bias:
+                    m.bias.data.zero_()
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: Optional[torch.Tensor],
+        v: Optional[torch.Tensor],
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if k is None and v is None:
+            k = q
+            v = q
+        elif k is None or v is None:
+            raise ValueError(
+                "both k and v must either be given as tensors or both None"
+            )
+
+        # Project queries, keys, values
+        queries = self.query(q)  # b x qlen x (nheads * head_dim)
+        keys = self.key(k)  # b x klen x (kvheads * head_dim)
+        values = self.value(v)  # b x vlen x (kvheads * head_dim)
+
+        # Apply normalization if enabled - this is passed as attention kwarg
+        # Normalization should be applied per-head, so we need to reshape first
+        if self.apply_norm_per_head:
+            batch_size, q_len, _ = queries.shape
+            k_len = keys.shape[1]
+
+            # Reshape to separate heads: b x len x heads x head_dim
+            queries = queries.view(batch_size, q_len, self.nheads, self.head_dim)
+            keys = keys.view(batch_size, k_len, self.kvheads, self.head_dim)
+
+            if torch._dynamo.is_compiling():
+                queries = (
+                    queries.transpose(-1, -2)
+                    .contiguous()
+                    .transpose(-1, -2)
+                    .contiguous()
+                )
+                keys = (
+                    keys.transpose(-1, -2).contiguous().transpose(-1, -2).contiguous()
+                )
+
+            # Apply normalization per head
+            queries = self.q_norm(queries)
+            keys = self.k_norm(keys)
+
+            # Reshape back: b x len x (heads * head_dim)
+            queries = queries.view(batch_size, q_len, -1)
+            keys = keys.view(batch_size, k_len, -1)
+
+        return queries, keys, values
+
+
+class FusedQKV(QKV):
+    """
+    Fused Weights implementation of QKV
+    """
+
+    def __init__(
+        self,
+        emb_dim: int,
+        nheads: int,
+        kvheads: int,
+        emb_kq_per_head: int,
+        emb_v_per_head: int,
+        use_bias: bool,
+        linear_config: Optional[Mapping[str, Any]] = None,
+        apply_norm_per_head: Optional[bool] = None,
+        norm_eps: Optional[float] = None,
+        head_dim: Optional[int] = None,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(
+            emb_dim,
+            nheads,
+            kvheads,
+            emb_kq_per_head,
+            emb_v_per_head,
+            use_bias,
+            linear_config,
+            *args,
+            **kwargs,
+        )
+        self.splits = [
+            self.nheads * self.emb_kq_per_head,
+            self.kvheads * self.emb_kq_per_head,
+            self.kvheads * self.emb_v_per_head,
+        ]
+
+        self.qkv_fused = get_linear(
+            self.emb_dim,
+            sum(self.splits),
+            bias=self.use_bias,
+            linear_config=linear_config,
+        )
+
+    def unfuse_weights(self):
+        with torch.device("meta"):
+            result = UnfusedQKV(
+                self.emb_dim,
+                self.nheads,
+                self.kvheads,
+                self.emb_kq_per_head,
+                self.emb_v_per_head,
+                self.use_bias,
+            )
+        query, key, value = torch.split(self.qkv_fused.weight, self.splits, dim=0)
+        result.query.weight = torch.nn.Parameter(query)
+        result.key.weight = torch.nn.Parameter(key)
+        result.value.weight = torch.nn.Parameter(value)
+        if self.use_bias:
+            query_bias, key_bias, value_bias = torch.split(
+                self.qkv_fused.bias, self.splits, dim=0
+            )
+            result.query.bias = torch.nn.Parameter(query_bias)
+            result.key.bias = torch.nn.Parameter(key_bias)
+            result.value.bias = torch.nn.Parameter(value_bias)
+        return result
+
+    def reset_parameters(self):
+        nn.init.trunc_normal_(self.qkv_fused.weight, mean=0.0, std=0.02)
+        if self.use_bias:
+            self.qkv_fused.bias.data.zero_()
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: Optional[torch.Tensor],
+        v: Optional[torch.Tensor],
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if (k is None and v is None) or (k is q and v is q):
+            qkv = q
+        else:
+            raise ValueError("q, k, and v must be the same or k and v must be None")
+        return self.qkv_fused(qkv).split(self.splits, dim=-1)
+
+
+class MultiHeadAttention(nn.Module):
+    """
+    Performs multi-headed self- or cross-attention, with optional attention masking.
+    ...
+    Args
+    ----
+    emb_dim : int
+        Latent dimensionality of input and output tensors.
+    emb_kq : int
+        Latent dimensionality of each head in key and query projections (attention dimension).
+    emb_v : int
+        Latent dimensionality of each head in value projection (mixing dimension).
+    nheads : int
+        Number of query attention heads.
+    kvheads: int
+        Number of key and value attention heads.
+    p_dropout : float|None
+        Dropout probability. Must be in range [0,1]. If 0 or None, dropout will not be used.
+    use_bias : bool
+        Include bias terms in fully-connected sublayers?
+    position_encoder : PositionEncoder | None
+        Optional position encoder applied to query and key tensors before attention
+    fused : bool
+        If True, qkv weights will be fused, otherwise qkv weights will be unfused.
+    linear_config : Mapping[str, Any] | None
+        Configuration for selection of linear modules (QKV, dense).
+        Pass as {"linear_type": [str | callable], <other kwargs>}.
+        "linear_type" should provide the string identifier of a registered type
+        (e.g., "torch_linear", "gptq", ...) or a callable for module selection depending
+        on module name. Additional config options should be provided as kwargs in
+        linear_config.
+    scale_factor : float | None
+        Optional scaling factor applied to the attention logits. If None, a default scaling based
+        on the embedding dimension may be used.
+    apply_norm_per_head : bool | None
+        If True, applies normalization per attention head. If None, normalization is not applied.
+    norm_eps : float | None
+        Epsilon value for normalization to ensure numerical stability. Only used when
+        apply_norm_per_head is True.
+    head_dim : int | None
+        Dimensionality of each attention head. If None, it will be computed based on other
+        parameters.
+    has_sinks : bool
+        If True, enables the use of sink tokens, which are represented by learnable parameters
+        (one per attention head). Sink tokens can be used to aggregate information across tokens
+        or to enable certain attention mechanisms such as global context gathering.
+
+    """
+
+    def __init__(
+        self,
+        emb_dim,
+        emb_kq,
+        emb_v,
+        nheads,
+        kvheads,
+        p_dropout=None,
+        use_bias=False,
+        position_encoder: Optional[PositionEncoder] = None,
+        fused: bool = True,
+        linear_config: Optional[Mapping[str, Any]] = None,
+        scale_factor: Optional[float] = None,
+        apply_norm_per_head: Optional[bool] = None,
+        norm_eps: Optional[float] = None,
+        head_dim: Optional[int] = None,
+        has_sinks: bool = False,
+    ):
+        super(MultiHeadAttention, self).__init__()
+        self.nheads = nheads
+        self.kvheads = kvheads
+        self.emb_dim = emb_dim
+        self.emb_kq_per_head = emb_kq
+        self.emb_v_per_head = emb_v
+        self.p_dropout = p_dropout if p_dropout is not None else 0.0
+        self.use_bias = use_bias
+        self.fused = fused
+        self.linear_config = linear_config
+        self.scale_factor = scale_factor
+        self.apply_norm_per_head = apply_norm_per_head
+        self.norm_eps = norm_eps
+        self.head_dim = head_dim
+        self.has_sinks = has_sinks
+
+        self.in_proj: QKV = (FusedQKV if self.fused else UnfusedQKV)(
+            self.emb_dim,
+            self.nheads,
+            self.kvheads,
+            self.emb_kq_per_head,
+            self.emb_v_per_head,
+            self.use_bias,
+            linear_config=linear_config,
+            apply_norm_per_head=self.apply_norm_per_head,
+            norm_eps=self.norm_eps,
+            head_dim=self.head_dim,
+        )
+        if self.has_sinks:
+            self.sinks = nn.Parameter(torch.empty(self.nheads))
+
+        self.dense = get_linear(
+            self.nheads * self.emb_v_per_head,
+            self.emb_dim,
+            bias=use_bias,
+            linear_config=linear_config,
+        )
+
+        if self.p_dropout:
+            self.attn_dropout = nn.Dropout(self.p_dropout)
+        self.position_encoder = position_encoder
+
+    def reset_parameters(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.trunc_normal_(m.weight, mean=0.0, std=0.02)
+                if self.use_bias:
+                    m.bias.data.zero_()
+            elif isinstance(m, QKV):
+                m.reset_parameters()
+        if self.has_sinks:
+            with torch.no_grad():
+                self.sinks.zero_()
+
+    def to_tp(self, group: ProcessGroup) -> "TPMultiHeadAttention":
+        return TPMultiHeadAttention.import_module(self, group)
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: Optional[torch.Tensor] = None,
+        v: Optional[torch.Tensor] = None,
+        position_ids=None,
+        past_key_value_state: Optional[Tuple[Tensor | None, Tensor | None]] = None,
+        use_cache=False,
+        sliding_window: Optional[int] = 0,
+        **attn_kwargs: Unpack[AttentionKwargs],
+    ):
+        """
+        past_key_value_state: tuple
+            the cache to be used in attention of the form (<self/cross>_key, <self/cross>_value)
+        position_ids: Optional[torch.LongTensor]
+            The position of each of the tokens encoded in q and k. Used for RoPE embeddings
+        use_cache: bool
+            if True, the kv states for self/cross attention will be saved, otherwise they will not be saved
+
+        Returns
+        -------
+        tensor or tuple
+            If use_cache=False, only the hidden state will be returned as a tensor. If use_cache=True, a tuple will be
+            returned in the form (hidden_state, cache) where hidden_state is a tensor and cache is of the form specified
+            in past_key_value_state
+        """
+        # q, k, v: batch_size x seq_len x emb_dim
+        # mask: batch_size x seq_len x seq_len
+        batch_size, q_len, _ = q.size()
+
+        # if this is self attention, we always recompute
+        # cross attention only gets computed when a cache does not exist
+        # if we dont have the cache yet, we need to compute
+        # d x (h x ds)
+        # b x kvlen x d
+        # b x kvlen x h x ds
+        # b x h x kvlen x ds
+        # todo: Cross attention (This always is true for now)
+        q_out, k_out, v_out = self.in_proj(q, k, v)
+
+        # note: transposes will be moved in a later PR to fix dis-contiguous tensor issues
+        queries = q_out.view(batch_size, q_len, self.nheads, self.emb_kq_per_head)
+        keys = k_out.view(batch_size, q_len, self.kvheads, self.emb_kq_per_head)
+        values = v_out.view(batch_size, q_len, self.kvheads, self.emb_v_per_head)
+
+        # You want to apply rotary embeddings pre-cache
+        if self.position_encoder is not None:
+            queries, keys = self.position_encoder.adjusted_qk(
+                queries, keys, position_ids, past_kv_state=past_key_value_state, selected_freqs=attn_kwargs["selected_freqs"], use_cache=use_cache
+            )
+
+        attn_compute_dict = get_attention_type(**attn_kwargs)
+
+        if use_cache:
+            if past_key_value_state is None:
+                past_key_value_state = (None, None)
+
+            keys_compute, values_compute, keys_return, values_return = (
+                attn_compute_dict["store"](
+                    keys,
+                    values,
+                    past_key_value_state[0],
+                    past_key_value_state[1],
+                    **attn_kwargs,
+                )
+            )
+        else:
+            keys_compute, values_compute = keys, values
+
+        updated_attn_kwargs: Union[AttentionKwargs, SinkAttentionKwargs]
+
+        if self.has_sinks:
+            updated_attn_kwargs = {
+                "sinks": self.sinks,
+                "sliding_window": sliding_window,
+                **attn_kwargs,
+            }
+        else:
+            updated_attn_kwargs = attn_kwargs
+
+        if attn_compute_dict["is_prefill"](**updated_attn_kwargs):
+            attn = attn_compute_dict["compute_prefill"](
+                queries,
+                keys_compute,
+                values_compute,
+                self.nheads,
+                self.kvheads,
+                self.p_dropout if self.training else 0.0,
+                self.scale_factor,
+                **updated_attn_kwargs,
+            )
+        else:
+            attn = attn_compute_dict["compute_decode"](
+                queries,
+                keys_compute,
+                values_compute,
+                self.nheads,
+                self.kvheads,
+                self.p_dropout if self.training else 0.0,
+                self.scale_factor,
+                **updated_attn_kwargs,
+            )
+
+        attn = attn.view(batch_size, q_len, self.nheads * self.emb_v_per_head)
+
+        out = self.dense(attn)
+
+        # if use_cache=True, we return the hidden_state as well as the kv cache
+        if use_cache:
+            return out, (keys_return, values_return)
+        else:
+            return out
+
+
+class TPMultiHeadAttention(MultiHeadAttention, TPModule):
+    """
+    Performs multi-headed self- or cross-attention, with optional attention masking.
+    This subclass adds support for Tensor Parallel
+    ...
+    Args
+    ----
+    Check MultiHeadAttention for up-to-date docs
+
+    world_size: int
+        the number of processes running this model in TP
+    rank: int
+        the index of this process wrt to the rest running the model in TP
+    """
+
+    def __init__(
+        self,
+        emb_dim,
+        emb_kq,
+        emb_v,
+        nheads,
+        kvheads,
+        p_dropout=None,
+        use_bias=False,
+        position_encoder: Optional[PositionEncoder] = None,
+        fused: bool = True,
+        group: Optional[ProcessGroup] = None,
+        linear_config: Optional[Mapping[str, Any]] = None,
+        scale_factor: Optional[float] = None,
+    ):
+        assert torch.distributed.is_initialized()
+
+        rank, world_size = distributed.rank_and_world(group)
+        assert nheads % world_size == 0, (
+            "The number of heads must be divisible by world size"
+        )
+        assert (kvheads >= world_size and kvheads % world_size == 0) or (
+            kvheads < world_size and world_size % kvheads == 0
+        ), (
+            "the kv heads must be divisible by the world size or the world size must be divisible by kv heads"
+        )
+        MultiHeadAttention.__init__(
+            self,
+            emb_dim,
+            emb_kq,
+            emb_v,
+            nheads // world_size,
+            (kvheads // world_size) if kvheads >= world_size else 1,
+            p_dropout,
+            use_bias,
+            position_encoder,
+            fused,
+            linear_config,
+            scale_factor,
+        )
+        self.pre_tp_nheads = nheads
+        self.pre_tp_kvheads = kvheads
+        self.setup_tp(rank, group)
+
+    def load_weights(
+        self,
+        tensor_values: dict[str, torch.Tensor],
+    ) -> Optional[set]:
+        """Define sharding info of MHA module as:
+        {'module_name': (module_obj, sharding_dim, max_partition)}
+        Then, call the pre-registered sharding function associated with
+        self.linear_type.
+
+        `sharding_dim` is sharding dimension of the `weights` parameter
+        of nn.Linear. It may differ for other types of linear or other
+        parameters.
+
+        The numbers in `max_partition` signify the largest world size
+        till we need to duplicate. For instance if we have nheads=16 and
+        world_size=32, then first 2 ranks will get first 1/16th of query
+        """
+
+        if self.fused:
+            module_sharding_info = {
+                "qkv_fused": LinearModuleShardingInfo(
+                    self.in_proj.get_submodule("qkv_fused"),
+                    0,
+                    [self.pre_tp_nheads, self.pre_tp_kvheads, self.pre_tp_kvheads],
+                ),
+                "dense": LinearModuleShardingInfo(self.dense, 1, [self.world_size]),
+            }
+        else:
+            module_sharding_info = {
+                "query": LinearModuleShardingInfo(
+                    self.in_proj.get_submodule("query"), 0, [self.pre_tp_nheads]
+                ),
+                "key": LinearModuleShardingInfo(
+                    self.in_proj.get_submodule("key"), 0, [self.pre_tp_kvheads]
+                ),
+                "value": LinearModuleShardingInfo(
+                    self.in_proj.get_submodule("value"), 0, [self.pre_tp_kvheads]
+                ),
+                "dense": LinearModuleShardingInfo(self.dense, 1, [self.world_size]),
+            }
+
+        type_sharding_map = get_all_linear_type_to_sharding_maps()
+
+        # TODO: Remove assumption that all layers in module share quantization
+        module_name = getattr(self.dense, "module_name", None)
+        linear_type = get_linear_type(self.linear_config, module_name)
+        unused_keys = type_sharding_map[linear_type](
+            tensor_values,
+            self,
+            module_sharding_info,
+        )
+        return unused_keys
+
+    @staticmethod
+    def import_module(
+        mha: MultiHeadAttention, group: ProcessGroup
+    ) -> "TPMultiHeadAttention":
+        tp_mha = TPMultiHeadAttention(
+            emb_dim=mha.emb_dim,
+            emb_kq=mha.emb_kq_per_head,
+            emb_v=mha.emb_v_per_head,
+            nheads=mha.nheads,
+            kvheads=mha.kvheads,
+            p_dropout=mha.p_dropout,
+            use_bias=mha.use_bias,
+            position_encoder=mha.position_encoder,
+            group=group,
+            fused=mha.fused,
+            linear_config=mha.linear_config,
+            scale_factor=mha.scale_factor,
+        )
+        return tp_mha
+
+    def _copy_to_tp_region(
+        self,
+        q: torch.Tensor,
+        k: Optional[torch.Tensor] = None,
+        v: Optional[torch.Tensor] = None,
+    ):
+        if (k is None and v is None) or (k is q and v is q):
+            q_par = copy_to_tensor_model_parallel_region(q, self.group)
+            if self.fused:
+                k_par = None
+                v_par = None
+            else:
+                k_par = copy_to_tensor_model_parallel_region(k, self.group)
+                v_par = copy_to_tensor_model_parallel_region(v, self.group)
+        else:
+            raise ValueError(
+                "both k and v must either be given as tensors or both None"
+            )
+
+        return q_par, k_par, v_par
+
+    def forward(
+        self,
+        q: torch.Tensor,
+        k: Optional[torch.Tensor] = None,
+        v: Optional[torch.Tensor] = None,
+        position_ids=None,
+        past_key_value_state: Optional[Tuple[Tensor | None, Tensor | None]] = None,
+        use_cache=False,
+        sliding_window: Optional[int] = 0,
+        **attn_kwargs: Unpack[AttentionKwargs],
+    ):
+        """
+        Check MultiHeadAttention for up-to-date arguments and docs
+        """
+
+        q_par, k_par, v_par = self._copy_to_tp_region(q, k, v)
+
+        out_par = MultiHeadAttention.forward(
+            self,
+            q_par,
+            k_par,
+            v_par,
+            position_ids,
+            past_key_value_state,
+            use_cache,
+            **attn_kwargs,
+        )
+
+        # if use_cache=True, we return the hidden_state as well as the kv cache.
+        # We only reduce the output, and keep the cache thread-local
+        if use_cache:
+            out = reduce_from_tensor_model_parallel_region(out_par[0], self.group)
+            return out, out_par[1]
+        else:
+            out = reduce_from_tensor_model_parallel_region(out_par, self.group)
+            return out

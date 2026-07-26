@@ -1,0 +1,212 @@
+{
+  "reference": {
+    "path": "runs/one_layer_prefill_edge1_baseline_10x_20260725_a/trace_warm/adnan-spyre-current-pf_706019.1785025217225616245.pt.trace.json",
+    "kernel_events": 120,
+    "generation_runs": 10,
+    "phase_metrics": {
+      "prefill": {
+        "layer_count": 1,
+        "layer": {
+          "count": 10,
+          "mean_ms": 8.8916175,
+          "median_ms": 8.8897655,
+          "min_ms": 8.862348,
+          "max_ms": 8.924672000000001,
+          "population_stdev_ms": 0.019142051573695324
+        },
+        "block_total": {
+          "count": 10,
+          "mean_ms": 8.8916175,
+          "median_ms": 8.8897655,
+          "min_ms": 8.862348,
+          "max_ms": 8.924672000000001,
+          "population_stdev_ms": 0.019142051573695324
+        },
+        "one_off": {
+          "count": 10,
+          "mean_ms": 11.2592653,
+          "median_ms": 11.267688,
+          "min_ms": 11.210834000000002,
+          "max_ms": 11.284707,
+          "population_stdev_ms": 0.02423058234979035
+        },
+        "phase_total": {
+          "count": 10,
+          "mean_ms": 20.150882799999998,
+          "median_ms": 20.149973,
+          "min_ms": 20.118900999999997,
+          "max_ms": 20.185442,
+          "population_stdev_ms": 0.01975054770784808
+        }
+      },
+      "decode_first": {
+        "layer_count": 1,
+        "layer": {
+          "count": 10,
+          "mean_ms": 3.8996912,
+          "median_ms": 3.9018295,
+          "min_ms": 3.8707810000000005,
+          "max_ms": 3.9315789999999997,
+          "population_stdev_ms": 0.016759539539020624
+        },
+        "block_total": {
+          "count": 10,
+          "mean_ms": 3.8996912,
+          "median_ms": 3.9018295,
+          "min_ms": 3.8707810000000005,
+          "max_ms": 3.9315789999999997,
+          "population_stdev_ms": 0.016759539539020624
+        },
+        "one_off": {
+          "count": 10,
+          "mean_ms": 4.4723089,
+          "median_ms": 4.52107,
+          "min_ms": 4.27133,
+          "max_ms": 4.577044,
+          "population_stdev_ms": 0.10357359644952961
+        },
+        "phase_total": {
+          "count": 10,
+          "mean_ms": 8.3720001,
+          "median_ms": 8.3985775,
+          "min_ms": 8.177667,
+          "max_ms": 8.493313,
+          "population_stdev_ms": 0.10870386866938099
+        }
+      }
+    },
+    "prefill_components": {
+      "fused_block": {
+        "count": 10,
+        "mean_ms": 8.8916175,
+        "median_ms": 8.8897655,
+        "min_ms": 8.862348,
+        "max_ms": 8.924672000000001,
+        "population_stdev_ms": 0.019142051573695324
+      }
+    }
+  },
+  "reproduction": {
+    "path": "runs/one_layer_prefill_edge1_oracle_10x_20260725_a/trace_warm/adnan-spyre-current-pf_706422.1785025392384843229.pt.trace.json",
+    "kernel_events": 120,
+    "generation_runs": 10,
+    "phase_metrics": {
+      "prefill": {
+        "layer_count": 1,
+        "layer": {
+          "count": 10,
+          "mean_ms": 8.6907722,
+          "median_ms": 8.689477499999999,
+          "min_ms": 8.666203,
+          "max_ms": 8.71245,
+          "population_stdev_ms": 0.016291181202110896
+        },
+        "block_total": {
+          "count": 10,
+          "mean_ms": 8.6907722,
+          "median_ms": 8.689477499999999,
+          "min_ms": 8.666203,
+          "max_ms": 8.71245,
+          "population_stdev_ms": 0.016291181202110896
+        },
+        "one_off": {
+          "count": 10,
+          "mean_ms": 11.1569808,
+          "median_ms": 11.154864,
+          "min_ms": 11.090115999999998,
+          "max_ms": 11.21595,
+          "population_stdev_ms": 0.03185193446809799
+        },
+        "phase_total": {
+          "count": 10,
+          "mean_ms": 19.847753,
+          "median_ms": 19.8566635,
+          "min_ms": 19.771960999999997,
+          "max_ms": 19.895979,
+          "population_stdev_ms": 0.03492561651281272
+        }
+      },
+      "decode_first": {
+        "layer_count": 1,
+        "layer": {
+          "count": 10,
+          "mean_ms": 3.8753698,
+          "median_ms": 3.874809,
+          "min_ms": 3.8412029999999997,
+          "max_ms": 3.9075770000000003,
+          "population_stdev_ms": 0.016355176121338598
+        },
+        "block_total": {
+          "count": 10,
+          "mean_ms": 3.8753698,
+          "median_ms": 3.874809,
+          "min_ms": 3.8412029999999997,
+          "max_ms": 3.9075770000000003,
+          "population_stdev_ms": 0.016355176121338598
+        },
+        "one_off": {
+          "count": 10,
+          "mean_ms": 4.4982924,
+          "median_ms": 4.498455999999999,
+          "min_ms": 4.315728999999999,
+          "max_ms": 4.595607,
+          "population_stdev_ms": 0.07993416843778386
+        },
+        "phase_total": {
+          "count": 10,
+          "mean_ms": 8.3736622,
+          "median_ms": 8.377493000000001,
+          "min_ms": 8.156932,
+          "max_ms": 8.474527,
+          "population_stdev_ms": 0.08730474073244839
+        }
+      }
+    },
+    "prefill_components": {
+      "fused_block": {
+        "count": 10,
+        "mean_ms": 8.6907722,
+        "median_ms": 8.689477499999999,
+        "min_ms": 8.666203,
+        "max_ms": 8.71245,
+        "population_stdev_ms": 0.016291181202110896
+      }
+    }
+  },
+  "comparison": {
+    "phases": {
+      "prefill": {
+        "reference_layers": 1,
+        "reference_layer_mean_ms": 8.8916175,
+        "reference_phase_total_ms": 20.150882799999998,
+        "reproduction_layers": 1,
+        "reproduction_layer_mean_ms": 8.6907722,
+        "reproduction_one_off_mean_ms": 11.1569808,
+        "projected_block_ms": 8.6907722,
+        "projected_phase_total_ms": 19.847752999999997,
+        "projected_minus_reference_ms": -0.30312980000000067,
+        "projected_minus_reference_percent": -1.5043003475758376
+      },
+      "decode_first": {
+        "reference_layers": 1,
+        "reference_layer_mean_ms": 3.8996912,
+        "reference_phase_total_ms": 8.3720001,
+        "reproduction_layers": 1,
+        "reproduction_layer_mean_ms": 3.8753698,
+        "reproduction_one_off_mean_ms": 4.4982924,
+        "projected_block_ms": 3.8753698,
+        "projected_phase_total_ms": 8.3736622,
+        "projected_minus_reference_ms": 0.0016621000000007768,
+        "projected_minus_reference_percent": 0.01985308146377207
+      }
+    },
+    "decode_average": {
+      "reference_device_ms": 8.3720001,
+      "projected_device_ms": 8.3736622,
+      "projected_minus_reference_ms": 0.0016621000000007768,
+      "projected_minus_reference_percent": 0.01985308146377207,
+      "reference_gap_to_reported_177_ms": 168.6279999,
+      "projected_gap_to_reported_177_ms": 168.6263378
+    }
+  }
+}

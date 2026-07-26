@@ -1,0 +1,44 @@
+{
+  "snapshot_utc": "2026-07-26T09:00:00Z",
+  "pod": "a6-quantization/adnan-spyre-current-pf",
+  "project_root": "/home/adnan/codex-isolated/device_parity_pr2939_20260725",
+  "runtime_activation": "/home/adnan/spyre-envs/main-e3a79c56-hints-pr2/activate.sh",
+  "lx_fraction": 0.2,
+  "repositories": {
+    "torch_spyre": {
+      "remote": "git@github.com:AdnanHoque/torch-spyre.git",
+      "branch": "ah/granite-relayout",
+      "snapshot_head_before_archive_commit": "3086ddb09485989f0c8ac8a13d8d0a41302ac2e0",
+      "prototype_code_commit": "e0a09fea7e9a20c6029410ce58a712fb7b4a246f",
+      "dirty_files": [
+        "tests/inductor/test_lx_relayout_dldsc.py",
+        "torch_spyre/_inductor/config.py",
+        "torch_spyre/_inductor/scratchpad/allocator.py",
+        "torch_spyre/_inductor/scratchpad/graph_editor.py",
+        "torch_spyre/_inductor/work_division.py"
+      ]
+    },
+    "deeptools": {
+      "remote": "git@github.ibm.com:ai-chip-toolchain/deeptools.git",
+      "branch": "ah/relayout-coordinate-handoff-after-4474",
+      "head": "406142afb9f080b9271e7c565a757ab8d8b5ed8f",
+      "dirty_overlay": "../overlays/deeptools"
+    },
+    "foundation_model_stack": {
+      "remote": "https://github.com/foundation-model-stack/foundation-model-stack.git",
+      "head": "61bc991b175103e80cb8202b24a66ba7dbe79d1b",
+      "dirty_overlay": "../overlays/foundation_model_stack"
+    },
+    "aiu_fms_testing_utils": {
+      "remote": "https://github.com/foundation-model-stack/aiu-fms-testing-utils.git",
+      "head": "dbb1617525844651e7a2c5afcdec27fe163caa5f"
+    },
+    "spyre_granite_e2e_bench": {
+      "remote": "https://github.ibm.com/Adnan-Hoque1/spyre-granite-e2e-bench.git",
+      "branch": "adnan/sendnn-granite-antoni-repro-20260725",
+      "head": "b12dacfdc47d00168e2304b271a70a71d94a9267",
+      "snapshot": "../reference/bench_harness"
+    }
+  }
+}
+

@@ -443,6 +443,33 @@ class ScratchpadAllocator:
         ``LifetimeBoundBuffer.read_count``."""
         return max(0, len(uses) - 1)
 
+    def _uses_after_planned_lx_relayouts(
+        self,
+        graph: GraphLowering,
+        name: str,
+        uses: list[int],
+    ) -> list[int]:
+        """Uses that will still access ``name`` after relayout materialization.
+
+        A relayout consumer is rewritten from the source buffer (S1) to the
+        shuffled destination (S2).  Its source view therefore must not make S1
+        fail an LX-layout legality check.  The producer write and every
+        non-relayout consumer remain on S1 and are deliberately retained.
+
+        Multiple consumers may share one compatible S1/S2 allocation pair, so
+        use the full alias-plan set rather than only the canonical plan.
+        """
+        canonical = self._lx_relayout_plans_by_source.get(name)
+        if canonical is None:
+            return uses
+        plans = self._lx_relayout_alias_plans_by_source.get(name) or [canonical]
+        rewritten_consumers = {plan.consumer_name for plan in plans}
+        return [
+            use
+            for use in uses
+            if graph.operations[use].get_name() not in rewritten_consumers
+        ]
+
     def _buffer_residency_reason(
         self,
         graph: GraphLowering,
@@ -504,7 +531,17 @@ class ScratchpadAllocator:
             # CP-SAT differential spill cost, so allow residency then.
             if not clone_at_graph_boundaries():
                 return "graph output (no clone)"
-            if name in reinterpret_output_names:
+            reinterpret_output_clone_allowlist = {
+                value.strip()
+                for value in config.relayout_oracle_reinterpret_output_clone_buffers.split(
+                    ","
+                )
+                if value.strip()
+            }
+            if (
+                name in reinterpret_output_names
+                and name not in reinterpret_output_clone_allowlist
+            ):
                 return "graph output is a ReinterpretView"
         if buffer_not_read_in_full(graph, name):
             return "partial/offset read"
@@ -514,7 +551,8 @@ class ScratchpadAllocator:
         if self._read_count(uses) == 0:
             # Only the producer's write touches it, so residency saves nothing.
             return "no consumer reads it from LX"
-        if _would_produce_lx_back_gap(graph, name, uses):
+        remaining_uses = self._uses_after_planned_lx_relayouts(graph, name, uses)
+        if _would_produce_lx_back_gap(graph, name, remaining_uses):
             # backGap fires when device_size[d] > it_dim_size; the backend
             # supports it for HBM but not for LX.
             return "lx back gap"

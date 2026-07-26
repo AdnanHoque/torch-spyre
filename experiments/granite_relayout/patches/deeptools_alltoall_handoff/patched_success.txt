@@ -1,0 +1,9 @@
+DeepTools base: e3944781cb25b76abeb9b3e87c1f5c5879e84229
+Patch: deeptools_alltoall_common_refinement.patch
+Input: example_bundle (explicit 4x8 -> 32x1 SHUFFLE)
+Exit status: 0
+DXP stdout/stderr: empty
+
+Generated outputs:
+  spyreCodeDir/spyrecode.json  479 bytes
+  spyreCodeDir/init_binary.bin 15360 bytes

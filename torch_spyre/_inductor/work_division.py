@@ -758,7 +758,7 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
     )
     is_compact_gqa_edge = (
         config.relayout_oracle_compact_gqa
-        and name in ("buf18", "buf29", "buf66")
+        and name in config.relayout_oracle_compact_gqa_buffers.split(",")
     )
     is_prefill_qk_query_edge = (
         config.relayout_oracle_prefill_qk_query

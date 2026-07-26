@@ -6,6 +6,15 @@ This document hands off the experiment for matching SenDNN's Granite 3.3 8B
 device performance by replaying its producer-to-consumer relayout decisions in
 Torch-Spyre. It is a state snapshot, not a completion claim.
 
+## Self-contained experiment record
+
+Everything needed to understand or resume the investigation is archived under
+`experiments/granite_relayout/`: run wrappers, analysis helpers, exact external
+source overlays, prior patches, relayout catalogs, compact raw traces/SDSCs,
+derived results, failed-gate evidence, a complete top-level run index, and
+SHA256 manifests. Start with `experiments/granite_relayout/README.md` after
+reading this document.
+
 ## Goal and acceptance contract
 
 Use the shuffle infrastructure from torch-spyre PR 2939 and a compatible

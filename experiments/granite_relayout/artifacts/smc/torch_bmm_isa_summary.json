@@ -1,0 +1,177 @@
+{
+  "source": "work/smc-study/torch_bmm_initpacket.json",
+  "header_count": 18,
+  "ibuff_flits_by_unit": {
+    "l0lu": 10,
+    "l0su": 2,
+    "l3lu": 16,
+    "l3su": 5,
+    "lxlu": 14,
+    "lxsu": 11,
+    "pe": 7,
+    "pt": 80,
+    "sfp": 3
+  },
+  "ibuff_slots_by_unit": {
+    "l0lu": 40,
+    "l0su": 8,
+    "l3lu": 64,
+    "l3su": 20,
+    "lxlu": 56,
+    "lxsu": 44,
+    "pe": 14,
+    "pt": 320,
+    "sfp": 6
+  },
+  "opcode_hist_by_unit": {
+    "l0lu": {
+      "LDSTI": 31,
+      "RETURN": 4,
+      "MVLOOPCNT": 2,
+      "SYNC": 1,
+      "LDSTIU": 1,
+      "NOP": 1
+    },
+    "l0su": {
+      "RETURN": 3,
+      "MVLOOPCNT": 2,
+      "SYNC": 1,
+      "LDSTIU": 1,
+      "NOP": 1
+    },
+    "l3lu": {
+      "LDGMU": 30,
+      "ADDEARIMM": 11,
+      "RETURN": 8,
+      "SYNC": 4,
+      "MVLOOPCNT": 3,
+      "GTRIMM": 2,
+      "SUBLARIMM": 2,
+      "LARREGCOPY": 1,
+      "LDMU": 1,
+      "LDM": 1,
+      "EARIMM": 1
+    },
+    "l3su": {
+      "SYNC": 4,
+      "MVLOOPCNT": 3,
+      "RETURN": 2,
+      "ADDEARIMM": 2,
+      "STZ": 1,
+      "JIMMCOPY": 1,
+      "STIM": 1,
+      "LARIMM": 1,
+      "LARREGCOPY": 1,
+      "MODLARREG": 1,
+      "STMU": 1,
+      "ADDLARIMM": 1,
+      "SUBLARIMM": 1
+    },
+    "lxlu": {
+      "LDSTI": 17,
+      "MVLOOPCNT": 6,
+      "MODLRFIMM": 6,
+      "SUBLRFIMM": 5,
+      "SETDSTMASK": 4,
+      "LDSTU": 4,
+      "RETURN": 4,
+      "SYNC": 3,
+      "LRFREGCOPY": 3,
+      "LDSTIU": 3,
+      "NOP": 1
+    },
+    "lxsu": {
+      "LDSTU": 14,
+      "MODLRFIMM": 13,
+      "SYNC": 8,
+      "LRFREGCOPY": 3,
+      "RETURN": 3,
+      "MVLOOPCNT": 2,
+      "SUBLRFIMM": 1
+    },
+    "pe": {
+      "MVLOOPCNT": 5,
+      "FMA": 5,
+      "LOGICAL": 2,
+      "NOP": 1,
+      "RETURN": 1
+    },
+    "pt": {
+      "FMA": 200,
+      "RETURN": 64,
+      "XRFACCESS": 32,
+      "MVLOOPCNT": 16,
+      "NOP": 8
+    },
+    "sfp": {
+      "MVLOOPCNT": 2,
+      "RETURN": 2,
+      "LOGICAL": 1,
+      "NOP": 1
+    }
+  },
+  "class_hist_by_unit": {
+    "l0lu": {
+      "l0_transfer": 32,
+      "return": 4,
+      "loop_control": 2,
+      "sync": 1,
+      "nop": 1
+    },
+    "l0su": {
+      "return": 3,
+      "loop_control": 2,
+      "sync": 1,
+      "l0_transfer": 1,
+      "nop": 1
+    },
+    "l3lu": {
+      "hbm_or_intercore_transfer": 32,
+      "register_or_address_control": 17,
+      "return": 8,
+      "sync": 4,
+      "loop_control": 3
+    },
+    "l3su": {
+      "register_or_address_control": 7,
+      "sync": 4,
+      "loop_control": 4,
+      "hbm_or_intercore_transfer": 3,
+      "return": 2
+    },
+    "lxlu": {
+      "lx_transfer": 24,
+      "register_or_address_control": 18,
+      "loop_control": 6,
+      "return": 4,
+      "sync": 3,
+      "nop": 1
+    },
+    "lxsu": {
+      "register_or_address_control": 17,
+      "lx_transfer": 14,
+      "sync": 8,
+      "return": 3,
+      "loop_control": 2
+    },
+    "pe": {
+      "vector_compute_or_dataflow": 7,
+      "loop_control": 5,
+      "nop": 1,
+      "return": 1
+    },
+    "pt": {
+      "pt_compute": 200,
+      "return": 64,
+      "register_or_address_control": 32,
+      "loop_control": 16,
+      "nop": 8
+    },
+    "sfp": {
+      "loop_control": 2,
+      "return": 2,
+      "vector_compute_or_dataflow": 1,
+      "nop": 1
+    }
+  }
+}

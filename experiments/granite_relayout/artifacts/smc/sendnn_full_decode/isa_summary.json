@@ -1,0 +1,240 @@
+{
+  "source": "/tmp/codex_smc_study_20260725/batch/sendnn_full_decode/initpacket.json",
+  "header_count": 17660,
+  "ibuff_flits_by_unit": {
+    "l0lu": 601,
+    "l0su": 401,
+    "l3lu": 8515,
+    "l3su": 3192,
+    "lxlu": 11693,
+    "lxsu": 7957,
+    "pe": 5186,
+    "pt": 20640,
+    "sfp": 4748
+  },
+  "ibuff_slots_by_unit": {
+    "l0lu": 2404,
+    "l0su": 1604,
+    "l3lu": 34060,
+    "l3su": 12768,
+    "lxlu": 46772,
+    "lxsu": 31828,
+    "pe": 10372,
+    "pt": 82560,
+    "sfp": 9496
+  },
+  "opcode_hist_by_unit": {
+    "l0lu": {
+      "RETURN": 601,
+      "MVLOOPCNT": 481,
+      "LDSTI": 440,
+      "SYNC": 401,
+      "LDSTIU": 401,
+      "MODLRFIMM": 80
+    },
+    "l0su": {
+      "SYNC": 401,
+      "MVLOOPCNT": 401,
+      "LDSTIU": 401,
+      "RETURN": 401
+    },
+    "l3lu": {
+      "RETURN": 8448,
+      "GTRIMM": 6125,
+      "LDGU": 5204,
+      "LARIMM": 4475,
+      "LDU": 2559,
+      "LDMU": 1454,
+      "MVLOOPCNT": 928,
+      "SYNC": 887,
+      "LD": 600,
+      "ADDEARIMM": 563,
+      "LDG": 482,
+      "LDM": 400,
+      "SUBLARIMM": 359,
+      "LARREGCOPY": 325,
+      "UNKNOWN_0x3f": 320,
+      "LDGMU": 237,
+      "ADDLARIMM": 208,
+      "LDGM": 202,
+      "JCMP": 81,
+      "MODLARREG": 80,
+      "LDIM": 41,
+      "JIMMCOPY": 41,
+      "LDIMU": 41
+    },
+    "l3su": {
+      "RETURN": 7328,
+      "LARIMM": 1326,
+      "GTRIMM": 927,
+      "STGU": 927,
+      "SYNC": 522,
+      "UNKNOWN_0x3f": 362,
+      "MVLOOPCNT": 328,
+      "STMU": 241,
+      "STU": 240,
+      "ADDEARIMM": 120,
+      "MODLARREG": 80,
+      "STZ": 80,
+      "JIMMCOPY": 80,
+      "STIMU": 80,
+      "STM": 40,
+      "ST": 40,
+      "NOP": 40,
+      "ADDLARIMM": 7
+    },
+    "lxlu": {
+      "MODLRFREG": 12889,
+      "RETURN": 9296,
+      "LDSTI": 5083,
+      "SETDSTMASK": 4690,
+      "MVLOOPCNT": 3606,
+      "LDSTU": 3058,
+      "LDSTIU": 2686,
+      "SYNC": 2452,
+      "SUBLRFIMM": 801,
+      "LRFREGCOPY": 642,
+      "MODLRFIMM": 520,
+      "SJCMP": 319,
+      "UNKNOWN_0x10": 240,
+      "UNKNOWN_0x14": 121,
+      "UNKNOWN_0x02": 82,
+      "JSUB": 41,
+      "UNKNOWN_0x01": 41,
+      "NOP": 40,
+      "LRFCOPY": 40,
+      "JCMP": 39,
+      "UNKNOWN_0x07": 38,
+      "IMMCOPY": 38,
+      "UNKNOWN_0x03": 4,
+      "UNKNOWN_0x06": 3,
+      "UNKNOWN_0x0b": 2,
+      "JADD": 1
+    },
+    "lxsu": {
+      "MODLRFREG": 12485,
+      "RETURN": 10385,
+      "LDSTI": 2567,
+      "MVLOOPCNT": 1648,
+      "LDSTU": 1411,
+      "SYNC": 1364,
+      "LDSTIU": 963,
+      "UNKNOWN_0x10": 320,
+      "SJCMP": 280,
+      "MODLRFIMM": 239,
+      "LRFREGCOPY": 164,
+      "NOP": 2
+    },
+    "pe": {
+      "FMA": 2975,
+      "FMUL": 1728,
+      "RETURN": 1612,
+      "LOGICAL": 1333,
+      "MVLOOPCNT": 1323,
+      "FMINMAX": 400,
+      "FNMS": 281,
+      "IME": 200,
+      "FEST": 160,
+      "FCMP": 80,
+      "SELECT": 80,
+      "EE": 80,
+      "ICVT": 80,
+      "SHR": 40
+    },
+    "pt": {
+      "FMA": 28934,
+      "NOP": 19755,
+      "XRFACCESS": 12832,
+      "MVLOOPCNT": 10444,
+      "RETURN": 9635,
+      "SETMASK": 640,
+      "INCRMASK": 320
+    },
+    "sfp": {
+      "RETURN": 2452,
+      "FMA": 1686,
+      "MERGE": 960,
+      "LOGICAL": 844,
+      "MVLOOPCNT": 565,
+      "FMUL": 526,
+      "IME": 526,
+      "FNMS": 443,
+      "FEST": 242,
+      "FCMP": 203,
+      "SELECT": 203,
+      "EE": 162,
+      "SPLAT": 161,
+      "REDUCE": 161,
+      "ICVT": 160,
+      "SHR": 121,
+      "FMINMAX": 81
+    }
+  },
+  "class_hist_by_unit": {
+    "l0lu": {
+      "l0_transfer": 841,
+      "return": 601,
+      "loop_control": 481,
+      "sync": 401,
+      "register_or_address_control": 80
+    },
+    "l0su": {
+      "sync": 401,
+      "loop_control": 401,
+      "l0_transfer": 401,
+      "return": 401
+    },
+    "l3lu": {
+      "register_or_address_control": 12135,
+      "hbm_or_intercore_transfer": 11220,
+      "return": 8448,
+      "loop_control": 1050,
+      "sync": 887,
+      "unknown": 320
+    },
+    "l3su": {
+      "return": 7328,
+      "register_or_address_control": 2460,
+      "hbm_or_intercore_transfer": 1648,
+      "sync": 522,
+      "loop_control": 408,
+      "unknown": 362,
+      "nop": 40
+    },
+    "lxlu": {
+      "register_or_address_control": 19620,
+      "lx_transfer": 10827,
+      "return": 9296,
+      "loop_control": 4006,
+      "sync": 2452,
+      "unknown": 531,
+      "nop": 40
+    },
+    "lxsu": {
+      "register_or_address_control": 12888,
+      "return": 10385,
+      "lx_transfer": 4941,
+      "loop_control": 1928,
+      "sync": 1364,
+      "unknown": 320,
+      "nop": 2
+    },
+    "pe": {
+      "vector_compute_or_dataflow": 7437,
+      "return": 1612,
+      "loop_control": 1323
+    },
+    "pt": {
+      "pt_compute": 28934,
+      "nop": 19755,
+      "register_or_address_control": 13792,
+      "loop_control": 10444,
+      "return": 9635
+    },
+    "sfp": {
+      "vector_compute_or_dataflow": 6479,
+      "return": 2452,
+      "loop_control": 565
+    }
+  }
+}

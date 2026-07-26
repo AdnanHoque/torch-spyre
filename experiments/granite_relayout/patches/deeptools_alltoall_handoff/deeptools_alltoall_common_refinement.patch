@@ -1,0 +1,41 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 913b3e69f2..03d463c407 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -349,8 +349,35 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         auto& outDs = dldsc.labeledDs_.back();
+         auto& outAllocNode = outDs.memOrg_.at(SenComponents::LX).allocateNode_;
+         pre_relayout_allocNode->layoutDimOrder_ = outAllocNode->layoutDimOrder_;
++
++        // The output allocation is already expressed in the destination form,
++        // so keep its destination coordinate folds.  The explicit custom map
++        // is redundant with the consumer SDSC, though, and prevents DDC from
++        // propagating a corelet-split dimension.  Let DDC use the SDSC's map.
++        outAllocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
++
++        // The relaid input and the direct output now name the same physical
++        // destination form.  Reuse the already-constructed destination folds
++        // instead of asking DDC to infer an equivalent factorization.
++        allocCoords = outAllocNode->allocateCoordinates_;
++
++        // STCDP has already implemented the direct SHUFFLE by moving the input
++        // into the destination allocation.  The remaining compute SDSC reads
++        // and writes that same destination form, so lower it to the supported
++        // identity op instead of asking DDC for a nonexistent SHUFFLE DDL.
++        dldsc.computeOp_.front().opFuncName = OpFuncs::IDENTITY;
++      }
++      if (!isDirectOutCopyEligible) {
++        // The allocation now describes the post-relayout (consumer) form.  Its
++        // producer-derived coordinate folds are no longer valid when the two
++        // work divisions are a true repartition (for example 4x8 -> 8x4): even
++        // after clearing only coreIdToWkSlice_, DDC can try to query the old
++        // core-fold cardinalities with consumer indices.  Drop the complete
++        // coordinate description so DDC rebuilds it from the consumer schedule.
++        // The physical placement is retained below through the rewritten start
++        // addresses.
++        allocCoords.clear();
+       }
+-      allocCoords.coreIdToWkSlice_.clear();
+       auto& stAddr = pre_relayout_allocNode->startAddressCoreCorelet_;
+       for (int coreid = 0; coreid < stAddr.getFoldSpaceSize().at(0); coreid++) {
+         if (sdsc->coreIdToWkSlice_.count(coreid) == 0) {

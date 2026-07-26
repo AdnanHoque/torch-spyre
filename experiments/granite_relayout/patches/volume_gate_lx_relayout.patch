@@ -1,0 +1,57 @@
+diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
+index 5a28f408..80f619ff 100644
+--- a/torch_spyre/_inductor/config.py
++++ b/torch_spyre/_inductor/config.py
+@@ -40,6 +40,12 @@ lx_relayout_collectives: str = os.environ.get(
+     "SPYRE_LX_RELAYOUT_COLLECTIVES", "all_to_all,all_gather,broadcast"
+ )
+ 
++# Reject dense all-to-all candidates above this total producer size when set
++# to a non-negative byte count.  The default preserves existing behavior.
++lx_relayout_all_to_all_max_bytes: int = int(
++    os.environ.get("SPYRE_LX_RELAYOUT_ALL_TO_ALL_MAX_BYTES", "-1")
++)
++
+ dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
+ 
+ sencores: int = int(os.getenv("SENCORES", "32"))
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index f171c853..e63b7dc3 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -293,6 +293,18 @@ def _work_slice_dims(view: PerCoreView) -> dict[str, int]:
+     return {str(int(dim)): int(split) for dim, split in view.work_slice_dims}
+ 
+ 
++def _buffer_nbytes(graph: GraphLowering, buffer: ComputedBuffer) -> int | None:
++    """Return a conservative concrete byte size for relayout cost gating."""
++
++    try:
++        numel = graph.sizevars.size_hint(math.prod(buffer.get_size()))
++        return int(numel) * int(buffer.get_dtype().itemsize)
++    except (AttributeError, TypeError, ValueError):
++        # A configured limit fails closed for symbolic or otherwise unknown
++        # candidates; the unlimited default never consults this helper.
++        return None
++
++
+ def _dense_view(
+     core_map: dict[str, dict[str, int]],
+     splits: dict[str, int],
+@@ -394,6 +406,16 @@ def collect_lx_relayout_plans(
+             }
+             if classification.collective_kind.value not in enabled_collectives:
+                 continue
++            if (
++                classification.collective_kind is LXCollectiveKind.ALL_TO_ALL
++                and config.lx_relayout_all_to_all_max_bytes >= 0
++            ):
++                producer_nbytes = _buffer_nbytes(graph, producer)
++                if (
++                    producer_nbytes is None
++                    or producer_nbytes > config.lx_relayout_all_to_all_max_bytes
++                ):
++                    continue
+ 
+             if is_matmul_consumer and (
+                 not _matmul_operand_source_good_for_lx_relayout(operations, producer)

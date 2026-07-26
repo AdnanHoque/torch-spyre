@@ -1,0 +1,376 @@
+{
+  "reference": {
+    "path": "runs/full40_prefill_edge1_baseline_5x_20260725_a/trace_warm/adnan-spyre-current-pf_707006.1785025717908728872.pt.trace.json",
+    "kernel_events": 1280,
+    "generation_runs": 5,
+    "phase_metrics": {
+      "prefill": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 8.92154284,
+          "median_ms": 8.968884,
+          "min_ms": 1e-06,
+          "max_ms": 9.095417,
+          "population_stdev_ms": 0.6352888299119499
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 356.86171360000003,
+          "median_ms": 358.550926,
+          "min_ms": 349.069426,
+          "max_ms": 359.306084,
+          "population_stdev_ms": 3.911290339946523
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 10.8695472,
+          "median_ms": 10.840208999999959,
+          "min_ms": 10.815493000000004,
+          "max_ms": 10.939700000000016,
+          "population_stdev_ms": 0.0531811026903416
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 367.73126080000003,
+          "median_ms": 369.375375,
+          "min_ms": 359.884919,
+          "max_ms": 370.233969,
+          "population_stdev_ms": 3.938511427929705
+        }
+      },
+      "decode_first": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 3.9088966750000003,
+          "median_ms": 3.908683,
+          "min_ms": 3.858704,
+          "max_ms": 3.9755089999999997,
+          "population_stdev_ms": 0.021807945179896593
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 156.355867,
+          "median_ms": 156.243072,
+          "min_ms": 156.027944,
+          "max_ms": 156.713542,
+          "population_stdev_ms": 0.26112862024986516
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 4.3778818,
+          "median_ms": 4.377980000000008,
+          "min_ms": 4.278278999999998,
+          "max_ms": 4.4669059999999945,
+          "population_stdev_ms": 0.062239362446605453
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 160.7337488,
+          "median_ms": 160.709978,
+          "min_ms": 160.405924,
+          "max_ms": 160.991821,
+          "population_stdev_ms": 0.2222088414707162
+        }
+      },
+      "decode_steady_1": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 3.8887422,
+          "median_ms": 3.9072924999999996,
+          "min_ms": 2e-06,
+          "max_ms": 3.9786770000000002,
+          "population_stdev_ms": 0.2769008442728371
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 155.549688,
+          "median_ms": 156.12303599999998,
+          "min_ms": 152.617654,
+          "max_ms": 156.624502,
+          "population_stdev_ms": 1.4827223620739034
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 4.400363199999998,
+          "median_ms": 4.397824000000014,
+          "min_ms": 4.314256,
+          "max_ms": 4.473533000000003,
+          "population_stdev_ms": 0.053662365350030015
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 159.9500512,
+          "median_ms": 160.43729199999999,
+          "min_ms": 157.015478,
+          "max_ms": 161.005183,
+          "population_stdev_ms": 1.4856338125324664
+        }
+      },
+      "decode_steady_2": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 3.90817939,
+          "median_ms": 3.9066805000000002,
+          "min_ms": 3.8436120000000003,
+          "max_ms": 3.9841170000000004,
+          "population_stdev_ms": 0.02311765518662955
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 156.3271756,
+          "median_ms": 156.28737,
+          "min_ms": 156.06094,
+          "max_ms": 156.576461,
+          "population_stdev_ms": 0.20097841664875452
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 4.5176853999999995,
+          "median_ms": 4.517407999999989,
+          "min_ms": 4.479118,
+          "max_ms": 4.547602000000012,
+          "population_stdev_ms": 0.02295896873642679
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 160.844861,
+          "median_ms": 160.804778,
+          "min_ms": 160.608542,
+          "max_ms": 161.108935,
+          "population_stdev_ms": 0.19062076954938792
+        }
+      }
+    },
+    "prefill_components": {
+      "fused_block": {
+        "count": 200,
+        "mean_ms": 8.92154284,
+        "median_ms": 8.968884,
+        "min_ms": 1e-06,
+        "max_ms": 9.095417,
+        "population_stdev_ms": 0.6352888299119499
+      }
+    }
+  },
+  "reproduction": {
+    "path": "runs/full40_prefill_edge1_oracle_5x_20260725_a/trace_warm/adnan-spyre-current-pf_707531.1785026031257116317.pt.trace.json",
+    "kernel_events": 1280,
+    "generation_runs": 5,
+    "phase_metrics": {
+      "prefill": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 8.729100560000001,
+          "median_ms": 8.765433,
+          "min_ms": 1e-06,
+          "max_ms": 8.941006999999999,
+          "population_stdev_ms": 0.622349215349852
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 349.1640224,
+          "median_ms": 350.753408,
+          "min_ms": 342.640243,
+          "max_ms": 350.88899200000003,
+          "population_stdev_ms": 3.262386521862834
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 11.114489400000002,
+          "median_ms": 11.13791900000001,
+          "min_ms": 11.01364000000001,
+          "max_ms": 11.184888999999998,
+          "population_stdev_ms": 0.05973030375480034
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 360.2785118,
+          "median_ms": 361.904105,
+          "min_ms": 353.778162,
+          "max_ms": 361.974294,
+          "population_stdev_ms": 3.2505024495209613
+        }
+      },
+      "decode_first": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 3.94451508,
+          "median_ms": 3.9452135000000004,
+          "min_ms": 3.890071,
+          "max_ms": 3.996449,
+          "population_stdev_ms": 0.02165307731532865
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 157.7806032,
+          "median_ms": 157.848618,
+          "min_ms": 157.286541,
+          "max_ms": 158.021795,
+          "population_stdev_ms": 0.26809418355078124
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 4.514198799999997,
+          "median_ms": 4.541735999999986,
+          "min_ms": 4.333016999999984,
+          "max_ms": 4.6010160000000155,
+          "population_stdev_ms": 0.09580110208844778
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 162.294802,
+          "median_ms": 162.360636,
+          "min_ms": 161.869748,
+          "max_ms": 162.622811,
+          "population_stdev_ms": 0.2848796022526068
+        }
+      },
+      "decode_steady_1": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 3.914704225,
+          "median_ms": 3.9161395,
+          "min_ms": 3.845712,
+          "max_ms": 3.9738029999999998,
+          "population_stdev_ms": 0.023422708615025167
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 156.588169,
+          "median_ms": 156.733622,
+          "min_ms": 156.255103,
+          "max_ms": 156.790273,
+          "population_stdev_ms": 0.21693848272448477
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 4.4412360000000035,
+          "median_ms": 4.449517999999983,
+          "min_ms": 4.336704999999995,
+          "max_ms": 4.546815000000009,
+          "population_stdev_ms": 0.06732429791390716
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 161.029405,
+          "median_ms": 161.094081,
+          "min_ms": 160.801918,
+          "max_ms": 161.239791,
+          "population_stdev_ms": 0.1822862146263374
+        }
+      },
+      "decode_steady_2": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 3.91148551,
+          "median_ms": 3.911498,
+          "min_ms": 3.836226,
+          "max_ms": 3.9941039999999997,
+          "population_stdev_ms": 0.024201631414429495
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 156.4594204,
+          "median_ms": 156.266531,
+          "min_ms": 156.094629,
+          "max_ms": 157.099418,
+          "population_stdev_ms": 0.3799248949019212
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 4.471598200000005,
+          "median_ms": 4.4284330000000125,
+          "min_ms": 4.32253,
+          "max_ms": 4.617943999999994,
+          "population_stdev_ms": 0.12075770173267937
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 160.9310186,
+          "median_ms": 160.773099,
+          "min_ms": 160.417159,
+          "max_ms": 161.708759,
+          "population_stdev_ms": 0.44875681826868724
+        }
+      }
+    },
+    "prefill_components": {
+      "fused_block": {
+        "count": 200,
+        "mean_ms": 8.729100560000001,
+        "median_ms": 8.765433,
+        "min_ms": 1e-06,
+        "max_ms": 8.941006999999999,
+        "population_stdev_ms": 0.622349215349852
+      }
+    }
+  },
+  "comparison": {
+    "phases": {
+      "prefill": {
+        "reference_layers": 40,
+        "reference_layer_mean_ms": 8.92154284,
+        "reference_phase_total_ms": 367.73126080000003,
+        "reproduction_layers": 40,
+        "reproduction_layer_mean_ms": 8.729100560000001,
+        "reproduction_one_off_mean_ms": 11.114489400000002,
+        "projected_block_ms": 349.1640224,
+        "projected_phase_total_ms": 360.27851180000005,
+        "projected_minus_reference_ms": -7.452748999999983,
+        "projected_minus_reference_percent": -2.0266835579293763
+      },
+      "decode_first": {
+        "reference_layers": 40,
+        "reference_layer_mean_ms": 3.9088966750000003,
+        "reference_phase_total_ms": 160.7337488,
+        "reproduction_layers": 40,
+        "reproduction_layer_mean_ms": 3.94451508,
+        "reproduction_one_off_mean_ms": 4.514198799999997,
+        "projected_block_ms": 157.7806032,
+        "projected_phase_total_ms": 162.294802,
+        "projected_minus_reference_ms": 1.5610532000000035,
+        "projected_minus_reference_percent": 0.9712043747218235
+      },
+      "decode_steady_1": {
+        "reference_layers": 40,
+        "reference_layer_mean_ms": 3.8887422,
+        "reference_phase_total_ms": 159.9500512,
+        "reproduction_layers": 40,
+        "reproduction_layer_mean_ms": 3.914704225,
+        "reproduction_one_off_mean_ms": 4.4412360000000035,
+        "projected_block_ms": 156.588169,
+        "projected_phase_total_ms": 161.029405,
+        "projected_minus_reference_ms": 1.079353800000007,
+        "projected_minus_reference_percent": 0.6748067861825247
+      },
+      "decode_steady_2": {
+        "reference_layers": 40,
+        "reference_layer_mean_ms": 3.90817939,
+        "reference_phase_total_ms": 160.844861,
+        "reproduction_layers": 40,
+        "reproduction_layer_mean_ms": 3.91148551,
+        "reproduction_one_off_mean_ms": 4.471598200000005,
+        "projected_block_ms": 156.4594204,
+        "projected_phase_total_ms": 160.93101860000002,
+        "projected_minus_reference_ms": 0.08615760000000705,
+        "projected_minus_reference_percent": 0.053565652930620544
+      }
+    },
+    "decode_average": {
+      "reference_device_ms": 160.50955366666668,
+      "projected_device_ms": 161.41840853333335,
+      "projected_minus_reference_ms": 0.9088548666666725,
+      "projected_minus_reference_percent": 0.5662310098712986,
+      "reference_gap_to_reported_177_ms": 16.490446333333324,
+      "projected_gap_to_reported_177_ms": 15.581591466666652
+    }
+  }
+}

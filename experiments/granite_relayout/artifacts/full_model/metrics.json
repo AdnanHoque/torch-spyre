@@ -1,0 +1,388 @@
+{
+  "contract": {
+    "model": "ibm-granite/granite-3.3-8b-instruct",
+    "decoder_layers": 40,
+    "batch_size": 1,
+    "fixed_prompt_tokens": 512,
+    "generated_token_phases": 4,
+    "iterations": 5,
+    "dtype": "fp16",
+    "weights": "unfused",
+    "attention": "SDPA",
+    "comparison_scope": "Trace-derived device-program time: fused SenDNN kernel versus the sum of Torch-Spyre phase kernels."
+  },
+  "sendnn": {
+    "path": "/Users/adnan/Documents/Codex/2026-07-25/can/work/full-model-artifacts/sendnn/sendnn_full_40_layer_b1_s512_5x4.pt.trace.json.gz",
+    "kernel_events": 20,
+    "generation_runs": 5,
+    "fused_kernel_name": "embedding",
+    "phase_metrics": {
+      "prefill": {
+        "count": 5,
+        "mean_ms": 190.4060778,
+        "median_ms": 190.366068,
+        "min_ms": 190.098355,
+        "max_ms": 190.654104,
+        "population_stdev_ms": 0.19421374082221596
+      },
+      "decode_first": {
+        "count": 5,
+        "mean_ms": 123.919919,
+        "median_ms": 123.968258,
+        "min_ms": 123.198338,
+        "max_ms": 124.33723699999999,
+        "population_stdev_ms": 0.3983293919438986
+      },
+      "decode_steady_1": {
+        "count": 5,
+        "mean_ms": 124.0245484,
+        "median_ms": 124.06348,
+        "min_ms": 123.53275199999999,
+        "max_ms": 124.372466,
+        "population_stdev_ms": 0.31950689044313835
+      },
+      "decode_steady_2": {
+        "count": 5,
+        "mean_ms": 123.9374036,
+        "median_ms": 124.128609,
+        "min_ms": 123.040307,
+        "max_ms": 124.475291,
+        "population_stdev_ms": 0.5288086730240329
+      }
+    },
+    "decode_average": {
+      "count": 15,
+      "mean_ms": 123.96062366666666,
+      "median_ms": 124.06348,
+      "min_ms": 123.040307,
+      "max_ms": 124.475291,
+      "population_stdev_ms": 0.42687702487900997
+    },
+    "dtoh_overlap": {
+      "events": 20,
+      "mean_kernel_interval_covered_percent": 99.99819684392646,
+      "interpretation": "DtoH spans the fused device program and must not be added to the kernel duration."
+    },
+    "compiler_cycle_proxy": {
+      "core_frequency_mhz": 1100.0,
+      "prefill_cycles": 127146112,
+      "prefill_ideal_ms": 115.58737454545455,
+      "prefill_utilization_percent": 60.70571689779041,
+      "decode_cycles": 257152,
+      "decode_ideal_ms": 0.23377454545454546,
+      "decode_utilization_percent": 0.18858774547889604,
+      "interpretation": "Compiler-cycle proxy, not a physical utilization counter."
+    },
+    "profiled_wall": {
+      "rows_ms": [
+        [
+          195.635,
+          132.042,
+          133.131,
+          134.434
+        ],
+        [
+          195.44,
+          132.949,
+          133.843,
+          132.801
+        ],
+        [
+          195.428,
+          131.801,
+          133.326,
+          133.756
+        ],
+        [
+          196.101,
+          132.655,
+          131.727,
+          132.931
+        ],
+        [
+          195.071,
+          132.325,
+          132.158,
+          133.379
+        ]
+      ],
+      "prefill": {
+        "count": 5,
+        "mean_ms": 195.535,
+        "median_ms": 195.44,
+        "min_ms": 195.071,
+        "max_ms": 196.101,
+        "population_stdev_ms": 0.336489524354028
+      },
+      "decode": {
+        "count": 15,
+        "mean_ms": 132.88386666666668,
+        "median_ms": 132.931,
+        "min_ms": 131.727,
+        "max_ms": 134.434,
+        "population_stdev_ms": 0.7620055001259655
+      },
+      "interpretation": "Profiled Python wall time; retained as diagnostics and excluded from the device-program comparison."
+    }
+  },
+  "torch_spyre": {
+    "path": "/Users/adnan/Documents/Codex/2026-07-25/can/work/full-model-artifacts/torch_spyre/torch_spyre_full_40_layer_b1_s512_5x4.pt.trace.json.gz",
+    "kernel_events": 4880,
+    "generation_runs": 5,
+    "phase_metrics": {
+      "prefill": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 7.317273525,
+          "median_ms": 7.31798,
+          "min_ms": 7.22555,
+          "max_ms": 7.406472999999999,
+          "population_stdev_ms": 0.03351051952774495
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 292.69094099999995,
+          "median_ms": 292.965519,
+          "min_ms": 292.04655500000007,
+          "max_ms": 293.37034,
+          "population_stdev_ms": 0.5363487899309508
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 8.75155600000005,
+          "median_ms": 8.75038699999999,
+          "min_ms": 8.737865,
+          "max_ms": 8.764074999999764,
+          "population_stdev_ms": 0.008794580421999215
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 301.442497,
+          "median_ms": 301.71386100000024,
+          "min_ms": 300.78442000000007,
+          "max_ms": 302.13441499999976,
+          "population_stdev_ms": 0.5434269486644834
+        }
+      },
+      "decode_first": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 3.76190035,
+          "median_ms": 3.76272,
+          "min_ms": 3.6731929999999995,
+          "max_ms": 3.8132539999999997,
+          "population_stdev_ms": 0.020246981691044753
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 150.476014,
+          "median_ms": 150.527627,
+          "min_ms": 149.93565,
+          "max_ms": 150.753973,
+          "population_stdev_ms": 0.2996729807226432
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 4.070388400000036,
+          "median_ms": 4.0624219999998274,
+          "min_ms": 3.9710710000001086,
+          "max_ms": 4.145471000000072,
+          "population_stdev_ms": 0.0643767714275842
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 154.54640240000003,
+          "median_ms": 154.66227500000008,
+          "min_ms": 153.90672100000012,
+          "max_ms": 154.89944400000007,
+          "population_stdev_ms": 0.34900731259019924
+        }
+      },
+      "decode_steady_1": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 3.726509275,
+          "median_ms": 3.7263255000000006,
+          "min_ms": 3.682361,
+          "max_ms": 3.787001,
+          "population_stdev_ms": 0.018536331108646473
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 149.060371,
+          "median_ms": 149.17445799999993,
+          "min_ms": 148.76920500000003,
+          "max_ms": 149.30192400000004,
+          "population_stdev_ms": 0.21326348743748658
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 4.111633000000029,
+          "median_ms": 4.097300000000132,
+          "min_ms": 3.9649850000000413,
+          "max_ms": 4.252738999999991,
+          "population_stdev_ms": 0.0975439268452807
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 153.17200400000004,
+          "median_ms": 153.27175800000006,
+          "min_ms": 152.73419000000007,
+          "max_ms": 153.55466300000003,
+          "population_stdev_ms": 0.3045990260778964
+        }
+      },
+      "decode_steady_2": {
+        "layer_count": 40,
+        "layer": {
+          "count": 200,
+          "mean_ms": 3.723064455,
+          "median_ms": 3.724087,
+          "min_ms": 3.6843499999999993,
+          "max_ms": 3.7616460000000003,
+          "population_stdev_ms": 0.015583187935014344
+        },
+        "block_total": {
+          "count": 5,
+          "mean_ms": 148.9225782,
+          "median_ms": 148.96674,
+          "min_ms": 148.746599,
+          "max_ms": 149.07164799999998,
+          "population_stdev_ms": 0.11846644383858197
+        },
+        "one_off": {
+          "count": 5,
+          "mean_ms": 4.134292799999997,
+          "median_ms": 4.17518400000003,
+          "min_ms": 3.9670569999999543,
+          "max_ms": 4.240002000000004,
+          "population_stdev_ms": 0.09312126409667455
+        },
+        "phase_total": {
+          "count": 5,
+          "mean_ms": 153.056871,
+          "median_ms": 153.067693,
+          "min_ms": 152.85707300000004,
+          "max_ms": 153.17539700000006,
+          "population_stdev_ms": 0.11159531188718456
+        }
+      }
+    },
+    "prefill_components": {
+      "projection_norm": {
+        "count": 200,
+        "mean_ms": 0.53290619,
+        "median_ms": 0.5331655,
+        "min_ms": 0.511961,
+        "max_ms": 0.559278,
+        "population_stdev_ms": 0.007826603431495686
+      },
+      "attention_qk": {
+        "count": 200,
+        "mean_ms": 1.43433713,
+        "median_ms": 1.4344394999999999,
+        "min_ms": 1.4166020000000001,
+        "max_ms": 1.448865,
+        "population_stdev_ms": 0.006817625257602534
+      },
+      "attention_av": {
+        "count": 200,
+        "mean_ms": 1.056482765,
+        "median_ms": 1.0560405,
+        "min_ms": 1.0341900000000002,
+        "max_ms": 1.0793430000000002,
+        "population_stdev_ms": 0.00902434722679568
+      },
+      "swiglu": {
+        "count": 200,
+        "mean_ms": 4.22454119,
+        "median_ms": 4.2254355,
+        "min_ms": 4.154329,
+        "max_ms": 4.288578,
+        "population_stdev_ms": 0.025878989273808606
+      },
+      "residual": {
+        "count": 200,
+        "mean_ms": 0.06900625,
+        "median_ms": 0.06888,
+        "min_ms": 0.063794,
+        "max_ms": 0.076548,
+        "population_stdev_ms": 0.0019082143714740224
+      }
+    },
+    "decode_average": {
+      "mean_ms": 153.59175913333337,
+      "definition": "Mean of first-decode and two steady-decode phase means."
+    },
+    "profiled_wall": {
+      "rows_ms": [
+        [
+          1331.789,
+          1069.451,
+          1058.959,
+          1064.348
+        ],
+        [
+          1318.323,
+          1070.168,
+          1130.725,
+          1136.981
+        ],
+        [
+          1311.1,
+          1085.416,
+          1243.143,
+          1100.667
+        ],
+        [
+          1234.804,
+          1069.498,
+          1083.835,
+          1212.031
+        ],
+        [
+          1273.465,
+          1079.962,
+          1067.68,
+          1106.22
+        ]
+      ],
+      "prefill": {
+        "count": 5,
+        "mean_ms": 1293.8962,
+        "median_ms": 1311.1,
+        "min_ms": 1234.804,
+        "max_ms": 1331.789,
+        "population_stdev_ms": 35.32088792428637
+      },
+      "decode": {
+        "count": 15,
+        "mean_ms": 1105.2722666666666,
+        "median_ms": 1083.835,
+        "min_ms": 1058.959,
+        "max_ms": 1243.143,
+        "population_stdev_ms": 53.294001718100404
+      },
+      "interpretation": "Profiled Python wall time; retained as diagnostics and excluded from the device-program comparison."
+    }
+  },
+  "comparison": {
+    "prefill": {
+      "sendnn_device_ms": 190.4060778,
+      "torch_spyre_device_ms": 301.442497,
+      "sendnn_minus_torch_spyre_ms": -111.03641920000001,
+      "sendnn_lower_percent": 36.83502502303118,
+      "torch_spyre_over_sendnn_ratio": 1.5831558555427585
+    },
+    "decode_average": {
+      "sendnn_device_ms": 123.96062366666666,
+      "torch_spyre_device_ms": 153.59175913333337,
+      "sendnn_minus_torch_spyre_ms": -29.631135466666706,
+      "sendnn_lower_percent": 19.292138871164212,
+      "torch_spyre_over_sendnn_ratio": 1.239036676246044
+    }
+  }
+}

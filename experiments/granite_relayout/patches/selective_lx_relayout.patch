@@ -1,0 +1,36 @@
+diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
+index 1589bf2f..c04b4c75 100644
+--- a/torch_spyre/_inductor/config.py
++++ b/torch_spyre/_inductor/config.py
+@@ -33,6 +33,13 @@ allow_all_ops_in_lx_planning: bool = False
+ # consumer per-core views as an explicit S1 -> SHUFFLE -> S2 sequence in LX.
+ lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
+ 
++# Comma-separated collective kinds accepted by the LX relayout planner.  This
++# is primarily an A/B and cost-model-development control; all supported kinds
++# remain enabled by default.
++lx_relayout_collectives: str = os.environ.get(
++    "SPYRE_LX_RELAYOUT_COLLECTIVES", "all_to_all,all_gather,broadcast"
++)
++
+ dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
+ 
+ sencores: int = int(os.getenv("SENCORES", "32"))
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index b60d6dd3..753aec33 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -389,6 +389,13 @@ def collect_lx_relayout_plans(
+             )
+             if classification is None:
+                 continue
++            enabled_collectives = {
++                value.strip()
++                for value in config.lx_relayout_collectives.split(",")
++                if value.strip()
++            }
++            if classification.collective_kind.value not in enabled_collectives:
++                continue
+ 
+             if is_matmul_consumer and (
+                 not _matmul_operand_source_good_for_lx_relayout(operations, producer)

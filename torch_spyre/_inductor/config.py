@@ -73,6 +73,20 @@ relayout_oracle_compact_gqa: bool = (
     os.environ.get("SPYRE_RELAYOUT_ORACLE_COMPACT_GQA", "0") == "1"
 )
 
+# Optional graph-local subset for isolating the compact-GQA replay edges.
+# ``buf18``/``buf66`` are the K path and ``buf29`` is the V -> AV edge.
+relayout_oracle_compact_gqa_buffers: str = os.environ.get(
+    "SPYRE_RELAYOUT_ORACLE_COMPACT_GQA_BUFFERS", "buf18,buf29,buf66"
+)
+
+# Graph-output residency normally excludes ReinterpretView outputs because the
+# boundary clone must preserve the view around the new HBM base buffer.  This
+# allowlist enables that path for exact replay experiments without changing
+# the default placement policy.
+relayout_oracle_reinterpret_output_clone_buffers: str = os.environ.get(
+    "SPYRE_RELAYOUT_ORACLE_REINTERPRET_OUTPUT_CLONE_BUFFERS", ""
+)
+
 # Test-only SenDNN P06 replay oracle.  Preserve the Granite prefill query in
 # 8 token cohorts x 4 query-head cohorts through projection and rotary, then
 # let the QK consumer gather the four head fragments for each 16-token shard.

@@ -1,0 +1,10 @@
+DeepTools base: e3944781cb25b76abeb9b3e87c1f5c5879e84229
+Input: example_bundle (explicit 4x8 -> 32x1 SHUFFLE)
+Exit status: 134
+
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: [distributeElemArrToTemporalLoops] Not enough elements to distribute.
+  Loop=corelet_slice: requires 12800 elements in total, across 2 iterations.
+  ElemArr: innerCardinality= 64 elemArr[1]: (alpha=64, cardinality= 25), file /home/adnan/codex-isolated/deeptools-master-e3944781/dsc/dsc2.cpp line 6321
+
+    Remaining elemArr: (1, 0, 64) (64, 0, 25)

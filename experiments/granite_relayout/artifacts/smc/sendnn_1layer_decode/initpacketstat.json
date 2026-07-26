@@ -1,0 +1,117 @@
+{
+  "totRegInitFlits" : 1341,
+  "totPatchInitFlits" : 2242,
+  "regFlitCompBreakdown" : { 
+    "-zero-" : { "null" : 7116 },
+    "-l3lu-" : { "header" : 90, "spr" : 90, "lrf" : 212, "ibuff" : 317 },
+    "-l3su-" : { "header" : 84, "spr" : 84, "lrf" : 109, "ibuff" : 104 },
+    "-lxlu0-" : { "header" : 76, "spr" : 76, "lrf" : 86, "ibuff" : 337 },
+    "-lxsu0-" : { "header" : 76, "spr" : 76, "lrf" : 76, "ibuff" : 234 },
+    "-l0lu0-" : { "header" : 4, "spr" : 4, "lrf" : 4, "ibuff" : 7 },
+    "-l0lu0-l0lu1-" : { "header" : 7, "spr" : 7, "lrf" : 7, "ibuff" : 9 },
+    "-l0su0-" : { "header" : 4, "spr" : 4, "lrf" : 4, "ibuff" : 4 },
+    "-l0su0-l0su1-" : { "header" : 7, "spr" : 7, "lrf" : 7, "ibuff" : 7 },
+    "-sfp0-" : { "header" : 11, "spr" : 11, "lrf" : 18, "ibuff" : 45 },
+    "-sfp0-sfp1-" : { "header" : 33, "spr" : 33, "lrf" : 14, "ibuff" : 101 },
+    "-pe0-" : { "header" : 39, "spr" : 39, "lrf" : 3, "ibuff" : 70 },
+    "-pe0-pe1-" : { "header" : 15, "spr" : 15, "lrf" : 14, "ibuff" : 83 },
+    "-ptrow0_0-" : { "header" : 32, "spr" : 32, "ibuff" : 192 },
+    "-ptrow0_0-ptrow0_1-" : { "header" : 56, "spr" : 56, "ibuff" : 480 }
+  },
+  "regSliceSparsity" : [ 0.888143, 0.884415, 0.576435, 0.49217, 0.713647, 0.722595, 0.636838, 0.392245 ],
+  "regInitsPerSlice" : [ 150, 155, 568, 681, 384, 372, 487, 815 ],
+  "whatIsPatched" : { 
+    "-zero-" : { "null" : 1748 },
+    "-l3lu-" : { "header" : 42, "spr" : 41, "lrf" : 281, "ibuff" : 720 },
+    "-l3su-" : { "header" : 6, "ibuff" : 2 },
+    "-lxlu0-" : { "header" : 8, "spr" : 6, "ibuff" : 1 },
+    "-lxsu0-" : { "header" : 3 }
+  },
+  "patchSliceSparsity" : [ 1, 1, 0.836753, 0.8876, 0.971454, 1, 0.732828, 0.29661 ],
+  "patchesPerSlice" : [ 0, 0, 366, 252, 64, 0, 599, 1577 ],
+  "jointSlicePatching" : [
+    [ 0, 0, 0, 0, 0, 0, 0, 0 ],
+    [ 0, 0, 0, 0, 0, 0, 0, 0 ],
+    [ 0, 0, 190, 173, 63, 0, 61, 38 ],
+    [ 0, 0, 173, 60, 64, 0, 65, 48 ],
+    [ 0, 0, 63, 64, 0, 0, 44, 24 ],
+    [ 0, 0, 0, 0, 0, 0, 0, 0 ],
+    [ 0, 0, 61, 65, 44, 0, 270, 290 ],
+    [ 0, 0, 38, 48, 24, 0, 290, 1266 ]
+  ],
+  "activeSlicesPatchInfo" : {
+    "7-" : {      "numPatches" : 1266,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 851, "2" : 289, "3" : 17, "4" : 21, "5" : 12, "6" : 7, "7" : 19, "8" : 18, "9" : 10, "10" : 1, "11" : 8, "12" : 3, "13" : 4, "15" : 2, "24" : 4, }
+    },
+    "6-" : {      "numPatches" : 270,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 223, "2" : 2, "3" : 6, "4" : 13, "5" : 2, "6" : 4, "7" : 4, "8" : 8, "9" : 2, "12" : 1, "14" : 1, "24" : 4, }
+    },
+    "6-7-" : {      "numPatches" : 261,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 257, "2" : 2, "7" : 2, }
+    },
+    "2-" : {      "numPatches" : 190,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 186, "2" : 1, "4" : 1, "6" : 2, }
+    },
+    "2-3-" : {      "numPatches" : 91,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 52, "2" : 2, "4" : 1, "6" : 3, "8" : 6, "25" : 4, "28" : 2, "32" : 21, }
+    },
+    "3-" : {      "numPatches" : 60,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 53, "7" : 7, }
+    },
+    "2-3-4-6-" : {      "numPatches" : 24,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 2, "6" : 4, "7" : 2, "30" : 4, "31" : 12, }
+    },
+    "2-3-4-6-7-" : {      "numPatches" : 19,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 19 }
+    },
+    "2-3-4-" : {      "numPatches" : 15,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 2, "4" : 1, "28" : 4, "31" : 8, }
+    },
+    "3-7-" : {      "numPatches" : 12,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 11, "7" : 1, }
+    },
+    "2-3-6-7-" : {      "numPatches" : 8,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 7, "7" : 1, }
+    },
+    "2-3-6-" : {      "numPatches" : 7,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 2, "2" : 4, "6" : 1, }
+    },
+    "3-6-" : {      "numPatches" : 6,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 6 }
+    },
+    "2-3-4-7-" : {      "numPatches" : 5,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 5 }
+    },
+    "2-3-7-" : {      "numPatches" : 4,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 4 }
+    },
+    "2-6-7-" : {      "numPatches" : 2,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "1" : 2 }
+    },
+    "3-4-6-" : {      "numPatches" : 1,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "7" : 1 }
+    },
+    "2-6-" : {      "numPatches" : 1,
+      "numAddrRepeating" : [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+      "mcastDegreeToPatchCount" : { "2" : 1 }
+    }
+  },
+  "mcastDegreeToPatchCount" : { "1" : 1682, "2" : 301, "3" : 23, "4" : 37, "5" : 14, "6" : 21, "7" : 37, "8" : 32, "9" : 12, "10" : 1, "11" : 8, "12" : 4, "13" : 4, "14" : 1, "15" : 2, "24" : 8, "25" : 4, "28" : 6, "30" : 4, "31" : 20, "32" : 21 }
+}

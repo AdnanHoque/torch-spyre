@@ -33,6 +33,7 @@ from torch._inductor.ir import (
     Operation,
     Pointwise,
     Reduction,
+    ReinterpretView,
 )
 from torch._inductor.lowering import clone as clone_lowering, lowerings
 
@@ -51,16 +52,18 @@ class GraphEditor:
         else:
             raise KeyError("could not find the clone lowering op")
 
-    def _graph_output_name(self, buffer: TensorBox | StorageBox | Buffer) -> str:
-        # graph_outputs can hold TensorBox, StorageBox, or Buffer depending on how
-        # Inductor constructed the graph.
+    def _graph_output_name(
+        self, buffer: TensorBox | StorageBox | ReinterpretView | Buffer
+    ) -> str:
+        # graph_outputs can hold TensorBox, StorageBox, ReinterpretView, or
+        # Buffer depending on how Inductor constructed the graph.
         while not isinstance(buffer, Buffer):
             buffer = buffer.data
-        return buffer.name
+        return buffer.get_name()
 
     def _replace_matching_buffer(
         self,
-        buffer: TensorBox | StorageBox | Buffer,
+        buffer: TensorBox | StorageBox | ReinterpretView | Buffer,
         old_name: str,
         i: int,
         new: ComputedBuffer | TensorBox,
@@ -71,21 +74,29 @@ class GraphEditor:
         If `buffer` is a `TensorBox` (containing a `StorageBox`) or `StorageBox`, wrap `new` up in
         the same way. If `new` is a `TensorBox` itself, it is assumed to be wrapped up in an
         appropriate way."""
-        fs = []
+        wrappers = []
         while not isinstance(buffer, Buffer):
             if isinstance(buffer, TensorBox):
-                fs.append(TensorBox)
+                wrappers.append((TensorBox, None))
+            elif isinstance(buffer, StorageBox):
+                wrappers.append((StorageBox, None))
+            elif isinstance(buffer, ReinterpretView):
+                wrappers.append((ReinterpretView, buffer.layout))
             else:
-                assert isinstance(buffer, StorageBox), (
-                    f"unexpected buffer type {type(buffer)} while replacing '{old_name}' ({buffer})"
+                raise AssertionError(
+                    f"unexpected buffer type {type(buffer)} while replacing "
+                    f"'{old_name}' ({buffer})"
                 )
-                fs.append(StorageBox)
             buffer = buffer.data
 
-        if buffer.name == old_name:
+        if buffer.get_name() == old_name:
             if not isinstance(new, TensorBox):
-                for f in fs[::-1]:
-                    new = f(new)
+                for wrapper, layout in reversed(wrappers):
+                    new = (
+                        ReinterpretView(data=new, layout=layout)
+                        if wrapper is ReinterpretView
+                        else wrapper(new)
+                    )
             self.lowering.graph_outputs[i] = new
             return True
         else:

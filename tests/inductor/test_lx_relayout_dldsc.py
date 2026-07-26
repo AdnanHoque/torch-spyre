@@ -19,6 +19,7 @@ from sympy import Integer, Mod, Symbol, floor
 
 import torch_spyre._inductor.lx_relayout as lx_relayout_module
 import torch_spyre._inductor.scratchpad.allocator as allocator_module
+import torch_spyre._inductor.scratchpad.graph_editor as graph_editor_module
 
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
@@ -39,6 +40,7 @@ from torch_spyre._inductor.scratchpad.firstfit_bestfit_solver import (
     FirstFitLayoutSolver,
 )
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
+from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
 from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
 from torch_spyre._inductor.spyre_kernel import (
     _materialize_explicit_lx_shuffle,
@@ -632,6 +634,76 @@ def test_planned_restickify_source_is_eligible_for_lx_reuse(monkeypatch):
     assert allocator._op_output_good_for_lx_reuse(source)
     assert not allocator._op_output_good_for_lx_reuse(unrelated)
     assert not allocator._op_output_good_for_lx_reuse(mutated_source)
+
+
+def test_relayout_source_layout_checks_skip_only_rewritten_consumers():
+    graph = _DummyGraph(
+        "buf_k", "consumer_a", "unrelated_consumer", "consumer_b"
+    )
+    plan_a = replace(_all_gather_plan(), consumer_name="consumer_a")
+    plan_b = replace(_all_gather_plan(), consumer_name="consumer_b")
+    allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
+    allocator._lx_relayout_plans_by_source = {"buf_k": plan_b}
+    allocator._lx_relayout_alias_plans_by_source = {
+        "buf_k": [plan_a, plan_b]
+    }
+
+    assert allocator._uses_after_planned_lx_relayouts(
+        graph, "buf_k", [0, 1, 2, 3]
+    ) == [0, 2]
+    assert allocator._uses_after_planned_lx_relayouts(
+        graph, "not_a_relayout_source", [0, 1, 2, 3]
+    ) == [0, 1, 2, 3]
+
+
+def test_graph_output_replacement_preserves_reinterpret_view(monkeypatch):
+    class _Buffer:
+        def __init__(self, name):
+            self.name = name
+
+        def get_name(self):
+            return self.name
+
+    class _Wrapper:
+        def __init__(self, data):
+            self.data = data
+
+    class _TensorBox(_Wrapper):
+        pass
+
+    class _StorageBox(_Wrapper):
+        pass
+
+    class _ReinterpretView(_Wrapper):
+        def __init__(self, *, data, layout):
+            super().__init__(data)
+            self.layout = layout
+
+    monkeypatch.setattr(graph_editor_module, "Buffer", _Buffer)
+    monkeypatch.setattr(graph_editor_module, "TensorBox", _TensorBox)
+    monkeypatch.setattr(graph_editor_module, "StorageBox", _StorageBox)
+    monkeypatch.setattr(graph_editor_module, "ReinterpretView", _ReinterpretView)
+
+    old = _Buffer("buf29")
+    replacement = _Buffer("buf29_hbm_clone")
+    view_layout = object()
+    graph_output = _TensorBox(
+        _StorageBox(
+            _ReinterpretView(data=_StorageBox(old), layout=view_layout)
+        )
+    )
+    editor = object.__new__(GraphEditor)
+    editor.lowering = SimpleNamespace(graph_outputs=[graph_output])
+
+    editor.change_graph_output(old, replacement)
+
+    replaced = editor.lowering.graph_outputs[0]
+    assert isinstance(replaced, _TensorBox)
+    assert isinstance(replaced.data, _StorageBox)
+    assert isinstance(replaced.data.data, _ReinterpretView)
+    assert replaced.data.data.layout is view_layout
+    assert isinstance(replaced.data.data.data, _StorageBox)
+    assert replaced.data.data.data.data is replacement
 
 
 def test_all_gather_emits_standard_shuffle_fold_geometry():
