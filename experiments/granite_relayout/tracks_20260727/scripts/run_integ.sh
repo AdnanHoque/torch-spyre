@@ -4,7 +4,7 @@
 # /home/adnan/claude-isolated/granite_parity_20260727.
 set -euo pipefail
 
-if [[ $# -lt 1 || $# -gt 11 ]]; then
+if [[ $# -lt 1 || $# -gt 13 ]]; then
   echo "usage: $0 <run-name> [iters] [mlp-down-proj:0|1] [mb-split] [out-split] [p08:0|1] [p07:0|1]" >&2
   exit 2
 fi
@@ -24,6 +24,8 @@ P06="${8:-1}"
 P09="${9:-0}"
 LXFRAC="${10:-0.2}"
 RESTICK_LX="${11:-0}"
+REINTERP="${12:-}"
+COMPACT="${13:-buf18,buf29}"
 if [[ "$MLP_DOWN_PROJ" = 1 && $((MLP_DOWN_PROJ_MB * MLP_DOWN_PROJ_OUT)) -ne 32 ]]; then
   echo "mlp-down-proj mb-split * out-split must equal 32" >&2; exit 2
 fi
@@ -63,10 +65,11 @@ export SPYRE_LX_RELAYOUT_DUMP_PLANS="$RUN/relayout_plans.jsonl"
 export SPYRE_LX_RELAYOUT_DUMP_ALLOCATIONS="$RUN/allocations.jsonl"
 export STCDP_DUMP_TRANSFERS=1
 export SPYRE_LX_ALLOW_RESTICKIFY_READ="$RESTICK_LX"
+export SPYRE_RELAYOUT_ORACLE_REINTERPRET_OUTPUT_CLONE_BUFFERS="$REINTERP"
 
 # Accepted working stack: P01/P02/P03/P04/P12/P13/P14.
 export SPYRE_RELAYOUT_ORACLE_COMPACT_GQA=1
-export SPYRE_RELAYOUT_ORACLE_COMPACT_GQA_BUFFERS=buf18,buf29
+export SPYRE_RELAYOUT_ORACLE_COMPACT_GQA_BUFFERS="$COMPACT"
 export SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_INPUTS=1
 export SPYRE_RELAYOUT_ORACLE_PREFILL_OUTPUT_PROJ=1
 export SPYRE_RELAYOUT_ORACLE_PREFILL_RESIDUAL_ADD=1

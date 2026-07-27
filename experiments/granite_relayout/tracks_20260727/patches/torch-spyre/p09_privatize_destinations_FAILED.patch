@@ -1,0 +1,425 @@
+diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
+index dd218393..0084e2e9 100644
+--- a/torch_spyre/_inductor/codegen/superdsc.py
++++ b/torch_spyre/_inductor/codegen/superdsc.py
+@@ -957,8 +957,13 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
+         # does not already use instead of indexing past the end.
+         dim_labels = list(dim_labels)
+         spare = [x for x in INPUT_DIM_LABELS if x not in dim_labels]
++        # OUTPUT_DIM_LABELS is always the final entry in a generated list
++        # (_get_op_dim_labels appends it last), so extra input-side labels must
++        # be inserted BEFORE a trailing "out", not after it. Appending past
++        # "out" puts an input axis where the backend expects the output axis.
++        tail = 1 if dim_labels and dim_labels[-1] in OUTPUT_DIM_LABELS else 0
+         while len(dim_labels) < ndim and spare:
+-            dim_labels.append(spare.pop(0))
++            dim_labels.insert(len(dim_labels) - tail, spare.pop(0))
+         if len(dim_labels) < ndim:
+             raise RuntimeError(
+                 f"cannot label {ndim} iteration dims for op {op_spec.op!r}: "
+diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
+index 6bfe487d..88a5f6fe 100644
+--- a/torch_spyre/_inductor/config.py
++++ b/torch_spyre/_inductor/config.py
+@@ -43,6 +43,15 @@ lx_relayout_collectives: str = os.environ.get(
+ # Optional comma-separated buffer names whose producer -> consumer transport
+ # is excluded from LX relayout planning.  This is an edge-isolation control:
+ # unlike SPYRE_LX_RELAYOUT_COLLECTIVES it leaves unrelated collectives enabled.
++# DeepTools has an LX restickify path (ReStickifyOpLx) which it selects when BOTH
++# the restickify's input and output live in LX. The allocator's cross-frame
++# barrier bars any buffer a restickify reads from LX residency, which makes that
++# precondition unreachable by construction and forces every restickify through
++# HBM. Setting this lifts the barrier so the LX path can be selected.
++lx_allow_restickify_read: bool = (
++    os.environ.get("SPYRE_LX_ALLOW_RESTICKIFY_READ", "0") == "1"
++)
++
+ lx_relayout_disabled_sources: str = os.environ.get(
+     "SPYRE_LX_RELAYOUT_DISABLED_SOURCES", ""
+ )
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index cc89cb73..0a5b622b 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -29,6 +29,7 @@ import os
+ from enum import StrEnum
+ 
+ import sympy
++from . import granite_roles
+ from torch._inductor.dependencies import MemoryDep
+ from torch._inductor.graph import GraphLowering
+ from torch._inductor.ir import ComputedBuffer, Operation, Pointwise, Reduction
+@@ -61,8 +62,12 @@ class _LXRelayoutClassification:
+     destination_size_divisor: int = 1
+ 
+ 
+-def make_lx_relayout_destination_name(source_name: str) -> str:
+-    return f"{LX_RELAYOUT_DESTINATION_PREFIX}:{source_name}"
++def make_lx_relayout_destination_name(
++    source_name: str, consumer_name: str = ""
++) -> str:
++    if not consumer_name:
++        return f"{LX_RELAYOUT_DESTINATION_PREFIX}:{source_name}"
++    return f"{LX_RELAYOUT_DESTINATION_PREFIX}:{source_name}:{consumer_name}"
+ 
+ 
+ def is_lx_relayout_destination(name: str) -> bool:
+@@ -83,10 +88,16 @@ class LXRelayoutPlan:
+     destination_size_ratio: int
+     destination_size_divisor: int = 1
+     destination_lx_address: int | None = None
++    # Set only by the allocator's privatization retry. False keeps the name
++    # byte-identical to today, so every hard-coded literal keeps its meaning.
++    private_destination: bool = False
+ 
+     @property
+     def destination_name(self) -> str:
+-        return make_lx_relayout_destination_name(self.source_name)
++        return make_lx_relayout_destination_name(
++            self.source_name,
++            self.consumer_name if self.private_destination else "",
++        )
+ 
+ 
+ def _intervals_overlap(
+@@ -404,6 +415,15 @@ def collect_lx_relayout_plans(
+         return []
+ 
+     operations = _operations_by_name(graph)
++    _granite_roles = granite_roles.roles_for(
++        graph,
++        _is_matmul_op,
++        lambda op: [
++            dep.name
++            for dep in op_read_writes(op).reads
++            if isinstance(dep, MemoryDep)
++        ],
++    )
+     disabled_sources = {
+         value.strip()
+         for value in config.lx_relayout_disabled_sources.split(",")
+@@ -464,12 +484,6 @@ def collect_lx_relayout_plans(
+                 and dep.name == "buf40"
+                 and read_count > 1
+             )
+-            if (
+-                read_count != 1
+-                and not oracle_shared_mlp_input
+-                and not oracle_shared_attention_output
+-            ):
+-                continue
+             producer = operations.get(dep.name)
+             oracle_shared_rope_input = (
+                 config.relayout_oracle_prefill_rope_input
+@@ -479,12 +493,17 @@ def collect_lx_relayout_plans(
+             )
+             oracle_shared_qkv_input = (
+                 config.relayout_oracle_prefill_qkv_inputs
+-                and dep.name == "buf10"
++                and dep.name == _granite_roles.get("attn_norm_out")
+                 and read_count == 3
+             )
++            # One gate, carrying every shared-source exemption. Keeping two
++            # gates here (the shape a naive union of the two branches produces)
++            # silently drops P07 and P09: the first gate lacks their exemptions
++            # and returns before their own gate is ever consulted.
+             if (
+                 read_count != 1
+                 and not oracle_shared_mlp_input
++                and not oracle_shared_attention_output
+                 and not oracle_shared_rope_input
+                 and not oracle_shared_qkv_input
+             ):
+@@ -610,16 +629,19 @@ def collect_lx_relayout_plans(
+                 # as adjacent replica pairs. SenDNN names the even member of
+                 # every pair as the authoritative P09 source owner.
+                 if (
+-                    producer_core_count != 16
+-                    or producer_view.work_slice_dims != ((0, 16),)
+-                    or set(producer_core_slices)
+-                    != {str(core) for core in range(16)}
++                    producer_core_count == 16
++                    and producer_view.work_slice_dims == ((0, 16),)
++                    and set(producer_core_slices)
++                    == {str(core) for core in range(16)}
+                 ):
+-                    continue
+-                producer_core_slices = {
+-                    str(2 * int(core)): per_core
+-                    for core, per_core in producer_core_slices.items()
+-                }
++                    producer_core_slices = {
++                        str(2 * int(core)): per_core
++                        for core, per_core in producer_core_slices.items()
++                    }
++                # Otherwise the activation is already on the accepted stack's
++                # 8-token x 4-hidden 32-core grid -- the same layout P03 gathers
++                # from for the gate/up matmuls. Fall through and let the generic
++                # classifier plan that gather instead of abandoning the edge.
+ 
+             consumer_work_slice_dims = _work_slice_dims(consumer_view)
+             consumer_core_slices = _core_id_to_device_slice(
+diff --git a/torch_spyre/_inductor/scratchpad/allocator.py b/torch_spyre/_inductor/scratchpad/allocator.py
+index 15d7e79c..99782424 100644
+--- a/torch_spyre/_inductor/scratchpad/allocator.py
++++ b/torch_spyre/_inductor/scratchpad/allocator.py
+@@ -85,6 +85,9 @@ from torch_spyre._inductor.scratchpad.utils import (
+ from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
+ 
+ from torch_spyre._inductor import config
++from torch_spyre._inductor.lx_relayout import (
++    make_lx_relayout_destination_name,
++)
+ from torch_spyre._inductor.logging_utils import get_inductor_logger
+ from torch_spyre._inductor.lx_relayout import (
+     LXRelayoutPlan,
+@@ -154,6 +157,9 @@ class ScratchpadAllocator:
+         self._lx_relayout_alias_plans_by_source: dict[
+             str, list[LXRelayoutPlan]
+         ] = {}
++        self._lx_relayout_private_destinations: dict[
++            str, list[LifetimeBoundBuffer]
++        ] = {}
+         self._p07_materialized_input_names: set[str] = set()
+ 
+     def plan_allocation(self, graph: GraphLowering):
+@@ -363,11 +369,66 @@ class ScratchpadAllocator:
+         if not self._lx_relayout_plans_by_source:
+             return allocation
+ 
++        # Pass 1 above is today's behaviour, unchanged. Only if a SHARED
++        # destination failed to place do we privatize that one source and
++        # re-solve, so sources that place today (e.g. mlp_norm_out -> gate/up)
++        # stay byte-identical and the retry can never lose ground.
++        by_name_pass1 = {buffer.name: buffer for buffer in allocation}
++        failed = [
++            source_name
++            for source_name, plan in self._lx_relayout_plans_by_source.items()
++            if source_name in self._lx_relayout_private_destinations
++            and by_name_pass1.get(plan.destination_name) is not None
++            and by_name_pass1[plan.destination_name].address is None
++        ]
++        if failed:
++            before = {p.source_name for p, _ in self._iter_complete_lx_relayouts(allocation)}
++            saved = {s: self._lx_relayout_alias_plans_by_source.get(s) for s in failed}
++            saved_canonical = {s: self._lx_relayout_plans_by_source[s] for s in failed}
++            retry_buffers = list(buffers)
++            for source_name in failed:
++                shared = self._lx_relayout_plans_by_source[source_name].destination_name
++                retry_buffers = [b for b in retry_buffers if b.name != shared]
++                retry_buffers.extend(
++                    self._lx_relayout_private_destinations[source_name]
++                )
++                privatized = [
++                    replace(p, private_destination=True)
++                    for p in self._lx_relayout_alias_plans_by_source[source_name]
++                ]
++                self._lx_relayout_alias_plans_by_source[source_name] = privatized
++                self._lx_relayout_plans_by_source[source_name] = privatized[-1]
++            # plan_layout asserts every buffer is unplanned, and pass 1
++            # assigned addresses in place. Snapshot so a losing retry can be
++            # rolled back exactly, then clear before re-solving.
++            pass1_addresses = [(b, b.address) for b in allocation]
++            for buffer in retry_buffers:
++                buffer.address = None
++            retry = layout_planning.plan_layout(
++                retry_buffers, log_lx_usage=log_lx_usage
++            )
++            after = {p.source_name for p, _ in self._iter_complete_lx_relayouts(retry)}
++            if len(after) > len(before):
++                allocation = retry
++                buffers = retry_buffers
++            else:
++                for buffer, address in pass1_addresses:
++                    buffer.address = address
++                for source_name in failed:
++                    self._lx_relayout_alias_plans_by_source[source_name] = saved[
++                        source_name
++                    ]
++                    self._lx_relayout_plans_by_source[source_name] = saved_canonical[
++                        source_name
++                    ]
++
+         complete_relayouts = list(self._iter_complete_lx_relayouts(allocation))
+-        if len(complete_relayouts) == len(self._lx_relayout_plans_by_source):
++        complete_sources = {plan.source_name for plan, _ in complete_relayouts}
++        # A privatized source contributes several destinations, so compare the
++        # set of complete SOURCES rather than counting yielded pairs.
++        if complete_sources == set(self._lx_relayout_plans_by_source):
+             return allocation
+ 
+-        complete_sources = {plan.source_name for plan, _ in complete_relayouts}
+         if complete_sources:
+             # First-fit may realize a useful subset even when a larger later
+             # relayout cannot fit. Preserve every complete S1/S2 pair and drop
+@@ -379,8 +440,12 @@ class ScratchpadAllocator:
+             )
+             removed_names = set(incomplete_sources)
+             removed_names.update(
+-                self._lx_relayout_plans_by_source[source_name].destination_name
++                alias_plan.destination_name
+                 for source_name in incomplete_sources
++                for alias_plan in self._lx_relayout_alias_plans_by_source.get(
++                    source_name,
++                    [self._lx_relayout_plans_by_source[source_name]],
++                )
+             )
+             for buffer in allocation:
+                 if buffer.name in removed_names:
+@@ -406,7 +471,11 @@ class ScratchpadAllocator:
+         # atomically rather than retaining a partially allocated pair.
+         removed_names = set(self._lx_relayout_plans_by_source)
+         removed_names.update(
+-            plan.destination_name for plan in self._lx_relayout_plans_by_source.values()
++            alias_plan.destination_name
++            for source_name, plan in self._lx_relayout_plans_by_source.items()
++            for alias_plan in self._lx_relayout_alias_plans_by_source.get(
++                source_name, [plan]
++            )
+         )
+         remaining = [buffer for buffer in buffers if buffer.name not in removed_names]
+         for buffer in remaining:
+@@ -435,21 +504,24 @@ class ScratchpadAllocator:
+         by_name = {buffer.name: buffer for buffer in allocation}
+         for source_name, plan in self._lx_relayout_plans_by_source.items():
+             source = by_name.get(source_name)
+-            destination = by_name.get(plan.destination_name)
+-            if (
+-                source is None
+-                or source.address is None
+-                or destination is None
+-                or destination.address is None
+-            ):
++            if source is None or source.address is None:
+                 continue
+-            source_address = source.address
+-            destination_address = destination.address
+-            if source_address < destination_address + destination.size and (
+-                destination_address < source_address + source.size
+-            ):
+-                continue
+-            yield plan, destination_address
++            alias_plans = self._lx_relayout_alias_plans_by_source.get(
++                source_name, [plan]
++            )
++            resolved = []
++            for alias_plan in alias_plans:
++                destination = by_name.get(alias_plan.destination_name)
++                if destination is None or destination.address is None:
++                    break
++                if source.address < destination.address + destination.size and (
++                    destination.address < source.address + source.size
++                ):
++                    break
++                resolved.append((alias_plan, destination.address))
++            else:
++                # All-or-nothing per source.
++                yield from resolved
+ 
+     def _record_reject_reasons(self, allocation: Sequence[Any]) -> None:
+         """Stamp ``reject_reasons`` for spilled buffers. Base: from the solver's
+@@ -484,15 +556,11 @@ class ScratchpadAllocator:
+         """Commit relayout metadata only after all required LX storage exists."""
+         clear_lx_relayout_metadata(graph)
+         for plan, destination_address in self._iter_complete_lx_relayouts(allocation):
+-            for consumer_plan in self._lx_relayout_alias_plans_by_source.get(
+-                plan.source_name, [plan]
+-            ):
+-                record_lx_relayout_plan(
+-                    graph,
+-                    replace(
+-                        consumer_plan, destination_lx_address=destination_address
+-                    ),
+-                )
++            # The iterator now yields one entry per consumer with its own
++            # destination address, so no inner alias loop is needed.
++            record_lx_relayout_plan(
++                graph, replace(plan, destination_lx_address=destination_address)
++            )
+ 
+     def _op_output_good_for_lx_reuse(self, op: Any) -> bool:
+         if not isinstance(op, ComputedBuffer):
+@@ -781,13 +849,19 @@ class ScratchpadAllocator:
+         allocators bar the same buffers; only :class:`CpSatLayoutSolver` acts on
+         it, the gap heuristics ignore ``residency_reason``.
+         """
+-        if any(
++        if not any(
+             graph.operations[u].name != name
+             and self._get_op_name(graph.operations[u]) == "restickify"
+             for u in uses
+         ):
+-            return "read by restickify (cross-frame barrier)"
+-        return None
++            return None
++        if config.lx_allow_restickify_read:
++            # Let the buffer stay in LX so DeepTools can select ReStickifyOpLx,
++            # which performs the cross-frame movement itself instead of round
++            # tripping through HBM. Barring the read unconditionally makes that
++            # path unreachable, since it requires the input to already be in LX.
++            return None
++        return "read by restickify (cross-frame barrier)"
+ 
+     def _build_bound_buffers(
+         self,
+@@ -1119,6 +1193,40 @@ class ScratchpadAllocator:
+                 sorted({*shuffle_uses, *consumer_uses}),
+                 first_use_is_read=False,
+             )
++            # Private alternative, used only if the shared S2 fails to place.
++            # The shared S2's lifetime is the union over every consumer, so for
++            # a 3-consumer source it straddles the whole attention peak. One S2
++            # per consumer is live for exactly its own SHUFFLE -> consume pair.
++            alias_plans = self._lx_relayout_alias_plans_by_source.get(
++                source.name, [plan]
++            )
++            if len(alias_plans) > 1:
++                private = []
++                for alias_plan in alias_plans:
++                    raw = op_index.get(alias_plan.consumer_name)
++                    if raw is None:
++                        private = []
++                        break
++                    uses = [transfer_time[raw], raw + bisect_right(boundaries, raw)]
++                    # Private S2s have disjoint lifetimes, so the solver may
++                    # overlay them at one address. That is only sound if each
++                    # shuffle runs strictly between its transfer step and its
++                    # own consumer. Assert rather than assume.
++                    if uses[1] != uses[0] + 1:
++                        private = []
++                        break
++                    private.append(
++                        LifetimeBoundBuffer(
++                            make_lx_relayout_destination_name(
++                                source.name, alias_plan.consumer_name
++                            ),
++                            destination_size,
++                            uses,
++                            first_use_is_read=False,
++                        )
++                    )
++                if private:
++                    self._lx_relayout_private_destinations[source.name] = private
+             for child in buffers:
+                 if source.name in child.in_place_parents:
+                     # This relation was validated against S1's layout and size;
+diff --git a/torch_spyre/_inductor/work_division.py b/torch_spyre/_inductor/work_division.py
+index 0c665dce..1b28346e 100644
+--- a/torch_spyre/_inductor/work_division.py
++++ b/torch_spyre/_inductor/work_division.py
+@@ -891,7 +891,14 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+         }
+         if shape == expected_shapes[name]:
+             return {"token": 8, "head_cohort": 4}
+-    if is_prefill_qkv_input and shape == ["1", "512", "4096"]:
++    if is_prefill_qkv_input and shape in (
++        ["1", "512", "4096"],
++        ["1", "512", "1024"],
++    ):
++        # Granite is grouped-query: 32 query heads but only 8 KV heads, so the
++        # K and V projections are 8 x 128 = 1024 wide while Q is 32 x 128 =
++        # 4096. Matching only the 4096 form silently skipped K and V, leaving
++        # buf10 with three consumers on inconsistent core divisions.
+         return {"mb": 16} if name == "buf10" else {"mb": 8, "out": 4}
+     if (
+         is_prefill_qkv_input
