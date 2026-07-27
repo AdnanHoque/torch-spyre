@@ -19,7 +19,25 @@ the four independent row shuffles it was designed to produce, and generates the
 correct one-layer token 44. It is still one-layer and unintegrated; full-40
 integration is in progress.
 
-**P09 has a full-40 run.** The ledger's P09 verdict ("no full-40 run exists; 203
+**Silent-drop: the failure mode that invalidates a whole class of "passing" runs.**
+An edge can be planned and then discarded before emission, leaving a run that generates
+the correct token while doing none of the work being tested. Two confirmed cases:
+
+- `p09_full40_a` generates token 203 over 40 real layers. Its allocator rejected both
+  P09 buffers -- `reject_reason="no room on scratchpad"` on `buf10` and on
+  `__spyre_lx_relayout_destination__:buf10` -- and the run emitted **zero**
+  `STCDP_FINAL_END` lines, zero post-PCFG payloads and zero shuffle dumps. Its 375 ms
+  is a baseline under a constrained LX budget, not a P09 measurement.
+- P07 merged into the accepted stack generates token 203 on 6/6 requests at full 40
+  layers, while `relayout_plans.jsonl` stays byte-identical to the P07-off control.
+
+**Token 203 is therefore not evidence that an edge did anything.** Any claim about an
+edge must cite the transport dump from the *same* run. A correctness gate and a
+transport gate are independent, and the silent-drop path satisfies the first by
+skipping the work the second would prove. This is the most likely mechanism behind
+several claims in the ledger below that measured identical to their own controls.
+
+**P09 has a full-40 run, but see above.** The ledger's P09 verdict ("no full-40 run exists; 203
 appears zero times") again describes the shared-PVC track. The cdx lane contains
 `p09_full40_a`, a full 40-layer run generating token **203** with 5 relayout plans.
 That materially changes P09's status — though the ledger's substantive warning stands
