@@ -1,0 +1,88 @@
+diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
+--- a/torch_spyre/_inductor/config.py
++++ b/torch_spyre/_inductor/config.py
+@@ -74,13 +74,20 @@ relayout_oracle_prefill_mlp_inputs: bool = (
+     os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_INPUTS", "0") == "1"
+ )
+ 
+-# Optional local follow-up to the MLP-input replay. Match the SwiGLU product's
+-# 32 token shards in the down projection, avoiding a separate replicated
+-# activation gather. This is not part of the SenDNN P03 transport template and
+-# is therefore gated independently for numerical/performance A/B testing.
++# Optional local follow-up to the MLP-input replay. Repartition the SwiGLU
++# product for the down projection without the baseline replicated HBM
++# restickify. The split knobs allow capacity-feasible topology experiments;
++# their product must remain 32 cores. This is gated independently for
++# numerical/performance A/B testing.
+ relayout_oracle_prefill_mlp_down_projection: bool = (
+     os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_DOWN_PROJ", "0") == "1"
+ )
++relayout_oracle_prefill_mlp_down_projection_mb: int = int(
++    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_DOWN_PROJ_MB", "32")
++)
++relayout_oracle_prefill_mlp_down_projection_out: int = int(
++    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_DOWN_PROJ_OUT", "1")
++)
+ 
+ # Replay the non-attention Granite RMSNorm transport cluster.  P05 gathers
+ # four hidden shards into each of eight token owners before the reduction;
+diff --git a/torch_spyre/_inductor/work_division.py b/torch_spyre/_inductor/work_division.py
+--- a/torch_spyre/_inductor/work_division.py
++++ b/torch_spyre/_inductor/work_division.py
+@@ -824,10 +824,14 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+         if name in ("buf53", "buf55") and shape == ["1", "512", "12800"]:
+             return {"mb": 8, "out": 4}
+     if is_mlp_down_projection and shape == ["1", "512", "4096"]:
+-        # The SwiGLU product (buf56) is already divided into 32 token shards.
+-        # Keep the down projection and its output on that layout instead of
+-        # gathering a 12.5 MiB activation into eight replicas.
+-        return {"mb": 32, "out": 1}
++        mb_split = config.relayout_oracle_prefill_mlp_down_projection_mb
++        out_split = config.relayout_oracle_prefill_mlp_down_projection_out
++        if mb_split * out_split != 32:
++            raise Unsupported(
++                "SenDNN MLP down-projection replay requires 32 total cores, "
++                f"got mb={mb_split}, out={out_split}"
++            )
++        return {"mb": mb_split, "out": out_split}
+     if is_mlp_normalization_edge:
+         if name in ("buf46", "buf47", "buf51", "buf52") and shape == [
+             "1",
+@@ -1116,7 +1120,14 @@ def _resolve_work_div_hint(
+                     f"iteration symbols, got {symbols} on {op.get_name()}"
+                 )
+             mb_sym, out_sym = symbols[:2]
+-            return {mb_sym: 32, out_sym: 1}
++            mb_split = config.relayout_oracle_prefill_mlp_down_projection_mb
++            out_split = config.relayout_oracle_prefill_mlp_down_projection_out
++            if mb_split * out_split != 32:
++                raise Unsupported(
++                    "SenDNN MLP down-projection replay requires 32 total cores, "
++                    f"got mb={mb_split}, out={out_split}"
++                )
++            return {mb_sym: mb_split, out_sym: out_split}
+         expected_rank = 2 if op.get_name() == "buf52" else 3
+         if len(symbols) != expected_rank:
+             raise Unsupported(
+diff --git a/tests/inductor/test_lx_relayout_dldsc.py b/tests/inductor/test_lx_relayout_dldsc.py
+--- a/tests/inductor/test_lx_relayout_dldsc.py
++++ b/tests/inductor/test_lx_relayout_dldsc.py
+@@ -167,6 +167,18 @@ def test_prefill_mlp_oracle_aligns_down_projection_with_swiglu(monkeypatch):
+         op,
+         {mb: Integer(512), out: Integer(4096), reduction: Integer(12800)},
+     ) == {mb: 32, out: 1}
++
++    monkeypatch.setattr(
++        config, "relayout_oracle_prefill_mlp_down_projection_mb", 16
++    )
++    monkeypatch.setattr(
++        config, "relayout_oracle_prefill_mlp_down_projection_out", 2
++    )
++    assert _oracle_work_div_hint_by_name(op) == {"mb": 16, "out": 2}
++    assert _resolve_work_div_hint(
++        op,
++        {mb: Integer(512), out: Integer(4096), reduction: Integer(12800)},
++    ) == {mb: 16, out: 2}
+ 
+ 
+ def test_prefill_mlp_normalization_oracle_replays_p05_p10_p11(monkeypatch):

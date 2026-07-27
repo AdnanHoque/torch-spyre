@@ -1,0 +1,184 @@
+diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
+index 59e98307..736fe90a 100644
+--- a/torch_spyre/_inductor/config.py
++++ b/torch_spyre/_inductor/config.py
+@@ -60,6 +60,13 @@ relayout_oracle_prefill_output_projection: bool = (
+     os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_OUTPUT_PROJ", "0") == "1"
+ )
+ 
++# Test-only SenDNN P09 replay. Keep the normalized activation on 16 token
++# owners, then gather pairs of 32-token fragments into eight 64-token slices
++# replicated across the four output-shard consumers of each Q/K/V BMM.
++relayout_oracle_prefill_qkv_inputs: bool = (
++    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_QKV_INPUTS", "0") == "1"
++)
++
+ # Replay the shared RMSNorm activation -> SwiGLU gate/up projections. SenDNN
+ # uses an 8x4 (mb x hidden/output) producer layout, then a four-core grouped
+ # all-gather into two 8x4 BMM consumers.
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index e8d877dc..a99edb93 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -178,6 +178,19 @@ def _classify_lx_relayout(
+     ):
+         return _LXRelayoutClassification(LXCollectiveKind.BROADCAST, 1)
+ 
++    # SenDNN P07/P09 gather several independently owned source fragments into
++    # a larger destination slice and then replicate that slice to a consumer
++    # cohort. The destination therefore has fewer unique slices but more
++    # physical participants than the source.
++    if (
++        producer_is_partitioned
++        and not consumer_is_partitioned
++        and len(producer_map) < len(consumer_map)
++        and max_fanout > 1
++        and max_fanin > 1
++    ):
++        return _LXRelayoutClassification(LXCollectiveKind.ALL_GATHER, max_fanin)
++
+     if (
+         same_participants
+         and producer_is_partitioned
+@@ -354,7 +367,16 @@ def collect_lx_relayout_plans(
+                 and dep.name == "buf52"
+                 and read_count == 2
+             )
+-            if read_count != 1 and not oracle_shared_mlp_input:
++            oracle_shared_qkv_input = (
++                config.relayout_oracle_prefill_qkv_inputs
++                and dep.name == "buf10"
++                and read_count == 3
++            )
++            if (
++                read_count != 1
++                and not oracle_shared_mlp_input
++                and not oracle_shared_qkv_input
++            ):
+                 continue
+             producer = operations.get(dep.name)
+             if not isinstance(producer, ComputedBuffer) or producer is consumer:
+@@ -389,6 +411,29 @@ def collect_lx_relayout_plans(
+             if producer_core_slices is None:
+                 continue
+ 
++            oracle_qkv_input_edge = (
++                config.relayout_oracle_prefill_qkv_inputs
++                and dep.name == "buf10"
++                and consumer.get_name() in ("buf11", "buf15", "buf29")
++                and [str(size) for size in producer.get_size()]
++                == ["1", "512", "4096"]
++            )
++            if oracle_qkv_input_edge:
++                # The normalized activation executes 16 logical token slices
++                # as adjacent replica pairs. SenDNN names the even member of
++                # every pair as the authoritative P09 source owner.
++                if (
++                    producer_core_count != 16
++                    or producer_view.work_slice_dims != ((0, 16),)
++                    or set(producer_core_slices)
++                    != {str(core) for core in range(16)}
++                ):
++                    continue
++                producer_core_slices = {
++                    str(2 * int(core)): per_core
++                    for core, per_core in producer_core_slices.items()
++                }
++
+             consumer_work_slice_dims = _work_slice_dims(consumer_view)
+             consumer_core_slices = _core_id_to_device_slice(
+                 consumer_view, consumer_core_count
+diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
+index c17d580c..fed2f3ba 100644
+--- a/torch_spyre/_inductor/spyre_kernel.py
++++ b/torch_spyre/_inductor/spyre_kernel.py
+@@ -898,7 +898,14 @@ class SpyreKernel(Kernel[CSEVariable]):
+                     for arg in args
+                     if arg.device_coordinates
+                 )
+-            )
++                )
++
++        oracle_qkv_input_source = (
++            _spyre_config.relayout_oracle_prefill_qkv_inputs
++            and ir_node.get_name() == "buf10"
++            and [str(size) for size in ir_node.get_size()]
++            == ["1", "512", "4096"]
++        )
+ 
+         return OpSpec(
+             op,
+@@ -910,6 +917,8 @@ class SpyreKernel(Kernel[CSEVariable]):
+             symbolic_dim_bounds=symbolic_dim_bounds,
+             debug_handle=debug_handle,
+             gather_dim=get_gather_dim(ir_node),
++            num_cores_override=32 if oracle_qkv_input_source else None,
++            replicas_contiguous=oracle_qkv_input_source,
+         )
+ 
+     def remove_kernel_local_buffers(self) -> None:
+diff --git a/torch_spyre/_inductor/work_division.py b/torch_spyre/_inductor/work_division.py
+index 9a6688c3..3bf6c36d 100644
+--- a/torch_spyre/_inductor/work_division.py
++++ b/torch_spyre/_inductor/work_division.py
+@@ -756,6 +756,10 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+         config.relayout_oracle_prefill_mlp_inputs
+         and name in ("buf52", "buf53", "buf55")
+     )
++    is_prefill_qkv_input = (
++        config.relayout_oracle_prefill_qkv_inputs
++        and name in ("buf10", "buf11", "buf15", "buf29")
++    )
+     is_compact_gqa_edge = (
+         config.relayout_oracle_compact_gqa
+         and name in config.relayout_oracle_compact_gqa_buffers.split(",")
+@@ -775,6 +779,7 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+     if (
+         not is_output_projection
+         and not is_mlp_input_edge
++        and not is_prefill_qkv_input
+         and not is_compact_gqa_edge
+         and not is_prefill_qk_query_edge
+         and not is_prefill_qk_head_owned
+@@ -792,6 +797,14 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+             return {"mb": 8, "out": 4}
+         if name in ("buf53", "buf55") and shape == ["1", "512", "12800"]:
+             return {"mb": 8, "out": 4}
++    if is_prefill_qkv_input and shape == ["1", "512", "4096"]:
++        return {"mb": 16} if name == "buf10" else {"mb": 8, "out": 4}
++    if (
++        is_prefill_qkv_input
++        and name in ("buf15", "buf29")
++        and shape == ["1", "512", "1024"]
++    ):
++        return {"mb": 8, "out": 4}
+     if is_compact_gqa_edge:
+         if name in ("buf18", "buf66") and shape == ["1", "8", "1", "512", "128"]:
+             return {"kv_head": 4, "token": 8}
+@@ -854,6 +867,26 @@ def _resolve_work_div_hint(
+                 op._spyre_oracle_gather_dim_symbol = head_cohort_sym  # type: ignore[attr-defined]
+                 return {token_sym: 8, head_cohort_sym: 4}
+             return {token_sym: 32}
++        if config.relayout_oracle_prefill_qkv_inputs and op.get_name() == "buf10":
++            actual_extents = [concretize_expr(it_space[sym]) for sym in symbols]
++            if actual_extents != [512, 64]:
++                raise Unsupported(
++                    "SenDNN P09 replay expected adjusted normalized-activation "
++                    f"extents [512, 64], got {actual_extents}"
++                )
++            return {symbols[0]: 16}
++        if (
++            config.relayout_oracle_prefill_qkv_inputs
++            and op.get_name() in ("buf11", "buf15", "buf29")
++        ):
++            if len(symbols) != 3:
++                raise Unsupported(
++                    "SenDNN P09 replay expected a rank-three Q/K/V BMM "
++                    f"iteration space, got {symbols} on {op.get_name()}"
++                )
++            mb_sym, out_sym = symbols[:2]
++            op._spyre_oracle_gather_dim_symbol = out_sym  # type: ignore[attr-defined]
++            return {mb_sym: 8, out_sym: 4}
+         if config.relayout_oracle_prefill_qk_query and op.get_name() in (
+             "buf11",
+             "buf12",

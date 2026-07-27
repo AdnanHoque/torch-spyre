@@ -1,0 +1,58 @@
+diff --git a/torch_spyre/_inductor/work_division.py b/torch_spyre/_inductor/work_division.py
+--- a/torch_spyre/_inductor/work_division.py
++++ b/torch_spyre/_inductor/work_division.py
+@@ -870,9 +870,19 @@
+             "buf11": ["1", "512", "4096"],
+             "buf12": ["1", "512", "32", "2", "2", "64"],
+             "buf13": ["1", "512", "32", "2", "1", "64"],
+-            "buf14": ["1", "8", "4", "512", "128"],
+         }
+-        if shape == expected_shapes[name]:
++        shape_matches = (
++            shape == expected_shapes.get(name)
++            or (
++                name == "buf14"
++                and shape
++                in (
++                    ["1", "8", "4", "512", "128"],
++                    ["1", "32", "512", "128"],
++                )
++            )
++        )
++        if shape_matches:
+             return {"token": 8, "query_head_cohort": 4}
+     if is_prefill_qk_head_owned and shape == ["1", "8", "4", "512", "512"]:
+         return {"kv_head": 8, "query_group": 4}
+@@ -996,7 +1004,19 @@
+             "buf13",
+             "buf14",
+         ) and op.get_name() in config.relayout_oracle_prefill_qk_query_buffers.split(","):
+-            expected_ranks = {"buf11": 3, "buf12": 5, "buf13": 5, "buf14": 4}
++            shape = [str(size) for size in op.get_size()]
++            flattened_buf14 = op.get_name() == "buf14" and shape == [
++                "1",
++                "32",
++                "512",
++                "128",
++            ]
++            expected_ranks = {
++                "buf11": 3,
++                "buf12": 5,
++                "buf13": 5,
++                "buf14": 3 if flattened_buf14 else 4,
++            }
+             if len(symbols) != expected_ranks[op.get_name()]:
+                 raise Unsupported(
+                     "SenDNN P06 replay expected the exact Granite query/rotary "
+@@ -1012,7 +1032,10 @@
+                     sym for sym in symbols if concretize_expr(it_space[sym]) == 512
+                 )
+                 head_cohort_sym = next(
+-                    sym for sym in symbols if concretize_expr(it_space[sym]) == 8
++                    sym
++                    for sym in symbols
++                    if concretize_expr(it_space[sym])
++                    == (32 if flattened_buf14 else 8)
+                 )
+             else:
+                 token_sym, head_cohort_sym = symbols[:2]

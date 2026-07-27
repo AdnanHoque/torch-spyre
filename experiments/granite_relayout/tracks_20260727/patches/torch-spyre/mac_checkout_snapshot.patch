@@ -1,0 +1,1118 @@
+diff --git a/experiments/granite_relayout/tools/compare_logits.py b/experiments/granite_relayout/tools/compare_logits.py
+index 590ea0a..aaa72ec 100755
+--- a/experiments/granite_relayout/tools/compare_logits.py
++++ b/experiments/granite_relayout/tools/compare_logits.py
+@@ -23,6 +23,15 @@ from pathlib import Path
+ import torch
+ 
+ 
++def _load_logits(path: Path) -> torch.Tensor:
++    payload = torch.load(path, map_location="cpu", weights_only=True)
++    if isinstance(payload, dict):
++        payload = payload.get("logits")
++    if not isinstance(payload, torch.Tensor):
++        raise TypeError(f"{path}: expected a tensor or a mapping containing 'logits'")
++    return payload
++
++
+ def main() -> int:
+     parser = argparse.ArgumentParser()
+     parser.add_argument("reference", type=Path)
+@@ -37,8 +46,8 @@ def main() -> int:
+ 
+     ok = True
+     for ref_path, got_path in zip(reference, candidate):
+-        ref = torch.load(ref_path, map_location="cpu", weights_only=True)
+-        got = torch.load(got_path, map_location="cpu", weights_only=True)
++        ref = _load_logits(ref_path)
++        got = _load_logits(got_path)
+         equal = ref.shape == got.shape and torch.equal(ref, got)
+         max_abs = float((ref - got).abs().max()) if ref.shape == got.shape else float("inf")
+         print(f"{ref_path.name}: bit_exact={equal} max_abs={max_abs}")
+@@ -48,4 +57,3 @@ def main() -> int:
+ 
+ if __name__ == "__main__":
+     raise SystemExit(main())
+-
+diff --git a/tests/inductor/test_lx_relayout_dldsc.py b/tests/inductor/test_lx_relayout_dldsc.py
+index 7a5428b..78847da 100644
+--- a/tests/inductor/test_lx_relayout_dldsc.py
++++ b/tests/inductor/test_lx_relayout_dldsc.py
+@@ -17,6 +17,7 @@ from types import SimpleNamespace
+ 
+ from sympy import Integer, Mod, Symbol, floor
+ 
++from torch_spyre._inductor import config
+ import torch_spyre._inductor.lx_relayout as lx_relayout_module
+ import torch_spyre._inductor.scratchpad.allocator as allocator_module
+ import torch_spyre._inductor.scratchpad.graph_editor as graph_editor_module
+@@ -47,6 +48,10 @@ from torch_spyre._inductor.spyre_kernel import (
+     _materialize_lx_relayout_inputs,
+     simplify_op_spec,
+ )
++from torch_spyre._inductor.work_division import (
++    _oracle_work_div_hint_by_name,
++    _resolve_work_div_hint,
++)
+ 
+ 
+ class _DummyOp:
+@@ -210,7 +215,7 @@ def test_all_to_all_geometry_and_emission():
+     assert args[0].name == args[1].name == plan.destination_name
+ 
+ 
+-def test_broadcast_geometry_requires_one_physical_source_owner():
++def test_broadcast_geometry_supports_single_and_grouped_source_owners():
+     producer_map = {"0": {}}
+     consumer_map = {str(core): {} for core in range(32)}
+ 
+@@ -238,22 +243,306 @@ def test_broadcast_geometry_requires_one_physical_source_owner():
+         is None
+     )
+ 
+-    # Multiple independently replicated source shards are multicast cohorts,
+-    # which are not yet supported by this planner.
++    # Multiple independently partitioned source shards form grouped broadcast
++    # cohorts. Each source owner feeds one uniform destination group.
+     multicast_producer_map = {"0": {"0": 0}, "1": {"0": 1}}
+     multicast_consumer_map = {
+         str(core): {"0": 0 if core < 16 else 1} for core in range(32)
+     }
++    grouped = _classify_lx_relayout(
++        multicast_producer_map,
++        {"0": 2},
++        multicast_consumer_map,
++        {"0": 2},
++    )
++    assert grouped is not None
++    assert grouped.collective_kind is LXCollectiveKind.BROADCAST
++    assert grouped.destination_size_ratio == 1
++
++
++def test_partition_contraction_is_all_gather():
++    producer_map = {
++        str(core): {"0": core // 4, "1": core % 4} for core in range(32)
++    }
++    consumer_map = {str(core): {"0": core, "1": 0} for core in range(8)}
++
++    classification = _classify_lx_relayout(
++        producer_map,
++        {"0": 8, "1": 4},
++        consumer_map,
++        {"0": 8, "1": 1},
++    )
++
++    assert classification is not None
++    assert classification.collective_kind is LXCollectiveKind.ALL_GATHER
++    assert classification.destination_size_ratio == 4
++
++    mb = Symbol("mb")
++    hidden = Symbol("hidden")
++    source_arg = TensorArg(
++        is_input=True,
++        arg_index=-1,
++        device_dtype=DataFormats.SEN169_FP16,
++        device_size=[512, 4096],
++        device_coordinates=[mb, hidden],
++        allocation={"lx": 0x24000},
++        name="buf_rms",
++    )
++    consumer_spec = OpSpec(
++        op="mean",
++        is_reduction=True,
++        iteration_space={mb: (Integer(512), 8), hidden: (Integer(4096), 1)},
++        args=[source_arg],
++        op_info={},
++    )
++    plan = LXRelayoutPlan(
++        source_name="buf_rms",
++        consumer_name="consumer",
++        source_core_id_to_device_slice=producer_map,
++        destination_core_id_to_device_slice=consumer_map,
++        source_device_dim_splits={"0": 8, "1": 4},
++        destination_device_dim_splits={"0": 8, "1": 1},
++        collective_kind=LXCollectiveKind.ALL_GATHER,
++        destination_size_ratio=4,
++        destination_lx_address=0x44000,
++    )
++
++    result = _materialize_explicit_lx_shuffle(source_arg, consumer_spec, plan)
++    assert result is not None
++    shuffle_spec, _ = result
++    assert shuffle_spec.num_cores_override == 32
++
++
++def test_decode_mlp_sparse_all_gather_is_exactly_gated(monkeypatch):
++    producer_map = {str(core): {"1": core} for core in range(25)}
++    consumer_map = {str(core): {"1": 0} for core in range(32)}
++
+     assert (
+         _classify_lx_relayout(
+-            multicast_producer_map,
+-            {"0": 2},
+-            multicast_consumer_map,
+-            {"0": 2},
++            producer_map,
++            {"1": 25},
++            consumer_map,
++            {"1": 1},
+         )
+         is None
+     )
+ 
++    classification = _classify_lx_relayout(
++        producer_map,
++        {"1": 25},
++        consumer_map,
++        {"1": 1},
++        allow_sparse_all_gather=True,
++    )
++    assert classification is not None
++    assert classification.collective_kind is LXCollectiveKind.ALL_GATHER
++    assert classification.destination_size_ratio == 25
++
++    # Preserve Torch's established mb4/out8 down-projection split. The input
++    # is replicated across eight output owners for each of four token cohorts,
++    # so every destination gathers 25 reduction shards but stores only one
++    # quarter of the padded token rows: S2:S1 = 25/4.
++    token_cohort_consumers = {
++        str(core): {"0": core % 4, "1": 0} for core in range(32)
++    }
++    monkeypatch.setattr(config, "relayout_oracle_decode_mlp_compact_row", True)
++    classification = _classify_lx_relayout(
++        {str(core): {"0": 0, "1": core} for core in range(25)},
++        {"0": 1, "1": 25},
++        token_cohort_consumers,
++        {"0": 4, "1": 1},
++        allow_sparse_all_gather=True,
++    )
++    assert classification is not None
++    assert classification.collective_kind is LXCollectiveKind.ALL_GATHER
++    assert classification.destination_size_ratio == 25
++    assert classification.destination_size_divisor == 4
++    assert classification.compact_valid_decode_row
++
++    monkeypatch.setattr(
++        config, "relayout_oracle_decode_mlp_broadcast_row", True
++    )
++    classification = _classify_lx_relayout(
++        {str(core): {"0": 0, "1": core} for core in range(25)},
++        {"0": 1, "1": 25},
++        token_cohort_consumers,
++        {"0": 4, "1": 1},
++        allow_sparse_all_gather=True,
++    )
++    assert classification is not None
++    assert classification.destination_size_ratio == 25
++    assert classification.destination_size_divisor == 64
++
++
++def test_decode_mlp_compact_shuffle_moves_only_mb_zero(monkeypatch):
++    mb, out, reduction = Symbol("mb"), Symbol("out"), Symbol("reduction")
++    producer_map = {
++        str(core): {"0": 0, "1": core} for core in range(25)
++    }
++    consumer_map = {
++        str(core): {"0": core % 4, "1": 0} for core in range(32)
++    }
++    source_arg = TensorArg(
++        is_input=True,
++        arg_index=-1,
++        device_dtype=DataFormats.SEN169_FP16,
++        device_size=[64, 200, 64],
++        device_coordinates=[mb, floor(reduction / 64), Mod(reduction, 64)],
++        allocation={"lx": 0x64000},
++        name="buf62",
++    )
++    consumer_spec = OpSpec(
++        op=BATCH_MATMUL_OP,
++        is_reduction=True,
++        iteration_space={
++            mb: (Integer(64), 4),
++            out: (Integer(4096), 8),
++            reduction: (Integer(12800), 1),
++        },
++        args=[source_arg],
++        op_info={},
++    )
++    plan = LXRelayoutPlan(
++        source_name="buf62",
++        consumer_name="buf63",
++        source_core_id_to_device_slice=producer_map,
++        destination_core_id_to_device_slice=consumer_map,
++        source_device_dim_splits={"0": 1, "1": 25},
++        destination_device_dim_splits={"0": 4, "1": 1},
++        collective_kind=LXCollectiveKind.ALL_GATHER,
++        destination_size_ratio=25,
++        destination_size_divisor=4,
++        compact_valid_decode_row=True,
++        destination_lx_address=0,
++    )
++
++    result = _materialize_explicit_lx_shuffle(source_arg, consumer_spec, plan)
++    assert result is not None
++    shuffle_spec, destination_input = result
++    assert shuffle_spec.iteration_space[mb] == (1, 1)
++    assert shuffle_spec.num_cores_override == 29
++    assert set(
++        shuffle_spec.args[-1].allocation_core_id_to_device_slice or {}
++    ) == {str(core) for core in range(0, 32, 4)}
++    assert shuffle_spec.args[-1].allocation_device_dim_splits == {
++        "0": 1,
++        "1": 1,
++    }
++    assert destination_input.device_size == [64, 200, 64]
++
++    monkeypatch.setattr(
++        config, "relayout_oracle_decode_mlp_broadcast_row", True
++    )
++    broadcast_plan = replace(plan, destination_size_divisor=64)
++    broadcast_result = _materialize_explicit_lx_shuffle(
++        source_arg, consumer_spec, broadcast_plan
++    )
++    assert broadcast_result is not None
++    broadcast_spec, broadcast_destination_input = broadcast_result
++    assert broadcast_spec.iteration_space[mb] == (1, 1)
++    assert broadcast_spec.num_cores_override == 32
++    assert set(
++        broadcast_spec.args[-1].allocation_core_id_to_device_slice or {}
++    ) == {str(core) for core in range(32)}
++    assert all(
++        per_core == {"0": 0, "1": 0}
++        for per_core in (
++            broadcast_spec.args[-1].allocation_core_id_to_device_slice or {}
++        ).values()
++    )
++    assert broadcast_spec.args[-1].allocation_device_dim_splits == {
++        "0": 1,
++        "1": 1,
++    }
++    assert broadcast_destination_input.device_size == [1, 200, 64]
++    assert broadcast_destination_input.device_coordinates[0] == 0
++    assert broadcast_destination_input.broadcast_dims == [mb]
++    _, allocations = _compile_shuffle(broadcast_spec)
++    assert len(allocations) == 2
++    source_coords = allocations[0]["coordinates_"]
++    destination_coords = allocations[1]["coordinates_"]
++    assert source_coords["coordInfo"]["in"]["folds"]["dim_prop_attr"][0][
++        "factor_"
++    ] == 25
++    assert destination_coords["coordInfo"]["mb"]["folds"]["dim_prop_attr"][
++        0
++    ]["factor_"] == 1
++    assert source_coords["coreIdToWkSlice_"]["24"] == {"in": 24, "mb": 0}
++    assert destination_coords["coreIdToWkSlice_"]["31"] == {
++        "in": 0,
++        "mb": 0,
++    }
++
++    weight = TensorArg(
++        is_input=True,
++        arg_index=0,
++        device_dtype=DataFormats.SEN169_FP16,
++        device_size=[64, 12800, 64],
++        device_coordinates=[floor(out / 64), reduction, Mod(out, 64)],
++        allocation={"hbm": 0},
++    )
++    output = TensorArg(
++        is_input=False,
++        arg_index=-1,
++        device_dtype=DataFormats.SEN169_FP16,
++        device_size=[64, 64, 64],
++        device_coordinates=[mb, floor(out / 64), Mod(out, 64)],
++        allocation={"lx": 0x84000},
++    )
++    broadcast_bmm = replace(
++        consumer_spec,
++        args=[broadcast_destination_input, weight, output],
++    )
++    simplify_op_spec(broadcast_bmm)
++    compiled_bmm, *_ = compile_op_spec(0, broadcast_bmm, [])
++    bmm_root = next(iter(compiled_bmm.values()))
++    bmm_dsc = next(iter(bmm_root["dscs_"][0].values()))
++    assert bmm_dsc["labeledDs_"][0]["scale_"] == [1, -1]
++    bmm_allocations = {
++        row["name_"]: row
++        for row in bmm_dsc["scheduleTree_"]
++        if row["nodeType_"] == "allocate"
++    }
++    bmm_input_mb_folds = bmm_allocations["allocate-Tensor0_lx"][
++        "coordinates_"
++    ]["coordInfo"]["mb"]["folds"]
++    assert [
++        item["factor_"] for item in bmm_input_mb_folds["dim_prop_attr"]
++    ] == [1, 1, 1, 1]
++
++
++def test_decode_mlp_down_projection_uses_output_only_split(monkeypatch):
++    class DummyBuffer:
++        def __init__(self, name):
++            self.name = name
++
++        def get_name(self):
++            return self.name
++
++        def get_size(self):
++            return [1, 64, 4096]
++
++    mb, out, reduction = Symbol("mb"), Symbol("out"), Symbol("reduction")
++    monkeypatch.setattr(config, "relayout_oracle_decode_mlp_down_input", True)
++
++    for name in ("buf59", "buf63"):
++        op = DummyBuffer(name)
++        assert _oracle_work_div_hint_by_name(op) == {"mb": 1, "out": 32}
++        assert _resolve_work_div_hint(
++            op,
++            {
++                mb: Integer(64),
++                out: Integer(4096),
++                reduction: Integer(12800),
++            },
++        ) == {mb: 1, out: 32}
++
++    monkeypatch.setattr(
++        config, "relayout_oracle_decode_mlp_preserve_work_div", True
++    )
++    for name in ("buf59", "buf63"):
++        assert _oracle_work_div_hint_by_name(DummyBuffer(name)) == {}
++
+ 
+ def test_planner_keeps_equal_view_edge_when_core_counts_require_broadcast(monkeypatch):
+     class _FakePointwise:
+diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
+index 435cbb6..4952ebc 100644
+--- a/torch_spyre/_inductor/codegen/superdsc.py
++++ b/torch_spyre/_inductor/codegen/superdsc.py
+@@ -335,6 +335,18 @@ def _map_core_id_to_wk_slice_dims(
+                 # cohort on planner axis 4.  Singleton removal and SDSC
+                 # normalization expose that same cohort as physical x axis 3.
+                 resolved_device_dim = "3"
++            if (
++                _spyre_config.relayout_oracle_prefill_output_projection_chain
++                and resolved_device_dim == "3"
++                and resolved_device_dim not in device_dim_to_sdsc_dim
++                and set(device_dim_to_sdsc_dim) == {"0", "1"}
++                and [str(dim) for dim in dim_order] == ["mb", "x"]
++            ):
++                # The scalar RMS producer records the token cohort on planner
++                # device axis 3. Normalizing that [1, token, 1] input for the
++                # following [token, hidden] multiply exposes the same cohort
++                # as physical mb axis 1.
++                resolved_device_dim = "1"
+             dim = device_dim_to_sdsc_dim.get(resolved_device_dim)
+             if dim is None:
+                 if int(slot) != 0:
+@@ -381,6 +393,14 @@ def _map_device_dim_splits(
+             and set(device_dim_to_sdsc_dim) == {"0", "1", "2", "3"}
+         ):
+             resolved_device_dim = "3"
++        if (
++            _spyre_config.relayout_oracle_prefill_output_projection_chain
++            and resolved_device_dim == "3"
++            and resolved_device_dim not in device_dim_to_sdsc_dim
++            and set(device_dim_to_sdsc_dim) == {"0", "1"}
++            and str(device_dim_to_sdsc_dim.get("1")) == "mb"
++        ):
++            resolved_device_dim = "1"
+         dim = device_dim_to_sdsc_dim.get(resolved_device_dim)
+         if dim is None:
+             if int(split) != 1:
+@@ -544,6 +564,14 @@ def _create_sdsc_tensors(
+         else:
+             dim_order, stick_dim = _get_device_dim_order(arg, symbol_mapping, op_spec)
+ 
++        broadcast_dims = [
++            symbol_mapping.get(dim, dim) for dim in arg.broadcast_dims
++        ]
++        if _is_matmul(op_spec.op):
++            for dim in broadcast_dims:
++                if dim not in dim_order:
++                    dim_order.append(dim)
++
+         scales: dict = {}
+         strides: dict = {}
+         offsets: dict = {}
+@@ -581,6 +609,10 @@ def _create_sdsc_tensors(
+                 i in index_tensor_indices or is_indirect_value_tensor(arg)
+             ):
+                 scales[dim] = 1
++            elif dim in broadcast_dims:
++                # DeepTools uses negative scale to represent a dimension whose
++                # physical extent is one and is reused across logical rows.
++                scales[dim] = -1
+             elif dim in reduced_dims and op_spec.op != "layernormscale":
+                 scales[dim] = -2 if (stick_dim is None and dim is op_stick_dim) else -1
+             elif dim in reduced_dims and op_spec.op == "layernormscale":
+@@ -1038,6 +1070,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
+     if (
+         (
+             _spyre_config.relayout_oracle_prefill_output_projection
++            or _spyre_config.relayout_oracle_prefill_output_projection_chain
+             or _spyre_config.relayout_oracle_prefill_mlp_inputs
+         )
+         and mapping_splits == (8, 4, 1)
+@@ -1066,7 +1099,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
+         # so pin the final SDSC mapping for this test-only replay.
+         contiguous_dim = 1
+     if (
+-        _spyre_config.relayout_oracle_prefill_mlp_inputs
++        (
++            _spyre_config.relayout_oracle_prefill_mlp_inputs
++            or _spyre_config.relayout_oracle_prefill_output_projection_chain
++        )
+         and not is_matmul
+         and mapping_splits == (8, 4)
+         and tuple(int(sdsc_iteration_space[dim]) for dim in mapping_dims)
+diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
+index 59e9830..09313e7 100644
+--- a/torch_spyre/_inductor/config.py
++++ b/torch_spyre/_inductor/config.py
+@@ -60,6 +60,15 @@ relayout_oracle_prefill_output_projection: bool = (
+     os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_OUTPUT_PROJ", "0") == "1"
+ )
+ 
++# Extend the output-projection replay through the following residual/RMSNorm
++# chain.  SenDNN keeps the 8 token x 4 hidden shards produced by the output
++# projection until the RMS reduction instead of immediately reshuffling back
++# to 32 token-only shards.
++relayout_oracle_prefill_output_projection_chain: bool = (
++    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_OUTPUT_PROJ_CHAIN", "0")
++    == "1"
++)
++
+ # Replay the shared RMSNorm activation -> SwiGLU gate/up projections. SenDNN
+ # uses an 8x4 (mb x hidden/output) producer layout, then a four-core grouped
+ # all-gather into two 8x4 BMM consumers.
+@@ -67,6 +76,36 @@ relayout_oracle_prefill_mlp_inputs: bool = (
+     os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_INPUTS", "0") == "1"
+ )
+ 
++# Test-only SenDNN replay for the steady-decode SwiGLU product feeding the
++# down-projection BMM. SenDNN gathers 25 independently owned 512-element
++# reduction shards onto all 32 BMM consumers instead of spilling/reloading the
++# complete activation through HBM.
++relayout_oracle_decode_mlp_down_input: bool = (
++    os.environ.get("SPYRE_RELAYOUT_ORACLE_DECODE_MLP_DOWN_INPUT", "0") == "1"
++)
++
++# Keep Torch's existing decode down-projection work division while replaying
++# only the SwiGLU-product input transport. This preserves the established
++# accumulation order for the bit-exact device gate.
++relayout_oracle_decode_mlp_preserve_work_div: bool = (
++    os.environ.get("SPYRE_RELAYOUT_ORACLE_DECODE_MLP_PRESERVE_WORK_DIV", "0")
++    == "1"
++)
++
++# Transfer only the one logically valid decode row into the mb=0 down-BMM
++# cohort. The destination keeps its padded mb4/out8 allocation and compute
++# view, but the shuffle no longer transports the other 63 padded rows.
++relayout_oracle_decode_mlp_compact_row: bool = (
++    os.environ.get("SPYRE_RELAYOUT_ORACLE_DECODE_MLP_COMPACT_ROW", "0") == "1"
++)
++
++# Keep the padded destination view but broadcast the gathered logical row into
++# every padded row locally. Granite's decode SwiGLU producer is an expand, so
++# this preserves its values while avoiding repeated remote source payloads.
++relayout_oracle_decode_mlp_broadcast_row: bool = (
++    os.environ.get("SPYRE_RELAYOUT_ORACLE_DECODE_MLP_BROADCAST_ROW", "0") == "1"
++)
++
+ # Test-only SenDNN replay oracle that preserves Granite GQA K/V in compact
+ # [KV-head, query-group] form through the attention BMMs.
+ relayout_oracle_compact_gqa: bool = (
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index e8d877d..c3e1fe6 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -58,6 +58,8 @@ class LXCollectiveKind(StrEnum):
+ class _LXRelayoutClassification:
+     collective_kind: LXCollectiveKind
+     destination_size_ratio: int
++    destination_size_divisor: int = 1
++    compact_valid_decode_row: bool = False
+ 
+ 
+ def make_lx_relayout_destination_name(source_name: str) -> str:
+@@ -80,6 +82,8 @@ class LXRelayoutPlan:
+     destination_device_dim_splits: dict[str, int]
+     collective_kind: LXCollectiveKind
+     destination_size_ratio: int
++    destination_size_divisor: int = 1
++    compact_valid_decode_row: bool = False
+     destination_lx_address: int | None = None
+ 
+     @property
+@@ -100,6 +104,8 @@ def _classify_lx_relayout(
+     producer_splits: dict[str, int],
+     consumer_map: dict[str, dict[str, int]],
+     consumer_splits: dict[str, int],
++    *,
++    allow_sparse_all_gather: bool = False,
+ ) -> _LXRelayoutClassification | None:
+     """Classify exact, uniform geometry supported by the LX relayout path."""
+ 
+@@ -153,7 +159,6 @@ def _classify_lx_relayout(
+         transfer_count == 0
+         or not covers_all_cores
+         or not uniform
+-        or not producer_cores.issubset(consumer_cores)
+     ):
+         return None
+ 
+@@ -178,6 +183,81 @@ def _classify_lx_relayout(
+     ):
+         return _LXRelayoutClassification(LXCollectiveKind.BROADCAST, 1)
+ 
++    # SenDNN's decode SwiGLU product uses one owner for each of 25 reduction
++    # shards, then gives every one of the 32 down-projection consumers the
++    # complete reduction input. The source participant set is intentionally
++    # sparse, so keep this geometry behind an exact replay gate.
++    if (
++        allow_sparse_all_gather
++        and producer_is_partitioned
++        and not consumer_is_partitioned
++        and consumer_slice_count == math.prod(consumer_splits.values())
++        and 1 < consumer_slice_count < len(consumer_map)
++        and len(producer_map) < len(consumer_map)
++        and producer_slice_count == len(producer_map)
++        and max_fanout == len(consumer_map)
++        and max_fanin == len(producer_map)
++    ):
++        # Torch decode pads mb=1 to 64 rows and keeps its bit-exact mb4/out8
++        # down-projection split. Each of the four token cohorts therefore
++        # gathers all 25 reduction shards, with eight output-shard replicas.
++        # S2:S1 is 25/4 rather than an integer ratio. The compact transport
++        # variant later restricts the physical shuffle to mb=0 only.
++        compact_valid_decode_row = config.relayout_oracle_decode_mlp_compact_row
++        destination_size_divisor = consumer_slice_count
++        if (
++            compact_valid_decode_row
++            and config.relayout_oracle_decode_mlp_broadcast_row
++        ):
++            # Gather one real decode row onto every BMM consumer. Each core
++            # stores 1x12800 elements instead of its padded 16x12800 mb slice,
++            # so S2:S1 is 25/64.
++            destination_size_divisor = 64
++        return _LXRelayoutClassification(
++            LXCollectiveKind.ALL_GATHER,
++            max_fanin,
++            destination_size_divisor,
++            compact_valid_decode_row=compact_valid_decode_row,
++        )
++
++    if (
++        allow_sparse_all_gather
++        and producer_is_partitioned
++        and not consumer_is_partitioned
++        and len(producer_map) < len(consumer_map)
++        and producer_slice_count == len(producer_map)
++        and consumer_slice_count == 1
++        and max_fanout == len(consumer_map)
++        and max_fanin == len(producer_map)
++    ):
++        return _LXRelayoutClassification(
++            LXCollectiveKind.ALL_GATHER, max_fanin
++        )
++
++    # A partition contraction gathers several producer fragments onto a
++    # smaller set of destination owners. SenDNN uses this for RMS reductions:
++    # 32 token/hidden shards become eight full-hidden token cohorts.
++    if (
++        producer_is_partitioned
++        and consumer_is_partitioned
++        and len(producer_map) > len(consumer_map)
++        and max_fanout == 1
++        and max_fanin > 1
++    ):
++        return _LXRelayoutClassification(LXCollectiveKind.ALL_GATHER, max_fanin)
++
++    # Grouped broadcast is the inverse geometry: several independent source
++    # shards each replicate to a cohort of destination cores. This covers the
++    # scalar RMS results broadcast across each four-core hidden cohort.
++    if (
++        producer_is_partitioned
++        and not consumer_is_partitioned
++        and len(producer_map) < len(consumer_map)
++        and max_fanout > 1
++        and max_fanin == 1
++    ):
++        return _LXRelayoutClassification(LXCollectiveKind.BROADCAST, 1)
++
+     if (
+         same_participants
+         and producer_is_partitioned
+@@ -340,12 +420,25 @@ def collect_lx_relayout_plans(
+         if not isinstance(consumer, ComputedBuffer):
+             continue
+         is_matmul_consumer = _is_matmul_op(consumer)
+-        if not is_matmul_consumer and not isinstance(consumer.data, Pointwise):
++        oracle_rms_reduction = (
++            config.relayout_oracle_prefill_output_projection_chain
++            and consumer.get_name() == "buf48"
++        )
++        if (
++            not is_matmul_consumer
++            and not isinstance(consumer.data, Pointwise)
++            and not oracle_rms_reduction
++        ):
+             continue
+         reads = (
+             dep for dep in op_read_writes(consumer).reads if isinstance(dep, MemoryDep)
+         )
+         for read_index, dep in enumerate(reads):
++            debug_chain_edge = (
++                config.relayout_oracle_prefill_output_projection_chain
++                and os.environ.get("SPYRE_RELAYOUT_ORACLE_DEBUG", "0") == "1"
++                and dep.name in ("buf47", "buf50")
++            )
+             if dep.name in disabled_sources:
+                 continue
+             read_count = read_counts.get(dep.name, 0)
+@@ -368,12 +461,30 @@ def collect_lx_relayout_plans(
+                 _per_core_view_on_buf(producer, write_dep, dep.name, cache)
+             )
+             if producer_has_partial or not producer_representable:
++                if debug_chain_edge:
++                    print(
++                        "[LX_RELAYOUT_CHAIN_DEBUG] producer rejected",
++                        dep.name,
++                        consumer.get_name(),
++                        repr(producer_view),
++                        producer_has_partial,
++                        producer_representable,
++                    )
+                 continue
+ 
+             consumer_view, consumer_has_partial, consumer_representable = (
+                 _per_core_view_on_buf(consumer, dep, dep.name, cache)
+             )
+             if consumer_has_partial or not consumer_representable:
++                if debug_chain_edge:
++                    print(
++                        "[LX_RELAYOUT_CHAIN_DEBUG] consumer rejected",
++                        dep.name,
++                        consumer.get_name(),
++                        repr(consumer_view),
++                        consumer_has_partial,
++                        consumer_representable,
++                    )
+                 continue
+ 
+             producer_core_count = _op_num_cores(producer)
+@@ -411,7 +522,25 @@ def collect_lx_relayout_plans(
+                 producer_work_slice_dims,
+                 consumer_core_slices,
+                 consumer_work_slice_dims,
++                allow_sparse_all_gather=(
++                    config.relayout_oracle_decode_mlp_down_input
++                    and is_matmul_consumer
++                    and (dep.name, consumer.get_name())
++                    in (("buf58", "buf59"), ("buf62", "buf63"))
++                    and [str(size) for size in producer.get_size()]
++                    == ["1", "64", "12800"]
++                    and read_index == 0
++                ),
+             )
++            if debug_chain_edge:
++                print(
++                    "[LX_RELAYOUT_CHAIN_DEBUG] classified",
++                    dep.name,
++                    consumer.get_name(),
++                    repr(producer_view),
++                    repr(consumer_view),
++                    classification,
++                )
+             if classification is None:
+                 continue
+             enabled_collectives = {
+@@ -448,6 +577,8 @@ def collect_lx_relayout_plans(
+                     destination_device_dim_splits=consumer_work_slice_dims,
+                     collective_kind=classification.collective_kind,
+                     destination_size_ratio=classification.destination_size_ratio,
++                    destination_size_divisor=classification.destination_size_divisor,
++                    compact_valid_decode_row=classification.compact_valid_decode_row,
+                 )
+             )
+ 
+diff --git a/torch_spyre/_inductor/op_spec.py b/torch_spyre/_inductor/op_spec.py
+index e3f1594..7e4c634 100644
+--- a/torch_spyre/_inductor/op_spec.py
++++ b/torch_spyre/_inductor/op_spec.py
+@@ -121,6 +121,9 @@ class TensorArg:
+                 codegen maps them to SDSC dimensions using the tensor layout.
+         allocation_device_dim_splits: Optional allocation fold geometry keyed
+                 by the same device-dimension indices.
++        broadcast_dims: Iteration-space dimensions that this tensor reuses
++                from a singleton device dimension. SuperDSC emits scale -1
++                for these dimensions instead of treating them as reductions.
+     """
+ 
+     is_input: bool
+@@ -133,6 +136,7 @@ class TensorArg:
+     name: str | None = None
+     allocation_core_id_to_device_slice: dict[str, dict[str, int]] | None = None
+     allocation_device_dim_splits: dict[str, int] | None = None
++    broadcast_dims: list[Symbol] = dataclasses.field(default_factory=list)
+ 
+ 
+ @dataclasses.dataclass
+diff --git a/torch_spyre/_inductor/scratchpad/allocator.py b/torch_spyre/_inductor/scratchpad/allocator.py
+index 03e9a95..6b68fa1 100644
+--- a/torch_spyre/_inductor/scratchpad/allocator.py
++++ b/torch_spyre/_inductor/scratchpad/allocator.py
+@@ -224,6 +224,10 @@ class ScratchpadAllocator:
+                     and plan.collective_kind == canonical.collective_kind
+                     and plan.destination_size_ratio
+                     == canonical.destination_size_ratio
++                    and plan.destination_size_divisor
++                    == canonical.destination_size_divisor
++                    and plan.compact_valid_decode_row
++                    == canonical.compact_valid_decode_row
+                 )
+             ]
+             self._lx_relayout_plans_by_source[source_name] = canonical
+@@ -990,8 +994,16 @@ class ScratchpadAllocator:
+             # released before consumer compute while S2 remains live through it.
+             source_uses = [use for use in source.uses if use != consumer_use]
+             source.uses = sorted({*source_uses, shuffle_use})
++            scaled_destination_size = source.size * plan.destination_size_ratio
++            if scaled_destination_size % plan.destination_size_divisor:
++                raise ValueError(
++                    "LX relayout destination size is not integral: "
++                    f"source={source.name} size={source.size} "
++                    f"ratio={plan.destination_size_ratio}/"
++                    f"{plan.destination_size_divisor}"
++                )
+             destination_size = round_up_to_alignment(
+-                source.size * plan.destination_size_ratio,
++                scaled_destination_size // plan.destination_size_divisor,
+                 _LX_ALLOCATION_GRANULARITY_BYTES,
+             )
+             destination = LifetimeBoundBuffer(
+diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
+index c17d580..048c5e6 100644
+--- a/torch_spyre/_inductor/spyre_kernel.py
++++ b/torch_spyre/_inductor/spyre_kernel.py
+@@ -104,8 +104,77 @@ def _materialize_explicit_lx_shuffle(
+     }
+     source_device_dim_splits = dict(plan.source_device_dim_splits)
+     destination_device_dim_splits = dict(plan.destination_device_dim_splits)
+-    participant_count = len(consumer_map)
++    compact_decode_device_dim: str | None = None
++    compact_decode_symbol: sympy.Symbol | None = None
++    broadcast_decode_row = (
++        plan.compact_valid_decode_row
++        and _spyre_config.relayout_oracle_decode_mlp_broadcast_row
++    )
++    if plan.compact_valid_decode_row:
++        compact_dims = [
++            dim
++            for dim, destination_split in destination_device_dim_splits.items()
++            if int(destination_split) == 4
++            and int(source_device_dim_splits.get(dim, 1)) == 1
++        ]
++        if len(compact_dims) != 1:
++            logger.warning(
++                "cannot compact decode shuffle %s: source splits=%s "
++                "destination splits=%s",
++                plan.source_name,
++                source_device_dim_splits,
++                destination_device_dim_splits,
++            )
++            return None
++        compact_decode_device_dim = compact_dims[0]
++        compact_symbols = [
++            symbol
++            for symbol in source_arg.device_coordinates[
++                int(compact_decode_device_dim)
++            ].free_symbols
++            if symbol in consumer_spec.iteration_space
++        ]
++        if len(compact_symbols) != 1:
++            logger.warning(
++                "cannot compact decode shuffle %s: device dim %s does not map "
++                "to one consumer symbol in coordinates %s",
++                plan.source_name,
++                compact_decode_device_dim,
++                source_arg.device_coordinates,
++            )
++            return None
++        compact_decode_symbol = compact_symbols[0]
++        if broadcast_decode_row:
++            # Every physical BMM consumer receives the same compact row. The
++            # consumer later reuses that local row for its padded mb slots.
++            consumer_map = {
++                core: {**per_core, compact_decode_device_dim: 0}
++                for core, per_core in consumer_map.items()
++            }
++            destination_device_dim_splits[compact_decode_device_dim] = 1
++        else:
++            # Only mb=0 carries a real decode token. Keep the eight mb=0
++            # replicas while retaining the padded consumer allocation.
++            consumer_map = {
++                core: per_core
++                for core, per_core in consumer_map.items()
++                if int(per_core.get(compact_decode_device_dim, 0)) == 0
++            }
++            destination_device_dim_splits[compact_decode_device_dim] = 1
++    # The shuffle executes across every physical core that either owns an S1
++    # fragment or receives an S2 fragment.  Partition contractions such as
++    # Granite's RMS gather have 32 source owners but only eight destination
++    # owners, so sizing this from the consumer map alone leaves DeepTools with
++    # source folds that exceed the declared core fold.
++    participant_cores = set(producer_map) | set(consumer_map)
++    participant_count = max(map(int, participant_cores), default=-1) + 1
+     if "lx" not in source_arg.allocation or destination_address is None:
++        logger.warning(
++            "cannot build LX shuffle %s: source allocation=%s destination=%s",
++            plan.source_name,
++            source_arg.allocation,
++            destination_address,
++        )
+         return None
+ 
+     used_symbols = {
+@@ -130,6 +199,13 @@ def _materialize_explicit_lx_shuffle(
+         if symbol in used_symbols
+     }
+     if not shuffle_iteration_space:
++        logger.warning(
++            "cannot build LX shuffle %s: source coordinates %s share no symbols "
++            "with consumer iteration space %s",
++            plan.source_name,
++            source_arg.device_coordinates,
++            consumer_spec.iteration_space,
++        )
+         return None
+ 
+     # A whole-buffer broadcast has no logically split tensor dimension, but
+@@ -178,34 +254,67 @@ def _materialize_explicit_lx_shuffle(
+     source_splits = splits_by_symbol(source_device_dim_splits)
+     destination_splits = splits_by_symbol(destination_device_dim_splits)
+     if source_splits is None or destination_splits is None:
++        logger.warning(
++            "cannot build LX shuffle %s: device splits %s -> %s do not map "
++            "through source coordinates %s to consumer symbols %s",
++            plan.source_name,
++            source_device_dim_splits,
++            destination_device_dim_splits,
++            source_arg.device_coordinates,
++            symbol_to_label,
++        )
+         return None
+ 
+     shuffle_iteration_space = {
+         symbol: (extent, destination_splits.get(symbol, 1))
+         for symbol, (extent, _) in shuffle_iteration_space.items()
+     }
++    if compact_decode_symbol is not None:
++        shuffle_iteration_space[compact_decode_symbol] = (1, 1)
+ 
++    source_coordinates = list(source_arg.device_coordinates)
+     source = replace(
+         source_arg,
+         is_input=True,
+         name=plan.source_name,
++        device_coordinates=source_coordinates,
+         allocation=dict(source_arg.allocation),
+         allocation_core_id_to_device_slice=producer_map,
+         allocation_device_dim_splits=source_device_dim_splits,
+     )
++    destination_device_size = list(source_arg.device_size)
++    destination_shuffle_coordinates = list(source_arg.device_coordinates)
++    destination_consumer_coordinates = list(source_arg.device_coordinates)
++    if (
++        broadcast_decode_row
++        and compact_decode_device_dim is not None
++        and compact_decode_symbol is not None
++    ):
++        coordinate_index = int(compact_decode_device_dim)
++        destination_device_size[coordinate_index] = 1
++        destination_consumer_coordinates[coordinate_index] = sympy.S.Zero
+     destination_input = replace(
+         source_arg,
+         is_input=True,
+         name=destination_name,
++        device_size=destination_device_size,
++        device_coordinates=destination_consumer_coordinates,
+         allocation={"lx": destination_address},
+         allocation_core_id_to_device_slice=None,
+         allocation_device_dim_splits=None,
++        broadcast_dims=(
++            [compact_decode_symbol]
++            if broadcast_decode_row and compact_decode_symbol is not None
++            else []
++        ),
+     )
+     destination_output = replace(
+         destination_input,
+         is_input=False,
++        device_coordinates=destination_shuffle_coordinates,
+         allocation_core_id_to_device_slice=consumer_map,
+         allocation_device_dim_splits=destination_device_dim_splits,
++        broadcast_dims=[],
+     )
+     shuffle = OpSpec(
+         op="shuffle",
+@@ -1136,7 +1245,16 @@ class SpyreKernel(Kernel[CSEVariable]):
+                 self.create_tensor_arg(True, x.name, x),
+                 self.create_tensor_arg(False, real_dst_name, dst),
+             ]
+-            self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
++            consumer_spec = self.create_op_spec(value.op, True, args, op_info)
++            self.op_specs.extend(
++                _materialize_lx_relayout_inputs(
++                    self.current_node,
++                    args,
++                    [(0, x)],
++                    consumer_spec,
++                )
++            )
++            self.op_specs.append(consumer_spec)
+ 
+     def wrap_op_specs_in_loop(self, count: sympy.Expr) -> None:
+         """Replace the current op_specs list with a single LoopSpec of the given count."""
+@@ -1388,6 +1506,14 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
+                                     "allocation_device_dim_splits="
+                                     f"{arg.allocation_device_dim_splits!r},"
+                                 )
++                            if arg.broadcast_dims:
++                                buf.writeline(
++                                    "broadcast_dims=["
++                                    + ", ".join(
++                                        sympy_str(dim) for dim in arg.broadcast_dims
++                                    )
++                                    + "],"
++                                )
+                         buf.writeline("),")
+                 buf.writeline("]")
+             buf.writeline("),")
+diff --git a/torch_spyre/_inductor/work_division.py b/torch_spyre/_inductor/work_division.py
+index 9a6688c..22c6ee2 100644
+--- a/torch_spyre/_inductor/work_division.py
++++ b/torch_spyre/_inductor/work_division.py
+@@ -752,10 +752,20 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+     is_output_projection = (
+         config.relayout_oracle_prefill_output_projection and name == "buf44"
+     )
++    is_output_projection_chain = (
++        config.relayout_oracle_prefill_output_projection_chain
++        and name
++        in ("buf45", "buf46", "buf47", "buf48", "buf49", "buf50", "buf51", "buf52")
++    )
+     is_mlp_input_edge = (
+         config.relayout_oracle_prefill_mlp_inputs
+         and name in ("buf52", "buf53", "buf55")
+     )
++    is_decode_mlp_down_input = (
++        config.relayout_oracle_decode_mlp_down_input
++        and not config.relayout_oracle_decode_mlp_preserve_work_div
++        and name in ("buf59", "buf63")
++    )
+     is_compact_gqa_edge = (
+         config.relayout_oracle_compact_gqa
+         and name in config.relayout_oracle_compact_gqa_buffers.split(",")
+@@ -774,7 +784,9 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+     )
+     if (
+         not is_output_projection
++        and not is_output_projection_chain
+         and not is_mlp_input_edge
++        and not is_decode_mlp_down_input
+         and not is_compact_gqa_edge
+         and not is_prefill_qk_query_edge
+         and not is_prefill_qk_head_owned
+@@ -787,11 +799,25 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+         and shape in (["1", "512", "4096"], ["1", "512", "32", "128"])
+     ):
+         return {"mb": 8, "out": 4}
++    if is_output_projection_chain:
++        if name in ("buf45", "buf46", "buf47", "buf51", "buf52") and shape == [
++            "1",
++            "512",
++            "4096",
++        ]:
++            return {"mb": 8, "out": 4}
++        if name in ("buf48", "buf49", "buf50") and shape == ["1", "512", "1"]:
++            return {"mb": 8}
+     if is_mlp_input_edge:
+         if name == "buf52" and shape == ["1", "512", "4096"]:
+             return {"mb": 8, "out": 4}
+         if name in ("buf53", "buf55") and shape == ["1", "512", "12800"]:
+             return {"mb": 8, "out": 4}
++    if is_decode_mlp_down_input and shape == ["1", "64", "4096"]:
++        # SenDNN decode does not split the single logical token dimension for
++        # the down projection. Torch pads decode to 64 rows, so preserve that
++        # topology by assigning all 32 cores to independent output shards.
++        return {"mb": 1, "out": 32}
+     if is_compact_gqa_edge:
+         if name in ("buf18", "buf66") and shape == ["1", "8", "1", "512", "128"]:
+             return {"kv_head": 4, "token": 8}
+@@ -840,6 +866,48 @@ def _resolve_work_div_hint(
+         # Bind exact-graph oracle buffers directly to symbols instead of relying
+         # on graph-propagated names, which are absent on these fused ops.
+         symbols = list(it_space)
++        if (
++            config.relayout_oracle_prefill_output_projection_chain
++            and op.get_name()
++            in (
++                "buf45",
++                "buf46",
++                "buf47",
++                "buf48",
++                "buf49",
++                "buf50",
++                "buf51",
++                "buf52",
++            )
++        ):
++            name = op.get_name()
++            if name in ("buf45", "buf46", "buf47", "buf51", "buf52"):
++                actual_extents = [concretize_expr(it_space[sym]) for sym in symbols]
++                if actual_extents != [512, 64]:
++                    raise Unsupported(
++                        "SenDNN output-projection chain expected adjusted "
++                        "[token, hidden-stick] iteration extents [512, 64], "
++                        f"got {actual_extents} on {name}"
++                    )
++                token_sym, hidden_sym = symbols
++                op._spyre_oracle_gather_dim_symbol = hidden_sym  # type: ignore[attr-defined]
++                return {token_sym: 8, hidden_sym: 4}
++
++            actual_extents = [concretize_expr(it_space[sym]) for sym in symbols]
++            if name == "buf48":
++                if actual_extents != [512, 64]:
++                    raise Unsupported(
++                        "SenDNN output-projection RMS reduction expected adjusted "
++                        f"[token, hidden-stick] extents [512, 64], got {actual_extents}"
++                    )
++                return {symbols[0]: 8}
++
++            if actual_extents != [512]:
++                raise Unsupported(
++                    "SenDNN output-projection scalar chain expected token extent "
++                    f"[512], got {actual_extents} on {name}"
++                )
++            return {symbols[0]: 8}
+         if config.relayout_oracle_p06_ramp and op.get_name() in (
+             config.relayout_oracle_p06_ramp_source,
+             config.relayout_oracle_p06_ramp_consumer,
+@@ -925,6 +993,18 @@ def _resolve_work_div_hint(
+             # with output/head shards contiguous inside each token cohort.
+             op._spyre_oracle_gather_dim_symbol = output_sym  # type: ignore[attr-defined]
+             return {token_sym: 8, output_sym: 4}
++        if (
++            config.relayout_oracle_decode_mlp_down_input
++            and op.get_name() in ("buf59", "buf63")
++        ):
++            if len(symbols) != 3:
++                raise Unsupported(
++                    "SenDNN decode down-projection replay expected "
++                    f"[mb, out, reduction], got {symbols} on {op.get_name()}"
++                )
++            mb_sym, out_sym = symbols[:2]
++            op._spyre_oracle_gather_dim_symbol = out_sym  # type: ignore[attr-defined]
++            return {mb_sym: 1, out_sym: 32}
+         expected_rank = 2 if op.get_name() == "buf52" else 3
+         if len(symbols) != expected_rank:
+             raise Unsupported(

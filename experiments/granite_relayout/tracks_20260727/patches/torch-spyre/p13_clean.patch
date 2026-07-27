@@ -1,0 +1,357 @@
+diff --git a/tests/inductor/test_lx_relayout_dldsc.py b/tests/inductor/test_lx_relayout_dldsc.py
+index 7a5428b4..6a240290 100644
+--- a/tests/inductor/test_lx_relayout_dldsc.py
++++ b/tests/inductor/test_lx_relayout_dldsc.py
+@@ -17,12 +17,17 @@ from types import SimpleNamespace
+ 
+ from sympy import Integer, Mod, Symbol, floor
+ 
++from torch_spyre._inductor import config
+ import torch_spyre._inductor.lx_relayout as lx_relayout_module
+ import torch_spyre._inductor.scratchpad.allocator as allocator_module
+ import torch_spyre._inductor.scratchpad.graph_editor as graph_editor_module
+ 
+ from torch_spyre._C import DataFormats
+-from torch_spyre._inductor.codegen.superdsc import compile_op_spec
++from torch_spyre._inductor.codegen.superdsc import (
++    _map_core_id_to_wk_slice_dims,
++    _map_device_dim_splits,
++    compile_op_spec,
++)
+ from torch_spyre._inductor.constants import BATCH_MATMUL_OP
+ from torch_spyre._inductor.lx_relayout import (
+     LX_RELAYOUT_ATTR,
+@@ -47,6 +52,10 @@ from torch_spyre._inductor.spyre_kernel import (
+     _materialize_lx_relayout_inputs,
+     simplify_op_spec,
+ )
++from torch_spyre._inductor.work_division import (
++    _oracle_work_div_hint_by_name,
++    _resolve_work_div_hint,
++)
+ 
+ 
+ class _DummyOp:
+@@ -778,3 +787,92 @@ def test_all_gather_emits_standard_shuffle_fold_geometry():
+         stick_folds["dim_prop_attr"][1]["factor_"],
+         stick_folds["dim_prop_func"][1]["Affine"]["alpha_"],
+     ) == (1, 0)
++
++
++def test_granite_last_token_head_oracle_uses_output_only_split(monkeypatch):
++    class DummyBuffer:
++        def __init__(self, name="buf0", size=(1, 1, 50176), reduction_type=None):
++            self.name = name
++            self.size = list(size)
++            self.data = SimpleNamespace(reduction_type=reduction_type)
++
++        def get_name(self):
++            return self.name
++
++        def get_size(self):
++            return self.size
++
++    op = DummyBuffer(reduction_type=BATCH_MATMUL_OP)
++    monkeypatch.setattr(config, "work_div_oracle_granite_last_token_head", False)
++    assert _oracle_work_div_hint_by_name(op) == {}
++
++    monkeypatch.setattr(config, "work_div_oracle_granite_last_token_head", True)
++    assert _oracle_work_div_hint_by_name(op) == {"in": 1, "out": 28}
++    assert _oracle_work_div_hint_by_name(
++        DummyBuffer(name="buf6", reduction_type=BATCH_MATMUL_OP)
++    ) == {"in": 1, "out": 28}
++    assert (
++        _oracle_work_div_hint_by_name(
++            DummyBuffer(size=(1, 512, 49280), reduction_type=BATCH_MATMUL_OP)
++        )
++        == {}
++    )
++    assert _oracle_work_div_hint_by_name(DummyBuffer(reduction_type="sum")) == {}
++
++    out, reduction = Symbol("out"), Symbol("reduction")
++    assert _resolve_work_div_hint(
++        op,
++        {out: Integer(784), reduction: Integer(64)},
++    ) == {reduction: 1, out: 28}
++
++    legacy = DummyBuffer(size=(1, 1, 49280), reduction_type=BATCH_MATMUL_OP)
++    assert _oracle_work_div_hint_by_name(legacy) == {"in": 1, "out": 22}
++    assert _resolve_work_div_hint(
++        legacy,
++        {out: Integer(770), reduction: Integer(64)},
++    ) == {reduction: 1, out: 22}
++
++
++def test_granite_last_token_subset_all_gather_is_exactly_gated():
++    source_shards = {str(core): {"0": core} for core in range(32)}
++    head_owners = {str(core): {"0": 0} for core in range(28)}
++
++    assert (
++        _classify_lx_relayout(
++            source_shards,
++            {"0": 32},
++            head_owners,
++            {"0": 1},
++        )
++        is None
++    )
++    classification = _classify_lx_relayout(
++        source_shards,
++        {"0": 32},
++        head_owners,
++        {"0": 1},
++        allow_grouped_collectives=True,
++    )
++    assert classification is not None
++    assert classification.collective_kind is LXCollectiveKind.ALL_GATHER
++    assert classification.destination_size_ratio == 32
++    assert (32 * 28 - 28) * 256 == 222_208
++
++
++def test_granite_last_token_hidden_axis_bridge(monkeypatch):
++    hidden = Symbol("in")
++    source_map = {str(core): {"1": core} for core in range(32)}
++
++    monkeypatch.setattr(config, "work_div_oracle_granite_last_token_head", True)
++
++    assert _map_core_id_to_wk_slice_dims(
++        source_map,
++        {"0": hidden},
++        [hidden],
++        "buf0",
++    ) == {str(core): {"in": core} for core in range(32)}
++    assert _map_device_dim_splits(
++        {"1": 32},
++        {"0": hidden},
++        "__spyre_lx_relayout_destination__:buf0",
++    ) == {hidden: 32}
+diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
+index 435cbb6c..43ec6cbf 100644
+--- a/torch_spyre/_inductor/codegen/superdsc.py
++++ b/torch_spyre/_inductor/codegen/superdsc.py
+@@ -292,6 +292,7 @@ def _map_core_id_to_wk_slice_dims(
+     core_id_to_device_slice: dict[str, dict[str, int]] | None,
+     device_dim_to_sdsc_dim: dict[str, Symbol],
+     dim_order: list[Symbol],
++    allocation_name: str | None = None,
+ ) -> dict[str, dict[str, int]] | None:
+     if core_id_to_device_slice is None:
+         return None
+@@ -335,6 +336,18 @@ def _map_core_id_to_wk_slice_dims(
+                 # cohort on planner axis 4.  Singleton removal and SDSC
+                 # normalization expose that same cohort as physical x axis 3.
+                 resolved_device_dim = "3"
++            if (
++                _spyre_config.work_div_oracle_granite_last_token_head
++                and allocation_name
++                in ("buf0", "__spyre_lx_relayout_destination__:buf0")
++                and resolved_device_dim == "1"
++                and resolved_device_dim not in device_dim_to_sdsc_dim
++                and set(device_dim_to_sdsc_dim) == {"0"}
++                and [str(dim) for dim in dim_order] == ["in"]
++            ):
++                # Singleton removal exposes the sliced activation's hidden
++                # partition as the shuffle's sole SDSC ``in`` axis.
++                resolved_device_dim = "0"
+             dim = device_dim_to_sdsc_dim.get(resolved_device_dim)
+             if dim is None:
+                 if int(slot) != 0:
+@@ -353,6 +366,7 @@ def _map_core_id_to_wk_slice_dims(
+ def _map_device_dim_splits(
+     device_dim_splits: dict[str, int] | None,
+     device_dim_to_sdsc_dim: dict[str, Symbol],
++    allocation_name: str | None = None,
+ ) -> dict[Symbol, int]:
+     if device_dim_splits is None:
+         return {}
+@@ -381,6 +395,15 @@ def _map_device_dim_splits(
+             and set(device_dim_to_sdsc_dim) == {"0", "1", "2", "3"}
+         ):
+             resolved_device_dim = "3"
++        if (
++            _spyre_config.work_div_oracle_granite_last_token_head
++            and allocation_name
++            in ("buf0", "__spyre_lx_relayout_destination__:buf0")
++            and resolved_device_dim == "1"
++            and resolved_device_dim not in device_dim_to_sdsc_dim
++            and set(device_dim_to_sdsc_dim) == {"0"}
++        ):
++            resolved_device_dim = "0"
+         dim = device_dim_to_sdsc_dim.get(resolved_device_dim)
+         if dim is None:
+             if int(split) != 1:
+@@ -704,10 +727,12 @@ def _create_sdsc_tensors(
+                     arg.allocation_core_id_to_device_slice,
+                     device_dim_to_sdsc_dim,
+                     dim_order,
++                    arg.name,
+                 ),
+                 core_splits=_map_device_dim_splits(
+                     arg.allocation_device_dim_splits,
+                     device_dim_to_sdsc_dim,
++                    arg.name,
+                 ),
+             )
+         )
+diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
+index 59e98307..92a6e965 100644
+--- a/torch_spyre/_inductor/config.py
++++ b/torch_spyre/_inductor/config.py
+@@ -67,6 +67,14 @@ relayout_oracle_prefill_mlp_inputs: bool = (
+     os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_INPUTS", "0") == "1"
+ )
+ 
++# Keep the Granite one-token LM head's reduction local to each output owner.
++# The parity path pads 770 output sticks to 784 and divides them over 28
++# cores, exactly matching SenDNN. The older unpadded 22-owner geometry remains
++# accepted for controlled A/Bs.
++work_div_oracle_granite_last_token_head: bool = (
++    os.environ.get("SPYRE_WORK_DIV_ORACLE_GRANITE_LAST_TOKEN_HEAD", "0") == "1"
++)
++
+ # Test-only SenDNN replay oracle that preserves Granite GQA K/V in compact
+ # [KV-head, query-group] form through the attention BMMs.
+ relayout_oracle_compact_gqa: bool = (
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index e8d877dc..1bee6717 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -100,6 +100,8 @@ def _classify_lx_relayout(
+     producer_splits: dict[str, int],
+     consumer_map: dict[str, dict[str, int]],
+     consumer_splits: dict[str, int],
++    *,
++    allow_grouped_collectives: bool = False,
+ ) -> _LXRelayoutClassification | None:
+     """Classify exact, uniform geometry supported by the LX relayout path."""
+ 
+@@ -153,7 +155,10 @@ def _classify_lx_relayout(
+         transfer_count == 0
+         or not covers_all_cores
+         or not uniform
+-        or not producer_cores.issubset(consumer_cores)
++        or (
++            not allow_grouped_collectives
++            and not producer_cores.issubset(consumer_cores)
++        )
+     ):
+         return None
+ 
+@@ -178,6 +183,20 @@ def _classify_lx_relayout(
+     ):
+         return _LXRelayoutClassification(LXCollectiveKind.BROADCAST, 1)
+ 
++    # P13 subset all-gather: 32 hidden-shard producers feed the complete
++    # vector to the smaller set of LM-head output owners. Keep the relaxed
++    # participant relation behind the exact graph gate at the call site.
++    if (
++        allow_grouped_collectives
++        and not same_participants
++        and producer_is_partitioned
++        and not consumer_is_partitioned
++        and consumer_slice_count == 1
++        and max_fanout == len(consumer_map)
++        and max_fanin == len(producer_map)
++    ):
++        return _LXRelayoutClassification(LXCollectiveKind.ALL_GATHER, max_fanin)
++
+     if (
+         same_participants
+         and producer_is_partitioned
+@@ -411,6 +430,15 @@ def collect_lx_relayout_plans(
+                 producer_work_slice_dims,
+                 consumer_core_slices,
+                 consumer_work_slice_dims,
++                allow_grouped_collectives=(
++                    config.work_div_oracle_granite_last_token_head
++                    and dep.name == "buf0"
++                    and consumer.get_name() == "buf1"
++                    and [str(size) for size in producer.get_size()]
++                    == ["1", "1", "4096"]
++                    and [str(size) for size in consumer.get_size()]
++                    in (["1", "1", "49280"], ["1", "1", "50176"])
++                ),
+             )
+             if classification is None:
+                 continue
+diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
+index c17d580c..bb524ceb 100644
+--- a/torch_spyre/_inductor/spyre_kernel.py
++++ b/torch_spyre/_inductor/spyre_kernel.py
+@@ -104,7 +104,16 @@ def _materialize_explicit_lx_shuffle(
+     }
+     source_device_dim_splits = dict(plan.source_device_dim_splits)
+     destination_device_dim_splits = dict(plan.destination_device_dim_splits)
+-    participant_count = len(consumer_map)
++    participant_cores = {int(core) for core in producer_map} | {
++        int(core) for core in consumer_map
++    }
++    if not participant_cores:
++        return None
++    participant_count = max(participant_cores) + 1
++    if participant_cores != set(range(participant_count)):
++        # num_cores_override is a dense prefix. Do not silently activate holes
++        # whose ownership is absent from both endpoint maps.
++        return None
+     if "lx" not in source_arg.allocation or destination_address is None:
+         return None
+ 
+diff --git a/torch_spyre/_inductor/work_division.py b/torch_spyre/_inductor/work_division.py
+index 9a6688c3..6c4f057d 100644
+--- a/torch_spyre/_inductor/work_division.py
++++ b/torch_spyre/_inductor/work_division.py
+@@ -756,6 +756,10 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+         config.relayout_oracle_prefill_mlp_inputs
+         and name in ("buf52", "buf53", "buf55")
+     )
++    is_granite_last_token_head = (
++        config.work_div_oracle_granite_last_token_head
++        and getattr(op.data, "reduction_type", None) == BATCH_MATMUL_OP
++    )
+     is_compact_gqa_edge = (
+         config.relayout_oracle_compact_gqa
+         and name in config.relayout_oracle_compact_gqa_buffers.split(",")
+@@ -775,6 +779,7 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+     if (
+         not is_output_projection
+         and not is_mlp_input_edge
++        and not is_granite_last_token_head
+         and not is_compact_gqa_edge
+         and not is_prefill_qk_query_edge
+         and not is_prefill_qk_head_owned
+@@ -792,6 +797,11 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+             return {"mb": 8, "out": 4}
+         if name in ("buf53", "buf55") and shape == ["1", "512", "12800"]:
+             return {"mb": 8, "out": 4}
++    if is_granite_last_token_head and shape in (
++        ["1", "1", "49280"],
++        ["1", "1", "50176"],
++    ):
++        return {"in": 1, "out": 28 if shape[-1] == "50176" else 22}
+     if is_compact_gqa_edge:
+         if name in ("buf18", "buf66") and shape == ["1", "8", "1", "512", "128"]:
+             return {"kv_head": 4, "token": 8}
+@@ -840,6 +850,23 @@ def _resolve_work_div_hint(
+         # Bind exact-graph oracle buffers directly to symbols instead of relying
+         # on graph-propagated names, which are absent on these fused ops.
+         symbols = list(it_space)
++        if (
++            config.work_div_oracle_granite_last_token_head
++            and getattr(op.data, "reduction_type", None) == BATCH_MATMUL_OP
++            and [str(size) for size in op.get_size()]
++            in (["1", "1", "49280"], ["1", "1", "50176"])
++        ):
++            actual_extents = [concretize_expr(it_space[sym]) for sym in symbols]
++            padded = [str(size) for size in op.get_size()][-1] == "50176"
++            expected_extents = [784, 64] if padded else [770, 64]
++            if actual_extents != expected_extents:
++                raise Unsupported(
++                    "Granite last-token LM-head replay expected adjusted "
++                    "[output-sticks, reduction-sticks] extents "
++                    f"{expected_extents}, got {actual_extents} on {op.get_name()}"
++                )
++            out_sym, reduction_sym = symbols
++            return {reduction_sym: 1, out_sym: 28 if padded else 22}
+         if config.relayout_oracle_p06_ramp and op.get_name() in (
+             config.relayout_oracle_p06_ramp_source,
+             config.relayout_oracle_p06_ramp_consumer,

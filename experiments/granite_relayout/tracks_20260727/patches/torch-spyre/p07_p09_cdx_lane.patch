@@ -1,0 +1,847 @@
+diff --git a/tests/inductor/test_lx_relayout_dldsc.py b/tests/inductor/test_lx_relayout_dldsc.py
+index 7a5428b4..97887902 100644
+--- a/tests/inductor/test_lx_relayout_dldsc.py
++++ b/tests/inductor/test_lx_relayout_dldsc.py
+@@ -17,6 +17,7 @@ from types import SimpleNamespace
+ 
+ from sympy import Integer, Mod, Symbol, floor
+ 
++from torch_spyre._inductor import config
+ import torch_spyre._inductor.lx_relayout as lx_relayout_module
+ import torch_spyre._inductor.scratchpad.allocator as allocator_module
+ import torch_spyre._inductor.scratchpad.graph_editor as graph_editor_module
+@@ -45,8 +46,10 @@ from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
+ from torch_spyre._inductor.spyre_kernel import (
+     _materialize_explicit_lx_shuffle,
+     _materialize_lx_relayout_inputs,
++    _split_p07_rope_shuffle,
+     simplify_op_spec,
+ )
++from torch_spyre._inductor.work_division import _resolve_work_div_hint
+ 
+ 
+ class _DummyOp:
+@@ -139,6 +142,69 @@ def test_gather_dim_hint_survives_metadata_copy():
+     assert set(dst.meta["custom"]) == {"_hint_1", "_hint_2"}
+ 
+ 
++def test_p07_row_split_rebinds_aligned_token_axis(monkeypatch):
++    d0 = Symbol("d0")
++    d2 = Symbol("d2")
++    d3 = Symbol("d3")
++    d4 = Symbol("d4")
++    source_map = {str(2 * core): {"1": core} for core in range(16)}
++    destination_map = {
++        str(core): {"1": core // 4} for core in range(32)
++    }
++    source = TensorArg(
++        is_input=True,
++        arg_index=-1,
++        device_dtype=DataFormats.SEN169_FP16,
++        device_size=[512, 2, 2, 1, 1, 64],
++        device_coordinates=[d0, d2, d4, Integer(0), Integer(0), d3],
++        allocation={"lx": 0x28000},
++        name="buf67",
++        allocation_core_id_to_device_slice=source_map,
++        allocation_device_dim_splits={"1": 16},
++    )
++    destination = replace(
++        source,
++        is_input=False,
++        allocation={"lx": 0x20000},
++        name="__spyre_lx_relayout_destination__:buf67",
++        allocation_core_id_to_device_slice=destination_map,
++        allocation_device_dim_splits={"1": 8},
++    )
++    shuffle = OpSpec(
++        op="shuffle",
++        is_reduction=False,
++        iteration_space={
++            d0: (Integer(512), 1),
++            d2: (Integer(2), 8),
++            d3: (Integer(64), 1),
++            d4: (Integer(2), 1),
++        },
++        args=[source, destination],
++        op_info={},
++        num_cores_override=32,
++        dim_labels_override=["mb", "y", "i", "out"],
++        layout_labels_override=["OUTPUT", "KERNEL", "INPUT", "KERNEL_IDX"],
++    )
++    monkeypatch.setattr(config, "relayout_oracle_prefill_rope_input", True)
++
++    rows = _split_p07_rope_shuffle(shuffle)
++
++    assert len(rows) == 2
++    for row, row_shuffle in enumerate(rows):
++        assert row_shuffle.iteration_space[d0] == (Integer(512), 8)
++        assert d2 not in row_shuffle.iteration_space
++        assert row_shuffle.args[0].device_coordinates[1] == row
++        assert row_shuffle.args[1].device_coordinates[1] == row
++        assert row_shuffle.dim_labels_override == ["mb", "i", "out"]
++        assert row_shuffle.layout_labels_override == [
++            "OUTPUT",
++            "INPUT",
++            "KERNEL_IDX",
++        ]
++        assert row_shuffle.args[0].allocation_device_dim_splits == {"1": 16}
++        assert row_shuffle.args[1].allocation_device_dim_splits == {"1": 8}
++
++
+ def test_all_to_all_geometry_and_emission():
+     producer_map = {"0": {"0": 0}, "1": {"0": 1}}
+     consumer_map = {"0": {"0": 1}, "1": {"0": 0}}
+@@ -210,6 +276,49 @@ def test_all_to_all_geometry_and_emission():
+     assert args[0].name == args[1].name == plan.destination_name
+ 
+ 
++def test_p07_grouped_gather_classification_uses_even_source_owners():
++    producer_map = {str(2 * token): {"1": token} for token in range(16)}
++    consumer_map = {str(core): {"1": core // 4} for core in range(32)}
++
++    classification = _classify_lx_relayout(
++        producer_map,
++        {"1": 16},
++        consumer_map,
++        {"1": 8},
++    )
++
++    assert classification is not None
++    assert classification.collective_kind is LXCollectiveKind.ALL_GATHER
++    assert classification.destination_size_ratio == 2
++
++
++def test_p07_rotary_work_division_is_token_band_by_head_cohort(monkeypatch):
++    token = Symbol("token")
++    head = Symbol("head")
++    rotary_row = Symbol("rotary_row")
++    stick = Symbol("stick")
++    rotary_col = Symbol("rotary_col")
++    op = SimpleNamespace(
++        get_name=lambda: "buf12",
++        get_size=lambda: [1, 512, 32, 2, 2, 64],
++    )
++    monkeypatch.setattr(config, "relayout_oracle_prefill_rope_input", True)
++
++    division = _resolve_work_div_hint(
++        op,
++        {
++            token: Integer(512),
++            head: Integer(32),
++            rotary_row: Integer(2),
++            rotary_col: Integer(2),
++            stick: Integer(1),
++        },
++    )
++
++    assert division == {token: 8, head: 4}
++    assert op._spyre_oracle_gather_dim_symbol == head
++
++
+ def test_broadcast_geometry_requires_one_physical_source_owner():
+     producer_map = {"0": {}}
+     consumer_map = {str(core): {} for core in range(32)}
+@@ -656,6 +765,33 @@ def test_relayout_source_layout_checks_skip_only_rewritten_consumers():
+     ) == [0, 1, 2, 3]
+ 
+ 
++def test_shared_relayout_destination_spans_both_alias_consumers(monkeypatch):
++    graph = _DummyGraph("buf_k", "consumer_a", "middle", "consumer_b")
++    plan_a = replace(_all_gather_plan(), consumer_name="consumer_a")
++    plan_b = replace(_all_gather_plan(), consumer_name="consumer_b")
++    source = LifetimeBoundBuffer("buf_k", size=128, uses=[0, 1, 3])
++    middle = LifetimeBoundBuffer("middle", size=128, uses=[2])
++    allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
++    allocator._lx_relayout_plans_by_source = {"buf_k": plan_b}
++    allocator._lx_relayout_alias_plans_by_source = {
++        "buf_k": [plan_a, plan_b]
++    }
++    monkeypatch.setattr(
++        allocator_module,
++        "op_read_writes",
++        lambda _: SimpleNamespace(reads=[]),
++    )
++    buffers = [source, middle]
++
++    allocator._append_lx_relayout_destinations(graph, buffers)
++
++    by_name = {buffer.name: buffer for buffer in buffers}
++    destination = by_name[plan_b.destination_name]
++    assert source.uses == [0, 1, 4]
++    assert destination.uses == [1, 2, 4, 5]
++    assert middle.uses == [3]
++
++
+ def test_graph_output_replacement_preserves_reinterpret_view(monkeypatch):
+     class _Buffer:
+         def __init__(self, name):
+diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
+index 435cbb6c..4ecf6891 100644
+--- a/torch_spyre/_inductor/codegen/superdsc.py
++++ b/torch_spyre/_inductor/codegen/superdsc.py
+@@ -1050,8 +1050,13 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
+         # force final compute emission to honor the same map.
+         contiguous_dim = 1
+     if (
+-        _spyre_config.relayout_oracle_prefill_qk_query
+-        and _spyre_config.relayout_oracle_prefill_qk_head_fast_emission
++        (
++            _spyre_config.relayout_oracle_prefill_rope_input
++            or (
++                _spyre_config.relayout_oracle_prefill_qk_query
++                and _spyre_config.relayout_oracle_prefill_qk_head_fast_emission
++            )
++        )
+         and not is_matmul
+         and len(mapping_splits) >= 4
+         and mapping_splits[:2] == (8, 4)
+diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
+index 59e98307..5b8a7bfc 100644
+--- a/torch_spyre/_inductor/config.py
++++ b/torch_spyre/_inductor/config.py
+@@ -60,6 +60,13 @@ relayout_oracle_prefill_output_projection: bool = (
+     os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_OUTPUT_PROJ", "0") == "1"
+ )
+ 
++# Test-only SenDNN P09 replay. Keep the normalized activation on 16 token
++# owners, then gather pairs of 32-token fragments into eight 64-token slices
++# replicated across the four output-shard consumers of each Q/K/V BMM.
++relayout_oracle_prefill_qkv_inputs: bool = (
++    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_QKV_INPUTS", "0") == "1"
++)
++
+ # Replay the shared RMSNorm activation -> SwiGLU gate/up projections. SenDNN
+ # uses an 8x4 (mb x hidden/output) producer layout, then a four-core grouped
+ # all-gather into two 8x4 BMM consumers.
+@@ -67,6 +74,13 @@ relayout_oracle_prefill_mlp_inputs: bool = (
+     os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_INPUTS", "0") == "1"
+ )
+ 
++# Test-only SenDNN P07 replay. Materialize Granite's shared RoPE frequency
++# input once as 16 token-owned LX fragments, then gather adjacent fragments
++# into eight 64-token bands replicated over four Q/K rotary consumer cohorts.
++relayout_oracle_prefill_rope_input: bool = (
++    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_ROPE_INPUT", "0") == "1"
++)
++
+ # Test-only SenDNN replay oracle that preserves Granite GQA K/V in compact
+ # [KV-head, query-group] form through the attention BMMs.
+ relayout_oracle_compact_gqa: bool = (
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index e8d877dc..0eefae9e 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -178,6 +178,18 @@ def _classify_lx_relayout(
+     ):
+         return _LXRelayoutClassification(LXCollectiveKind.BROADCAST, 1)
+ 
++    # SenDNN P07/P09 gathers multiple independently owned source fragments into
++    # a larger destination slice and replicates that slice over a consumer
++    # cohort. The destination has fewer unique slices but more participants.
++    if (
++        producer_is_partitioned
++        and not consumer_is_partitioned
++        and len(producer_map) < len(consumer_map)
++        and max_fanout > 1
++        and max_fanin > 1
++    ):
++        return _LXRelayoutClassification(LXCollectiveKind.ALL_GATHER, max_fanin)
++
+     if (
+         same_participants
+         and producer_is_partitioned
+@@ -354,9 +366,25 @@ def collect_lx_relayout_plans(
+                 and dep.name == "buf52"
+                 and read_count == 2
+             )
+-            if read_count != 1 and not oracle_shared_mlp_input:
+-                continue
+             producer = operations.get(dep.name)
++            oracle_shared_rope_input = (
++                config.relayout_oracle_prefill_rope_input
++                and isinstance(producer, ComputedBuffer)
++                and getattr(producer, "_spyre_oracle_p07_source", False)
++                and read_count == 2
++            )
++            oracle_shared_qkv_input = (
++                config.relayout_oracle_prefill_qkv_inputs
++                and dep.name == "buf10"
++                and read_count == 3
++            )
++            if (
++                read_count != 1
++                and not oracle_shared_mlp_input
++                and not oracle_shared_rope_input
++                and not oracle_shared_qkv_input
++            ):
++                continue
+             if not isinstance(producer, ComputedBuffer) or producer is consumer:
+                 continue
+ 
+@@ -389,6 +417,52 @@ def collect_lx_relayout_plans(
+             if producer_core_slices is None:
+                 continue
+ 
++            oracle_rope_input_edge = (
++                oracle_shared_rope_input
++                and consumer.get_name() in ("buf12", "buf16")
++                and [str(size) for size in producer.get_size()]
++                == ["1", "512", "2", "2", "64"]
++            )
++            if oracle_rope_input_edge:
++                # The source clone computes 16 logical token slices as adjacent
++                # replica pairs. SenDNN names each pair's even core as the
++                # authoritative P07 owner.
++                if (
++                    producer_core_count != 16
++                    or len(producer_view.work_slice_dims) != 1
++                    or producer_view.work_slice_dims[0][1] != 16
++                    or set(producer_core_slices)
++                    != {str(core) for core in range(16)}
++                ):
++                    continue
++                producer_core_slices = {
++                    str(2 * int(core)): per_core
++                    for core, per_core in producer_core_slices.items()
++                }
++
++            oracle_qkv_input_edge = (
++                config.relayout_oracle_prefill_qkv_inputs
++                and dep.name == "buf10"
++                and consumer.get_name() in ("buf11", "buf15", "buf29")
++                and [str(size) for size in producer.get_size()]
++                == ["1", "512", "4096"]
++            )
++            if oracle_qkv_input_edge:
++                # The normalized activation executes 16 logical token slices
++                # as adjacent replica pairs. SenDNN names the even member of
++                # every pair as the authoritative P09 source owner.
++                if (
++                    producer_core_count != 16
++                    or producer_view.work_slice_dims != ((0, 16),)
++                    or set(producer_core_slices)
++                    != {str(core) for core in range(16)}
++                ):
++                    continue
++                producer_core_slices = {
++                    str(2 * int(core)): per_core
++                    for core, per_core in producer_core_slices.items()
++                }
++
+             consumer_work_slice_dims = _work_slice_dims(consumer_view)
+             consumer_core_slices = _core_id_to_device_slice(
+                 consumer_view, consumer_core_count
+@@ -397,6 +471,30 @@ def collect_lx_relayout_plans(
+                 continue
+ 
+             producer_work_slice_dims = _work_slice_dims(producer_view)
++            if oracle_rope_input_edge:
++                # ``PerCoreView`` numbers the clone's non-trivial iteration
++                # axes, so token is axis 0 there.  The consumer TensorArg keeps
++                # Granite's leading singleton stick quotient and therefore
++                # exposes the same token coordinate as physical device axis 1.
++                # Bridge that exact view difference before emitting allocation
++                # metadata; leaving this as axis 0 incorrectly partitions the
++                # 64-wide stick and trips DeepTools fold validation.
++                if (
++                    producer_work_slice_dims != {"0": 16}
++                    or consumer_work_slice_dims != {"0": 8}
++                ):
++                    continue
++                producer_core_slices = {
++                    core: {"1": per_core["0"]}
++                    for core, per_core in producer_core_slices.items()
++                }
++                consumer_core_slices = {
++                    core: {"1": per_core["0"]}
++                    for core, per_core in consumer_core_slices.items()
++                }
++                producer_work_slice_dims = {"1": 16}
++                consumer_work_slice_dims = {"1": 8}
++
+             relayout_dims = set(producer_work_slice_dims) | set(
+                 consumer_work_slice_dims
+             )
+diff --git a/torch_spyre/_inductor/scratchpad/allocator.py b/torch_spyre/_inductor/scratchpad/allocator.py
+index 03e9a951..abfbd56a 100644
+--- a/torch_spyre/_inductor/scratchpad/allocator.py
++++ b/torch_spyre/_inductor/scratchpad/allocator.py
+@@ -154,6 +154,7 @@ class ScratchpadAllocator:
+         self._lx_relayout_alias_plans_by_source: dict[
+             str, list[LXRelayoutPlan]
+         ] = {}
++        self._p07_materialized_input_names: set[str] = set()
+ 
+     def plan_allocation(self, graph: GraphLowering):
+         """Run pre-passes, assign LX addresses to eligible buffers, then run post-passes.
+@@ -171,6 +172,7 @@ class ScratchpadAllocator:
+         """
+         self.reject_reasons = {}
+         self._run_passes(self.pre_optimization_passes, graph)
++        self._materialize_p07_rope_input_source(graph)
+         buffers = self._prepare_buffers(graph)
+         allocation = self._solve(buffers)
+         self._post_solve(graph, allocation)
+@@ -179,6 +181,74 @@ class ScratchpadAllocator:
+         self._log_lx_pinning(graph)
+         self._run_passes(self.post_optimization_passes, graph)
+ 
++    def _materialize_p07_rope_input_source(self, graph: GraphLowering) -> None:
++        """Create the safe computed producer required by the P07 shuffle.
++
++        Granite's RoPE frequencies enter the fused graph as one shared input to
++        the Q and K rotary multiplies. LX relayout planning normally starts at a
++        computed buffer, while regular input pinning is inserted only after
++        planning. For the exact replay, insert that same pointwise clone before
++        planning, give it SenDNN's 16-token source division, and leave the graph
++        input itself in HBM. Both rotary consumers can then share one explicit
++        S1/S2 allocation pair without reading partially materialized storage.
++        """
++
++        self._p07_materialized_input_names = set()
++        if not config.relayout_oracle_prefill_rope_input:
++            return
++
++        buffer_users = get_buffer_users(graph)
++        saw_rope_shape = False
++        for input_name in graph.graph_input_names:
++            input_buffer = graph.get_buffer(input_name)
++            if [str(size) for size in input_buffer.get_size()] != [
++                "1",
++                "512",
++                "2",
++                "2",
++                "64",
++            ]:
++                continue
++            saw_rope_shape = True
++            consumers = buffer_users.get(input_name, [])
++            if {consumer.get_name() for consumer in consumers} != {
++                "buf12",
++                "buf16",
++            }:
++                continue
++
++            source = GraphEditor(graph).push_allocation_with_clone(
++                input_buffer,
++                0,
++                consumers,
++                input=True,
++            )
++            source_rw = op_read_writes(source)
++            write_dep = next(
++                dep for dep in source_rw.writes if dep.name == source.get_name()
++            )
++            source_it_space = iteration_space_from_op(source)
++            token_sym = next(
++                sym
++                for sym in source_it_space
++                if concretize_expr(source_it_space[sym]) == 512
++            )
++            source_splits, _ = splits_by_index_coeff(
++                {token_sym: 16},
++                write_dep.index,
++                write_dep.index,
++            )
++            source.op_it_space_splits = (source_splits, {})
++            source._spyre_oracle_p07_source = True  # type: ignore[attr-defined]
++            self._p07_materialized_input_names.add(input_name)
++            return
++
++        if saw_rope_shape:
++            raise Unsupported(
++                "SenDNN P07 replay found the Granite RoPE-shaped input but "
++                "not its exact buf12 and buf16 consumers"
++            )
++
+     @staticmethod
+     def _run_passes(
+         passes: Sequence[ScratchpadOptimizationPass], graph: GraphLowering
+@@ -582,6 +652,8 @@ class ScratchpadAllocator:
+         (``division_is_fixed``); the joint path defers the core division to the
+         solver and passes neither.
+         """
++        if name in self._p07_materialized_input_names:
++            return "materialized by the SenDNN P07 source clone"
+         if not clone_at_graph_boundaries():
+             return "graph input (no clone)"
+         if self._read_count(uses) == 0:
+@@ -911,25 +983,34 @@ class ScratchpadAllocator:
+         """Add post-shuffle views and their transfer steps to LX liveness."""
+         by_name = {buffer.name: buffer for buffer in buffers}
+         op_index = {op.get_name(): index for index, op in enumerate(graph.operations)}
+-        entries: list[tuple[LifetimeBoundBuffer, LXRelayoutPlan, int]] = []
++        entries: list[tuple[LifetimeBoundBuffer, LXRelayoutPlan, list[int]]] = []
+         invalid_sources: set[str] = set()
+         for source_name, plan in self._lx_relayout_plans_by_source.items():
+             source = by_name.get(source_name)
+-            consumer_use = op_index.get(plan.consumer_name)
++            alias_plans = self._lx_relayout_alias_plans_by_source.get(
++                source_name, [plan]
++            )
++            consumer_uses = sorted(
++                {
++                    use
++                    for alias_plan in alias_plans
++                    if (use := op_index.get(alias_plan.consumer_name)) is not None
++                }
++            )
+             if source is None or source.residency_reason is not None:
+                 invalid_sources.add(source_name)
+                 continue
+             if (
+-                consumer_use is None
+-                or consumer_use not in source.uses
+-                or not any(use < consumer_use for use in source.uses)
++                len(consumer_uses) != len(alias_plans)
++                or any(use not in source.uses for use in consumer_uses)
++                or not any(use < consumer_uses[0] for use in source.uses)
+             ):
+                 source.residency_reason = (
+                     "core div mismatch: relayout transfer could not be scheduled"
+                 )
+                 invalid_sources.add(source_name)
+                 continue
+-            entries.append((source, plan, consumer_use))
++            entries.append((source, plan, consumer_uses))
+ 
+         if invalid_sources:
+             # Keep every declarative buffer and its residency reason. Only drop
+@@ -945,7 +1026,13 @@ class ScratchpadAllocator:
+         # that needs a SHUFFLE. Existing solvers then see S1 and S2 live together
+         # during the transfer and keep their addresses disjoint without any
+         # relayout-specific placement rules.
+-        boundaries = sorted({consumer_use for _, _, consumer_use in entries})
++        boundaries = sorted(
++            {
++                consumer_use
++                for _, _, consumer_uses in entries
++                for consumer_use in consumer_uses
++            }
++        )
+         transfer_time = {
+             consumer_use: consumer_use + rank
+             for rank, consumer_use in enumerate(boundaries)
+@@ -953,11 +1040,12 @@ class ScratchpadAllocator:
+         for buffer in buffers:
+             buffer.uses = [use + bisect_right(boundaries, use) for use in buffer.uses]
+ 
+-        for source, plan, original_consumer_use in entries:
+-            consumer_use = original_consumer_use + bisect_right(
+-                boundaries, original_consumer_use
+-            )
+-            shuffle_use = transfer_time[original_consumer_use]
++        for source, plan, original_consumer_uses in entries:
++            consumer_uses = [
++                use + bisect_right(boundaries, use)
++                for use in original_consumer_uses
++            ]
++            shuffle_uses = [transfer_time[use] for use in original_consumer_uses]
+ 
+             # The backend may execute the final producer data movement and the
+             # inserted SHUFFLE in one bundle. Keep any LX-resident producer
+@@ -969,7 +1057,7 @@ class ScratchpadAllocator:
+                     producer_input = by_name.get(dep.name)
+                     if producer_input is not None:
+                         producer_input.uses = sorted(
+-                            {*producer_input.uses, shuffle_use}
++                            {*producer_input.uses, *shuffle_uses}
+                         )
+                         # The input now stays live past its original in-place
+                         # handoff, so its storage cannot be reused there.
+@@ -988,8 +1076,10 @@ class ScratchpadAllocator:
+             #
+             # Both views are accessed at the synthetic SHUFFLE step. S1 can be
+             # released before consumer compute while S2 remains live through it.
+-            source_uses = [use for use in source.uses if use != consumer_use]
+-            source.uses = sorted({*source_uses, shuffle_use})
++            source_uses = [
++                use for use in source.uses if use not in set(consumer_uses)
++            ]
++            source.uses = sorted({*source_uses, *shuffle_uses})
+             destination_size = round_up_to_alignment(
+                 source.size * plan.destination_size_ratio,
+                 _LX_ALLOCATION_GRANULARITY_BYTES,
+@@ -997,7 +1087,7 @@ class ScratchpadAllocator:
+             destination = LifetimeBoundBuffer(
+                 plan.destination_name,
+                 destination_size,
+-                [shuffle_use, consumer_use],
++                sorted({*shuffle_uses, *consumer_uses}),
+                 first_use_is_read=False,
+             )
+             for child in buffers:
+@@ -1012,7 +1102,7 @@ class ScratchpadAllocator:
+                     ]
+             # Keep the synthetic destination adjacent to its source for readable
+             # plans. Placement order does not affect correctness because their
+-            # lifetimes overlap at ``shuffle_use``.
++            # lifetimes overlap at every synthetic shuffle use.
+             buffers.insert(buffers.index(source), destination)
+ 
+     def _log_lx_pinning(self, graph: GraphLowering) -> None:
+diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
+index c17d580c..e2094801 100644
+--- a/torch_spyre/_inductor/spyre_kernel.py
++++ b/torch_spyre/_inductor/spyre_kernel.py
+@@ -231,6 +231,113 @@ def _materialize_explicit_lx_shuffle(
+     return shuffle, destination_input
+ 
+ 
++def _split_p07_rope_shuffle(shuffle: OpSpec) -> list[OpSpec]:
++    """Replay SenDNN P07 as two independent 128-KiB logical tensors.
++
++    Granite carries both rotary output rows in one physical
++    ``[1, 512, 2, 2, 64]`` input.  SenDNN emits one grouped gather per output
++    row (and per Q/K consumer), rather than one 256-KiB four-dimensional
++    gather.  Besides matching that topology, keeping the rows independent is
++    required by DeepTools' temporal element-arrangement contract.
++    """
++
++    if not _spyre_config.relayout_oracle_prefill_rope_input:
++        return [shuffle]
++    if shuffle.op != "shuffle" or len(shuffle.args) != 2:
++        return [shuffle]
++
++    source, destination = shuffle.args
++    source_shape = [str(size) for size in source.device_size]
++    if source_shape == ["512", "2", "2", "1", "1", "64"]:
++        # ``align_tensors`` has already moved the unit batch/head axes behind
++        # the two rotary axes.  This is the representation seen at explicit
++        # shuffle materialization time.
++        token_axis, row_axis = 0, 1
++    elif source_shape == ["1", "512", "2", "2", "64"]:
++        # Keep the helper usable on the unaligned logical layout as well.
++        token_axis, row_axis = 1, 2
++    else:
++        return [shuffle]
++
++    token_symbols = list(source.device_coordinates[token_axis].free_symbols)
++    row_symbols = list(source.device_coordinates[row_axis].free_symbols)
++    if len(token_symbols) != 1:
++        raise Unsupported("SenDNN P07 expected one token symbol")
++    if len(row_symbols) != 1:
++        raise Unsupported("SenDNN P07 expected one rotary output-row symbol")
++    token_symbol = token_symbols[0]
++    row_symbol = row_symbols[0]
++    token_extent = shuffle.iteration_space.get(token_symbol)
++    row_extent = shuffle.iteration_space.get(row_symbol)
++    if token_extent is None or str(token_extent[0]) != "512":
++        raise Unsupported("SenDNN P07 expected a 512-token shuffle axis")
++    if row_extent is None or str(row_extent[0]) != "2":
++        raise Unsupported(
++            "SenDNN P07 expected an unsplit two-row rotary output axis"
++        )
++
++    # The relayout plan records the logical source layout, where device axis 1
++    # is the token axis.  At materialization, ``align_tensors`` has temporarily
++    # moved that token axis to physical axis 0.  Rebind the work split to the
++    # token symbol before row splitting; otherwise the destination's 8-way
++    # token split is accidentally applied to the two-row rotary axis.
++    destination_splits = destination.allocation_device_dim_splits or {}
++    token_split = destination_splits.get("1")
++    if token_split != 8:
++        raise Unsupported(
++            f"SenDNN P07 expected eight destination token bands, got {token_split}"
++        )
++    corrected_iteration_space = dict(shuffle.iteration_space)
++    corrected_iteration_space[token_symbol] = (token_extent[0], token_split)
++    corrected_iteration_space[row_symbol] = (row_extent[0], 1)
++
++    symbols = list(corrected_iteration_space)
++    row_index = symbols.index(row_symbol)
++    labels = list(shuffle.dim_labels_override or [])
++    if len(labels) != len(symbols):
++        raise Unsupported("SenDNN P07 expected one label per shuffle axis")
++    layout_labels = list(shuffle.layout_labels_override or [])
++    if layout_labels and len(layout_labels) != len(symbols):
++        raise Unsupported("SenDNN P07 expected one layout label per shuffle axis")
++
++    result: list[OpSpec] = []
++    for row in range(2):
++        row_args = [
++            replace(
++                arg,
++                device_coordinates=[
++                    sympy.simplify(coord.subs(row_symbol, row))
++                    for coord in arg.device_coordinates
++                ],
++            )
++            for arg in (source, destination)
++        ]
++        result.append(
++            replace(
++                shuffle,
++                iteration_space={
++                    symbol: extent
++                    for symbol, extent in corrected_iteration_space.items()
++                    if symbol != row_symbol
++                },
++                args=row_args,
++                dim_labels_override=[
++                    label for index, label in enumerate(labels) if index != row_index
++                ],
++                layout_labels_override=(
++                    [
++                        label
++                        for index, label in enumerate(layout_labels)
++                        if index != row_index
++                    ]
++                    if layout_labels
++                    else None
++                ),
++            )
++        )
++    return result
++
++
+ def _materialize_lx_relayout_inputs(
+     current_node,
+     args: list[TensorArg],
+@@ -258,7 +365,7 @@ def _materialize_lx_relayout_inputs(
+                     f"cannot materialize LX shuffle for {plan.source_name}"
+                 )
+             shuffle_spec, destination_arg = materialized
+-            prefix_specs.append(shuffle_spec)
++            prefix_specs.extend(_split_p07_rope_shuffle(shuffle_spec))
+             destinations[plan.source_name] = destination_arg
+         args[arg_index] = destination_arg
+     return prefix_specs
+@@ -900,6 +1007,21 @@ class SpyreKernel(Kernel[CSEVariable]):
+                 )
+             )
+ 
++        oracle_p07_source = (
++            _spyre_config.relayout_oracle_prefill_rope_input
++            and getattr(ir_node, "_spyre_oracle_p07_source", False)
++            and [str(size) for size in ir_node.get_size()]
++            == ["1", "512", "2", "2", "64"]
++        )
++
++        oracle_qkv_input_source = (
++            _spyre_config.relayout_oracle_prefill_qkv_inputs
++            and ir_node.get_name() == "buf10"
++            and [str(size) for size in ir_node.get_size()]
++            == ["1", "512", "4096"]
++        )
++        oracle_grouped_source = oracle_p07_source or oracle_qkv_input_source
++
+         return OpSpec(
+             op,
+             is_reduction,
+@@ -910,6 +1032,10 @@ class SpyreKernel(Kernel[CSEVariable]):
+             symbolic_dim_bounds=symbolic_dim_bounds,
+             debug_handle=debug_handle,
+             gather_dim=get_gather_dim(ir_node),
++            # Materialize 16 logical token shards on adjacent replica pairs;
++            # the relayout plan selects each even replica as the source owner.
++            num_cores_override=32 if oracle_grouped_source else None,
++            replicas_contiguous=oracle_grouped_source,
+         )
+ 
+     def remove_kernel_local_buffers(self) -> None:
+diff --git a/torch_spyre/_inductor/work_division.py b/torch_spyre/_inductor/work_division.py
+index 9a6688c3..9237bd1e 100644
+--- a/torch_spyre/_inductor/work_division.py
++++ b/torch_spyre/_inductor/work_division.py
+@@ -756,6 +756,14 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+         config.relayout_oracle_prefill_mlp_inputs
+         and name in ("buf52", "buf53", "buf55")
+     )
++    is_prefill_rope_input = (
++        config.relayout_oracle_prefill_rope_input
++        and name in ("buf12", "buf16")
++    )
++    is_prefill_qkv_input = (
++        config.relayout_oracle_prefill_qkv_inputs
++        and name in ("buf10", "buf11", "buf15", "buf29")
++    )
+     is_compact_gqa_edge = (
+         config.relayout_oracle_compact_gqa
+         and name in config.relayout_oracle_compact_gqa_buffers.split(",")
+@@ -775,6 +783,8 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+     if (
+         not is_output_projection
+         and not is_mlp_input_edge
++        and not is_prefill_rope_input
++        and not is_prefill_qkv_input
+         and not is_compact_gqa_edge
+         and not is_prefill_qk_query_edge
+         and not is_prefill_qk_head_owned
+@@ -792,6 +802,21 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+             return {"mb": 8, "out": 4}
+         if name in ("buf53", "buf55") and shape == ["1", "512", "12800"]:
+             return {"mb": 8, "out": 4}
++    if is_prefill_rope_input:
++        expected_shapes = {
++            "buf12": ["1", "512", "32", "2", "2", "64"],
++            "buf16": ["1", "512", "8", "2", "2", "64"],
++        }
++        if shape == expected_shapes[name]:
++            return {"token": 8, "head_cohort": 4}
++    if is_prefill_qkv_input and shape == ["1", "512", "4096"]:
++        return {"mb": 16} if name == "buf10" else {"mb": 8, "out": 4}
++    if (
++        is_prefill_qkv_input
++        and name in ("buf15", "buf29")
++        and shape == ["1", "512", "1024"]
++    ):
++        return {"mb": 8, "out": 4}
+     if is_compact_gqa_edge:
+         if name in ("buf18", "buf66") and shape == ["1", "8", "1", "512", "128"]:
+             return {"kv_head": 4, "token": 8}
+@@ -840,6 +865,27 @@ def _resolve_work_div_hint(
+         # Bind exact-graph oracle buffers directly to symbols instead of relying
+         # on graph-propagated names, which are absent on these fused ops.
+         symbols = list(it_space)
++        if (
++            config.relayout_oracle_prefill_rope_input
++            and op.get_name() in ("buf12", "buf16")
++        ):
++            expected_extents = {
++                "buf12": [512, 32, 2, 2, 1],
++                "buf16": [512, 8, 2, 2, 1],
++            }[op.get_name()]
++            actual_extents = [concretize_expr(it_space[sym]) for sym in symbols]
++            if actual_extents != expected_extents:
++                raise Unsupported(
++                    "SenDNN P07 replay expected Granite rotary iteration "
++                    f"extents {expected_extents}, got {actual_extents} on "
++                    f"{op.get_name()}"
++                )
++            token_sym, head_cohort_sym = symbols[:2]
++            # Four rotary head cohorts share each 64-token frequency band.
++            # Keep those consumers adjacent so the destination owner map is
++            # [0..3], [4..7], ... exactly as in SenDNN.
++            op._spyre_oracle_gather_dim_symbol = head_cohort_sym  # type: ignore[attr-defined]
++            return {token_sym: 8, head_cohort_sym: 4}
+         if config.relayout_oracle_p06_ramp and op.get_name() in (
+             config.relayout_oracle_p06_ramp_source,
+             config.relayout_oracle_p06_ramp_consumer,
+@@ -854,6 +900,26 @@ def _resolve_work_div_hint(
+                 op._spyre_oracle_gather_dim_symbol = head_cohort_sym  # type: ignore[attr-defined]
+                 return {token_sym: 8, head_cohort_sym: 4}
+             return {token_sym: 32}
++        if config.relayout_oracle_prefill_qkv_inputs and op.get_name() == "buf10":
++            actual_extents = [concretize_expr(it_space[sym]) for sym in symbols]
++            if actual_extents != [512, 64]:
++                raise Unsupported(
++                    "SenDNN P09 replay expected adjusted normalized-activation "
++                    f"extents [512, 64], got {actual_extents}"
++                )
++            return {symbols[0]: 16}
++        if (
++            config.relayout_oracle_prefill_qkv_inputs
++            and op.get_name() in ("buf11", "buf15", "buf29")
++        ):
++            if len(symbols) != 3:
++                raise Unsupported(
++                    "SenDNN P09 replay expected a rank-three Q/K/V BMM "
++                    f"iteration space, got {symbols} on {op.get_name()}"
++                )
++            mb_sym, out_sym = symbols[:2]
++            op._spyre_oracle_gather_dim_symbol = out_sym  # type: ignore[attr-defined]
++            return {mb_sym: 8, out_sym: 4}
+         if config.relayout_oracle_prefill_qk_query and op.get_name() in (
+             "buf11",
+             "buf12",

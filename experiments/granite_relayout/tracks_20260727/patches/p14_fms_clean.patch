@@ -1,0 +1,314 @@
+diff --git a/fms/models/granite.py b/fms/models/granite.py
+index f00525fc..704dc8e1 100644
+--- a/fms/models/granite.py
++++ b/fms/models/granite.py
+@@ -1,5 +1,6 @@
+ import logging
+ import math
++import os
+ import re
+ from dataclasses import dataclass
+ from typing import Any, Mapping, Optional, Tuple
+@@ -267,6 +268,7 @@ class GraniteHeadless(nn.Module):
+         position_ids=None,
+         past_key_value_states=None,
+         use_cache=False,
++        skip_final_norm=False,
+         **attn_kwargs: Unpack[AttentionKwargs],
+     ):
+         # Embed the given vocabulary indices using the given attention mask, with pre-/post-norm and dropout as specified
+@@ -300,13 +302,73 @@ class GraniteHeadless(nn.Module):
+                 x_in = output
+ 
+         dec_out = x_in
+-        dec_out = self.dec_norm(dec_out)
++        if not skip_final_norm:
++            dec_out = self.dec_norm(dec_out)
+         if self.config.p_dropout:
+             dec_out = self.dropout(dec_out)
+ 
+         return dec_out, present_key_value_states
+ 
+ 
++class _GraniteLastTokenStage(nn.Module):
++    """Compile the token slice and LM head as one Spyre graph.
++
++    The final RMSNorm deliberately stays in the headless model's existing
++    compiled graph.  Moving it into this stage changes the graph input boundary
++    and was not bit-exact on device.  Fusing only the slice and head preserves
++    the accepted normalization path while exposing their ownership transition
++    to Torch-Spyre's relayout planner.
++    """
++
++    def __init__(self, logits_scaling: float, output_vocab_size: int):
++        super().__init__()
++        self.logits_scaling = logits_scaling
++        self.output_vocab_size = output_vocab_size
++
++    def forward(self, output, head_weight):
++        output = output[:, -1:, :].clone(memory_format=torch.contiguous_format)
++        preds = torch.nn.functional.linear(output, head_weight)
++        if head_weight.shape[0] > self.output_vocab_size:
++            preds = preds[..., : self.output_vocab_size]
++        return preds / self.logits_scaling
++
++
++class _GraniteFinalNormLastTokenStage(nn.Module):
++    """Keep Granite's final RMSNorm, last-token slice, and LM head together.
++
++    This experimental stage removes the HBM graph boundary between the final
++    normalization and the last-token consumer.  It is selected only by the
++    explicit P14 replay gate; the existing final-normalization path remains
++    the default.
++    """
++
++    def __init__(
++        self,
++        emb_dim: int,
++        norm_eps: float,
++        logits_scaling: float,
++        output_vocab_size: int,
++    ):
++        super().__init__()
++        self.normalized_shape = (emb_dim,)
++        self.norm_eps = norm_eps
++        self.logits_scaling = logits_scaling
++        self.output_vocab_size = output_vocab_size
++
++    def forward(self, output, norm_weight, head_weight):
++        output = torch.nn.functional.rms_norm(
++            output,
++            self.normalized_shape,
++            norm_weight,
++            self.norm_eps,
++        )
++        output = output[:, -1:, :].clone(memory_format=torch.contiguous_format)
++        preds = torch.nn.functional.linear(output, head_weight)
++        if head_weight.shape[0] > self.output_vocab_size:
++            preds = preds[..., : self.output_vocab_size]
++        return preds / self.logits_scaling
++
++
+ class Granite(nn.Module):
+     def __init__(
+         self,
+@@ -326,6 +388,18 @@ class Granite(nn.Module):
+         self.head = nn.Linear(
+             self.config.emb_dim, self.config.src_vocab_size, bias=False
+         )
++        self._last_token_stage = _GraniteLastTokenStage(
++            self.config.logits_scaling,
++            serialization._padded_vocab(self.config.src_vocab_size),
++        )
++        self._last_token_stage.compile(dynamic=False)
++        self._final_norm_last_token_stage = _GraniteFinalNormLastTokenStage(
++            self.config.emb_dim,
++            self.config.norm_eps,
++            self.config.logits_scaling,
++            serialization._padded_vocab(self.config.src_vocab_size),
++        )
++        self._final_norm_last_token_stage.compile(dynamic=False)
+ 
+     @classmethod
+     def from_config(cls, config: GraniteConfig) -> "Granite":
+@@ -348,7 +422,30 @@ class Granite(nn.Module):
+         # cannot share storage. Handles both tied (head still on meta after
+         # load) and untied (head loaded with STL but unpadded) cases.
+         if self.base_model.embedding.weight.device.type == "spyre":
+-            serialization.materialize_decoupled_head_for_spyre(self)
++            padded_vocab = None
++            if (
++                os.environ.get(
++                    "SPYRE_GRANITE_LAST_TOKEN_HEAD_28_OWNER", "0"
++                )
++                == "1"
++            ):
++                default_padded_vocab = serialization._padded_vocab(
++                    self.config.src_vocab_size
++                )
++                if (
++                    self.config.emb_dim != 4096
++                    or default_padded_vocab != 49_280
++                ):
++                    raise RuntimeError(
++                        "SPYRE_GRANITE_LAST_TOKEN_HEAD_28_OWNER is scoped to "
++                        "the Granite 3.3 8B 4096x49280 LM head"
++                    )
++                # SenDNN pads 770 output sticks to 784, allowing exactly
++                # 28 owners with 28 sticks/core while K stays unsplit.
++                padded_vocab = 50_176
++            serialization.materialize_decoupled_head_for_spyre(
++                self, padded_vocab=padded_vocab
++            )
+         elif self.config.tie_heads:
+             # Non-Spyre tie path, unchanged.
+             if self.head.weight.device == torch.device("meta"):
+@@ -374,19 +471,44 @@ class Granite(nn.Module):
+             **attn_kwargs,
+         )
+ 
++        fuse_last_token_stage = (
++            os.environ.get("SPYRE_FUSE_GRANITE_LAST_TOKEN_STAGE", "0") == "1"
++            and last_n_tokens == 1
++        )
++        fuse_final_norm_last_token_stage = (
++            os.environ.get(
++                "SPYRE_FUSE_GRANITE_FINAL_NORM_LAST_TOKEN_STAGE", "0"
++            )
++            == "1"
++            and last_n_tokens == 1
++        )
++
+         output, cache = self.base_model(
+             x,
+             position_ids,
+             past_key_value_states,
+             use_cache,
++            skip_final_norm=fuse_final_norm_last_token_stage,
+             **attn_kwargs,
+         )
+ 
+-        output = gather_outputs(output, last_n_tokens, **attn_kwargs)
+-        # self.head.weight = torch.nn.Parameter(self.head.weight.to("cpu"))
+-        # preds = self.head(output.to("cpu")).to("spyre")
+-        preds = self.head(output)
+-        preds = preds / self.config.logits_scaling
++        if fuse_final_norm_last_token_stage:
++            preds = self._final_norm_last_token_stage(
++                output,
++                self.base_model.dec_norm.weight,
++                self.head.weight,
++            )
++        elif fuse_last_token_stage:
++            preds = self._last_token_stage(
++                output,
++                self.head.weight,
++            )
++        else:
++            output = gather_outputs(output, last_n_tokens, **attn_kwargs)
++            # self.head.weight = torch.nn.Parameter(self.head.weight.to("cpu"))
++            # preds = self.head(output.to("cpu")).to("spyre")
++            preds = self.head(output)
++            preds = preds / self.config.logits_scaling
+ 
+         if use_cache:
+             return preds, cache
+diff --git a/fms/utils/generation.py b/fms/utils/generation.py
+index d8c1abe2..3f222a83 100644
+--- a/fms/utils/generation.py
++++ b/fms/utils/generation.py
+@@ -1,4 +1,5 @@
+ import logging
++import os
+ import time
+ from typing import Any, Callable, List, Optional, Tuple, Union
+ from collections.abc import Iterable, MutableMapping
+@@ -173,6 +174,18 @@ def _make_cache_dynamic(
+     return past_key_value_states
+ 
+ 
++def _apply_spyre_last_n_tokens_policy(kwargs: MutableMapping[str, Any]) -> None:
++    """Apply the opt-in Spyre final-token policy to generation kwargs."""
++    if "last_n_tokens" not in kwargs and kwargs.get("only_last_token", False):
++        kwargs["last_n_tokens"] = 1
++
++    # Preserve the historical fallback unless the final-token experiment is
++    # explicitly enabled.  With the gate enabled, retain the caller's explicit
++    # or only_last_token-derived value.
++    if os.environ.get("SPYRE_ENABLE_LAST_N_TOKENS", "0") != "1":
++        kwargs["last_n_tokens"] = 0
++
++
+ def generate(
+     model: Union[Callable, torch.nn.Module],
+     input_ids: torch.Tensor,
+@@ -296,13 +309,7 @@ def generate(
+     next_input = input_ids
+     kwargs["past_key_value_states"] = None
+     kwargs["use_cache"] = use_cache
+-    # if we didn't specify last_n_tokens and only_last_token is set to True, set last_n_tokens to 1, otherwise use default
+-    # we do this since the output shape of only_last_token is different and therefore would change the logic in generate
+-    if "last_n_tokens" not in kwargs and kwargs.get("only_last_token", False):
+-        kwargs["last_n_tokens"] = 1
+-
+-    # Fix until slicing works on Spyre
+-    kwargs["last_n_tokens"] = 0
++    _apply_spyre_last_n_tokens_policy(kwargs)
+ 
+     if decode_only:
+         config = getattr(model, "config", None)
+diff --git a/fms/utils/serialization.py b/fms/utils/serialization.py
+index 8dec83a1..64ffc12c 100644
+--- a/fms/utils/serialization.py
++++ b/fms/utils/serialization.py
+@@ -671,6 +671,7 @@ def _alloc_full_head_on_spyre(
+ def materialize_decoupled_head_for_spyre(
+     model,
+     dtype: Optional[torch.dtype] = None,
++    padded_vocab: Optional[int] = None,
+ ) -> None:
+     """Allocate ``model.head.weight`` on Spyre with a row-major STL and a
+     stick-padded vocab dim, populated from the embedding (tied case) or from
+@@ -727,7 +728,21 @@ def materialize_decoupled_head_for_spyre(
+     else:
+         source_dtype = head_w.dtype
+     target_dtype = dtype if dtype is not None else source_dtype
+-    padded = _padded_vocab(vocab)
++    minimum_padded = _padded_vocab(vocab)
++    if padded_vocab is None:
++        padded = minimum_padded
++    else:
++        if padded_vocab < minimum_padded:
++            raise ValueError(
++                f"padded_vocab={padded_vocab} is smaller than the required "
++                f"Spyre head width {minimum_padded}"
++            )
++        if padded_vocab % _SPYRE_BLOCK_SIZE != 0:
++            raise ValueError(
++                f"padded_vocab={padded_vocab} is not aligned to the "
++                f"{_SPYRE_BLOCK_SIZE}-element Spyre stick"
++            )
++        padded = padded_vocab
+     padded_shape = (padded, hidden)
+ 
+     # Pad the source on CPU, then ship the full padded tensor to Spyre with
+diff --git a/tests/utils/test_generate.py b/tests/utils/test_generate.py
+index 60661d87..54051337 100644
+--- a/tests/utils/test_generate.py
++++ b/tests/utils/test_generate.py
+@@ -4,6 +4,7 @@ from torch import nn
+ 
+ from fms.models import get_model
+ from fms.utils.generation import (
++    _apply_spyre_last_n_tokens_policy,
+     generate,
+     pad_input_ids,
+     trim_prefix,
+@@ -50,6 +51,27 @@ def test_generate():
+     assert result != "ABCDEFGHIJ"
+ 
+ 
++def test_generate_last_n_tokens_gate_defaults_to_legacy_fallback(monkeypatch):
++    monkeypatch.delenv("SPYRE_ENABLE_LAST_N_TOKENS", raising=False)
++    kwargs = {"last_n_tokens": 1}
++    _apply_spyre_last_n_tokens_policy(kwargs)
++    assert kwargs["last_n_tokens"] == 0
++
++
++def test_generate_last_n_tokens_gate_preserves_explicit_value(monkeypatch):
++    monkeypatch.setenv("SPYRE_ENABLE_LAST_N_TOKENS", "1")
++    kwargs = {"last_n_tokens": 1}
++    _apply_spyre_last_n_tokens_policy(kwargs)
++    assert kwargs["last_n_tokens"] == 1
++
++
++def test_generate_last_n_tokens_gate_preserves_derived_value(monkeypatch):
++    monkeypatch.setenv("SPYRE_ENABLE_LAST_N_TOKENS", "1")
++    kwargs = {"only_last_token": True}
++    _apply_spyre_last_n_tokens_policy(kwargs)
++    assert kwargs["last_n_tokens"] == 1
++
++
+ def test_batched_homogeneous():
+     _model_mock = ModelMock()
+     tokenizer = get_tokenizer("char_tokenizer")

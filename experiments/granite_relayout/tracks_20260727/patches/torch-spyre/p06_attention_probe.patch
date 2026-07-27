@@ -1,0 +1,16 @@
+diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
+index 435cbb6c..07d835cd 100644
+--- a/torch_spyre/_inductor/codegen/superdsc.py
++++ b/torch_spyre/_inductor/codegen/superdsc.py
+@@ -1050,7 +1050,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
+         # force final compute emission to honor the same map.
+         contiguous_dim = 1
+     if (
+-        _spyre_config.relayout_oracle_prefill_qk_query
++        (
++            _spyre_config.relayout_oracle_p06_ramp
++            or _spyre_config.relayout_oracle_prefill_qk_query
++        )
+         and _spyre_config.relayout_oracle_prefill_qk_head_fast_emission
+         and not is_matmul
+         and len(mapping_splits) >= 4

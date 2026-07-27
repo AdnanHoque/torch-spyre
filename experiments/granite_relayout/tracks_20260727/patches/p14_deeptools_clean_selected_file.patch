@@ -1,0 +1,193 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 5e389209e4..085ec03325 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -7,11 +7,13 @@
+ #include <dsc/superdsc.h>
+ #include <sharedtools/mem_track_bundle.h>
+ 
++#include <cstdlib>
+ #include <set>
++#include <string>
+ 
+ #include "dxp.h"
+ 
+-// #define DEBUG_RELAYOUT 1
++#define DEBUG_RELAYOUT 1
+ 
+ static double getRelayoutPieceSize(
+     double form_size,
+@@ -53,6 +55,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+   auto& hbmTrack = memTrackers->hbmTrack.at(dxpSeg);
+   auto& dldsc = sdsc->dscs_.at(0);
+   bool isDirectOutCopyEligible = false;
++  bool directOutCopyWasReplaced = false;
+   if (dldsc.computeOp_.size() > 0) {
+     // Direct out-copy is only meaningful for a single-input/single-output
+     // IDENTITY/SHUFFLE (2 labeledDs). Ops such as scatter can also be tagged
+@@ -77,6 +80,23 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       }
+     }
+   }
++  // Keep scheduling on the source/destination union, but construct direct
++  // copy output pieces only for the destination allocation's physical owners.
++  // Capture this sparse map before Step 3c clears the redundant custom map.
++  auto destinationCoreIdToWkSlice = sdsc->coreIdToWkSlice_;
++  if (isDirectOutCopyEligible) {
++    auto& outDs = dldsc.labeledDs_.back();
++    auto& outAllocNode =
++        outDs.memOrg_.at(SenComponents::LX).allocateNode_;
++    const auto& outputAllocationMap =
++        outAllocNode->allocateCoordinates_.coreIdToWkSlice_;
++    if (!outputAllocationMap.empty()) {
++      destinationCoreIdToWkSlice = outputAllocationMap;
++    }
++    for (const auto& [coreId, workSlice] : destinationCoreIdToWkSlice) {
++      DT_CHECK(sdsc->coreIdToWkSlice_.count(coreId));
++    }
++  }
+   for (int iter = 0; iter < dldsc.labeledDs_.size() - 1; iter++) {
+     auto& lds = dldsc.labeledDs_.at(iter);
+     // Step 1: For each input lds, check if relayout is needed. Relayout
+@@ -92,7 +112,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       continue;
+ 
+ #ifdef DEBUG_RELAYOUT
+-    std::cout << "Inserting relayout for: " << lds.dsName_ << std::endl;
++    std::cout << "Inserting relayout for SDSC " << sdsc->name_ << ": "
++              << lds.dsName_ << std::endl;
+ #endif
+ 
+     // Step 2a: Create new sdsc for the relayout, and copy relevant properties
+@@ -160,7 +181,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       DT_CHECK(iter == 0);
+       auto& outDs = dldsc.labeledDs_.back();
+       auto& outAllocNode = outDs.memOrg_.at(SenComponents::LX).allocateNode_;
+-      for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
++      for (const auto& mapkv : destinationCoreIdToWkSlice) {
+         coreIdToAllocAddr[mapkv.first] =
+             outAllocNode->startAddressCoreCorelet_.getSingleData(
+                 {{0, mapkv.first}});
+@@ -277,6 +298,24 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         }
+       }
+ 
++      // SenDNN retains the logical batch axis as a trailing singleton in its
++      // P03 STCDP descriptors. Preserve that exact rank behind a diagnostic
++      // switch so we can distinguish ring lowering from topology/addressing.
++      const bool preserveSingletonY =
++          std::getenv("DXP_RELAYOUT_PRESERVE_SINGLETON_Y") != nullptr;
++      if (preserveSingletonY &&
++          !inpLds.dimToLayoutSize_.count("y") &&
++          !outLds.dimToLayoutSize_.count("y")) {
++        for (auto* myLds : {&inpLds, &outLds}) {
++          myLds->layoutDimOrder_.push_back("y");
++          myLds->dimToLayoutSize_["y"] = 1;
++          myLds->validGap_["y"] = {std::make_pair(1, 0)};
++        }
++        ddsc.primaryDs_.at("activation").dimNames.insert("y");
++        std::cout << "DXP_RELAYOUT_PRESERVE_SINGLETON_Y active for "
++                  << relayout_sdsc->name_ << std::endl;
++      }
++
+       // Fill totalElements_
+       for (int i = 0; i < 2; i++) {
+         auto& myLds = (i == 0) ? outLds : inpLds;
+@@ -294,19 +333,20 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       for (int i = 0; i < 2; i++) {
+         auto& myLds = (i == 0) ? outLds : inpLds;
+         int piece_count = 0;
++        const auto& pieceCoreIdToWkSlice =
++            (i == 0) ? destinationCoreIdToWkSlice
++                     : allocCoords.coreIdToWkSlice_;
+         // Find the CoreD for each dim. This is given by N_ / total number of
+         // work slices created
+         std::map<PrimaryDimTypes, std::set<int>> wkslices_in_dim;
+-        for (auto kv :
+-             (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
++        for (auto kv : pieceCoreIdToWkSlice) {
+           for (auto kv2 : kv.second) {
+             if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             wkslices_in_dim[kv2.first].insert(kv2.second);
+           }
+         }
+ 
+-        for (auto kv :
+-             (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
++        for (auto kv : pieceCoreIdToWkSlice) {
+           PieceInfo new_piece;
+           for (auto kv2 : kv.second) {
+             if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+@@ -353,6 +393,14 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+           myLds.pieces_["p" + std::to_string(piece_count)] = new_piece;
+           piece_count++;
+         }
++
++        if (preserveSingletonY) {
++          for (auto& [_, piece] : myLds.pieces_) {
++            piece.dimToStartCordinate["y"] = 0;
++            piece.dimToSize_["y"] = 1;
++            piece.validGap_["y"] = {std::make_pair(1, 0)};
++          }
++        }
+       }
+ 
+       // Step 3c-lx: Modify the coreId_ to workslice map and addresses of the
+@@ -380,6 +428,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         // and writes that same destination form, so lower it to the supported
+         // identity op instead of asking DDC for a nonexistent SHUFFLE DDL.
+         dldsc.computeOp_.front().opFuncName = OpFuncs::IDENTITY;
++        directOutCopyWasReplaced = true;
+       }
+       if (!isDirectOutCopyEligible) {
+         if (hasSameWorkSlicePartition(allocCoords.coreIdToWkSlice_,
+@@ -398,6 +447,10 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       }
+       auto& stAddr = pre_relayout_allocNode->startAddressCoreCorelet_;
+       for (int coreid = 0; coreid < stAddr.getFoldSpaceSize().at(0); coreid++) {
++        // The residual IDENTITY remains scheduled on the full scheduling
++        // union, including non-destination owners.  Preserve valid input
++        // addresses for every scheduled participant; sparsity applies only to
++        // the STCDP output pieces and their physical destination allocation.
+         if (sdsc->coreIdToWkSlice_.count(coreid) == 0) {
+           stAddr.insertData(-1, coreid, 0, 0);
+         } else {
+@@ -601,14 +654,36 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+     }
+     relayout_sdscs.push_back(relayout_sdsc);
+ #ifdef DEBUG_RELAYOUT
+-    std::string filename = "relayout_debug_out";
++    std::string filename = "relayout_debug_" + sdsc->name_ + "_input";
+     filename = filename + std::to_string(iter);
+     filename = filename + ".json";
+     relayout_sdsc->exportJson(filename);
+ #endif
+   }
++
++  // Diagnostic isolation for a direct-copy SHUFFLE. STCDP already writes the
++  // destination allocation, so the old SHUFFLE/IDENTITY program is logically
++  // redundant. Replace only the explicitly named SDSC with the same minimal
++  // NOP form used by ProgramCorrection. This lets us distinguish transport
++  // corruption from an unsafe in-place identity program without changing the
++  // rest of the bundle.
++  const char* directCopyNopTarget = std::getenv("DXP_RELAYOUT_DIRECT_COPY_NOP");
++  if (directOutCopyWasReplaced && directCopyNopTarget != nullptr &&
++      sdsc->name_ == std::string(directCopyNopTarget)) {
++    std::cout << "Replacing redundant post-relayout SDSC " << sdsc->name_
++              << " with NOP" << std::endl;
++    sdsc->dscs_.clear();
++    sdsc->coreIdToDsc_.clear();
++    sdsc->coreIdToDscSchedule.clear();
++    sdsc->coreIdToWkSlice_.clear();
++    sdsc->numWkSlicesPerDim_.clear();
++    sdsc->opFuncsUsed_.clear();
++    sdsc->numCoresUsed_ = 0;
++    sdsc->dataOpdscs_.clear();
++    sdsc->dataOpdscs_.emplace_back().opName = OpFuncs::Nop;
++  }
+ #ifdef DEBUG_RELAYOUT
+-  std::string filename = "origsdsc_debug_out.json";
++  std::string filename = "origsdsc_debug_" + sdsc->name_ + ".json";
+   sdsc->exportJson(filename);
+ #endif
+ }

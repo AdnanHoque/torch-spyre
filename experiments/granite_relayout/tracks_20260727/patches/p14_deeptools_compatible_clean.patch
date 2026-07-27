@@ -1,0 +1,519 @@
+diff --git a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+index 743638abc0..37bc901290 100644
+--- a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
++++ b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+@@ -11,6 +11,8 @@
+ #include <dcg/dcg_fe/dcg_frontend.h>
+ #include <dsc/dsc2Pcfg.h>
+ 
++#include <cstdlib>
++
+ void DcgFE::generatePcfgIRForDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+                                     int c /*=0*/) {
+   if (verbose_ > 0) std::cout << "Creating PCFG for DataDsc.." << std::endl;
+@@ -46,7 +48,30 @@ void DcgFE::generatePcfgIRForDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+       }
+     }
+ 
+-    if (!skip) createPcfgsSTCDPOp(&myDataOpDsc);
++    bool forceNoOpt = false;
++    if (!skip && myDataOpDsc.op->name == OpFuncs::STCDPOpLx) {
++      forceNoOpt = std::getenv("STCDP_FORCE_NOOPT") != nullptr;
++      if (!forceNoOpt && std::getenv("P06_STCDP_FORCE_NOOPT") != nullptr &&
++          !myDataOpDsc.labeledDs_.empty()) {
++        const auto& dims = myDataOpDsc.labeledDs_.front().dimToLayoutSize_;
++        forceNoOpt = dims.count("x") && dims.count("y") &&
++                     dims.count("mb") && dims.count("in") &&
++                     dims.at("x") == 8 && dims.at("y") == 512 &&
++                     dims.at("mb") == 4 && dims.at("in") == 128;
++      }
++      if (forceNoOpt) {
++        std::cout << "STCDP_FORCE_NOOPT active for " << mySDsc.name_
++                  << std::endl;
++      }
++    }
++
++    if (!skip) {
++      createPcfgsSTCDPOp(&myDataOpDsc, forceNoOpt);
++      if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx &&
++          std::getenv("STCDP_DUMP_TRANSFERS") != nullptr) {
++        mySDsc.exportJson("stcdp_after_pcfg_" + mySDsc.name_ + ".json");
++      }
++    }
+   } else if (myDataOpDsc.op->name == OpFuncs::GatherOpHBM) {
+     GatherOpHBM* myOp = (GatherOpHBM*)myDataOpDsc.op;
+ 
+@@ -183,4 +208,4 @@ DataOpDsc* DcgFE::generatePcfgIRForDataOpInpFetch(
+ 
+   isInpFetchNeigh_ = false;
+   return masterDDsc;
+-}
+\ No newline at end of file
++}
+diff --git a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+index f0640651f4..fbc453e05f 100644
+--- a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+@@ -10,6 +10,8 @@
+ 
+ #include <dcg/dcg_fe/dcg_frontend.h>
+ 
++#include <cstdlib>
++
+ #include "util/dt_exception.hpp"
+ 
+ void DcgFE::createSubPieces(STCDPOpHBM* op) {
+@@ -237,6 +239,63 @@ void DcgFE::createSubPieces(STCDPOpLx* op) {
+       }
+     }
+   }
++
++  // Focused diagnostic for Granite P06: dump the exact byte-addressed
++  // common-refinement transfer table after logical piece intersections have
++  // been lowered to source and destination subpieces.
++  const auto& dims = op->inpLds->dimToLayoutSize_;
++  const bool isGraniteP06 =
++      std::getenv("STCDP_DUMP_TRANSFERS") != nullptr ||
++      (dims.count("x") && dims.count("y") && dims.count("mb") &&
++       dims.count("in") && dims.at("x") == 8 && dims.at("y") == 512 &&
++       dims.at("mb") == 4 && dims.at("in") == 128);
++  if (isGraniteP06) {
++    auto dumpSlice = [](const char* role, int idx, const SliceInfo& slice) {
++      std::cout << "P06_STCDP_SLICE role=" << role << " idx=" << idx
++                << " mem=";
++      for (const auto memId : slice.placement.MemId().getData()) {
++        std::cout << memId << ",";
++      }
++      std::cout << " addr=";
++      for (const auto& addresses : slice.placement.StartAddr().getAllData()) {
++        for (const auto address : addresses) {
++          std::cout << address << ",";
++        }
++      }
++      std::cout << " start=";
++      for (const auto& [dim, start] : slice.dimToStartCordinate) {
++        std::cout << dim << ":" << start << ",";
++      }
++      std::cout << " size=";
++      for (const auto& [dim, size] : slice.dimToSize_) {
++        std::cout << dim << ":" << size << ",";
++      }
++      std::cout << std::endl;
++    };
++
++    std::cout << "P06_STCDP_BEGIN input_ldo=";
++    for (const auto& dim : op->inpLds->layoutDimOrder_) {
++      std::cout << dim << ",";
++    }
++    std::cout << " output_ldo=";
++    for (const auto& dim : op->outLds->layoutDimOrder_) {
++      std::cout << dim << ",";
++    }
++    std::cout << " entries=" << op->dtTable_.size() << std::endl;
++    for (const auto& [key, transfer] : op->dtTable_) {
++      std::cout << "P06_STCDP_ENTRY key=" << key
++                << " producer=" << transfer.pIDX << " consumers=";
++      for (const auto consumer : transfer.cIDXs) {
++        std::cout << consumer << ",";
++      }
++      std::cout << std::endl;
++      dumpSlice("src", transfer.pIDX, op->inpSP_.at(transfer.pIDX));
++      for (const auto consumer : transfer.cIDXs) {
++        dumpSlice("dst", consumer, op->outSP_.at(consumer));
++      }
++    }
++    std::cout << "P06_STCDP_END" << std::endl;
++  }
+ }
+ 
+ void DcgFE::mapDtEntryToSenComponent(STCDPOpLx* op) {
+@@ -6442,4 +6501,4 @@ void DcgFE::fillAddr(FoldManager<int64_t>& lhs,
+       return r[idx];
+     });
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/dcg/dcg_fe/transfer_compute/transfer_compute.cpp b/dcg/dcg_fe/transfer_compute/transfer_compute.cpp
+index d248500bc0..0118bf529c 100644
+--- a/dcg/dcg_fe/transfer_compute/transfer_compute.cpp
++++ b/dcg/dcg_fe/transfer_compute/transfer_compute.cpp
+@@ -10,6 +10,8 @@
+ 
+ #include <dcg/dcg_fe/dcg_frontend.h>
+ 
++#include <cstdlib>
++
+ void DcgFE::computeTranferforDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+                                     int c /*=0*/) {
+   DT_CHECK(!isInpFetchNeigh_);
+@@ -34,9 +36,53 @@ void DcgFE::computeTranferforDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+       createSubPieces((STCDPOpLx*)myDataOpDsc.op);
+ 
+       if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx) {
+-        eliminateRedundantTransaction((STCDPOpLx*)myDataOpDsc.op);
++        auto* stcdpOp = (STCDPOpLx*)myDataOpDsc.op;
++        eliminateRedundantTransaction(stcdpOp);
++
++        // Diagnostic isolation for the optimized multicast/GTR lowering.
++        // Preserve the exact delivery table, but represent every consumer as
++        // a separate entry so PCFG lowering retains explicit directed core
++        // IDs and checkConvertToUnicast() selects the unicast path.
++        if (std::getenv("STCDP_FORCE_UNICAST_SPLIT") != nullptr) {
++          std::vector<int> originalKeys;
++          originalKeys.reserve(stcdpOp->dtTable_.size());
++          for (const auto& [key, _] : stcdpOp->dtTable_)
++            originalKeys.push_back(key);
++
++          for (const auto key : originalKeys) {
++            const auto original = stcdpOp->dtTable_.at(key);
++            if (original.cIDXs.size() <= 1) continue;
++
++            auto destinationCore = [&](int cidx) {
++              return stcdpOp->outSP_.at(cidx)
++                  .placement.MemId()
++                  .getData()
++                  .at(0);
++            };
++
++            auto& retained = stcdpOp->dtTable_.at(key);
++            retained.cIDXs = {original.cIDXs.front()};
++            retained.cMemIDs.clear();
++            retained.minCMemID = destinationCore(original.cIDXs.front());
++
++            for (size_t i = 1; i < original.cIDXs.size(); ++i) {
++              stcdpOp->inpSP_.push_back(
++                  stcdpOp->inpSP_.at(original.pIDX));
++              const int newKey = stcdpOp->inpSP_.size() - 1;
++              DT_CHECK(stcdpOp->dtTable_.count(newKey) == 0);
++              auto split = original;
++              split.pIDX = newKey;
++              split.cIDXs = {original.cIDXs.at(i)};
++              split.cMemIDs.clear();
++              split.minCMemID = destinationCore(original.cIDXs.at(i));
++              stcdpOp->dtTable_.emplace(newKey, std::move(split));
++            }
++          }
++          std::cout << "STCDP_FORCE_UNICAST_SPLIT entries="
++                    << stcdpOp->dtTable_.size() << std::endl;
++        }
+ 
+-        populateCoreProdConsumerList((STCDPOpLx*)myDataOpDsc.op);
++        populateCoreProdConsumerList(stcdpOp);
+ 
+         computeInferredSegGroups((STCDPOpLx*)myDataOpDsc.op);
+ 
+@@ -364,6 +410,120 @@ void DcgFE::computeTranferforDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+     // add new ops here..
+     DT_CHECK(0);
+   }
++
++  if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx &&
++      !myDataOpDsc.labeledDs_.empty()) {
++    const auto& dims = myDataOpDsc.labeledDs_.front().dimToLayoutSize_;
++    const bool isGraniteP06 =
++        dims.count("x") && dims.count("y") && dims.count("mb") &&
++        dims.count("in") && dims.at("x") == 8 && dims.at("y") == 512 &&
++        dims.at("mb") == 4 && dims.at("in") == 128;
++    if (isGraniteP06) {
++      const auto* p06Op = static_cast<STCDPOpLx*>(myDataOpDsc.op);
++      for (const auto& [key, transfer] : p06Op->dtTable_) {
++        std::cout << "P06_STCDP_FINAL key=" << key << " loop=";
++        for (const auto& dim : transfer.loopOrder) {
++          std::cout << dim << ",";
++        }
++        std::cout << " collapse=" << transfer.collapseFactor
++                  << " burst=" << transfer.useBurst
++                  << " producer=" << transfer.pMemID << " consumers=";
++        for (const auto consumer : transfer.cMemIDs) {
++          std::cout << consumer << ",";
++        }
++        std::cout << std::endl;
++      }
++      mySDsc.exportJson("p06_after_transfer_" + mySDsc.name_ + ".json");
++    }
++
++    if (std::getenv("STCDP_DUMP_TRANSFERS") != nullptr) {
++      const auto* op = static_cast<const STCDPOpLx*>(myDataOpDsc.op);
++
++      auto dumpFoldedValues = [](const auto& foldedValues) {
++        bool first = true;
++        std::cout << "[";
++        for (const auto& values : foldedValues.getAllData()) {
++          for (const auto& value : values) {
++            if (!first) std::cout << ",";
++            std::cout << value;
++            first = false;
++          }
++        }
++        std::cout << "]";
++      };
++      auto dumpRegion = [](const SliceInfo& slice) {
++        bool first = true;
++        std::cout << "{";
++        for (const auto& [dim, start] : slice.dimToStartCordinate) {
++          if (!first) std::cout << ",";
++          std::cout << dim << ":" << start << "+"
++                    << slice.dimToSize_.at(dim);
++          first = false;
++        }
++        std::cout << "}";
++      };
++
++      size_t deliveryCount = 0;
++      for (const auto& [_, transfer] : op->dtTable_)
++        deliveryCount += transfer.cIDXs.size();
++      std::cout << "STCDP_FINAL_BEGIN sdsc=" << mySDsc.name_
++                << " ddsc=" << myDataOpDsc.dscName_
++                << " src_lds=" << op->inpLds->ldsName_
++                << " dst_lds=" << op->outLds->ldsName_
++                << " entries=" << op->dtTable_.size()
++                << " deliveries=" << deliveryCount << std::endl;
++
++      size_t ordinal = 0;
++      for (const auto& [key, transfer] : op->dtTable_) {
++        const auto& src = op->inpSP_.at(transfer.pIDX);
++        const auto srcCore = src.placement.MemId().getData().at(0);
++        double logicalElements = 1.0;
++        double wireSticks = 1.0;
++        for (const auto& [dim, size] : src.dimToSize_) {
++          logicalElements *= size;
++          wireSticks *= size / op->inpLds->getNumElemsInStick(dim);
++        }
++        const auto logicalBytes = static_cast<uint64_t>(
++            logicalElements * op->inpLds->wordLength);
++        const auto wireBytes = static_cast<uint64_t>(
++            wireSticks * sysDef.bytesPerStick);
++
++        for (size_t cpos = 0; cpos < transfer.cIDXs.size(); ++cpos) {
++          const auto cidx = transfer.cIDXs.at(cpos);
++          const auto& dst = op->outSP_.at(cidx);
++          const auto dstCore = dst.placement.MemId().getData().at(0);
++          const auto cachedDstCore =
++              cpos < transfer.cMemIDs.size() ? transfer.cMemIDs.at(cpos) : -1;
++          std::cout << "STCDP_FINAL_TRANSFER ordinal=" << ordinal++
++                    << " key=" << key << " src_sp=" << transfer.pIDX
++                    << " dst_sp=" << cidx << " src_core=" << srcCore
++                    << " cached_src_core=" << transfer.pMemID
++                    << " dst_core=" << dstCore
++                    << " cached_dst_core=" << cachedDstCore
++                    << " remote=" << (srcCore != dstCore) << " src_addr=";
++          dumpFoldedValues(src.placement.StartAddr());
++          std::cout << " dst_addr=";
++          dumpFoldedValues(dst.placement.StartAddr());
++          std::cout << " logical_bytes=" << logicalBytes
++                    << " wire_bytes=" << wireBytes << " src_region=";
++          dumpRegion(src);
++          std::cout << " dst_region=";
++          dumpRegion(dst);
++          std::cout << " loop=[";
++          for (size_t i = 0; i < transfer.loopOrder.size(); ++i) {
++            if (i) std::cout << ",";
++            std::cout << transfer.loopOrder.at(i);
++          }
++          std::cout << "] collapse=" << transfer.collapseFactor
++                    << " burst=" << transfer.useBurst
++                    << " gtr_group=" << transfer.myGTR.groupID
++                    << " gtr_sharers=" << transfer.myGTR.numSharers
++                    << " mc_mode=" << transfer.selectedMCMode << std::endl;
++        }
++      }
++      std::cout << "STCDP_FINAL_END sdsc=" << mySDsc.name_ << std::endl;
++    }
++  }
+ }
+ 
+ void DcgFE::checkGapInfo(DataOpDsc& myDataOpDsc) {
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 5e389209e4..085ec03325 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -7,11 +7,13 @@
+ #include <dsc/superdsc.h>
+ #include <sharedtools/mem_track_bundle.h>
+ 
++#include <cstdlib>
+ #include <set>
++#include <string>
+ 
+ #include "dxp.h"
+ 
+-// #define DEBUG_RELAYOUT 1
++#define DEBUG_RELAYOUT 1
+ 
+ static double getRelayoutPieceSize(
+     double form_size,
+@@ -53,6 +55,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+   auto& hbmTrack = memTrackers->hbmTrack.at(dxpSeg);
+   auto& dldsc = sdsc->dscs_.at(0);
+   bool isDirectOutCopyEligible = false;
++  bool directOutCopyWasReplaced = false;
+   if (dldsc.computeOp_.size() > 0) {
+     // Direct out-copy is only meaningful for a single-input/single-output
+     // IDENTITY/SHUFFLE (2 labeledDs). Ops such as scatter can also be tagged
+@@ -77,6 +80,23 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       }
+     }
+   }
++  // Keep scheduling on the source/destination union, but construct direct
++  // copy output pieces only for the destination allocation's physical owners.
++  // Capture this sparse map before Step 3c clears the redundant custom map.
++  auto destinationCoreIdToWkSlice = sdsc->coreIdToWkSlice_;
++  if (isDirectOutCopyEligible) {
++    auto& outDs = dldsc.labeledDs_.back();
++    auto& outAllocNode =
++        outDs.memOrg_.at(SenComponents::LX).allocateNode_;
++    const auto& outputAllocationMap =
++        outAllocNode->allocateCoordinates_.coreIdToWkSlice_;
++    if (!outputAllocationMap.empty()) {
++      destinationCoreIdToWkSlice = outputAllocationMap;
++    }
++    for (const auto& [coreId, workSlice] : destinationCoreIdToWkSlice) {
++      DT_CHECK(sdsc->coreIdToWkSlice_.count(coreId));
++    }
++  }
+   for (int iter = 0; iter < dldsc.labeledDs_.size() - 1; iter++) {
+     auto& lds = dldsc.labeledDs_.at(iter);
+     // Step 1: For each input lds, check if relayout is needed. Relayout
+@@ -92,7 +112,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       continue;
+ 
+ #ifdef DEBUG_RELAYOUT
+-    std::cout << "Inserting relayout for: " << lds.dsName_ << std::endl;
++    std::cout << "Inserting relayout for SDSC " << sdsc->name_ << ": "
++              << lds.dsName_ << std::endl;
+ #endif
+ 
+     // Step 2a: Create new sdsc for the relayout, and copy relevant properties
+@@ -160,7 +181,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       DT_CHECK(iter == 0);
+       auto& outDs = dldsc.labeledDs_.back();
+       auto& outAllocNode = outDs.memOrg_.at(SenComponents::LX).allocateNode_;
+-      for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
++      for (const auto& mapkv : destinationCoreIdToWkSlice) {
+         coreIdToAllocAddr[mapkv.first] =
+             outAllocNode->startAddressCoreCorelet_.getSingleData(
+                 {{0, mapkv.first}});
+@@ -277,6 +298,24 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         }
+       }
+ 
++      // SenDNN retains the logical batch axis as a trailing singleton in its
++      // P03 STCDP descriptors. Preserve that exact rank behind a diagnostic
++      // switch so we can distinguish ring lowering from topology/addressing.
++      const bool preserveSingletonY =
++          std::getenv("DXP_RELAYOUT_PRESERVE_SINGLETON_Y") != nullptr;
++      if (preserveSingletonY &&
++          !inpLds.dimToLayoutSize_.count("y") &&
++          !outLds.dimToLayoutSize_.count("y")) {
++        for (auto* myLds : {&inpLds, &outLds}) {
++          myLds->layoutDimOrder_.push_back("y");
++          myLds->dimToLayoutSize_["y"] = 1;
++          myLds->validGap_["y"] = {std::make_pair(1, 0)};
++        }
++        ddsc.primaryDs_.at("activation").dimNames.insert("y");
++        std::cout << "DXP_RELAYOUT_PRESERVE_SINGLETON_Y active for "
++                  << relayout_sdsc->name_ << std::endl;
++      }
++
+       // Fill totalElements_
+       for (int i = 0; i < 2; i++) {
+         auto& myLds = (i == 0) ? outLds : inpLds;
+@@ -294,19 +333,20 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       for (int i = 0; i < 2; i++) {
+         auto& myLds = (i == 0) ? outLds : inpLds;
+         int piece_count = 0;
++        const auto& pieceCoreIdToWkSlice =
++            (i == 0) ? destinationCoreIdToWkSlice
++                     : allocCoords.coreIdToWkSlice_;
+         // Find the CoreD for each dim. This is given by N_ / total number of
+         // work slices created
+         std::map<PrimaryDimTypes, std::set<int>> wkslices_in_dim;
+-        for (auto kv :
+-             (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
++        for (auto kv : pieceCoreIdToWkSlice) {
+           for (auto kv2 : kv.second) {
+             if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             wkslices_in_dim[kv2.first].insert(kv2.second);
+           }
+         }
+ 
+-        for (auto kv :
+-             (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
++        for (auto kv : pieceCoreIdToWkSlice) {
+           PieceInfo new_piece;
+           for (auto kv2 : kv.second) {
+             if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+@@ -353,6 +393,14 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+           myLds.pieces_["p" + std::to_string(piece_count)] = new_piece;
+           piece_count++;
+         }
++
++        if (preserveSingletonY) {
++          for (auto& [_, piece] : myLds.pieces_) {
++            piece.dimToStartCordinate["y"] = 0;
++            piece.dimToSize_["y"] = 1;
++            piece.validGap_["y"] = {std::make_pair(1, 0)};
++          }
++        }
+       }
+ 
+       // Step 3c-lx: Modify the coreId_ to workslice map and addresses of the
+@@ -380,6 +428,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         // and writes that same destination form, so lower it to the supported
+         // identity op instead of asking DDC for a nonexistent SHUFFLE DDL.
+         dldsc.computeOp_.front().opFuncName = OpFuncs::IDENTITY;
++        directOutCopyWasReplaced = true;
+       }
+       if (!isDirectOutCopyEligible) {
+         if (hasSameWorkSlicePartition(allocCoords.coreIdToWkSlice_,
+@@ -398,6 +447,10 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       }
+       auto& stAddr = pre_relayout_allocNode->startAddressCoreCorelet_;
+       for (int coreid = 0; coreid < stAddr.getFoldSpaceSize().at(0); coreid++) {
++        // The residual IDENTITY remains scheduled on the full scheduling
++        // union, including non-destination owners.  Preserve valid input
++        // addresses for every scheduled participant; sparsity applies only to
++        // the STCDP output pieces and their physical destination allocation.
+         if (sdsc->coreIdToWkSlice_.count(coreid) == 0) {
+           stAddr.insertData(-1, coreid, 0, 0);
+         } else {
+@@ -601,14 +654,36 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+     }
+     relayout_sdscs.push_back(relayout_sdsc);
+ #ifdef DEBUG_RELAYOUT
+-    std::string filename = "relayout_debug_out";
++    std::string filename = "relayout_debug_" + sdsc->name_ + "_input";
+     filename = filename + std::to_string(iter);
+     filename = filename + ".json";
+     relayout_sdsc->exportJson(filename);
+ #endif
+   }
++
++  // Diagnostic isolation for a direct-copy SHUFFLE. STCDP already writes the
++  // destination allocation, so the old SHUFFLE/IDENTITY program is logically
++  // redundant. Replace only the explicitly named SDSC with the same minimal
++  // NOP form used by ProgramCorrection. This lets us distinguish transport
++  // corruption from an unsafe in-place identity program without changing the
++  // rest of the bundle.
++  const char* directCopyNopTarget = std::getenv("DXP_RELAYOUT_DIRECT_COPY_NOP");
++  if (directOutCopyWasReplaced && directCopyNopTarget != nullptr &&
++      sdsc->name_ == std::string(directCopyNopTarget)) {
++    std::cout << "Replacing redundant post-relayout SDSC " << sdsc->name_
++              << " with NOP" << std::endl;
++    sdsc->dscs_.clear();
++    sdsc->coreIdToDsc_.clear();
++    sdsc->coreIdToDscSchedule.clear();
++    sdsc->coreIdToWkSlice_.clear();
++    sdsc->numWkSlicesPerDim_.clear();
++    sdsc->opFuncsUsed_.clear();
++    sdsc->numCoresUsed_ = 0;
++    sdsc->dataOpdscs_.clear();
++    sdsc->dataOpdscs_.emplace_back().opName = OpFuncs::Nop;
++  }
+ #ifdef DEBUG_RELAYOUT
+-  std::string filename = "origsdsc_debug_out.json";
++  std::string filename = "origsdsc_debug_" + sdsc->name_ + ".json";
+   sdsc->exportJson(filename);
+ #endif
+ }

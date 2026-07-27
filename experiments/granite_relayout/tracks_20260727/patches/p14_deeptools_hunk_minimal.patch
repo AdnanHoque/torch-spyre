@@ -1,0 +1,62 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 5e389209e4..3bde3cb620 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -77,6 +77,23 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       }
+     }
+   }
++  // Keep scheduling on the source/destination union, but construct direct
++  // copy output pieces only for the destination allocation's physical owners.
++  // Capture this sparse map before Step 3c clears the redundant custom map.
++  auto destinationCoreIdToWkSlice = sdsc->coreIdToWkSlice_;
++  if (isDirectOutCopyEligible) {
++    auto& outDs = dldsc.labeledDs_.back();
++    auto& outAllocNode =
++        outDs.memOrg_.at(SenComponents::LX).allocateNode_;
++    const auto& outputAllocationMap =
++        outAllocNode->allocateCoordinates_.coreIdToWkSlice_;
++    if (!outputAllocationMap.empty()) {
++      destinationCoreIdToWkSlice = outputAllocationMap;
++    }
++    for (const auto& [coreId, workSlice] : destinationCoreIdToWkSlice) {
++      DT_CHECK(sdsc->coreIdToWkSlice_.count(coreId));
++    }
++  }
+   for (int iter = 0; iter < dldsc.labeledDs_.size() - 1; iter++) {
+     auto& lds = dldsc.labeledDs_.at(iter);
+     // Step 1: For each input lds, check if relayout is needed. Relayout
+@@ -160,7 +177,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       DT_CHECK(iter == 0);
+       auto& outDs = dldsc.labeledDs_.back();
+       auto& outAllocNode = outDs.memOrg_.at(SenComponents::LX).allocateNode_;
+-      for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
++      for (const auto& mapkv : destinationCoreIdToWkSlice) {
+         coreIdToAllocAddr[mapkv.first] =
+             outAllocNode->startAddressCoreCorelet_.getSingleData(
+                 {{0, mapkv.first}});
+@@ -294,19 +311,20 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       for (int i = 0; i < 2; i++) {
+         auto& myLds = (i == 0) ? outLds : inpLds;
+         int piece_count = 0;
++        const auto& pieceCoreIdToWkSlice =
++            (i == 0) ? destinationCoreIdToWkSlice
++                     : allocCoords.coreIdToWkSlice_;
+         // Find the CoreD for each dim. This is given by N_ / total number of
+         // work slices created
+         std::map<PrimaryDimTypes, std::set<int>> wkslices_in_dim;
+-        for (auto kv :
+-             (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
++        for (auto kv : pieceCoreIdToWkSlice) {
+           for (auto kv2 : kv.second) {
+             if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             wkslices_in_dim[kv2.first].insert(kv2.second);
+           }
+         }
+ 
+-        for (auto kv :
+-             (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
++        for (auto kv : pieceCoreIdToWkSlice) {
+           PieceInfo new_piece;
+           for (auto kv2 : kv.second) {
+             if (relayout_tensor_dims.count(kv2.first) == 0) continue;
