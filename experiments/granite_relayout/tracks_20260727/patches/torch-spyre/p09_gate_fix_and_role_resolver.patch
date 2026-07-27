@@ -1,0 +1,109 @@
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index cc89cb73..a158b494 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -29,6 +29,7 @@ import os
+ from enum import StrEnum
+ 
+ import sympy
++from . import granite_roles
+ from torch._inductor.dependencies import MemoryDep
+ from torch._inductor.graph import GraphLowering
+ from torch._inductor.ir import ComputedBuffer, Operation, Pointwise, Reduction
+@@ -404,6 +405,15 @@ def collect_lx_relayout_plans(
+         return []
+ 
+     operations = _operations_by_name(graph)
++    _granite_roles = granite_roles.roles_for(
++        graph,
++        _is_matmul_op,
++        lambda op: [
++            dep.name
++            for dep in op_read_writes(op).reads
++            if isinstance(dep, MemoryDep)
++        ],
++    )
+     disabled_sources = {
+         value.strip()
+         for value in config.lx_relayout_disabled_sources.split(",")
+@@ -464,12 +474,6 @@ def collect_lx_relayout_plans(
+                 and dep.name == "buf40"
+                 and read_count > 1
+             )
+-            if (
+-                read_count != 1
+-                and not oracle_shared_mlp_input
+-                and not oracle_shared_attention_output
+-            ):
+-                continue
+             producer = operations.get(dep.name)
+             oracle_shared_rope_input = (
+                 config.relayout_oracle_prefill_rope_input
+@@ -479,12 +483,17 @@ def collect_lx_relayout_plans(
+             )
+             oracle_shared_qkv_input = (
+                 config.relayout_oracle_prefill_qkv_inputs
+-                and dep.name == "buf10"
++                and dep.name == _granite_roles.get("attn_norm_out")
+                 and read_count == 3
+             )
++            # One gate, carrying every shared-source exemption. Keeping two
++            # gates here (the shape a naive union of the two branches produces)
++            # silently drops P07 and P09: the first gate lacks their exemptions
++            # and returns before their own gate is ever consulted.
+             if (
+                 read_count != 1
+                 and not oracle_shared_mlp_input
++                and not oracle_shared_attention_output
+                 and not oracle_shared_rope_input
+                 and not oracle_shared_qkv_input
+             ):
+@@ -610,16 +619,19 @@ def collect_lx_relayout_plans(
+                 # as adjacent replica pairs. SenDNN names the even member of
+                 # every pair as the authoritative P09 source owner.
+                 if (
+-                    producer_core_count != 16
+-                    or producer_view.work_slice_dims != ((0, 16),)
+-                    or set(producer_core_slices)
+-                    != {str(core) for core in range(16)}
++                    producer_core_count == 16
++                    and producer_view.work_slice_dims == ((0, 16),)
++                    and set(producer_core_slices)
++                    == {str(core) for core in range(16)}
+                 ):
+-                    continue
+-                producer_core_slices = {
+-                    str(2 * int(core)): per_core
+-                    for core, per_core in producer_core_slices.items()
+-                }
++                    producer_core_slices = {
++                        str(2 * int(core)): per_core
++                        for core, per_core in producer_core_slices.items()
++                    }
++                # Otherwise the activation is already on the accepted stack's
++                # 8-token x 4-hidden 32-core grid -- the same layout P03 gathers
++                # from for the gate/up matmuls. Fall through and let the generic
++                # classifier plan that gather instead of abandoning the edge.
+ 
+             consumer_work_slice_dims = _work_slice_dims(consumer_view)
+             consumer_core_slices = _core_id_to_device_slice(
+diff --git a/torch_spyre/_inductor/work_division.py b/torch_spyre/_inductor/work_division.py
+index 0c665dce..1b28346e 100644
+--- a/torch_spyre/_inductor/work_division.py
++++ b/torch_spyre/_inductor/work_division.py
+@@ -891,7 +891,14 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+         }
+         if shape == expected_shapes[name]:
+             return {"token": 8, "head_cohort": 4}
+-    if is_prefill_qkv_input and shape == ["1", "512", "4096"]:
++    if is_prefill_qkv_input and shape in (
++        ["1", "512", "4096"],
++        ["1", "512", "1024"],
++    ):
++        # Granite is grouped-query: 32 query heads but only 8 KV heads, so the
++        # K and V projections are 8 x 128 = 1024 wide while Q is 32 x 128 =
++        # 4096. Matching only the 4096 form silently skipped K and V, leaving
++        # buf10 with three consumers on inconsistent core divisions.
+         return {"mb": 16} if name == "buf10" else {"mb": 8, "out": 4}
+     if (
+         is_prefill_qkv_input
