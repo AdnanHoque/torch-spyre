@@ -4,7 +4,7 @@
 # /home/adnan/claude-isolated/granite_parity_20260727.
 set -euo pipefail
 
-if [[ $# -lt 1 || $# -gt 7 ]]; then
+if [[ $# -lt 1 || $# -gt 11 ]]; then
   echo "usage: $0 <run-name> [iters] [mlp-down-proj:0|1] [mb-split] [out-split] [p08:0|1] [p07:0|1]" >&2
   exit 2
 fi
@@ -20,6 +20,10 @@ MLP_DOWN_PROJ_MB="${4:-16}"
 MLP_DOWN_PROJ_OUT="${5:-2}"
 P08="${6:-1}"
 P07="${7:-0}"
+P06="${8:-1}"
+P09="${9:-0}"
+LXFRAC="${10:-0.2}"
+RESTICK_LX="${11:-0}"
 if [[ "$MLP_DOWN_PROJ" = 1 && $((MLP_DOWN_PROJ_MB * MLP_DOWN_PROJ_OUT)) -ne 32 ]]; then
   echo "mlp-down-proj mb-split * out-split must equal 32" >&2; exit 2
 fi
@@ -46,7 +50,7 @@ export ANTONI_LOGIT_DUMP_DIR="$RUN/logits"
 unset ANTONI_LAYER_LIMIT
 export DUMP_SPYRE_CODE=1
 
-export DXP_LX_FRAC_AVAIL=0.2
+export DXP_LX_FRAC_AVAIL="$LXFRAC"
 export SPYRE_LX_PLANNER_RELAYOUT=1
 export SPYRE_LX_RELAYOUT_COLLECTIVES=all_to_all,all_gather,broadcast
 export SPYRE_LX_RELAYOUT_ALL_TO_ALL_MAX_BYTES=-1
@@ -58,6 +62,7 @@ fi
 export SPYRE_LX_RELAYOUT_DUMP_PLANS="$RUN/relayout_plans.jsonl"
 export SPYRE_LX_RELAYOUT_DUMP_ALLOCATIONS="$RUN/allocations.jsonl"
 export STCDP_DUMP_TRANSFERS=1
+export SPYRE_LX_ALLOW_RESTICKIFY_READ="$RESTICK_LX"
 
 # Accepted working stack: P01/P02/P03/P04/P12/P13/P14.
 export SPYRE_RELAYOUT_ORACLE_COMPACT_GQA=1
@@ -75,7 +80,7 @@ export SPYRE_WORK_DIV_ORACLE_GRANITE_LAST_TOKEN_HEAD=1
 export SPYRE_RELAYOUT_ORACLE_GRANITE_P14=1
 
 # P06: preserve 8 token x 4 query-head cohorts through rotary, gather at the QK consumer.
-export SPYRE_RELAYOUT_ORACLE_PREFILL_QK_QUERY=1
+export SPYRE_RELAYOUT_ORACLE_PREFILL_QK_QUERY="$P06"
 export SPYRE_RELAYOUT_ORACLE_PREFILL_QK_QUERY_BUFFERS=buf11,buf12,buf13,buf14
 export SPYRE_RELAYOUT_ORACLE_PREFILL_QK_HEAD_FAST_EMISSION=1
 export SPYRE_RELAYOUT_ORACLE_PREFILL_QK_AXIS_BRIDGE=1
@@ -89,7 +94,8 @@ export SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_DOWN_PROJ="$MLP_DOWN_PROJ"
 export SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_DOWN_PROJ_MB="$MLP_DOWN_PROJ_MB"
 export SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_DOWN_PROJ_OUT="$MLP_DOWN_PROJ_OUT"
 export SPYRE_RELAYOUT_ORACLE_PREFILL_ROPE_INPUT="$P07"
-export SPYRE_RELAYOUT_ORACLE_PREFILL_QKV_INPUTS=0
+export SPYRE_RELAYOUT_ORACLE_PREFILL_QKV_INPUTS="$P09"
+export SPYRE_RELAYOUT_ORACLE_NO_INPUT_PINNING="$P09"
 export SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_NORM=0
 unset DXP_RELAYOUT_PRESERVE_SINGLETON_Y
 unset DXP_RELAYOUT_DIRECT_COPY_NOP
@@ -99,7 +105,7 @@ unset TORCH_SPYRE_DOWNCAST_WARN
 
 printf 'tree=accepted+p07lane(merged)\nstack=P01,P02,P03,P04,P06,P08,P12,P13,P14\niters=%s\nmlp_down_proj=%s\nmlp_down_proj_mb=%s\nmlp_down_proj_out=%s\np08=%s\ntorch_spyre=%s\n' \
   "$ITERS" "$MLP_DOWN_PROJ" "$MLP_DOWN_PROJ_MB" "$MLP_DOWN_PROJ_OUT" "$P08" "$SELF/torch-spyre" > "$RUN/contract.txt"
-printf 'p07=%s\n' "$P07" >> "$RUN/contract.txt"
+printf 'p07=%s\np06=%s\np09=%s\nlxfrac=%s\nrestickify_lx=%s\n' "$P07" "$P06" "$P09" "$LXFRAC" "$RESTICK_LX" >> "$RUN/contract.txt"
 
 "$PYTHON" "$RUNNER" \
   --architecture hf_pretrained \
