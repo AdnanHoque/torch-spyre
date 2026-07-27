@@ -860,6 +860,21 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         if op_spec.dim_labels_override is None
         else op_spec.dim_labels_override
     )
+    if len(dim_labels) < ndim:
+        # A dim_labels_override is captured before work division runs.  A later
+        # pass can add a band symbol to the iteration space (e.g. the P07 rope
+        # row split re-materialising its 8-way token split), which leaves the
+        # frozen override one label short.  Extend it with labels the override
+        # does not already use instead of indexing past the end.
+        dim_labels = list(dim_labels)
+        spare = [x for x in INPUT_DIM_LABELS if x not in dim_labels]
+        while len(dim_labels) < ndim and spare:
+            dim_labels.append(spare.pop(0))
+        if len(dim_labels) < ndim:
+            raise RuntimeError(
+                f"cannot label {ndim} iteration dims for op {op_spec.op!r}: "
+                f"override={op_spec.dim_labels_override!r}"
+            )
     symbol_mapping = {
         sym: Symbol(dim_labels[i]) for i, sym in enumerate(op_spec.iteration_space)
     }
