@@ -1,0 +1,53 @@
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index cc89cb73..a283a7ce 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -610,16 +610,19 @@ def collect_lx_relayout_plans(
+                 # as adjacent replica pairs. SenDNN names the even member of
+                 # every pair as the authoritative P09 source owner.
+                 if (
+-                    producer_core_count != 16
+-                    or producer_view.work_slice_dims != ((0, 16),)
+-                    or set(producer_core_slices)
+-                    != {str(core) for core in range(16)}
++                    producer_core_count == 16
++                    and producer_view.work_slice_dims == ((0, 16),)
++                    and set(producer_core_slices)
++                    == {str(core) for core in range(16)}
+                 ):
+-                    continue
+-                producer_core_slices = {
+-                    str(2 * int(core)): per_core
+-                    for core, per_core in producer_core_slices.items()
+-                }
++                    producer_core_slices = {
++                        str(2 * int(core)): per_core
++                        for core, per_core in producer_core_slices.items()
++                    }
++                # Otherwise the activation is already on the accepted stack's
++                # 8-token x 4-hidden 32-core grid -- the same layout P03 gathers
++                # from for the gate/up matmuls. Fall through and let the generic
++                # classifier plan that gather instead of abandoning the edge.
+ 
+             consumer_work_slice_dims = _work_slice_dims(consumer_view)
+             consumer_core_slices = _core_id_to_device_slice(
+diff --git a/torch_spyre/_inductor/work_division.py b/torch_spyre/_inductor/work_division.py
+index 0c665dce..1b28346e 100644
+--- a/torch_spyre/_inductor/work_division.py
++++ b/torch_spyre/_inductor/work_division.py
+@@ -891,7 +891,14 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
+         }
+         if shape == expected_shapes[name]:
+             return {"token": 8, "head_cohort": 4}
+-    if is_prefill_qkv_input and shape == ["1", "512", "4096"]:
++    if is_prefill_qkv_input and shape in (
++        ["1", "512", "4096"],
++        ["1", "512", "1024"],
++    ):
++        # Granite is grouped-query: 32 query heads but only 8 KV heads, so the
++        # K and V projections are 8 x 128 = 1024 wide while Q is 32 x 128 =
++        # 4096. Matching only the 4096 form silently skipped K and V, leaving
++        # buf10 with three consumers on inconsistent core divisions.
+         return {"mb": 16} if name == "buf10" else {"mb": 8, "out": 4}
+     if (
+         is_prefill_qkv_input
