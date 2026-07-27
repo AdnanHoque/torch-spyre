@@ -1,5 +1,38 @@
 # The V edge fires correctly, and costs 20 ms
 
+> **CORRECTION, same day.** The "32x wire amplification" diagnosed below is **wrong**, and
+> so is everything built on it. `wire_bytes` is computed once per injection in
+> `transfer_compute.cpp:488` and then *reprinted inside the per-consumer loop* at `:508`,
+> so summing the printed lines yields DELIVERED bytes, not injected. DeepTools prints the
+> honest split one line above, on `STCDP_FINAL_BEGIN`:
+>
+>     29_shuffle-Relayout ... entries=32 deliveries=1024
+>
+> `entries=32` x 32768 B = **1.00 MiB injected per layer** -- exactly the figure SenDNN's
+> own catalog reports for the same edge. Deduping the transfer lines by `key=` reproduces
+> it. **We were already at byte-for-byte parity on this edge.**
+>
+> The supporting claims fall too: `useUnicast=0` is an OUTPUT set by
+> `checkConvertToUnicast` meaning "this op contains real multicast entries", not an input
+> permission. `selectedMCMode` is ring DIRECTION (1=CCW, 2=CW, 3=split), not
+> multicast-vs-unicast, and it is 16/16 across the table rather than "always 1"; mode 3
+> cannot apply to a 32-way all-gather by construction (`hop_Mode3=16 > maxNumCores/8*3=12`)
+> and models identical total ring bytes anyway, so it would not have helped. The
+> `gtr_imm_opt_en=0` quoted below is from `pe0` `ptsfpdatatransfer` nodes, unrelated to ring
+> multicast; every ring node has it set to 1. And the destination geometry is IDENTICAL to
+> SenDNN's -- 32 pieces with the same extents, same start coordinates and same
+> `lxStartAddress` on all 32 cores (`uniq=1` in the plan dump), which is whole-tensor
+> replication written as 32 PieceInfos rather than SenDNN's 1 PieceInfo with 32 memIds.
+>
+> The PCFG proves the collapse directly: exactly ONE `ringdatatransfer` node per core, 32
+> total, each storing its own 32768 B with `GTRBurstInfo numSharers=31`. Unicast would have
+> emitted 1024.
+>
+> **The +20 ms is therefore not wire traffic.** It is two extra SDSC nodes on the per-layer
+> critical path that remove nothing -- consistent with the budget analysis, which places the
+> gap in compute/weight-stream overlap rather than transport.
+
+
 Date: 2026-07-27
 
 SenDNN's relayout set contains two large edges we lack: K^T into the score matmul
