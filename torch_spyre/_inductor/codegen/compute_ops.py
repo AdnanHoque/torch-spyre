@@ -221,6 +221,47 @@ def add_constant(kwargs, name, value) -> int:
     return index
 
 
+def _build_coord_info(sdsc_spec, tensor, tensor_idx: int) -> dict:
+    """Builds the coordinate information for all dimensions of a tensor.
+
+    Computes layout, slicing, and FP8 parameter metadata required for
+    generating coordinate info across each dimension specified in the tensor's
+    layout order.
+
+    Args:
+        sdsc_spec: SDSC specification containing iteration space, work slices,
+            layout mappings, and opfunc metadata.
+        tensor: The tensor object containing layout, scale, and data format specs.
+        tensor_idx: The index of the tensor within the parent operation.
+
+    Returns:
+        dict[str, Any]: A dictionary mapping string dimension names to their
+            corresponding generated coordinate information value structure.
+    """
+    dim_order = sdsc_spec.layouts[tensor.layout]["dim_order"]
+    stick_dim_order = sdsc_spec.layouts[tensor.layout]["stick_dim_order"]
+    return {
+        str(dim): gen_coord_info_value(
+            size=sdsc_spec.iteration_space[dim] // sdsc_spec.work_slices[dim]
+            if (tensor.scales[dim] == 1)
+            else 1,
+            nsplits=sdsc_spec.work_slices[dim] if (tensor.scales[dim] == 1) else 1,
+            elems_per_stick=tensor.data_format.elems_per_stick(),
+            is_stick_dim=(dim in stick_dim_order),
+            is_stick_reduction=(tensor.scales[dim] == -2),
+            is_fp8_stick=is_fp8,
+            other_stick_size=other_sz,
+            stick_idx=st_idx,
+            tensor_idx=tensor_idx,
+            opfunc=sdsc_spec.opfunc,
+        )
+        for dim in dim_order
+        for is_fp8, other_sz, st_idx in (
+            (_compute_fp8_coord_params(tensor, dim, sdsc_spec),)
+        )
+    }
+
+
 def _compute_fp8_coord_params(tensor, dim, sdsc_spec):
     """Compute FP8 2D stick coordinate parameters for a dimension.
 
@@ -1149,43 +1190,9 @@ def generate_sdsc(
                                         else {}
                                     ),
                                     "coordinates_": {
-                                        "coordInfo": {
-                                            str(dim): (
-                                                lambda is_fp8,
-                                                other_sz,
-                                                st_idx: gen_coord_info_value(
-                                                    size=sdsc_spec.iteration_space[dim]
-                                                    // sdsc_spec.work_slices[dim]
-                                                    if (tensor.scales[dim] == 1)
-                                                    else 1,
-                                                    nsplits=sdsc_spec.work_slices[dim]
-                                                    if (tensor.scales[dim] == 1)
-                                                    else 1,
-                                                    elems_per_stick=tensor.data_format.elems_per_stick(),
-                                                    is_stick_dim=(
-                                                        dim
-                                                        in sdsc_spec.layouts[
-                                                            tensor.layout
-                                                        ]["stick_dim_order"]
-                                                    ),
-                                                    is_stick_reduction=(
-                                                        tensor.scales[dim] == -2
-                                                    ),
-                                                    is_fp8_stick=is_fp8,
-                                                    other_stick_size=other_sz,
-                                                    stick_idx=st_idx,
-                                                    tensor_idx=i,
-                                                    opfunc=sdsc_spec.opfunc,
-                                                )
-                                            )(
-                                                *_compute_fp8_coord_params(
-                                                    tensor, dim, sdsc_spec
-                                                )
-                                            )
-                                            for dim in sdsc_spec.layouts[tensor.layout][
-                                                "dim_order"
-                                            ]
-                                        },
+                                        "coordInfo": _build_coord_info(
+                                            sdsc_spec, tensor, i
+                                        ),
                                         "coreIdToWkSlice_": {},
                                     },
                                 }

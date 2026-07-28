@@ -1366,7 +1366,7 @@ def lower_qfp8ch(x):
 @register_spyre_lowering(torch.ops.spyre.qfp8wt)
 def lower_qfp8wt(x):
     """
-    Lower qfp8ch operation - channel-wise FP8 format conversion.
+    Lower qfp8wt operation - weight FP8 format conversion.
 
     Pointwise format conversion only (no scaling).
     """
