@@ -1,0 +1,121 @@
+N 0 SenPreparedOp folded_fp8_scaled_bmm-BnPrecZeroShft1-Input1_insertedVirOpLds_tunfold0-LxPreload
+E 0 4
+E 0 3
+E 0 2
+E 0 17
+A IS_R5SS_EXEC 7 0
+A _IS_PRECOMPUTE_OP 7 1
+D SEN:0
+N 1 SenSenRecv fp8_scaled_bmm-Const-Output0_0-SenRecv
+E 0 16
+A dev_ptr 6 34376777728
+A size 6 128
+A sync_key 0 "fp8_scaled_bmm-BnPrecZeroShft1-Input2-StaticDs"
+D SEN:0
+N 2 SenSenRecv weight_scale-Output0_0-SenRecv
+E 0 14
+A dev_ptr 6 34376777984
+A size 6 8192
+A sync_key 0 "fp8_scaled_bmm-BnPrecZeroShft2-Input1-StaticDs"
+D SEN:0
+N 3 SenSenRecv activation_scale-Output0_0-SenRecv
+E 0 12
+A dev_ptr 6 34376515584
+A size 6 262144
+A sync_key 0 "fp8_scaled_bmm-BnPrecZeroShft1-Input1-StaticDs"
+D SEN:0
+N 4 SenSenRecv weight-Output0_0-SenRecv
+E 0 10
+A dev_ptr 6 34359738368
+A size 6 16777216
+A sync_key 0 "fp8_scaled_bmm-BatchMatMulV2-Input1-StaticDs"
+D SEN:0
+N 5 ModelInput weight
+A _INP_DATATYPES 9 { }
+A _INP_DIM_LABELS 3 0
+A _INP_TENSOR_RANKS 2 { }
+A _INP_TENSOR_SHAPES 3 0
+A _OUT_DATATYPES 9 { 20 }
+A _OUT_DIM_LABELS 3 1 { 9 9 9 9 }
+A _OUT_IS_STATIC 2 { 1 }
+A _OUT_TENSOR_RANKS 2 { 4 }
+A _OUT_TENSOR_SHAPES 3 1 { 4096 4096 1 1 }
+N 6 ModelInput activation_scale
+A _INP_DATATYPES 9 { }
+A _INP_DIM_LABELS 3 0
+A _INP_TENSOR_RANKS 2 { }
+A _INP_TENSOR_SHAPES 3 0
+A _OUT_DATATYPES 9 { 1 }
+A _OUT_DIM_LABELS 3 1 { 9 9 9 9 }
+A _OUT_IS_STATIC 2 { 1 }
+A _OUT_TENSOR_RANKS 2 { 4 }
+A _OUT_TENSOR_SHAPES 3 1 { 1 2048 1 1 }
+N 7 ModelInput weight_scale
+A _INP_DATATYPES 9 { }
+A _INP_DIM_LABELS 3 0
+A _INP_TENSOR_RANKS 2 { }
+A _INP_TENSOR_SHAPES 3 0
+A _OUT_DATATYPES 9 { 1 }
+A _OUT_DIM_LABELS 3 1 { 9 9 9 9 }
+A _OUT_IS_STATIC 2 { 1 }
+A _OUT_TENSOR_RANKS 2 { 4 }
+A _OUT_TENSOR_SHAPES 3 1 { 4096 1 1 1 }
+N 8 Const fp8_scaled_bmm-Const
+A _IS_DT_INSERTED_NODE 7 1
+A value 5 0
+N 9 SenDataConvert weight-Output0_0-HostPrep-StaticDs
+E 1 5 0 0
+A Tinput 8 20
+A Toutput 8 14
+A _INP_DATATYPES 9 { 17 }
+A _INP_TENSOR_SHAPES 3 1 { 4096 4096 1 1 }
+A _OUT_DATATYPES 9 { 17 }
+A _OUT_TENSOR_SHAPES 3 1 { 2 64 2048 64 1 1 }
+A output_shape 2 { 1 1 64 2048 64 2 }
+N 10 SenHostSend weight-Output0_0-HostSend
+E 1 9 0 0
+A T 8 14
+A sync_key 0 "fp8_scaled_bmm-BatchMatMulV2-Input1-StaticDs"
+N 11 SenDataConvert activation_scale-Output0_0-HostPrep-StaticDs
+E 1 6 0 0
+A Tinput 8 1
+A Toutput 8 14
+A _INP_DATATYPES 9 { 1 }
+A _INP_TENSOR_SHAPES 3 1 { 2048 1 1 1 }
+A _OUT_DATATYPES 9 { 15 }
+A _OUT_TENSOR_SHAPES 3 1 { 64 2048 1 1 1 }
+A output_shape 2 { 1 1 1 2048 64 }
+N 12 SenHostSend activation_scale-Output0_0-HostSend
+E 1 11 0 0
+A T 8 14
+A sync_key 0 "fp8_scaled_bmm-BnPrecZeroShft1-Input1-StaticDs"
+N 13 SenDataConvert weight_scale-Output0_0-HostPrep-StaticDs
+E 1 7 0 0
+A Tinput 8 1
+A Toutput 8 14
+A _INP_DATATYPES 9 { 1 }
+A _INP_TENSOR_SHAPES 3 1 { 4096 1 1 1 }
+A _OUT_DATATYPES 9 { 15 }
+A _OUT_TENSOR_SHAPES 3 1 { 64 1 64 1 1 }
+A output_shape 2 { 1 1 64 1 64 }
+N 14 SenHostSend weight_scale-Output0_0-HostSend
+E 1 13 0 0
+A T 8 14
+A sync_key 0 "fp8_scaled_bmm-BnPrecZeroShft2-Input1-StaticDs"
+N 15 SenDataConvert fp8_scaled_bmm-Const-Output0_0-HostPrep-StaticDs
+E 1 8 0 0
+A Tinput 8 1
+A Toutput 8 14
+A _INP_DATATYPES 9 { 1 }
+A _INP_TENSOR_SHAPES 3 1 { 1 1 1 1 }
+A _OUT_DATATYPES 9 { 15 }
+A _OUT_TENSOR_SHAPES 3 1 { 64 1 1 1 1 }
+A output_shape 2 { 1 1 1 1 64 }
+N 16 SenHostSend fp8_scaled_bmm-Const-Output0_0-HostSend
+E 1 15 0 0
+A T 8 14
+A sync_key 0 "fp8_scaled_bmm-BnPrecZeroShft1-Input2-StaticDs"
+N 17 SenProgAddrGenerate folded_fp8_scaled_bmm-BnPrecZeroShft1-Input1_insertedVirOpLds_tunfold0-LxPreload-SenProgAddrGenerate
+I { }
+O { }
+T { }

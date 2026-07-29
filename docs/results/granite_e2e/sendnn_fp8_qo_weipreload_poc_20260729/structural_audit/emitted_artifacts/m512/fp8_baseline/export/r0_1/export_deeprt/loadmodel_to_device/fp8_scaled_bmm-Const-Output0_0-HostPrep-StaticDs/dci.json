@@ -1,0 +1,38 @@
+{
+  "dsName_" : "fp8_scaled_bmm-BnPrecZeroShft1-Input2",
+  "isHostToSen_" : 1,
+  "dataformat_src_" : 1,
+  "dataformat_dst_" : 0,
+  "dcOpName_" : 1,
+  "pre_expand_dcsi_" : [
+  ],
+  "pre_input_shape_" : [],
+  "dcsi_" : [
+  ],
+  "input_shape_" : [1, 1, 1, 1],
+  "output_shape_" : [64, 1, 1, 1, 1],
+  "post_slice_dcsi_" : [
+  ],
+  "post_output_shape_" : [],
+  "input_dimwise_ea_" : [
+  ],
+  "output_dimwise_ea_" : [
+  ],
+  "useSpi_" : 0,
+  "usePca_" : 0,
+  "usePadVal_" : 0,
+  "inputPadVal_" : 0,
+  "useWli_" : 0,
+  "dmdi_" :{
+    "perTensorInfo" : [
+    ]
+  },
+  "ssi_" :{
+    "value_and_locs_" : [
+    ],
+    "inputSym_" : [],
+    "unSubstitutedFlitStartOffset_" : 0,
+    "variableDefs_" : {
+    }
+  }
+}

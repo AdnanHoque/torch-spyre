@@ -1,0 +1,19 @@
+{
+  "dsName_" : "activation-Output0_0-SenRecv",
+  "isMarker_" : 0,
+  "defaultAddr_" : "17179869184",
+  "addrMap_" : [
+  ],
+  "addrMapTag_" : [
+  ],
+  "defaultSize_" : "16777216",
+  "sizeMap_" : [
+  ],
+  "sizeMapTag_" : [
+  ],
+  "inputSym_" : [],
+  "addrIdxSym_" : [],
+  "sizeIdxSym_" : [],
+  "variableDefs_" : {
+  }
+}

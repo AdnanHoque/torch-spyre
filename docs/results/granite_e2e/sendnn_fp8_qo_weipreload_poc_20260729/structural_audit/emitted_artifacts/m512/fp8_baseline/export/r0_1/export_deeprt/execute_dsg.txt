@@ -1,0 +1,67 @@
+N 0 SenPreparedOp fp8_scaled_bmm-Qfp8
+E 0 1
+E 0 9
+A IS_R5SS_EXEC 7 0
+D SEN:0
+N 1 SenSenRecv activation-Output0_0-SenRecv
+E 0 6
+E 0 10
+A sync_key 0 "fp8_scaled_bmm-Qfp8-Input0"
+D SEN:0
+N 2 SenSenSend output-Input0-SenSend
+E 0 0
+E 0 11
+A sync_key 0 "fp8_scaled_bmm-BnPrecZeroShft2_out"
+D SEN:0
+N 3 PrimaryInput activation
+A _INP_DATATYPES 9 { }
+A _INP_DIM_LABELS 3 0
+A _INP_TENSOR_RANKS 2 { }
+A _INP_TENSOR_SHAPES 3 0
+A _OUT_DATATYPES 9 { 14 }
+A _OUT_DIM_LABELS 3 1 { 9 9 9 9 }
+A _OUT_TENSOR_RANKS 2 { 4 }
+A _OUT_TENSOR_SHAPES 3 1 { 4096 512 1 1 }
+N 4 PrimaryOutput output
+E 1 8 0 0
+A _INP_DATATYPES 9 { 14 }
+A _INP_DIM_LABELS 3 1 { 9 9 9 9 }
+A _INP_TENSOR_RANKS 2 { 4 }
+A _INP_TENSOR_SHAPES 3 1 { 4096 512 1 1 }
+A _OUT_DATATYPES 9 { }
+A _OUT_DIM_LABELS 3 0
+A _OUT_TENSOR_RANKS 2 { }
+A _OUT_TENSOR_SHAPES 3 0
+N 5 SenDataConvert activation-Output0_0-HostPrep
+E 1 3 0 0
+A Tinput 8 14
+A Toutput 8 14
+A _INP_DATATYPES 9 { 14 }
+A _INP_TENSOR_SHAPES 3 1 { 4096 512 1 1 }
+A _OUT_DATATYPES 9 { 15 }
+A _OUT_TENSOR_SHAPES 3 1 { 64 512 64 1 1 }
+A output_shape 2 { 1 1 64 512 64 }
+N 6 SenHostSend activation-Output0_0-HostSend
+E 1 5 0 0
+A T 8 14
+A sync_key 0 "fp8_scaled_bmm-Qfp8-Input0"
+N 7 SenHostRecv output-Input0-HostRecv
+E 0 2
+A T 8 14
+A output_shape 2 { 1 1 64 512 64 }
+A sync_key 0 "fp8_scaled_bmm-BnPrecZeroShft2_out"
+N 8 SenDataConvert output-Input0-HostPrep
+E 1 7 0 0
+A Tinput 8 14
+A Toutput 8 14
+A _INP_DATATYPES 9 { 15 }
+A _INP_TENSOR_SHAPES 3 1 { 64 512 64 1 1 }
+A _OUT_DATATYPES 9 { 14 }
+A _OUT_TENSOR_SHAPES 3 1 { 4096 512 1 1 }
+A output_shape 2 { 1 1 512 4096 }
+N 9 SenProgAddrGenerate fp8_scaled_bmm-Qfp8-SenProgAddrGenerate
+N 10 TransferGenerate activation-Output0_0-SenRecv-TransferGenerate
+N 11 TransferGenerate output-Input0-SenSend-TransferGenerate
+I { }
+O { }
+T { }

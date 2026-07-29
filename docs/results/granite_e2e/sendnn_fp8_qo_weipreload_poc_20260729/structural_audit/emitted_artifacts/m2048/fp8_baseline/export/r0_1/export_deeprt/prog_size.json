@@ -1,0 +1,6 @@
+{
+  "progSizePerSenPreparedOp" : {
+    "folded_fp8_scaled_bmm-BnPrecZeroShft1-Input1_insertedVirOpLds_tunfold0-LxPreload" : 6144,
+    "fp8_scaled_bmm-Qfp8" : 22528
+  }
+}

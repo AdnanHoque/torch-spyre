@@ -1,0 +1,33 @@
+CORELET_AUDIT entrypoint=DcgRun sdsc=folded_fp8_scaled_bmm-BnPrecZeroShft2-Input1_insertedVirOpLds_tunfold0-LxPreload super_cores=1 work_slices=
+CORELET_AUDIT entrypoint=DcgRun sdsc=folded_fp8_scaled_bmm-BnPrecZeroShft1-Input1_insertedVirOpLds_tunfold0-LxPreload super_cores=1 work_slices=
+CORELET_AUDIT entrypoint=DcgRunDataDlOps sdsc=fp8_scaled_bmm-BnPrecZeroShft2 super_cores=1 work_slices=OUT:1,MB:1,X:1,Y:1,
+CORELET_AUDIT entrypoint=DcgRunDataDlOps dsc=fp8_scaled_bmm-BnPrecZeroShft2 cores=1 corelets=2 stage=0 split=MB:1024+1024, stage=1 split=MB:16+16, stage=2 split=MB:1+1, stage=3 split=MB:1+1,
+LAYOUT_AUDIT entrypoint=DcgRunDataDlOps dsc=fp8_scaled_bmm-BnPrecZeroShft2 global_in=-1 global_out=4096 global_mb=2048 core_in=-1 core_out=-1 core_mb=-1 corelet_in=-1 corelet_out=-1 corelet_mb=-1
+LAYOUT_AUDIT compute_op=batchnormfwd data_format=0
+LAYOUT_AUDIT lds=fp8_scaled_bmm-BnPrecZeroShft1_out type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+LAYOUT_AUDIT lds=fp8_scaled_bmm-BnPrecZeroShft2-Input1_insertedVirOpLds type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+LAYOUT_AUDIT lds=fp8_scaled_bmm-BnPrecZeroShft1-Input2 type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+LAYOUT_AUDIT lds=fp8_scaled_bmm-BnPrecZeroShft2_out type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+CORELET_AUDIT entrypoint=DcgRunDataDlOps sdsc=fp8_scaled_bmm-Qfp8 super_cores=32 work_slices=OUT:1,MB:32,X:1,Y:1,
+CORELET_AUDIT entrypoint=DcgRunDataDlOps dsc=fp8_scaled_bmm-Qfp8 cores=32 corelets=2 stage=0 split=MB:32+32, stage=1 split=MB:16+16, stage=2 split=MB:1+1, stage=3 split=MB:2+2,
+LAYOUT_AUDIT entrypoint=DcgRunDataDlOps dsc=fp8_scaled_bmm-Qfp8 global_in=-1 global_out=4096 global_mb=2048 core_in=-1 core_out=-1 core_mb=-1 corelet_in=-1 corelet_out=-1 corelet_mb=-1
+LAYOUT_AUDIT compute_op=qfp8mb data_format=0
+LAYOUT_AUDIT lds=fp8_scaled_bmm-Qfp8-Input0 type=INPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+LAYOUT_AUDIT lds=fp8_scaled_bmm-Qfp8_out type=OUTPUT word_bytes=1 data_format=3 layout=MB,OUT,Y,X, stick=OUT:8,MB:2,OUT:8,
+CORELET_AUDIT entrypoint=DcgRunDataDlOps sdsc=fp8_scaled_bmm-BnPrecZeroShft1 super_cores=32 work_slices=OUT:1,MB:32,X:1,Y:1,
+CORELET_AUDIT entrypoint=DcgRunDataDlOps dsc=fp8_scaled_bmm-BnPrecZeroShft1 cores=32 corelets=2 stage=0 split=MB:32+32, stage=1 split=MB:16+16, stage=2 split=MB:1+1, stage=3 split=MB:1+1,
+LAYOUT_AUDIT entrypoint=DcgRunDataDlOps dsc=fp8_scaled_bmm-BnPrecZeroShft1 global_in=-1 global_out=4096 global_mb=2048 core_in=-1 core_out=-1 core_mb=-1 corelet_in=-1 corelet_out=-1 corelet_mb=-1
+LAYOUT_AUDIT compute_op=batchnormfwd data_format=0
+LAYOUT_AUDIT lds=fp8_scaled_bmm-BatchMatMulV2_out type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+LAYOUT_AUDIT lds=fp8_scaled_bmm-BnPrecZeroShft1-Input1_insertedVirOpLds type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+LAYOUT_AUDIT lds=fp8_scaled_bmm-BnPrecZeroShft1-Input2 type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+LAYOUT_AUDIT lds=fp8_scaled_bmm-BnPrecZeroShft1_out type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+Progress: [===                 ]CORELET_AUDIT entrypoint=DcgRunDataDlOps sdsc=fp8_scaled_bmm-BatchMatMulV2 super_cores=32 work_slices=IN:1,OUT:1,MB:32,X:1,Y:1,
+CORELET_AUDIT entrypoint=DcgRunDataDlOps dsc=fp8_scaled_bmm-BatchMatMulV2 cores=32 corelets=2 stage=0 split=OUT:2048+2048, stage=1 split=OUT:64+64, stage=2 split=OUT:-1+-1, stage=3 split=OUT:-1+-1, stage=4 split=OUT:-1+-1, stage=5 split=OUT:-1+-1, stage=6 split=OUT:-1+-1, stage=7 split=OUT:64+64,
+LAYOUT_AUDIT entrypoint=DcgRunDataDlOps dsc=fp8_scaled_bmm-BatchMatMulV2 global_in=4096 global_out=4096 global_mb=2048 core_in=-1 core_out=-1 core_mb=-1 corelet_in=-1 corelet_out=-1 corelet_mb=-1
+LAYOUT_AUDIT compute_op=batchmatmulfp8mb data_format=3
+LAYOUT_AUDIT lds=fp8_scaled_bmm-Qfp8_out type=INPUT word_bytes=1 data_format=3 layout=MB,IN,Y,X, stick=IN:8,MB:2,IN:8,
+LAYOUT_AUDIT lds=fp8_scaled_bmm-BatchMatMulV2-Input1 type=KERNEL word_bytes=1 data_format=3 layout=IN,OUT,X, stick=IN:2,OUT:64,
+LAYOUT_AUDIT lds=internal_tensor_lds2 type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+LAYOUT_AUDIT lds=internal_tensor_lds3 type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,
+LAYOUT_AUDIT lds=fp8_scaled_bmm-BatchMatMulV2_out type=OUTPUT word_bytes=2 data_format=0 layout=MB,OUT,Y,X, stick=OUT:64,

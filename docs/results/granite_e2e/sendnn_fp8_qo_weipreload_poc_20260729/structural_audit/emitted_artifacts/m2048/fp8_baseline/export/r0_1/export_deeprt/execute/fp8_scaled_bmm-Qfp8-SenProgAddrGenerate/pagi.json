@@ -1,0 +1,13 @@
+{
+  "dsName_" : "fp8_scaled_bmm-Qfp8",
+  "isMarker_" : 0,
+  "defaultAddr_" : "120259090688",
+  "addrMap_" : [
+  ],
+  "addrMapTag_" : [
+  ],
+  "inputSym_" : [],
+  "addrIdxSym_" : [],
+  "variableDefs_" : {
+  }
+}

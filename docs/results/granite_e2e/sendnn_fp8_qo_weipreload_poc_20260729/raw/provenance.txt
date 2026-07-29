@@ -1,0 +1,28 @@
+2026-07-29T07:05:16,009866227+00:00
+adnan-clc-spyre-dev-pf
+run_root=/home/adnan/codex-isolated/fp8_qo_planner_hack_20260729/runs/qo_weipreload_poc_20260729_070515
+logical_shape=[M,4096]@[4096,4096]
+m_values=1,2,4,8,16,32,64,128,256,512,1024,2048
+variants=fp16,fp8_baseline,fp8_weipreload0
+fp8_baseline_dt_opt=autopilot=1
+fp8_weipreload0_dt_opt=autopilot=1,weipreload=0
+warmups=5
+repetitions=20
+benchmark_sha256=3536cfcb912779e2f04013df04d534e0c11b2d38a43152ca235e21b713bbd046  /home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/direct_sendnn_fp16_fp8_pair_benchmark_per_axis.py
+wrapper_sha256=a5873a426ba376ca2f97172567d09e6402923f3281a40ecfb53e7949bdb174f9  /home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/direct_sendnn_kineto_wrapper.py
+runner_sha256=906743b1e274d46272f7ecd8fcf929d654bcb9da35e614d49a161ee8e70c0c45  /home/adnan/codex-isolated/fp8_qo_planner_hack_20260729/run_qo_weipreload_poc.sh
+flexiblas-3.4.2-3.el10.x86_64
+flexiblas-netlib-3.4.2-3.el10.x86_64
+flexiblas-openblas-openmp-3.4.2-3.el10.x86_64
+ibm-deeptools-2.0.0-0.main.1+1401.ee2f97a_0.el10.x86_64
+ibm-deeptools-devel-2.0.0-0.main.1+1401.ee2f97a_0.el10.x86_64
+ibm-flex-2.0.0-0.main.1+388.81385a4_0.el10.x86_64
+ibm-flex-devel-2.0.0-0.main.1+388.81385a4_0.el10.x86_64
+ibm-senlib-core-2.0.0-0.main.1+194.951e4c4_0.el10.x86_64
+ibm-senlib-dd2-2.0.0-0.main.1+194.951e4c4_0.el10.x86_64
+ibm-senlib-headers-2.0.0-0.main.1+194.951e4c4_0.el10.x86_64
+python 3.12.13 (main, Apr 16 2026, 00:00:00) [GCC 14.3.1 20251022 (Red Hat 14.3.1-4)]
+torch 2.10.0+aiu.kineto.1.1.1 /home/adnan/codex-isolated/sendnn_granite_antoni_20260725/venv/lib64/python3.12/site-packages/torch/__init__.py
+torch_sendnn 1.3.0+main.1.1bef083.0 /usr/local/lib/python3.12/site-packages/torch_sendnn/__init__.py
+sendnn /opt/ibm/spyre/runtime/lib/sendnn.cpython-312-x86_64-linux-gnu.so
+failure_count=0

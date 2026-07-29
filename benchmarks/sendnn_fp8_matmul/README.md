@@ -66,3 +66,35 @@ python3 benchmarks/sendnn_fp8_matmul/summarize_granite_linear_m_sweeps.py \
   --run-root mlp_down=/path/to/mlp-down-run \
   --output-dir /path/to/summary
 ```
+
+## Q/O weight-preload planner PoC
+
+The follow-up PoC for `[M,4096] @ [4096,4096]` compares a fresh FP16 control,
+stock scaled FP8, and scaled FP8 with:
+
+```text
+DT_OPT=autopilot=1,weipreload=0
+```
+
+Run the three-way rotating sweep:
+
+```bash
+bash benchmarks/sendnn_fp8_matmul/run_qo_weipreload_poc.sh
+```
+
+The runner is the exact measured script (SHA-256
+`906743b1e274d46272f7ecd8fcf929d654bcb9da35e614d49a161ee8e70c0c45`)
+and intentionally pins the isolated pod paths recorded in provenance.
+
+Validate and summarize it:
+
+```bash
+python3 benchmarks/sendnn_fp8_matmul/summarize_qo_weipreload_poc.py \
+  --run-root /path/to/qo_weipreload_poc_run \
+  --output-dir /path/to/summary
+```
+
+The summarizer requires all 36 cases to pass, verifies 20 Kineto kernel events
+per case, checks the pinned DD2 stack, and rejects `1p5` provenance. The
+archived result and compiler-mechanism audit are in
+[`docs/results/granite_e2e/sendnn_fp8_qo_weipreload_poc_20260729`](../../docs/results/granite_e2e/sendnn_fp8_qo_weipreload_poc_20260729).

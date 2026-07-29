@@ -1,0 +1,5 @@
+{
+  "progSizePerSenPreparedOp" : {
+    "fp8_scaled_bmm-Qfp8" : 36608
+  }
+}

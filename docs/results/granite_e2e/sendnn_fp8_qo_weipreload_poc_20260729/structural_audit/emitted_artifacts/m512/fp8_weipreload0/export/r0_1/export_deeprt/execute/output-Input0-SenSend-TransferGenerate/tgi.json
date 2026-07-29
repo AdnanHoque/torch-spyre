@@ -1,0 +1,19 @@
+{
+  "dsName_" : "output-Input0-SenSend",
+  "isMarker_" : 0,
+  "defaultAddr_" : "268435456",
+  "addrMap_" : [
+  ],
+  "addrMapTag_" : [
+  ],
+  "defaultSize_" : "4194304",
+  "sizeMap_" : [
+  ],
+  "sizeMapTag_" : [
+  ],
+  "inputSym_" : [],
+  "addrIdxSym_" : [],
+  "sizeIdxSym_" : [],
+  "variableDefs_" : {
+  }
+}

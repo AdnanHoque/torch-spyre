@@ -1,0 +1,533 @@
+
+  {
+    "schemaVersion": 1,
+    "deviceProperties": [
+  {
+    "id": 0, "type": "AIU", "name": "AIU",
+    "core": "PT Array"
+  }
+    ],
+      "trace_id": "C0F5111AD56E4F6F9747C81ED0D18F2B",
+  "displayTimeUnit": "ns",
+  "baseTimeNanoseconds": 1782967788000000000,
+  "traceEvents": [
+  {
+    "ph": "X", "cat": "gpu_memcpy", "name": "Memcpy (HtoD)", "pid": 0, "tid": 100,
+    "ts": 2341495749885.402, "dur": 287.804,
+    "args": {
+      "memory bandwidth (GB/s)": 58.293894455949186, "bytes": 16777216, "memory operation id": 1, "context": "4118", "correlation": 26, "device": 0, "call": "HtoD"
+    }
+  },
+  {
+    "ph": "X", "cat": "kernel", "name": "fp8_scaled_bmm-Qfp8", "pid": 0, "tid": 1,
+    "ts": 2341495750174.154, "dur": 766.616,
+    "args": {
+      "context": "4119", "stream": 1, "correlation": 26, "device": 0, "submitted": 1785309283749872562, "queued": 1784753910947280135
+    }
+  },
+  {
+    "ph": "f", "id": 26, "pid": 0, "tid": 1, "ts": 2341495750174.154,
+    "cat": "ac2g", "name": "ac2g", "bp": "e"
+  },
+  {
+    "ph": "X", "cat": "gpu_memcpy", "name": "Memcpy (DtoH)", "pid": 0, "tid": 200,
+    "ts": 2341495750173.235, "dur": 1186.892,
+    "args": {
+      "memory bandwidth (GB/s)": 14.135419229382286, "bytes": 16777216, "memory operation id": 2, "context": "4120", "correlation": 26, "device": 0, "call": "DtoH"
+    }
+  },
+  {
+    "ph": "X", "cat": "gpu_memcpy", "name": "Memcpy (HtoD)", "pid": 0, "tid": 100,
+    "ts": 2341495814622.901, "dur": 283.847,
+    "args": {
+      "memory bandwidth (GB/s)": 59.106546836852246, "bytes": 16777216, "memory operation id": 1, "context": "4121", "correlation": 27, "device": 0, "call": "HtoD"
+    }
+  },
+  {
+    "ph": "X", "cat": "kernel", "name": "fp8_scaled_bmm-Qfp8", "pid": 0, "tid": 1,
+    "ts": 2341495814907.333, "dur": 767.591,
+    "args": {
+      "context": "4122", "stream": 1, "correlation": 27, "device": 0, "submitted": 1785309283814611071, "queued": 1784753910947280133
+    }
+  },
+  {
+    "ph": "f", "id": 27, "pid": 0, "tid": 1, "ts": 2341495814907.333,
+    "cat": "ac2g", "name": "ac2g", "bp": "e"
+  },
+  {
+    "ph": "X", "cat": "gpu_memcpy", "name": "Memcpy (DtoH)", "pid": 0, "tid": 200,
+    "ts": 2341495814906.776, "dur": 1190.343,
+    "args": {
+      "memory bandwidth (GB/s)": 14.094438325759887, "bytes": 16777216, "memory operation id": 2, "context": "4123", "correlation": 27, "device": 0, "call": "DtoH"
+    }
+  },
+  {
+    "ph": "X", "cat": "gpu_memset", "name": "Memset (Device)", "pid": 0, "tid": 400,
+    "ts": 2341495711113.205, "dur": 792.426,
+    "args": {
+      "memory bandwidth (GB/s)": 21.171965584168113, "bytes": 16777216, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X", "cat": "gpu_memset", "name": "Memset (Device)", "pid": 0, "tid": 400,
+    "ts": 2341495715720.365, "dur": 799.859,
+    "args": {
+      "memory bandwidth (GB/s)": 20.97521688197545, "bytes": 16777216, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_driver", "name": "Memory (Release)", "pid": 0, "tid": 400,
+    "ts": 2341495779052.849, "dur": 594.997,
+    "args": {
+      "memory bandwidth (GB/s)": 28.19714385114547, "bytes": 16777216, "memory operation id": 2, "context": "614423", "correlation": 0, "device": 0, "call": "Release"
+    }
+  },
+  {
+    "ph": "i", "cat": "cpu_instant_event", "s": "t", "name": "[memory]",
+    "pid": 614423, "tid": 614423,
+    "ts": 2341495779052.849,
+    "args": {
+      "Device Type": 1, "Device Id": 0, "Addr": 70368765218816, "Bytes": -16777216, "Total Allocated": -16777216, "Total Reserved": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_driver", "name": "Memory (Release)", "pid": 0, "tid": 400,
+    "ts": 2341495779652.335, "dur": 509.273,
+    "args": {
+      "memory bandwidth (GB/s)": 32.943462543665184, "bytes": 16777216, "memory operation id": 2, "context": "614423", "correlation": 0, "device": 0, "call": "Release"
+    }
+  },
+  {
+    "ph": "i", "cat": "cpu_instant_event", "s": "t", "name": "[memory]",
+    "pid": 614423, "tid": 614423,
+    "ts": 2341495779652.335,
+    "args": {
+      "Device Type": 1, "Device Id": 0, "Addr": 70368781996032, "Bytes": -16777216, "Total Allocated": -33554432, "Total Reserved": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "gpu_memset", "name": "Memset (Device)", "pid": 0, "tid": 400,
+    "ts": 2341495782071.610, "dur": 731.135,
+    "args": {
+      "memory bandwidth (GB/s)": 22.946810096630582, "bytes": 16777216, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X", "cat": "gpu_memset", "name": "Memset (Device)", "pid": 0, "tid": 400,
+    "ts": 2341495789275.351, "dur": 680.252,
+    "args": {
+      "memory bandwidth (GB/s)": 24.663236565272868, "bytes": 16777216, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_driver", "name": "Memory (Release)", "pid": 0, "tid": 400,
+    "ts": 2341495840927.743, "dur": 408.733,
+    "args": {
+      "memory bandwidth (GB/s)": 41.04688390709828, "bytes": 16777216, "memory operation id": 2, "context": "614423", "correlation": 0, "device": 0, "call": "Release"
+    }
+  },
+  {
+    "ph": "i", "cat": "cpu_instant_event", "s": "t", "name": "[memory]",
+    "pid": 614423, "tid": 614423,
+    "ts": 2341495840927.743,
+    "args": {
+      "Device Type": 1, "Device Id": 0, "Addr": 70368765218816, "Bytes": -16777216, "Total Allocated": -50331648, "Total Reserved": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_driver", "name": "Memory (Release)", "pid": 0, "tid": 400,
+    "ts": 2341495841340.679, "dur": 280.585,
+    "args": {
+      "memory bandwidth (GB/s)": 59.79370244310993, "bytes": 16777216, "memory operation id": 2, "context": "614423", "correlation": 0, "device": 0, "call": "Release"
+    }
+  },
+  {
+    "ph": "i", "cat": "cpu_instant_event", "s": "t", "name": "[memory]",
+    "pid": 614423, "tid": 614423,
+    "ts": 2341495841340.679,
+    "args": {
+      "Device Type": 1, "Device Id": 0, "Addr": 70368781996032, "Bytes": -16777216, "Total Allocated": -67108864, "Total Reserved": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuMalloc", "pid": 614423, "tid": 614423,
+    "ts": 2341495708344.788, "dur": 9516.771,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuResizeTensorAllocation", "pid": 614423, "tid": 614423,
+    "ts": 2341495717861.560, "dur": 5.897,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuDataConvert", "pid": 614423, "tid": 614423,
+    "ts": 2341495717869.133, "dur": 31943.965,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuPrepareDMAs", "pid": 614423, "tid": 614423,
+    "ts": 2341495749833.912, "dur": 3.646,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuPrepareAndSyncRDMA", "pid": 614423, "tid": 614423,
+    "ts": 2341495749840.850, "dur": 2.245,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuClearCache", "pid": 614423, "tid": 614423,
+    "ts": 2341495749847.569, "dur": 0.641,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuPreloadCache", "pid": 614423, "tid": 614423,
+    "ts": 2341495749848.211, "dur": 0.962,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuLaunchControlBlocks", "pid": 614423, "tid": 614423,
+    "ts": 2341495749855.712, "dur": 5.332,
+    "args": {
+      "num_cbs": 0, "correlation": 26
+    }
+  },
+  {
+    "ph": "s", "id": 26, "pid": 614423, "tid": 614423, "ts": 2341495749855.712,
+    "cat": "ac2g", "name": "ac2g"
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuLaunchComputeStream", "pid": 614423, "tid": 614423,
+    "ts": 2341495749849.172, "dur": 33.368,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuInitScheduler", "pid": 614423, "tid": 614423,
+    "ts": 2341495749820.247, "dur": 1.416,
+    "args": {
+      "correlation": 26
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuCreateVirtualAddresses", "pid": 614423, "tid": 614423,
+    "ts": 2341495749821.662, "dur": 5.224,
+    "args": {
+      "correlation": 26
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuLaunchScheduleCompute", "pid": 614423, "tid": 614423,
+    "ts": 2341495749826.886, "dur": 55.924,
+    "args": {
+      "correlation": 26
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuScheduleWait", "pid": 614423, "tid": 614423,
+    "ts": 2341495749882.810, "dur": 1499.909,
+    "args": {
+      "correlation": 26
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuNodeCompute", "pid": 614423, "tid": 614423,
+    "ts": 2341495749817.034, "dur": 1569.682,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuDataConvert", "pid": 614423, "tid": 614423,
+    "ts": 2341495751387.904, "dur": 27655.623,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuGraphExecution", "pid": 614423, "tid": 614423,
+    "ts": 2341495708343.804, "dur": 70702.474,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuLaunchSuperNode", "pid": 614423, "tid": 614423,
+    "ts": 2341495708331.164, "dur": 71840.734,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuMalloc", "pid": 614423, "tid": 614423,
+    "ts": 2341495780276.624, "dur": 10967.474,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuResizeTensorAllocation", "pid": 614423, "tid": 614423,
+    "ts": 2341495791244.098, "dur": 4.980,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuDataConvert", "pid": 614423, "tid": 614423,
+    "ts": 2341495791251.255, "dur": 23003.351,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuPrepareDMAs", "pid": 614423, "tid": 614423,
+    "ts": 2341495814554.900, "dur": 5.495,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuPrepareAndSyncRDMA", "pid": 614423, "tid": 614423,
+    "ts": 2341495814563.699, "dur": 2.987,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuClearCache", "pid": 614423, "tid": 614423,
+    "ts": 2341495814575.587, "dur": 1.468,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuPreloadCache", "pid": 614423, "tid": 614423,
+    "ts": 2341495814577.055, "dur": 0.630,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuLaunchControlBlocks", "pid": 614423, "tid": 614423,
+    "ts": 2341495814588.696, "dur": 8.088,
+    "args": {
+      "num_cbs": 0, "correlation": 27
+    }
+  },
+  {
+    "ph": "s", "id": 27, "pid": 614423, "tid": 614423, "ts": 2341495814588.696,
+    "cat": "ac2g", "name": "ac2g"
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuLaunchComputeStream", "pid": 614423, "tid": 614423,
+    "ts": 2341495814577.686, "dur": 43.110,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuInitScheduler", "pid": 614423, "tid": 614423,
+    "ts": 2341495814261.826, "dur": 2.489,
+    "args": {
+      "correlation": 27
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuCreateVirtualAddresses", "pid": 614423, "tid": 614423,
+    "ts": 2341495814264.316, "dur": 5.089,
+    "args": {
+      "correlation": 27
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuLaunchScheduleCompute", "pid": 614423, "tid": 614423,
+    "ts": 2341495814269.406, "dur": 352.109,
+    "args": {
+      "correlation": 27
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuScheduleWait", "pid": 614423, "tid": 614423,
+    "ts": 2341495814621.515, "dur": 1505.869,
+    "args": {
+      "correlation": 27
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuNodeCompute", "pid": 614423, "tid": 614423,
+    "ts": 2341495814258.336, "dur": 1878.047,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuDataConvert", "pid": 614423, "tid": 614423,
+    "ts": 2341495816138.514, "dur": 24774.417,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuGraphExecution", "pid": 614423, "tid": 614423,
+    "ts": 2341495780275.959, "dur": 60640.136,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuClockCalibration", "pid": 614423, "tid": 614423,
+    "ts": 2341495829267.353, "dur": 2287.897,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "ph": "X", "cat": "privateuse1_runtime", "name": "aiuLaunchSuperNode", "pid": 614423, "tid": 614423,
+    "ts": 2341495780266.619, "dur": 61368.719,
+    "args": {
+      "correlation": 0
+    }
+  },
+  {
+    "name": "process_name", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 0,
+    "args": {
+      "name": "python"
+    }
+  },
+  {
+    "name": "process_labels", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 0,
+    "args": {
+      "labels": "AIU 0"
+    }
+  },
+  {
+    "name": "process_sort_index", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 0,
+    "args": {
+      "sort_index": 5000000
+    }
+  },
+  {
+    "name": "process_name", "ph": "M", "ts": 2341495708059.832, "pid": 614423, "tid": 0,
+    "args": {
+      "name": "python"
+    }
+  },
+  {
+    "name": "process_labels", "ph": "M", "ts": 2341495708059.832, "pid": 614423, "tid": 0,
+    "args": {
+      "labels": "CPU"
+    }
+  },
+  {
+    "name": "process_sort_index", "ph": "M", "ts": 2341495708059.832, "pid": 614423, "tid": 0,
+    "args": {
+      "sort_index": 614423
+    }
+  },
+  {
+    "name": "thread_name", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 1,
+    "args": {
+      "name": "Stream 1"
+    }
+  },
+  {
+    "name": "thread_sort_index", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 1,
+    "args": {
+      "sort_index": 1001
+    }
+  },
+  {
+    "name": "thread_name", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 100,
+    "args": {
+      "name": "Memcpy (HtoD):"
+    }
+  },
+  {
+    "name": "thread_sort_index", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 100,
+    "args": {
+      "sort_index": 100
+    }
+  },
+  {
+    "name": "thread_name", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 200,
+    "args": {
+      "name": "Memcpy (DtoH):"
+    }
+  },
+  {
+    "name": "thread_sort_index", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 200,
+    "args": {
+      "sort_index": 200
+    }
+  },
+  {
+    "name": "thread_name", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 400,
+    "args": {
+      "name": "Memory management:"
+    }
+  },
+  {
+    "name": "thread_sort_index", "ph": "M", "ts": 2341495708059.832, "pid": 0, "tid": 400,
+    "args": {
+      "sort_index": 400
+    }
+  },
+  {
+    "ph": "X", "cat": "Trace", "ts": 2341495708005.011, "dur": 133803.221,
+    "pid": "Spans", "tid": "PyTorch Profiler",
+    "name": "PyTorch Profiler (0)",
+    "args": {
+      "Op count": 0
+    }
+  },
+  {
+    "name": "process_sort_index", "ph": "M", "ts": 2341495708005.011,
+    "pid": "Spans", "tid": 0,
+    "args": {
+      "sort_index": 536870912
+    }
+  },
+  {
+    "name": "Iteration Start: PyTorch Profiler", "ph": "i", "s": "g",
+    "pid": "Traces", "tid": "Trace PyTorch Profiler", "ts": 2341495708005.011
+  },
+  {
+    "ph": "X", "cat": "Trace", "ts": 2341495708060.456, "dur": 133886.700,
+    "pid": "Spans", "tid": "__aiu_profiler__",
+    "name": "__aiu_profiler__ (0)",
+    "args": {
+      "Op count": 53
+    }
+  },
+  {
+    "name": "process_sort_index", "ph": "M", "ts": 2341495708060.456,
+    "pid": "Spans", "tid": 0,
+    "args": {
+      "sort_index": 536870912
+    }
+  },
+  {
+    "name": "Iteration Start: __aiu_profiler__", "ph": "i", "s": "g",
+    "pid": "Traces", "tid": "Trace __aiu_profiler__", "ts": 2341495708060.456
+  },
+  {
+    "name": "Record Window End", "ph": "i", "s": "g",
+    "pid": "", "tid": "", "ts": 2341495841944.793
+  }
+  ],
+  "traceName": "/home/adnan/codex-isolated/fp8_qo_planner_hack_20260729/runs/qo_weipreload_poc_20260729_070515/artifact_audit/m2048/fp8_weipreload0/profile/kineto_trace.json"
+}

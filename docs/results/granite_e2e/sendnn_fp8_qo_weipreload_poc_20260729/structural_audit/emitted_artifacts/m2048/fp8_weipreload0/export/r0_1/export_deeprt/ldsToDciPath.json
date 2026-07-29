@@ -1,0 +1,10 @@
+{
+  "ldsToDciPath" : {
+    "fp8_scaled_bmm-Qfp8-Input0" : "execute/activation-Output0_0-HostPrep/",
+    "fp8_scaled_bmm-BatchMatMulV2-Input1" : "loadmodel_to_device/weight-Output0_0-HostPrep-StaticDs/",
+    "fp8_scaled_bmm-BnPrecZeroShft1-Input1" : "loadmodel_to_device/activation_scale-Output0_0-HostPrep-StaticDs/",
+    "fp8_scaled_bmm-BnPrecZeroShft2-Input1" : "loadmodel_to_device/weight_scale-Output0_0-HostPrep-StaticDs/",
+    "fp8_scaled_bmm-BnPrecZeroShft2_out" : "execute/output-Input0-HostPrep/",
+    "fp8_scaled_bmm-BnPrecZeroShft1-Input2" : "loadmodel_to_device/fp8_scaled_bmm-Const-Output0_0-HostPrep-StaticDs/"
+  }
+}

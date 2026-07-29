@@ -1,0 +1,6 @@
+N 0 SenProgSend fp8_scaled_bmm-Qfp8-SenProgSend
+A dev_ptr 6 120259084544
+A size 6 38144
+I { }
+O { }
+T { }

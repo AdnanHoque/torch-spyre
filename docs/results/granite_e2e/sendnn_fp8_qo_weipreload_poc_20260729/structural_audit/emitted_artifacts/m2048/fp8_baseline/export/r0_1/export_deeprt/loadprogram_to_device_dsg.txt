@@ -1,0 +1,6 @@
+N 0 SenProgSend folded_fp8_scaled_bmm-BnPrecZeroShft1-Input1_insertedVirOpLds_tunfold0-LxPreload-SenProgSend
+A dev_ptr 6 120259084544
+A size 6 28672
+I { }
+O { }
+T { }
