@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "run_started_utc": "2026-07-29T02:18:25Z",
+  "pod": "adnan-spyre-current-pf",
+  "hardware": "AIU 1.0 / DD2",
+  "logical_operation": "[M,4096]@[4096,1024]",
+  "m_values": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024,
+    2048
+  ],
+  "warmups": 5,
+  "measured_repetitions": 20,
+  "timing_source": "Kineto positive-duration kernel events",
+  "fp8_scale_shapes": {
+    "activation": [
+      1,
+      1,
+      "M",
+      1
+    ],
+    "weight": [
+      1,
+      1,
+      1,
+      1024
+    ]
+  },
+  "fp8_scale_values": "unit FP32",
+  "scale_derivation_in_graph": false,
+  "all_24_cases_passed": true,
+  "remote_run_root": "/home/adnan/codex-isolated/fp8_sendnn_kineto_current_20260729/runs/granite_kv_m_sweep_20260729_021824",
+  "download_archive_sha256": "ec48ddced17d083a969dbfdbaf063b50040d17c055bc738674097fb486fef153",
+  "scripts": {
+    "benchmark_sha256": "ed81a8dba13dbd15557510e9343132f13139fe2a2696528f69c5ef6007e641b2",
+    "wrapper_sha256": "a5873a426ba376ca2f97172567d09e6402923f3281a40ecfb53e7949bdb174f9",
+    "runner_sha256": "fa8187eeceab8beb6d99c579846f19839568bf86c80ff6b79bddbc246d4fbebc"
+  }
+}

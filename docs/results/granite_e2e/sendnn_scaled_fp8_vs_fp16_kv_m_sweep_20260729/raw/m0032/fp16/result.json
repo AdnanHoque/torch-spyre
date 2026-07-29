@@ -1,0 +1,727 @@
+{
+  "benchmark_script": {
+    "path": "/home/adnan/codex-isolated/fp8_sendnn_kineto_current_20260729/direct_sendnn_fp16_fp8_pair_benchmark_per_axis.py",
+    "sha256": "ed81a8dba13dbd15557510e9343132f13139fe2a2696528f69c5ef6007e641b2"
+  },
+  "compile_statuses": {
+    "compile": "Status OK",
+    "finalize": "Status OK",
+    "load": "Status OK",
+    "parse": "Status OK"
+  },
+  "correctness": {
+    "actual_max": 6.015625,
+    "actual_min": -5.84375,
+    "allclose": true,
+    "atol": 0.25,
+    "cpu_reference_wall_ms": 4.928781,
+    "execute_status": "Status OK",
+    "max_abs_error": 0.14453125,
+    "mean_abs_error": 0.043856386095285416,
+    "passed": true,
+    "reference_max": 5.9609375,
+    "reference_min": -5.77734375,
+    "relative_l2_error": 0.020609667524695396,
+    "relative_l2_limit": 0.03,
+    "rmse": 0.05306466296315193,
+    "rtol": 0.02
+  },
+  "environment": {
+    "DEEPRT_EXPORT_DIR": "/home/adnan/codex-isolated/fp8_sendnn_kineto_current_20260729/runs/granite_kv_m_sweep_20260729_021824/m32_k4096_n1024/fp16/export",
+    "DTCOMPILER_EXPORT_DIR": "/home/adnan/codex-isolated/fp8_sendnn_kineto_current_20260729/runs/granite_kv_m_sweep_20260729_021824/m32_k4096_n1024/fp16/export",
+    "DTCOMPILER_KEEP_EXPORT": "true",
+    "DT_OPT": "autopilot=1",
+    "DXP_LX_FRAC_AVAIL": null,
+    "LX_PLANNING": null,
+    "TORCH_DEVICE_BACKEND_AUTOLOAD": "0"
+  },
+  "graph_contract": "FP16 PrimaryInput -> BatchMatMul",
+  "kernel_event_count": 20,
+  "kernel_mean_us_per_predict": 73.66345,
+  "kernel_total_us": 1473.269,
+  "lifecycle_statuses": {
+    "device_init": "Status OK",
+    "prepare": "Status OK"
+  },
+  "logical_shape": {
+    "K": 4096,
+    "M": 32,
+    "N": 1024
+  },
+  "mode": "fp16",
+  "repetitions": 20,
+  "schema_version": 1,
+  "software": {
+    "platform": "Linux-5.14.0-427.102.1.el9_4.x86_64-x86_64-with-glibc2.39",
+    "python": "3.12.13 (main, Apr 16 2026, 00:00:00) [GCC 14.3.1 20251022 (Red Hat 14.3.1-4)]",
+    "sendnn_distribution": null,
+    "sendnn_module": "/opt/ibm/spyre/runtime/lib/sendnn.cpython-312-x86_64-linux-gnu.so",
+    "torch": "2.10.0+aiu.kineto.1.1.1",
+    "torch_sendnn_distribution": "1.3.0+main.1.1bef083.0"
+  },
+  "supernode_contracts": [
+    {
+      "inputs": [
+        "weight"
+      ],
+      "outputs": 1,
+      "supernode": 0
+    },
+    {
+      "inputs": [
+        "PrepareModel"
+      ],
+      "outputs": 0,
+      "supernode": 1
+    },
+    {
+      "inputs": [
+        "activation"
+      ],
+      "outputs": 1,
+      "supernode": 2
+    }
+  ],
+  "torch_sendnn_module": "/usr/local/lib/python3.12/site-packages/torch_sendnn/__init__.py",
+  "trace_path": "/home/adnan/codex-isolated/fp8_sendnn_kineto_current_20260729/runs/granite_kv_m_sweep_20260729_021824/m32_k4096_n1024/fp16/profile/kineto_trace.json",
+  "trace_summary": {
+    "category_summary": {
+      "Trace": {
+        "count": 2,
+        "duration_us": 33504.293000000005
+      },
+      "gpu_memcpy": {
+        "count": 40,
+        "duration_us": 1760.8659999999998
+      },
+      "gpu_memset": {
+        "count": 40,
+        "duration_us": 409.7689999999999
+      },
+      "kernel": {
+        "count": 20,
+        "duration_us": 1473.269
+      },
+      "privateuse1_driver": {
+        "count": 40,
+        "duration_us": 523.0459999999999
+      },
+      "privateuse1_runtime": {
+        "count": 340,
+        "duration_us": 49730.11099999997
+      }
+    },
+    "kernel_events": [
+      {
+        "category": "kernel",
+        "duration_us": 74.548,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 71.606,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.062,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 73.308,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.517,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 72.496,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 76.577,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 73.416,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 72.585,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 73.504,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 72.222,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.732,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 75.426,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.411,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 73.58,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 71.764,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 71.15,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.852,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 73.808,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.705,
+        "name": "fp16_bmm"
+      }
+    ],
+    "positive_event_count": 482,
+    "privateuse_or_device_events": [
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.17,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.548,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 76.75,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.655,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 71.606,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 73.849,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.17,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.062,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 76.266,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 11.969,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 73.308,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 75.557,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 11.884,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.517,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 76.739,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.295,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 72.496,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 74.718,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 11.879,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 76.577,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 78.798,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.391,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 73.416,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 75.634,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.03,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 72.585,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 74.817,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 11.685,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 73.504,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 75.712,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.195,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 72.222,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 74.442,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.259,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.732,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 76.945,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.228,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 75.426,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 77.649,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 11.717,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.411,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 76.623,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.312,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 73.58,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 75.798,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.522,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 71.764,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 74.128,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.166,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 71.15,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 73.379,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.351,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.852,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 77.072,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.138,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 73.808,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 76.029,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 12.033,
+        "name": "Memcpy (HtoD)"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 74.705,
+        "name": "fp16_bmm"
+      },
+      {
+        "category": "gpu_memcpy",
+        "duration_us": 76.912,
+        "name": "Memcpy (DtoH)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 28.948,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 8.953,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 14.978,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 7.361,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.926,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.869,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.931,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.919,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.696,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.819,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.439,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.881,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.286,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.817,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.624,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 7.082,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.524,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.767,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.389,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.771,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.638,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.914,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.472,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.974,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.467,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.831,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.339,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.878,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.583,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.751,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.54,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.661,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.714,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.744,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.356,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.852,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.361,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 6.88,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 12.804,
+        "name": "Memset (Device)"
+      },
+      {
+        "category": "gpu_memset",
+        "duration_us": 7.03,
+        "name": "Memset (Device)"
+      }
+    ]
+  },
+  "wall_mean_us": 821.132,
+  "wall_total_us": 16422.64,
+  "warmups": 5,
+  "wrapper": {
+    "path": "/home/adnan/codex-isolated/fp8_sendnn_kineto_current_20260729/direct_sendnn_kineto_wrapper.py",
+    "sha256": "a5873a426ba376ca2f97172567d09e6402923f3281a40ecfb53e7949bdb174f9"
+  }
+}

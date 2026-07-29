@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title description">
+<title id="title">FP16 versus scaled FP8 throughput by M</title>
+<desc id="description">Effective matmul TFLOP per second for the Granite 3 8B KV projection at M values from 1 to 2048.</desc>
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;fill:#202124} .small{font-size:14px;fill:#5f6368} .tick{font-size:13px;fill:#5f6368} .axis{stroke:#80868b;stroke-width:1.2} .grid{stroke:#dadce0;stroke-width:1} .series{fill:none;stroke-width:3;stroke-linejoin:round;stroke-linecap:round}
+</style>
+<rect width="1280" height="760" fill="#ffffff"/>
+<text x="52" y="54" font-size="27" font-weight="600">Granite 3 8B KV projection: [M, 4096] @ [4096, 1024]</text>
+<text x="52" y="84" class="small">Mean Kineto device-kernel time; 5 warmups and 20 measured iterations per point</text>
+<line x1="52" y1="116" x2="86" y2="116" stroke="#3568b8" stroke-width="3"/>
+<text x="95" y="121" font-size="14">FP16 BatchMatMul</text>
+<line x1="277" y1="116" x2="311" y2="116" stroke="#d35434" stroke-width="3"/>
+<text x="320" y="121" font-size="14">Scaled FP8, fixed unit scales (Qfp8 + matmul + 2x recovery)</text>
+<line class="grid" x1="104" y1="628.00" x2="1235" y2="628.00"/>
+<text class="tick" x="90" y="633.00" text-anchor="end">0</text>
+<line class="grid" x1="104" y1="559.71" x2="1235" y2="559.71"/>
+<text class="tick" x="90" y="564.71" text-anchor="end">10</text>
+<line class="grid" x1="104" y1="491.43" x2="1235" y2="491.43"/>
+<text class="tick" x="90" y="496.43" text-anchor="end">20</text>
+<line class="grid" x1="104" y1="423.14" x2="1235" y2="423.14"/>
+<text class="tick" x="90" y="428.14" text-anchor="end">30</text>
+<line class="grid" x1="104" y1="354.86" x2="1235" y2="354.86"/>
+<text class="tick" x="90" y="359.86" text-anchor="end">40</text>
+<line class="grid" x1="104" y1="286.57" x2="1235" y2="286.57"/>
+<text class="tick" x="90" y="291.57" text-anchor="end">50</text>
+<line class="grid" x1="104" y1="218.29" x2="1235" y2="218.29"/>
+<text class="tick" x="90" y="223.29" text-anchor="end">60</text>
+<line class="grid" x1="104" y1="150.00" x2="1235" y2="150.00"/>
+<text class="tick" x="90" y="155.00" text-anchor="end">70</text>
+<line class="grid" x1="104.00" y1="150" x2="104.00" y2="628"/>
+<text class="tick" x="104.00" y="654" text-anchor="middle">1</text>
+<line class="grid" x1="206.82" y1="150" x2="206.82" y2="628"/>
+<text class="tick" x="206.82" y="654" text-anchor="middle">2</text>
+<line class="grid" x1="309.64" y1="150" x2="309.64" y2="628"/>
+<text class="tick" x="309.64" y="654" text-anchor="middle">4</text>
+<line class="grid" x1="412.45" y1="150" x2="412.45" y2="628"/>
+<text class="tick" x="412.45" y="654" text-anchor="middle">8</text>
+<line class="grid" x1="515.27" y1="150" x2="515.27" y2="628"/>
+<text class="tick" x="515.27" y="654" text-anchor="middle">16</text>
+<line class="grid" x1="618.09" y1="150" x2="618.09" y2="628"/>
+<text class="tick" x="618.09" y="654" text-anchor="middle">32</text>
+<line class="grid" x1="720.91" y1="150" x2="720.91" y2="628"/>
+<text class="tick" x="720.91" y="654" text-anchor="middle">64</text>
+<line class="grid" x1="823.73" y1="150" x2="823.73" y2="628"/>
+<text class="tick" x="823.73" y="654" text-anchor="middle">128</text>
+<line class="grid" x1="926.55" y1="150" x2="926.55" y2="628"/>
+<text class="tick" x="926.55" y="654" text-anchor="middle">256</text>
+<line class="grid" x1="1029.36" y1="150" x2="1029.36" y2="628"/>
+<text class="tick" x="1029.36" y="654" text-anchor="middle">512</text>
+<line class="grid" x1="1132.18" y1="150" x2="1132.18" y2="628"/>
+<text class="tick" x="1132.18" y="654" text-anchor="middle">1024</text>
+<line class="grid" x1="1235.00" y1="150" x2="1235.00" y2="628"/>
+<text class="tick" x="1235.00" y="654" text-anchor="middle">2048</text>
+<line class="axis" x1="104" y1="628" x2="1235" y2="628"/>
+<line class="axis" x1="104" y1="150" x2="104" y2="628"/>
+<text x="669.50" y="694" font-size="17" text-anchor="middle">M (log2 scale)</text>
+<text x="28" y="389.00" font-size="17" text-anchor="middle" transform="rotate(-90 28 389.00)">Effective matmul throughput (TFLOP/s)</text>
+<polyline class="series" points="104.00,627.09 206.82,626.23 309.64,624.47 412.45,621.01 515.27,615.18 618.09,603.12 720.91,572.50 823.73,523.20 926.55,450.69 1029.36,350.91 1132.18,291.23 1235.00,238.70" stroke="#3568b8"/>
+<circle cx="104.00" cy="627.09" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="206.82" cy="626.23" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="309.64" cy="624.47" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="412.45" cy="621.01" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="515.27" cy="615.18" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="618.09" cy="603.12" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="720.91" cy="572.50" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="823.73" cy="523.20" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="926.55" cy="450.69" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="1029.36" cy="350.91" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="1132.18" cy="291.23" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<circle cx="1235.00" cy="238.70" r="5.2" fill="#ffffff" stroke="#3568b8" stroke-width="2.5"/>
+<polyline class="series" points="104.00,626.14 206.82,624.29 309.64,620.74 412.45,614.51 515.27,604.05 618.09,587.74 720.91,550.40 823.73,494.45 926.55,416.17 1029.36,356.88 1132.18,384.54 1235.00,375.70" stroke="#d35434"/>
+<rect x="99.00" y="621.14" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="201.82" y="619.29" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="304.64" y="615.74" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="407.45" y="609.51" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="510.27" y="599.05" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="613.09" y="582.74" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="715.91" y="545.40" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="818.73" y="489.45" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="921.55" y="411.17" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="1024.36" y="351.88" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="1127.18" y="379.54" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<rect x="1230.00" y="370.70" width="10" height="10" fill="#ffffff" stroke="#d35434" stroke-width="2.5"/>
+<text x="1235" y="733" class="small" text-anchor="end">AIU 1.0 nominal arithmetic peaks at 1.5 GHz: FP16 98.3, FP8 196.6 TFLOP/s</text>
+</svg>
