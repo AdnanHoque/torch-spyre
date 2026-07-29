@@ -88,12 +88,55 @@ scale with duplicated PT arithmetic. Gate/up at `M=2048` reaches 1.73x when
 the surrounding plan is healthy, reinforcing that this is a scheduling and
 feed issue rather than a fundamental FP8 corelet restriction.
 
+## Planner-model boundary
+
+The accepted run logs show `DT_OPT=autopilot=1`, `Sen2Perf`, `RCU Optimizer`,
+and `Spatial Work Division and Pinning Optimization`. The relevant pinned
+DeepTools `ee2f97a` source is:
+
+- `dsm/dsm.cpp:696-815`: selects the RCU optimizer path;
+- `dsm/workOptimizer/baseOptimizer/workdivopt.cpp:1142-1158`: defines
+  `SpUnitEqPerf = product(split factors) * SpUnitUnderUse`;
+- `dsm/workOptimizer/rcuOptimizer/rcuOptimizer.cpp:873-877`: the RCU
+  `getSpUnitUnderuse` implementation is a TODO returning `1.0`;
+- `dsm/workOptimizer/rcuOptimizer/rcuOptimizer.cpp:131-240`: supplies
+  operation/dataflow legality constraints, including no reduction split across
+  corelets;
+- `sharedtools/perfmodel.cpp:2654-2732` and `dxp/dxp.cpp:783-798`: compute
+  per-SDSC ideal-cycle telemetry after the plan is already selected and
+  codegen has run.
+
+The telemetry is:
+
+```text
+ceil(product(positive unpadded dimensions)
+     / (cores * corelets * 8^3 * precision_multiplier))
+```
+
+The precision multiplier is 1 for FP16 and 2 for FP8. Only primary operations
+enter the formula, which is why Qfp8, recovery, relayout, and transfers report
+zero. That is an arithmetic-roof report, not a candidate-plan cost.
+
+There is also a more detailed optional performance-estimator subsystem, but it
+was not enabled in these runs and is scheduled after work assignment rather
+than used to search work-division candidates.
+
 ## Directly observed causes
 
-1. **The compiler costs only the inner matmul.** The emitted ideal-cycle model
-   halves FP8 BatchMatMul cycles, but assigns zero cycles to Qfp8, relayout,
-   and both scale-recovery stages. The optimizer is therefore blind to much of
-   the timed operation.
+1. **The active planner has no quantitative throughput objective.** These runs
+   use the RCU optimizer's spatial-work assignment. Its score is the product
+   of legal split factors times a spatial-unit-underuse term. On this RCU path,
+   `RcuOptimizer::getSpUnitUnderuse` is a TODO that returns `1.0`, so the score
+   reduces to maximizing legal spatial-unit count. The planner does account
+   for legality, dataflow actions, reuse, tensor size, memory capacity, and
+   ownership constraints, but it does not compare predicted cycles or bytes
+   for FP16 versus FP8 candidates or minimize total scaled-operation latency.
+
+   DeepTools separately emits post-plan ideal-cycle telemetry. That arithmetic
+   proxy halves FP8 BatchMatMul cycles and assigns zero to Qfp8, relayout, and
+   both recovery stages, but it does not select the work division. The earlier
+   zero-cycle observation must not be described as the planner treating those
+   stages as free.
 
 2. **Recovery fanout and ownership can be pathological.** Gate/up at `M=512`
    uses the same 32-core, two-corelet FP8 matmul grid as `M=1024`, but its
@@ -140,7 +183,7 @@ values are aligned to the FP8 stick contract.
 1. Add per-stage timing or hardware-counter attribution for Qfp8, BMM,
    recovery 1, recovery 2, and relayout. A contrived unsupported raw-matmul
    API is not required; instrument the actual fissioned operation.
-2. Make the planner cost the full scaled operation: cycles and bytes for
+2. Give the planner a full-operation objective: cycles and bytes for
    Qfp8, each recovery, relayout, synchronization, FP16 output, core/corelet
    fanout, and dynamic-working-set count.
 3. Use gate/up `M=512` as the first causal target. Independently force
