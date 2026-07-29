@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "hardware_scope": "AIU 1.0 / SenLib DD2 only; no 1p5 artifacts or settings",
+  "accepted_runs": {
+    "kv": {
+      "pod": "adnan-spyre-current-pf",
+      "run_root": "/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_kv_m_sweep_20260729_040508",
+      "slim_archive_sha256": "fed192840dacab6f3b3aece4c6648631cacc887b10a1b3d0065a59db9fc47880"
+    },
+    "qo": {
+      "pod": "adnan-cdx-spyre-dev-pf",
+      "run_root": "/home/adnan-cdx/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_qo_m_sweep_20260729_043441",
+      "slim_archive_sha256": "898f07588fda24b8e9f8b4ba7c608289c9dc77bd4e30a00bb87a92d53e803f5f"
+    },
+    "mlp_up": {
+      "pod": "adnan-clc-spyre-dev-pf",
+      "run_root": "/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_up_m_sweep_20260729_040527",
+      "slim_archive_sha256": "a95c5d49c4e8901312675d1f2c782be24bb40451f2bbc2333af10b0224b5c3bf"
+    },
+    "mlp_down": {
+      "pod": "adnan-spyre-dev-pf",
+      "run_root": "/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_down_m_sweep_20260729_040532",
+      "slim_archive_sha256": "7c04985e9c1427ba42bb915a1035ee89be3610b1dd54a2f3736584f2c3fa744f"
+    }
+  },
+  "accepted_case_count": 96,
+  "kineto_events_per_case": 20,
+  "helper_sha256": {
+    "archive": "373646629d6eae3f6be4c5726ae6b5fc4385c55d1332e13d787ecc0e3d9ce176",
+    "benchmark": "3536cfcb912779e2f04013df04d534e0c11b2d38a43152ca235e21b713bbd046",
+    "wrapper": "a5873a426ba376ca2f97172567d09e6402923f3281a40ecfb53e7949bdb174f9",
+    "runner": "7c69ee115d521b184c5f8c974232c4c5c30fbe9105e98f2ccb6cfa1fda9ae5d1"
+  },
+  "qo_isolated_environment_archive_sha256": "d7a9b419c5694e67efc4d55e108f7320cb20c43552c3a784c304d6b40edfe491",
+  "mlp_up_transition_repeat": {
+    "pod": "adnan-clc-spyre-dev-pf",
+    "run_root": "/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_up_m512_m1024_repeat2_20260729_041803",
+    "archive_sha256": "af30e7cb30b81380aa19d2f7b2fb7116f28e7a31e1c83acbe25a4672135b2977"
+  },
+  "excluded_partial_runs": [
+    {
+      "pod": "adnan-cdx-spyre-dev-pf",
+      "run_root": "/home/adnan-cdx/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_qo_m_sweep_20260729_042930",
+      "reason": "interpreter/runtime teardown hang after completed M=16 FP16 result; entire partial sweep excluded"
+    },
+    {
+      "pod": "adnan-clc-spyre-dev-pf",
+      "run_root": "/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_up_m512_m1024_repeat_20260729_041430",
+      "reason": "focused-repeat profiler teardown hang; excluded and repeated successfully with one process per case"
+    }
+  ]
+}

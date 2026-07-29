@@ -1,0 +1,5 @@
+M	mode	exit_status	result
+512	fp16	0	/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_up_m512_m1024_repeat2_20260729_041803/m512_k4096_n12800/fp16/profile/result.json
+512	fp8	0	/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_up_m512_m1024_repeat2_20260729_041803/m512_k4096_n12800/fp8/profile/result.json
+1024	fp16	0	/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_up_m512_m1024_repeat2_20260729_041803/m1024_k4096_n12800/fp16/profile/result.json
+1024	fp8	0	/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_up_m512_m1024_repeat2_20260729_041803/m1024_k4096_n12800/fp8/profile/result.json

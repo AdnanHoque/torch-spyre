@@ -1,0 +1,13 @@
+2026-07-29T04:18:03,452679409+00:00
+adnan-clc-spyre-dev-pf
+run_root=/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_up_m512_m1024_repeat2_20260729_041803
+baseline_root=/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_up_m_sweep_20260729_040527
+prior_repeat_root=/home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/runs/granite_mlp_up_m512_m1024_repeat_20260729_041430
+shape_label=mlp_up
+logical_shape=[M,4096]@[4096,12800]
+m_values=512,1024
+warmups=5
+repetitions=20
+case_process_isolation=one_oc_exec_per_case
+benchmark_sha256=3536cfcb912779e2f04013df04d534e0c11b2d38a43152ca235e21b713bbd046  /home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/direct_sendnn_fp16_fp8_pair_benchmark_per_axis.py
+wrapper_sha256=a5873a426ba376ca2f97172567d09e6402923f3281a40ecfb53e7949bdb174f9  /home/adnan/codex-isolated/fp8_sendnn_linear_sweeps_20260729/direct_sendnn_kineto_wrapper.py

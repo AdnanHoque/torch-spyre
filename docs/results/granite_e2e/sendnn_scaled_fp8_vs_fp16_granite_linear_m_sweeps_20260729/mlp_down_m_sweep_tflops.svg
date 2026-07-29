@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="650" viewBox="0 0 920 650" role="img" aria-labelledby="title description">
+<title id="title">down FP16 versus scaled FP8 throughput</title>
+<desc id="description">Effective TFLOP per second over M for [M,12800]@[12800,4096].</desc>
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;fill:#202124}.small{font-size:13px;fill:#5f6368}.tick{font-size:11px;fill:#5f6368}.axis{stroke:#80868b;stroke-width:1.1}.grid{stroke:#e4e7eb;stroke-width:1}.series{fill:none;stroke-width:2.7;stroke-linejoin:round;stroke-linecap:round}
+</style>
+<rect width="920" height="650" fill="#fff"/>
+<text x="42" y="43" font-size="24" font-weight="600">Granite 3 8B down: [M,12800]@[12800,4096]</text>
+<text x="42" y="71" class="small">Mean Kineto device-kernel time; 5 warmups and 20 iterations</text>
+<line x1="42" y1="99" x2="72" y2="99" stroke="#3568b8" stroke-width="3"/>
+<text x="80" y="104" font-size="13">FP16 BatchMatMul</text>
+<line x1="242" y1="99" x2="272" y2="99" stroke="#d35434" stroke-width="3"/>
+<text x="280" y="104" font-size="13">Scaled FP8 pipeline (fixed unit per-axis scales)</text>
+<line class="grid" x1="90.00" y1="542.00" x2="877.00" y2="542.00"/>
+<text class="tick" x="81.00" y="546.00" text-anchor="end">0</text>
+<line class="grid" x1="90.00" y1="461.00" x2="877.00" y2="461.00"/>
+<text class="tick" x="81.00" y="465.00" text-anchor="end">20</text>
+<line class="grid" x1="90.00" y1="380.00" x2="877.00" y2="380.00"/>
+<text class="tick" x="81.00" y="384.00" text-anchor="end">40</text>
+<line class="grid" x1="90.00" y1="299.00" x2="877.00" y2="299.00"/>
+<text class="tick" x="81.00" y="303.00" text-anchor="end">60</text>
+<line class="grid" x1="90.00" y1="218.00" x2="877.00" y2="218.00"/>
+<text class="tick" x="81.00" y="222.00" text-anchor="end">80</text>
+<line class="grid" x1="90.00" y1="137.00" x2="877.00" y2="137.00"/>
+<text class="tick" x="81.00" y="141.00" text-anchor="end">100</text>
+<line class="grid" x1="90.00" y1="137.00" x2="90.00" y2="542.00"/>
+<text class="tick" x="90.00" y="562.00" text-anchor="middle">1</text>
+<line class="grid" x1="161.55" y1="137.00" x2="161.55" y2="542.00"/>
+<line class="grid" x1="233.09" y1="137.00" x2="233.09" y2="542.00"/>
+<text class="tick" x="233.09" y="562.00" text-anchor="middle">4</text>
+<line class="grid" x1="304.64" y1="137.00" x2="304.64" y2="542.00"/>
+<line class="grid" x1="376.18" y1="137.00" x2="376.18" y2="542.00"/>
+<text class="tick" x="376.18" y="562.00" text-anchor="middle">16</text>
+<line class="grid" x1="447.73" y1="137.00" x2="447.73" y2="542.00"/>
+<line class="grid" x1="519.27" y1="137.00" x2="519.27" y2="542.00"/>
+<text class="tick" x="519.27" y="562.00" text-anchor="middle">64</text>
+<line class="grid" x1="590.82" y1="137.00" x2="590.82" y2="542.00"/>
+<line class="grid" x1="662.36" y1="137.00" x2="662.36" y2="542.00"/>
+<text class="tick" x="662.36" y="562.00" text-anchor="middle">256</text>
+<line class="grid" x1="733.91" y1="137.00" x2="733.91" y2="542.00"/>
+<line class="grid" x1="805.45" y1="137.00" x2="805.45" y2="542.00"/>
+<text class="tick" x="805.45" y="562.00" text-anchor="middle">1024</text>
+<line class="grid" x1="877.00" y1="137.00" x2="877.00" y2="542.00"/>
+<text class="tick" x="877.00" y="562.00" text-anchor="middle">2048</text>
+<line class="axis" x1="90.00" y1="542.00" x2="877.00" y2="542.00"/>
+<line class="axis" x1="90.00" y1="137.00" x2="90.00" y2="542.00"/>
+<text x="483.50" y="586.00" class="small" text-anchor="middle">M (log2 scale)</text>
+<text x="43.00" y="339.50" class="small" text-anchor="middle" transform="rotate(-90 43.00 339.50)">Effective TFLOP/s</text>
+<polyline class="series" points="90.00,541.41 161.55,540.84 233.09,539.81 304.64,537.31 376.18,532.92 447.73,524.35 519.27,504.57 590.82,464.88 662.36,399.44 733.91,325.32 805.45,295.74 877.00,275.88" stroke="#3568b8"/>
+<circle cx="90.00" cy="541.41" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="161.55" cy="540.84" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="233.09" cy="539.81" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="304.64" cy="537.31" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="376.18" cy="532.92" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="447.73" cy="524.35" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="519.27" cy="504.57" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="590.82" cy="464.88" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="662.36" cy="399.44" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="733.91" cy="325.32" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="805.45" cy="295.74" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="877.00" cy="275.88" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<polyline class="series" points="90.00,540.85 161.55,539.71 233.09,537.42 304.64,533.78 376.18,527.04 447.73,510.03 519.27,477.83 590.82,424.06 662.36,352.40 733.91,282.47 805.45,247.34 877.00,247.78" stroke="#d35434"/>
+<rect x="86.00" y="536.85" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="157.55" y="535.71" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="229.09" y="533.42" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="300.64" y="529.78" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="372.18" y="523.04" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="443.73" y="506.03" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="515.27" y="473.83" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="586.82" y="420.06" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="658.36" y="348.40" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="729.91" y="278.47" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="801.45" y="243.34" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="873.00" y="243.78" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<text x="890" y="633" class="small" text-anchor="end">Effective throughput = 2*M*K*N / kernel time</text>
+</svg>

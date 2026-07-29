@@ -1,0 +1,259 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1080" viewBox="0 0 1500 1080" role="img" aria-labelledby="title description">
+<title id="title">Granite 3 8B FP16 versus scaled FP8 throughput</title>
+<desc id="description">Four panels show effective TFLOP per second over M for all unique single-device Granite linear projection shapes. Each panel has its own vertical scale.</desc>
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;fill:#202124}.small{font-size:13px;fill:#5f6368}.tick{font-size:11px;fill:#5f6368}.axis{stroke:#80868b;stroke-width:1.1}.grid{stroke:#e4e7eb;stroke-width:1}.series{fill:none;stroke-width:2.7;stroke-linejoin:round;stroke-linecap:round}
+</style>
+<rect width="1500" height="1080" fill="#fff"/>
+<text x="55" y="50" font-size="28" font-weight="600">Granite 3 8B TP1 linear projections: FP16 vs scaled FP8</text>
+<text x="55" y="80" class="small">Mean Kineto device-kernel time; 5 warmups and 20 measured iterations; each panel uses its own y-axis scale</text>
+<line x1="55" y1="110" x2="89" y2="110" stroke="#3568b8" stroke-width="3"/>
+<text x="98" y="115" font-size="14">FP16 BatchMatMul</text>
+<line x1="270" y1="110" x2="304" y2="110" stroke="#d35434" stroke-width="3"/>
+<text x="313" y="115" font-size="14">Scaled FP8 pipeline (fixed unit per-axis scales)</text>
+<text x="52.00" y="165.00" font-size="18" font-weight="600">K/V: [M,4096]@[4096,1024]</text>
+<line class="grid" x1="105.00" y1="507.00" x2="727.00" y2="507.00"/>
+<text class="tick" x="96.00" y="511.00" text-anchor="end">0</text>
+<line class="grid" x1="105.00" y1="428.50" x2="727.00" y2="428.50"/>
+<text class="tick" x="96.00" y="432.50" text-anchor="end">20</text>
+<line class="grid" x1="105.00" y1="350.00" x2="727.00" y2="350.00"/>
+<text class="tick" x="96.00" y="354.00" text-anchor="end">40</text>
+<line class="grid" x1="105.00" y1="271.50" x2="727.00" y2="271.50"/>
+<text class="tick" x="96.00" y="275.50" text-anchor="end">60</text>
+<line class="grid" x1="105.00" y1="193.00" x2="727.00" y2="193.00"/>
+<text class="tick" x="96.00" y="197.00" text-anchor="end">80</text>
+<line class="grid" x1="105.00" y1="193.00" x2="105.00" y2="507.00"/>
+<text class="tick" x="105.00" y="527.00" text-anchor="middle">1</text>
+<line class="grid" x1="161.55" y1="193.00" x2="161.55" y2="507.00"/>
+<line class="grid" x1="218.09" y1="193.00" x2="218.09" y2="507.00"/>
+<text class="tick" x="218.09" y="527.00" text-anchor="middle">4</text>
+<line class="grid" x1="274.64" y1="193.00" x2="274.64" y2="507.00"/>
+<line class="grid" x1="331.18" y1="193.00" x2="331.18" y2="507.00"/>
+<text class="tick" x="331.18" y="527.00" text-anchor="middle">16</text>
+<line class="grid" x1="387.73" y1="193.00" x2="387.73" y2="507.00"/>
+<line class="grid" x1="444.27" y1="193.00" x2="444.27" y2="507.00"/>
+<text class="tick" x="444.27" y="527.00" text-anchor="middle">64</text>
+<line class="grid" x1="500.82" y1="193.00" x2="500.82" y2="507.00"/>
+<line class="grid" x1="557.36" y1="193.00" x2="557.36" y2="507.00"/>
+<text class="tick" x="557.36" y="527.00" text-anchor="middle">256</text>
+<line class="grid" x1="613.91" y1="193.00" x2="613.91" y2="507.00"/>
+<line class="grid" x1="670.45" y1="193.00" x2="670.45" y2="507.00"/>
+<text class="tick" x="670.45" y="527.00" text-anchor="middle">1024</text>
+<line class="grid" x1="727.00" y1="193.00" x2="727.00" y2="507.00"/>
+<text class="tick" x="727.00" y="527.00" text-anchor="middle">2048</text>
+<line class="axis" x1="105.00" y1="507.00" x2="727.00" y2="507.00"/>
+<line class="axis" x1="105.00" y1="193.00" x2="105.00" y2="507.00"/>
+<text x="416.00" y="551.00" class="small" text-anchor="middle">M (log2 scale)</text>
+<text x="58.00" y="350.00" class="small" text-anchor="middle" transform="rotate(-90 58.00 350.00)">Effective TFLOP/s</text>
+<polyline class="series" points="105.00,506.47 161.55,505.98 218.09,505.00 274.64,503.01 331.18,499.59 387.73,492.91 444.27,475.13 500.82,446.48 557.36,405.19 613.91,347.15 670.45,313.34 727.00,283.31" stroke="#3568b8"/>
+<circle cx="105.00" cy="506.47" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="161.55" cy="505.98" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="218.09" cy="505.00" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="274.64" cy="503.01" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="331.18" cy="499.59" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="387.73" cy="492.91" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="444.27" cy="475.13" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="500.82" cy="446.48" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="557.36" cy="405.19" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="613.91" cy="347.15" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="670.45" cy="313.34" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="727.00" cy="283.31" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<polyline class="series" points="105.00,505.93 161.55,504.85 218.09,502.87 274.64,499.35 331.18,493.16 387.73,484.08 444.27,462.46 500.82,429.58 557.36,384.56 613.91,351.11 670.45,366.78 727.00,361.98" stroke="#d35434"/>
+<rect x="101.00" y="501.93" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="157.55" y="500.85" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="214.09" y="498.87" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="270.64" y="495.35" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="327.18" y="489.16" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="383.73" y="480.08" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="440.27" y="458.46" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="496.82" y="425.58" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="553.36" y="380.56" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="609.91" y="347.11" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="666.45" y="362.78" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="723.00" y="357.98" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<text x="767.00" y="165.00" font-size="18" font-weight="600">Q/O: [M,4096]@[4096,4096]</text>
+<line class="grid" x1="820.00" y1="507.00" x2="1442.00" y2="507.00"/>
+<text class="tick" x="811.00" y="511.00" text-anchor="end">0</text>
+<line class="grid" x1="820.00" y1="428.50" x2="1442.00" y2="428.50"/>
+<text class="tick" x="811.00" y="432.50" text-anchor="end">20</text>
+<line class="grid" x1="820.00" y1="350.00" x2="1442.00" y2="350.00"/>
+<text class="tick" x="811.00" y="354.00" text-anchor="end">40</text>
+<line class="grid" x1="820.00" y1="271.50" x2="1442.00" y2="271.50"/>
+<text class="tick" x="811.00" y="275.50" text-anchor="end">60</text>
+<line class="grid" x1="820.00" y1="193.00" x2="1442.00" y2="193.00"/>
+<text class="tick" x="811.00" y="197.00" text-anchor="end">80</text>
+<line class="grid" x1="820.00" y1="193.00" x2="820.00" y2="507.00"/>
+<text class="tick" x="820.00" y="527.00" text-anchor="middle">1</text>
+<line class="grid" x1="876.55" y1="193.00" x2="876.55" y2="507.00"/>
+<line class="grid" x1="933.09" y1="193.00" x2="933.09" y2="507.00"/>
+<text class="tick" x="933.09" y="527.00" text-anchor="middle">4</text>
+<line class="grid" x1="989.64" y1="193.00" x2="989.64" y2="507.00"/>
+<line class="grid" x1="1046.18" y1="193.00" x2="1046.18" y2="507.00"/>
+<text class="tick" x="1046.18" y="527.00" text-anchor="middle">16</text>
+<line class="grid" x1="1102.73" y1="193.00" x2="1102.73" y2="507.00"/>
+<line class="grid" x1="1159.27" y1="193.00" x2="1159.27" y2="507.00"/>
+<text class="tick" x="1159.27" y="527.00" text-anchor="middle">64</text>
+<line class="grid" x1="1215.82" y1="193.00" x2="1215.82" y2="507.00"/>
+<line class="grid" x1="1272.36" y1="193.00" x2="1272.36" y2="507.00"/>
+<text class="tick" x="1272.36" y="527.00" text-anchor="middle">256</text>
+<line class="grid" x1="1328.91" y1="193.00" x2="1328.91" y2="507.00"/>
+<line class="grid" x1="1385.45" y1="193.00" x2="1385.45" y2="507.00"/>
+<text class="tick" x="1385.45" y="527.00" text-anchor="middle">1024</text>
+<line class="grid" x1="1442.00" y1="193.00" x2="1442.00" y2="507.00"/>
+<text class="tick" x="1442.00" y="527.00" text-anchor="middle">2048</text>
+<line class="axis" x1="820.00" y1="507.00" x2="1442.00" y2="507.00"/>
+<line class="axis" x1="820.00" y1="193.00" x2="820.00" y2="507.00"/>
+<text x="1131.00" y="551.00" class="small" text-anchor="middle">M (log2 scale)</text>
+<text x="773.00" y="350.00" class="small" text-anchor="middle" transform="rotate(-90 773.00 350.00)">Effective TFLOP/s</text>
+<polyline class="series" points="820.00,506.43 876.55,505.86 933.09,504.76 989.64,502.95 1046.18,498.54 1102.73,489.90 1159.27,469.42 1215.82,440.58 1272.36,386.14 1328.91,314.14 1385.45,284.02 1442.00,271.18" stroke="#3568b8"/>
+<circle cx="820.00" cy="506.43" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="876.55" cy="505.86" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="933.09" cy="504.76" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="989.64" cy="502.95" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1046.18" cy="498.54" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1102.73" cy="489.90" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1159.27" cy="469.42" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1215.82" cy="440.58" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1272.36" cy="386.14" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1328.91" cy="314.14" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1385.45" cy="284.02" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1442.00" cy="271.18" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<polyline class="series" points="820.00,505.82 876.55,504.68 933.09,502.47 989.64,498.51 1046.18,491.87 1102.73,474.90 1159.27,447.05 1215.82,418.11 1272.36,383.28 1328.91,344.30 1385.45,334.76 1442.00,345.25" stroke="#d35434"/>
+<rect x="816.00" y="501.82" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="872.55" y="500.68" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="929.09" y="498.47" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="985.64" y="494.51" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1042.18" y="487.87" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1098.73" y="470.90" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1155.27" y="443.05" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1211.82" y="414.11" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1268.36" y="379.28" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1324.91" y="340.30" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1381.45" y="330.76" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1438.00" y="341.25" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<text x="52.00" y="600.00" font-size="18" font-weight="600">gate/up: [M,4096]@[4096,12800]</text>
+<line class="grid" x1="105.00" y1="942.00" x2="727.00" y2="942.00"/>
+<text class="tick" x="96.00" y="946.00" text-anchor="end">0</text>
+<line class="grid" x1="105.00" y1="879.20" x2="727.00" y2="879.20"/>
+<text class="tick" x="96.00" y="883.20" text-anchor="end">20</text>
+<line class="grid" x1="105.00" y1="816.40" x2="727.00" y2="816.40"/>
+<text class="tick" x="96.00" y="820.40" text-anchor="end">40</text>
+<line class="grid" x1="105.00" y1="753.60" x2="727.00" y2="753.60"/>
+<text class="tick" x="96.00" y="757.60" text-anchor="end">60</text>
+<line class="grid" x1="105.00" y1="690.80" x2="727.00" y2="690.80"/>
+<text class="tick" x="96.00" y="694.80" text-anchor="end">80</text>
+<line class="grid" x1="105.00" y1="628.00" x2="727.00" y2="628.00"/>
+<text class="tick" x="96.00" y="632.00" text-anchor="end">100</text>
+<line class="grid" x1="105.00" y1="628.00" x2="105.00" y2="942.00"/>
+<text class="tick" x="105.00" y="962.00" text-anchor="middle">1</text>
+<line class="grid" x1="161.55" y1="628.00" x2="161.55" y2="942.00"/>
+<line class="grid" x1="218.09" y1="628.00" x2="218.09" y2="942.00"/>
+<text class="tick" x="218.09" y="962.00" text-anchor="middle">4</text>
+<line class="grid" x1="274.64" y1="628.00" x2="274.64" y2="942.00"/>
+<line class="grid" x1="331.18" y1="628.00" x2="331.18" y2="942.00"/>
+<text class="tick" x="331.18" y="962.00" text-anchor="middle">16</text>
+<line class="grid" x1="387.73" y1="628.00" x2="387.73" y2="942.00"/>
+<line class="grid" x1="444.27" y1="628.00" x2="444.27" y2="942.00"/>
+<text class="tick" x="444.27" y="962.00" text-anchor="middle">64</text>
+<line class="grid" x1="500.82" y1="628.00" x2="500.82" y2="942.00"/>
+<line class="grid" x1="557.36" y1="628.00" x2="557.36" y2="942.00"/>
+<text class="tick" x="557.36" y="962.00" text-anchor="middle">256</text>
+<line class="grid" x1="613.91" y1="628.00" x2="613.91" y2="942.00"/>
+<line class="grid" x1="670.45" y1="628.00" x2="670.45" y2="942.00"/>
+<text class="tick" x="670.45" y="962.00" text-anchor="middle">1024</text>
+<line class="grid" x1="727.00" y1="628.00" x2="727.00" y2="942.00"/>
+<text class="tick" x="727.00" y="962.00" text-anchor="middle">2048</text>
+<line class="axis" x1="105.00" y1="942.00" x2="727.00" y2="942.00"/>
+<line class="axis" x1="105.00" y1="628.00" x2="105.00" y2="942.00"/>
+<text x="416.00" y="986.00" class="small" text-anchor="middle">M (log2 scale)</text>
+<text x="58.00" y="785.00" class="small" text-anchor="middle" transform="rotate(-90 58.00 785.00)">Effective TFLOP/s</text>
+<polyline class="series" points="105.00,941.60 161.55,941.21 218.09,940.41 274.64,938.82 331.18,935.64 387.73,930.30 444.27,910.91 500.82,889.31 557.36,843.65 613.91,787.58 670.45,759.72 727.00,736.58" stroke="#3568b8"/>
+<circle cx="105.00" cy="941.60" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="161.55" cy="941.21" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="218.09" cy="940.41" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="274.64" cy="938.82" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="331.18" cy="935.64" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="387.73" cy="930.30" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="444.27" cy="910.91" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="500.82" cy="889.31" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="557.36" cy="843.65" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="613.91" cy="787.58" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="670.45" cy="759.72" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="727.00" cy="736.58" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<polyline class="series" points="105.00,941.24 161.55,940.48 218.09,939.16 274.64,936.65 331.18,931.67 387.73,922.42 444.27,900.81 500.82,882.24 557.36,865.14 613.91,849.46 670.45,658.49 727.00,661.10" stroke="#d35434"/>
+<rect x="101.00" y="937.24" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="157.55" y="936.48" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="214.09" y="935.16" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="270.64" y="932.65" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="327.18" y="927.67" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="383.73" y="918.42" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="440.27" y="896.81" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="496.82" y="878.24" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="553.36" y="861.14" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="609.91" y="845.46" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="666.45" y="654.49" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="723.00" y="657.10" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<text x="767.00" y="600.00" font-size="18" font-weight="600">down: [M,12800]@[12800,4096]</text>
+<line class="grid" x1="820.00" y1="942.00" x2="1442.00" y2="942.00"/>
+<text class="tick" x="811.00" y="946.00" text-anchor="end">0</text>
+<line class="grid" x1="820.00" y1="879.20" x2="1442.00" y2="879.20"/>
+<text class="tick" x="811.00" y="883.20" text-anchor="end">20</text>
+<line class="grid" x1="820.00" y1="816.40" x2="1442.00" y2="816.40"/>
+<text class="tick" x="811.00" y="820.40" text-anchor="end">40</text>
+<line class="grid" x1="820.00" y1="753.60" x2="1442.00" y2="753.60"/>
+<text class="tick" x="811.00" y="757.60" text-anchor="end">60</text>
+<line class="grid" x1="820.00" y1="690.80" x2="1442.00" y2="690.80"/>
+<text class="tick" x="811.00" y="694.80" text-anchor="end">80</text>
+<line class="grid" x1="820.00" y1="628.00" x2="1442.00" y2="628.00"/>
+<text class="tick" x="811.00" y="632.00" text-anchor="end">100</text>
+<line class="grid" x1="820.00" y1="628.00" x2="820.00" y2="942.00"/>
+<text class="tick" x="820.00" y="962.00" text-anchor="middle">1</text>
+<line class="grid" x1="876.55" y1="628.00" x2="876.55" y2="942.00"/>
+<line class="grid" x1="933.09" y1="628.00" x2="933.09" y2="942.00"/>
+<text class="tick" x="933.09" y="962.00" text-anchor="middle">4</text>
+<line class="grid" x1="989.64" y1="628.00" x2="989.64" y2="942.00"/>
+<line class="grid" x1="1046.18" y1="628.00" x2="1046.18" y2="942.00"/>
+<text class="tick" x="1046.18" y="962.00" text-anchor="middle">16</text>
+<line class="grid" x1="1102.73" y1="628.00" x2="1102.73" y2="942.00"/>
+<line class="grid" x1="1159.27" y1="628.00" x2="1159.27" y2="942.00"/>
+<text class="tick" x="1159.27" y="962.00" text-anchor="middle">64</text>
+<line class="grid" x1="1215.82" y1="628.00" x2="1215.82" y2="942.00"/>
+<line class="grid" x1="1272.36" y1="628.00" x2="1272.36" y2="942.00"/>
+<text class="tick" x="1272.36" y="962.00" text-anchor="middle">256</text>
+<line class="grid" x1="1328.91" y1="628.00" x2="1328.91" y2="942.00"/>
+<line class="grid" x1="1385.45" y1="628.00" x2="1385.45" y2="942.00"/>
+<text class="tick" x="1385.45" y="962.00" text-anchor="middle">1024</text>
+<line class="grid" x1="1442.00" y1="628.00" x2="1442.00" y2="942.00"/>
+<text class="tick" x="1442.00" y="962.00" text-anchor="middle">2048</text>
+<line class="axis" x1="820.00" y1="942.00" x2="1442.00" y2="942.00"/>
+<line class="axis" x1="820.00" y1="628.00" x2="820.00" y2="942.00"/>
+<text x="1131.00" y="986.00" class="small" text-anchor="middle">M (log2 scale)</text>
+<text x="773.00" y="785.00" class="small" text-anchor="middle" transform="rotate(-90 773.00 785.00)">Effective TFLOP/s</text>
+<polyline class="series" points="820.00,941.54 876.55,941.10 933.09,940.30 989.64,938.36 1046.18,934.96 1102.73,928.31 1159.27,912.98 1215.82,882.21 1272.36,831.47 1328.91,774.00 1385.45,751.08 1442.00,735.67" stroke="#3568b8"/>
+<circle cx="820.00" cy="941.54" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="876.55" cy="941.10" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="933.09" cy="940.30" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="989.64" cy="938.36" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1046.18" cy="934.96" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1102.73" cy="928.31" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1159.27" cy="912.98" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1215.82" cy="882.21" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1272.36" cy="831.47" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1328.91" cy="774.00" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1385.45" cy="751.08" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<circle cx="1442.00" cy="735.67" r="4.2" fill="#fff" stroke="#3568b8" stroke-width="2"/>
+<polyline class="series" points="820.00,941.11 876.55,940.23 933.09,938.45 989.64,935.62 1046.18,930.40 1102.73,917.22 1159.27,892.25 1215.82,850.56 1272.36,795.00 1328.91,740.78 1385.45,713.55 1442.00,713.89" stroke="#d35434"/>
+<rect x="816.00" y="937.11" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="872.55" y="936.23" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="929.09" y="934.45" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="985.64" y="931.62" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1042.18" y="926.40" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1098.73" y="913.22" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1155.27" y="888.25" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1211.82" y="846.56" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1268.36" y="791.00" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1324.91" y="736.78" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1381.45" y="709.55" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<rect x="1438.00" y="709.89" width="8" height="8" fill="#fff" stroke="#d35434" stroke-width="2"/>
+<text x="1460" y="1050" class="small" text-anchor="end">AIU 1.0 raw PT arithmetic roofs at 1.5 GHz (not scaled-pipeline roofs): FP16 98.3, FP8 196.6 TFLOP/s</text>
+</svg>
