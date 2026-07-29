@@ -40,6 +40,10 @@ The complete 48-pair table is in
 [`linear_shape_m_sweep_summary.md`](linear_shape_m_sweep_summary.md). CSV and
 JSON versions retain all event statistics and correctness fields.
 
+The theory-to-measurement comparison, controlled one-versus-two-corelet
+diagnostics, ranked causes, and closure plan are in
+[`PERFORMANCE_GAP_DIAGNOSIS.md`](PERFORMANCE_GAP_DIAGNOSIS.md).
+
 ## Gate/up M=512 to M=1024 transition
 
 The large gate/up FP8 jump was independently repeated with fresh compilation
