@@ -1132,19 +1132,19 @@
     "fp16": {
       "dt_opt": "autopilot=1",
       "kernel": "fp16_bmm",
-      "label": "FP16 BatchMatMul",
+      "label": "FP16 matmul",
       "mode": "fp16"
     },
     "fp8_baseline": {
       "dt_opt": "autopilot=1",
       "kernel": "fp8_scaled_bmm-Qfp8",
-      "label": "Stock scaled FP8",
+      "label": "Baseline FP8 matmul",
       "mode": "fp8"
     },
     "fp8_weipreload0": {
       "dt_opt": "autopilot=1,weipreload=0",
       "kernel": "fp8_scaled_bmm-Qfp8",
-      "label": "Scaled FP8, weight preload disabled",
+      "label": "Optimized FP8 matmul",
       "mode": "fp8"
     }
   }

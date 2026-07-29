@@ -20,19 +20,19 @@ VARIANTS = {
         "mode": "fp16",
         "dt_opt": "autopilot=1",
         "kernel": "fp16_bmm",
-        "label": "FP16 BatchMatMul",
+        "label": "FP16 matmul",
     },
     "fp8_baseline": {
         "mode": "fp8",
         "dt_opt": "autopilot=1",
         "kernel": "fp8_scaled_bmm-Qfp8",
-        "label": "Stock scaled FP8",
+        "label": "Baseline FP8 matmul",
     },
     "fp8_weipreload0": {
         "mode": "fp8",
         "dt_opt": "autopilot=1,weipreload=0",
         "kernel": "fp8_scaled_bmm-Qfp8",
-        "label": "Scaled FP8, weight preload disabled",
+        "label": "Optimized FP8 matmul",
     },
 }
 
@@ -286,7 +286,7 @@ def rounded_axis_max(maximum: float) -> tuple[float, float]:
 
 def write_chart(rows: list[dict], path: Path) -> None:
     width, height = 980, 680
-    left, right, top, bottom = 88, 946, 142, 592
+    left, right, top, bottom = 88, 946, 118, 592
     plot_width = right - left
     plot_height = bottom - top
     y_max, y_step = rounded_axis_max(
@@ -308,9 +308,9 @@ def write_chart(rows: list[dict], path: Path) -> None:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
         f'height="{height}" viewBox="0 0 {width} {height}" role="img" '
         'aria-labelledby="title description">',
-        '<title id="title">Q/O FP8 weight-preload PoC throughput</title>',
+        '<title id="title">Q/O matmul performance</title>',
         '<desc id="description">Effective TFLOP per second over M for FP16, '
-        "stock scaled FP8, and scaled FP8 with weight preload disabled.</desc>",
+        "baseline FP8, and optimized FP8 matmul.</desc>",
         "<style>",
         "text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
         "fill:#202124}.small{font-size:13px;fill:#5f6368}"
@@ -321,9 +321,9 @@ def write_chart(rows: list[dict], path: Path) -> None:
         "</style>",
         f'<rect width="{width}" height="{height}" fill="#fff"/>',
         '<text x="42" y="43" font-size="25" font-weight="600">'
-        "Granite 3 8B Q/O: closing the scaled-FP8 planner cliff</text>",
-        '<text x="42" y="72" class="small">[M,4096] @ [4096,4096]; '
-        "mean Kineto device-kernel time; 5 warmups + 20 iterations; DD2</text>",
+        "Q/O Matmul Performance</text>",
+        '<text x="42" y="70" class="small">'
+        "Granite 3 8B · K=N=4096</text>",
     ]
 
     legend_x = 42
@@ -332,9 +332,9 @@ def write_chart(rows: list[dict], path: Path) -> None:
         label = VARIANTS[variant_name]["label"]
         parts.extend(
             [
-                f'<line x1="{legend_x}" y1="104" x2="{legend_x + 30}" '
-                f'y2="104" stroke="{color}" stroke-width="3"/>',
-                f'<text x="{legend_x + 38}" y="109" font-size="13">'
+                f'<line x1="{legend_x}" y1="91" x2="{legend_x + 30}" '
+                f'y2="91" stroke="{color}" stroke-width="3"/>',
+                f'<text x="{legend_x + 38}" y="96" font-size="13">'
                 f"{escape(label)}</text>",
             ]
         )
@@ -369,22 +369,11 @@ def write_chart(rows: list[dict], path: Path) -> None:
             f'x2="{right}" y2="{bottom}"/>',
             f'<line class="axis" x1="{left}" y1="{top}" '
             f'x2="{left}" y2="{bottom}"/>',
-            f'<text x="{(left + right) / 2:.2f}" y="642" class="small" '
-            'text-anchor="middle">M (log2 scale)</text>',
+            f'<text x="{(left + right) / 2:.2f}" y="638" class="small" '
+            'text-anchor="middle">M (log scale)</text>',
             f'<text x="23" y="{(top + bottom) / 2:.2f}" class="small" '
             f'text-anchor="middle" transform="rotate(-90 23 '
-            f'{(top + bottom) / 2:.2f})">Effective TFLOP/s</text>',
-        ]
-    )
-
-    breakpoint_x = xpos(128)
-    parts.extend(
-        [
-            f'<line x1="{breakpoint_x:.2f}" y1="{top}" '
-            f'x2="{breakpoint_x:.2f}" y2="{bottom}" stroke="#6f7378" '
-            'stroke-width="1.5" stroke-dasharray="5 5"/>',
-            f'<text x="{breakpoint_x + 8:.2f}" y="{top + 17}" '
-            'class="small">stock recovery-2 cliff begins</text>',
+            f'{(top + bottom) / 2:.2f})">TFLOP/s</text>',
         ]
     )
 
@@ -422,13 +411,7 @@ def write_chart(rows: list[dict], path: Path) -> None:
                     f'<polygon points="{points}" fill="#fff" '
                     f'stroke="{color}" stroke-width="2"/>'
                 )
-    parts.extend(
-        [
-            '<text x="946" y="665" class="small" text-anchor="end">'
-            "Effective throughput = 2*M*K*N / kernel time</text>",
-            "</svg>",
-        ]
-    )
+    parts.append("</svg>")
     path.write_text("\n".join(parts) + "\n")
 
 
