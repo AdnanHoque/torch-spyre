@@ -1,6 +1,6 @@
 # Ring-native matmul handoff
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ## Executive status
 
@@ -168,6 +168,302 @@ Relevant source:
 This substrate is not yet a production-ready patch set. It must be reduced
 into separately reviewable compiler changes only after the device algorithm
 passes.
+
+## Cross-environment path and durability registry
+
+This registry was audited read-only on 2026-07-30 against the Mac, GitHub, and
+all four live pods in namespace `a6-quantization`. No device work was launched
+and no pod files were changed during the audit.
+
+The registry records where the working state exists. It is not itself a
+backup:
+
+| Class | Meaning |
+|---|---|
+| GitHub | Versioned and recoverable from the named remote commit |
+| Mac local | Present on the Mac, but not recoverable from GitHub unless explicitly stated |
+| PVC | Survives ordinary pod recreation, but may still be detached, dirty, or unversioned |
+| Pod `/tmp` | Container-overlay state; disappears when that pod is replaced |
+
+### Published state
+
+The first published handoff snapshot is:
+
+```text
+remote: https://github.com/AdnanHoque/torch-spyre.git
+branch: ah/communication-cost-model
+commit: c69d92f8689071e1162d900d66024f2d211234a3
+path:   ring_compute_prototypes/RING_NATIVE_MATMUL_HANDOFF.md
+```
+
+That commit changes exactly this one documentation file. It does **not**
+contain the compiler delta, tests, DDL, manifests, harnesses, ledgers, or
+generated evidence described below.
+
+The Mac Git HEAD remains:
+
+```text
+6952529929cdb9c9e8668e11d94d61312c5d83ca
+```
+
+The handoff is still an untracked file in that dirty checkout. Before this
+registry was added, its blob matched `c69d92f` byte-for-byte; the registry
+revision lives in the untracked handoff rather than in the Mac's Git HEAD.
+
+### Four-pod storage map
+
+| Pod | Durable home | Relationship | Ephemeral state |
+|---|---|---|---|
+| `adnan-spyre-current-pf` | `/home/adnan` | Same NFSv4-mounted GPFS PVC as CLC and DEV | ordinary `/tmp`, `/dev/shm` |
+| `adnan-clc-spyre-dev-pf` | `/home/adnan` | Same NFSv4-mounted GPFS PVC as CURRENT and DEV | ordinary `/tmp`, `/dev/shm` |
+| `adnan-spyre-dev-pf` | `/home/adnan` | Same NFSv4-mounted GPFS PVC as CURRENT and CLC | ordinary `/tmp`, `/dev/shm` |
+| `adnan-cdx-spyre-dev-pf` | `/home/adnan-cdx` | Separate NFSv4-mounted GPFS PVC | ordinary `/tmp`, `/dev/shm` |
+
+`/tmp/models` is a separately mounted shared-models PVC. No current
+continuation artifact was identified there. Listing a `/home/adnan` path once
+below covers the same durable object as seen from CURRENT, CLC, and DEV; those
+are not three independent copies.
+
+### Mac working set
+
+Workspace root:
+
+```text
+/Users/adnan/Documents/Codex/2026-07-20-https-github-com-adnanhoque-torch-spyre
+```
+
+The 13 tracked, unstaged compiler/test modifications are:
+
+```text
+tests/inductor/test_lx_relayout_dldsc.py
+tests/inductor/test_work_division_hint.py
+torch_spyre/_inductor/codegen/compute_ops.py
+torch_spyre/_inductor/codegen/superdsc.py
+torch_spyre/_inductor/config.py
+torch_spyre/_inductor/constants.py
+torch_spyre/_inductor/lx_relayout.py
+torch_spyre/_inductor/op_spec.py
+torch_spyre/_inductor/pass_utils.py
+torch_spyre/_inductor/propagate_layouts.py
+torch_spyre/_inductor/spyre_kernel.py
+torch_spyre/_inductor/work_division.py
+torch_spyre/_inductor/wrapper.py
+```
+
+The output of `git diff --binary -- <the 13 paths above>` has SHA-256:
+
+```text
+89ed97d7004576c959bcd1a58529ed3b3000871bd7ed416eed1d531fb814262e
+```
+
+The additional activation-layout test is untracked:
+
+```text
+tests/inductor/test_matmul_activation_layout.py
+```
+
+The primary Mac research roots are below. Their contents are local-only except
+for the published handoff snapshot named above:
+
+| Root relative to the workspace | Audit inventory | Role |
+|---|---:|---|
+| `ring_compute_prototypes/` | 341 files, 43 MiB | contracts, models, harnesses, ledgers, evidence |
+| `tmp/` excluding `fontcache` | 538 scratch/evidence files, 209 MiB total root | current DDL, manifests, generated candidates |
+| `compiler_patch/` | 152 files, 11 MiB | compiler patch staging and logs |
+| `tmp_deeptools_ring_streamed/` | 115 files, 28 MiB | streamed-matmul Deeptools study |
+| `ring_matmul_prior_art_20260722/` | 167 files, 107 MiB | source and prior-art corpus |
+| `ring_aware_implementation_gap_20260722/` | 73 files, 18 MiB | compiler/runtime gap audit |
+| `e2e_harness/` | 1.7 MiB | end-to-end controls |
+| `hierarchical_oracle_probe/` | 240 KiB | topology/oracle probes |
+| `ring_routing_global_study/` | 28 KiB | global route model |
+| `pr2939-live-807014/` | 26 MiB | pinned Torch-Spyre snapshot |
+| `pr2939-live-9bea-20260729/` | 23 MiB | later PR2939 snapshot |
+| `pr2939-topology-aware-placement/` | 26 MiB | placement experiment |
+
+The exact current continuation inputs are local-only:
+
+| Path relative to the workspace | SHA-256 |
+|---|---|
+| `tmp/bmm_output_stationary.k32_pe_lx_carry.ddl` | `06fa0e2f147fa906501cb2db84a7c0693949f7e70c566e89e0bf68cb82cd1792` |
+| `tmp/k32_pe_lx_carry_completion_manifest.json` | `9d0a27a9b38e83fc2e5ac8a1e8bef96f12ae7d82b39158d458a1e835e8435fe3` |
+| `tmp/k32_pe_lx_carry_direct_launch_contract.json` | `e5a738f8081f4095a763757975b54f9019bc9bcce7f732bec0ee9bb45dae8279` |
+| `ring_compute_prototypes/RING_NATIVE_MATMUL_LEDGER.md` | `3642465449b2bca24b43dc76d1b221a959915f0dbbc1561ce3e14f998c4b0da9` |
+| `ring_compute_prototypes/COMPILER_CONTRACT.md` | `a3d6ba3ab3209a34bc30ac683c4ebe78f9fd28fc8044af3b095097b5c9cb7cc4` |
+| `ring_compute_prototypes/HARDWARE_ARCHITECTURE_CONTRACT.md` | `41e77280eb42303396a3918ca44246e743098df37634b72827e9740c7e9947c7` |
+| `ring_compute_prototypes/DUAL_FABRIC_CEILING.md` | `607b00950bde66760c4ba0e7c398ece5142e8057640e325fbabda358df958ed1` |
+
+The launch scripts are under:
+
+```text
+ring_compute_prototypes/prebenchmark_m2n16_os/
+ring_compute_prototypes/true_fp16_os/
+ring_compute_prototypes/stationary_weight_matmul_probe.py
+```
+
+The first directory also contains local-only launch contracts, ABBA scripts,
+split-correction validation, and correctness checkers. The current emitted
+SFP-egress investigation is under:
+
+```text
+ring_compute_prototypes/evidence/os_hmi2_sfp_egress_20260729/
+```
+
+Supporting Mac-only documents and source inputs are:
+
+| Absolute path | SHA-256 |
+|---|---|
+| `/Users/adnan/torch-spyre-work/RING_MATMUL_DOSSIER.md` | `f9a53c49f58a8af588fcd6d706ad821be87e7184c7d7b005f6ebf7c3ace6819b` |
+| `/Users/adnan/torch-spyre-work/R67_PROGRESS_REPORT.md` | `59eed71df24d6e7e13034a354c849695d27ab88831652f21c9c5ddbe8457a9df` |
+| `/Users/adnan/torch-spyre-work/ring-native-fp16-matmul-codesign-20260722.md` | `82e9ba20b8f44dc035578b62559cf5399df395ea33fb5266fd98f68f120e5b7d` |
+| `/Users/adnan/torch-spyre-work/ring-aware-matmul-and-flash.html` | `dcc91dd31da1e7f5e6d1253c89f7154eec3dd42b1c4b3bc45714f4d06cc575f5` |
+| `/Users/adnan/Downloads/AIU_1_0_Rapid_Core_ISA_Spec_v1.0_260121.pdf` | `225e7ac8a83dbeed53861167708d0604265e2a862718a9e3f1a30880e09b5b05` |
+| `/Users/adnan/Downloads/deeptools_aiu_lectures.pdf` | `ab3677134145a40aefac0bbe2dae2effc08cd526527753d18c5dde4428fa62e8` |
+
+### Shared `/home/adnan` PVC working set
+
+These paths are durable across ordinary recreation of CURRENT, CLC, and DEV:
+
+| Absolute path | Identity or role | Audit state |
+|---|---|---|
+| `/home/adnan/codex-isolated/ring_matmul_true_os_torch_20260722_v1` | Torch-Spyre `80701411a151fa6402d08ce7586f671883e1e66b`, branch `codex/ring-streamed-matmul-v1` | dirty, 22 status entries |
+| `/home/adnan/codex-isolated/deeptools-master-e3944781` | Deeptools `e3944781cb25b76abeb9b3e87c1f5c5879e84229`, branch `adnan/alltoall-common-refinement-4x8-32x1` | clean |
+| `/home/adnan/codex-isolated/ring-native-matmul-20260722` | baseline bundles and controls | non-Git artifact root |
+| `/home/adnan/codex-isolated/ring_compute_hw_20260721_v1` | first hardware probes and runs | non-Git artifact root |
+| `/home/adnan/codex-isolated/ring_compute_hw_20260721_v2` | audits, replays, DXP wrapper, runs | non-Git artifact root |
+| `/home/adnan/codex-isolated/ring_compute_prototypes_20260721_v1` | durable prototype bundle | non-Git artifact root |
+| `/home/adnan/codex-isolated/output_stationary_audit_20260722_v1` | output-stationary audit corpus | non-Git artifact root |
+| `/home/adnan/codex-isolated/r64_full8_stock_bmm_real_output_sync_device_20260725_v1` | sealed stock completion/control bundle | non-Git artifact root |
+| `/home/adnan/claude-isolated/ring_r67_20260727` | complete R67 snapshot, harnesses, bundles, logs, results, scripts | non-Git artifact root |
+| `/home/adnan/spyre-envs/main-ac3c7395` | pinned runtime extension tree | non-Git environment root |
+| `/home/adnan/spyre-perf-suite-envfix` | perf-suite `5640b6859d09273cc814348489f68778dc88d108`, branch `adnan/run-benchmark-environment` | dirty, 5 status entries |
+| `/home/adnan/dt-inductor/torch-spyre` | inherited default Torch-Spyre `cf67411d2071d0e567f4449d87ba3031a331a688`, branch `latest-main` | dirty, 29 status entries; not an accepted control |
+| `/home/adnan/dt-inductor/.venv` | Python/Torch execution environment | PVC environment root, lock not yet captured |
+| `/home/adnan/codex-isolated/ring_matmul_b35_coordinator_20260729/deeptools` | Deeptools `b35cece729c0ae1707ea71bf5a0d3c4451358a07` | detached, dirty |
+| `/home/adnan/codex-isolated/ring_matmul_owner_w_master_b35cece_20260729_v2` | owner-W compiler arm at `b35cece7` | detached, dirty |
+| `/home/adnan/codex-isolated/ring_matmul_owner_w_master_b35cece_20260729_clean_control` | owner-W clean control at `b35cece7` | detached, clean |
+| `/home/adnan/codex-isolated/ring_matmul_partial_gap_probe_20260729` | partial-gap arm at `b35cece7` | detached, dirty |
+| `/home/adnan/codex-isolated/ring_matmul_true_os_master_b35cece_20260729_clc` | true-OS compiler arm at `b35cece7` | detached, dirty |
+| `/home/adnan/codex-isolated/ring_matmul_dual_fabric_whole_a_20260722_v1` | early whole-A dual-fabric worktree at `503f5f4d` | dirty, 50 status entries |
+| `/home/adnan/codex-isolated/ring_matmul_timing_torch_20260729` | Torch-Spyre `9bea573e6f304fba5357656ce9122f6e4b587700`, branch `codex/ring-native-matmul` | dirty |
+| `/home/adnan/codex-isolated/ring_matmul_torch_pr2939_9bea_20260729` | PR2939 Torch-Spyre at `9bea573e` | detached, dirty |
+
+There are 131 broader `ring*`/`matmul*` roots on this PVC, including 41 Git
+checkouts, 37 build directories, and 18 evidence/validation directories. The
+family roots:
+
+```text
+/home/adnan/codex-isolated/ring_matmul_*
+/home/adnan/codex-isolated/ring_compute_*
+/home/adnan/claude-isolated/ring_r67_*
+```
+
+cover the historical R40-R67, marker, source-bound, SFP, K256, owner-W,
+partial-gap, and dual-fabric studies without pretending they are all active
+continuation inputs.
+
+The accepted launch also depends on image-owned libraries at:
+
+```text
+/opt/ibm/spyre/runtime/lib
+/opt/ibm/spyre/spyre-comms/lib
+/opt/ibm/spyre/deeptools/lib
+/opt/ibm/spyre/senlib/lib
+```
+
+Those paths are tied to the container image rather than the shared project PVC.
+
+One source overlay needs special treatment:
+
+```text
+/home/adnan/codex-isolated/ring_matmul_owner_w_master_b35cece_20260729/deeptools
+```
+
+Its `.git` worktree pointer targets a missing historical path. The source is
+PVC-resident, but Git cannot currently identify or preserve its delta.
+
+### CDX `/home/adnan-cdx` PVC working set
+
+The current compiler-side roots are:
+
+| Absolute path | Identity or role | Audit state |
+|---|---|---|
+| `/home/adnan-cdx/codex-isolated/ring_matmul_rowsplit_contract_b35_20260729` | row-split contract worktree at `b35cece7` | detached, one tracked modification |
+| `/home/adnan-cdx/codex-isolated/ring_matmul_rowsplit_contract_b35_20260729-build-llvm22` | matching standalone-tool build | PVC artifact |
+| `/home/adnan-cdx/codex-isolated/ring_matmul_rowsplit_contract_b35_20260729-evidence` | contract/full-FX/true-OS evidence | row split not yet realized |
+| `/home/adnan-cdx/codex-isolated/ring_matmul_geometry_master_20260729` | geometry worktree at `b35cece7` | detached, five tracked modifications |
+| `/home/adnan-cdx/codex-isolated/ring_matmul_geometry_master_20260729-build-llvm22` | matching compiler build | PVC artifact |
+| `/home/adnan-cdx/codex-isolated/ring_matmul_geometry_master_20260729-evidence` | DCC, PCFG, and MLIR outputs | PVC artifact |
+| `/home/adnan-cdx/codex-isolated/dcc_lx_replication4_b35_20260729/deeptools` | most complete current compiler-substrate arm at `b35cece7` | detached, 11 tracked modifications |
+| `/home/adnan-cdx/codex-isolated/dcc_lx_replication4_b35_20260729/build-clone` | RelWithDebInfo build with DDL/DCC/DDC/DXP standalone tools | PVC artifact |
+| `/home/adnan-cdx/codex-isolated/m4n8_incumbent_audit_b35_20260729` | incumbent control bundle and output | non-Git PVC artifact |
+| `/home/adnan-cdx/codex-isolated/ring_matmul_stage_c_route_20260723` | older route worktree at `07992243` | detached, heavily dirty |
+| `/home/adnan-cdx/codex-isolated/ring_matmul_stage_c_route_build_20260723` | matching older stage-C Release build | PVC artifact |
+| `/home/adnan-cdx/codex-isolated/ring_release_validation_20260723` | older release-validation worktree | detached, heavily dirty |
+| `/home/adnan-cdx/codex-isolated/fused_metadata_bridge_20260723` | older metadata-bridge worktree | detached, heavily dirty |
+
+CDX reports that name the Torch-Spyre `9bea573e` source root refer to the
+shared `/home/adnan` PVC on another pod. There is no corresponding Torch-Spyre
+checkout under `/home/adnan-cdx`; those reports are cross-pod provenance, not
+a locally reconstructible source tree.
+
+### Pod-local `/tmp` working set
+
+The exact candidate, harness, and fresh controls named in this handoff exist
+only on `adnan-spyre-current-pf`:
+
+| Ephemeral CURRENT path | Role |
+|---|---|
+| `/tmp/os_hmi2_k32_pe_lx_carry_mscope_20260729/run` | compiled K32 candidate and emitted bundle |
+| `/tmp/k32_pe_lx_carry_validation_20260729` | staged completion/correctness harness |
+| `/tmp/r64_normal_frontend_stock_unhinted_20260729_v2` | fresh normal-frontend stock control |
+| `/tmp/r64_stock_recovery_after_k32_carry_20260729_v1` | post-timeout stock recovery control |
+
+Those four paths are absent from the CLC and DEV pod overlays. Their source
+inputs are mirrored on the Mac, but the full generated binaries, logs, and
+results are not archived on GitHub or a PVC.
+
+The other pod-local scratch families are:
+
+| Pod | Ephemeral paths or families | Role |
+|---|---|---|
+| `adnan-spyre-current-pf` | `/tmp/os_hmi2_*_20260729`, `/tmp/ring_matmul_*`, plus the four exact paths above | current completion bisections and controls |
+| `adnan-clc-spyre-dev-pf` | 177 matching R40-R65, `os_hmi2_*`, `ring_matmul_*`, and `typed_tensor_*` directories; `/tmp/ring_matmul_v12_f49_integration_source_20260724_composer` is a dirty temporary Git tree at `f49f3e3c` | historical compiler/build/harness overlays; not current exact candidate |
+| `adnan-spyre-dev-pf` | `/tmp/owner_w_b35cece_identity`, `/tmp/owner_w_b35cece_ownership`, `/tmp/owner_w_b35cece_tests`, `/tmp/pr2939-dxp-frontend.JvJ2Dh/repo`, `/tmp/ring-ddc-*`, `/tmp/ring_role_asym_patches_20260723`, `/tmp/tranche_stitcher_lane_compile*` | owner-W, DXP, DDC, and stitcher studies |
+| `adnan-cdx-spyre-dev-pf` | `/tmp/ring_matmul_geometry_b35.patch`, `/tmp/ring_matmul_occurrence_geometry_20260729.patch`, `/tmp/diagnose_matmul_planner.py` | geometry overlays and planner diagnostic |
+
+The two CDX geometry patches are distinct:
+
+| Ephemeral CDX path | SHA-256 |
+|---|---|
+| `/tmp/ring_matmul_geometry_b35.patch` | `1e07f9e5416fae059a453038b090ed4e9d9a4a1b9a61b292a15c6e751c8fffd4` |
+| `/tmp/ring_matmul_occurrence_geometry_20260729.patch` | `6f76561cc6676b893770b1cb0a665ef0f44f215149f579746188a7ee43491bad` |
+
+### Preservation and reconstruction gaps
+
+The path audit establishes location and identity, not reproducibility. Before
+recreating any pod or consolidating the work:
+
+1. archive the four CURRENT `/tmp` roots and the two CDX patch files to a PVC
+   with a recursive SHA-256 manifest;
+2. preserve the Mac's 13-file compiler diff, untracked activation-layout test,
+   DDL, manifests, and harnesses without resetting or cleaning the worktree;
+3. preserve patches from every detached dirty PVC checkout before attempting
+   to consolidate them;
+4. repair or copy the broken owner-W overlay before relying on Git metadata;
+5. pin the perf-suite checkout and dirty delta, Python/Torch lock, compiler and
+   runtime binaries, container image digest, exact compile command/environment,
+   device/node identity, and firmware for a fully reconstructible run.
+
+All four audited pods currently resolve their `app` container to:
+
+```text
+sha256:913f394b4b3f03740a9d35f70f273b1cb799d4cba55f7fdaff108d7749d77964
+```
+
+Still-unpinned handoff references include the adjacent `r65` static artifact,
+the “earlier split control,” and hashes for the candidate final SDSC and stock
+result files. Until those gaps are closed, no reader should infer that the
+published documentation alone can reconstruct the current candidate.
 
 ## Correctness-gate correction
 
