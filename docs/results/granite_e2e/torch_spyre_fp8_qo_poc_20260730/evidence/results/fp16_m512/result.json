@@ -1,0 +1,133 @@
+{
+  "compile": {
+    "backend": "inductor",
+    "compile_and_first_run_ms": 12254.982151,
+    "dynamic": false,
+    "fullgraph": true,
+    "options": {
+      "epilogue_fusion": false
+    }
+  },
+  "correctness": {
+    "all_finite": true,
+    "allclose": true,
+    "atol": 1.0,
+    "cpu_reference_ms": 13.140185,
+    "max_abs_error": 0.6875,
+    "mean_abs_error": 0.07702859491109848,
+    "passed": true,
+    "relative_l2_error": 0.00451976153999567,
+    "relative_l2_limit": 0.01,
+    "rmse": 0.10852041840553284,
+    "rtol": 0.02
+  },
+  "effective_matmul_tflops": 54.116573859290796,
+  "effective_tflops_numerator": "2*M*K*N",
+  "environment": {
+    "DT_OPT": null,
+    "DXP_LX_FRAC_AVAIL": null,
+    "SENCORELETS": null,
+    "SENCORES": null,
+    "TORCHINDUCTOR_CACHE_DIR": "/home/adnan/codex-isolated/torch_spyre_pr2286_a01c627d_20260729/cache_fp16_m512",
+    "TORCH_SPYRE_FP8_POC_EXTERNAL_SCALES": "1"
+  },
+  "graph_contract": {
+    "host_prequantized_fp8": false,
+    "raw_scaled_mm_output_dtype": "torch.float16",
+    "scaled_mm_schema_scales": "unit FP32; ignored by experiment lowering",
+    "scaled_recovery": "none",
+    "use_fast_accum": false
+  },
+  "kernel_event_count": 5,
+  "kernel_event_duration_median_us": 317.285,
+  "kernel_mean_us_per_iteration": 317.4604,
+  "kernel_total_us": 1587.302,
+  "logical_shape": {
+    "K": 4096,
+    "M": 512,
+    "N": 4096
+  },
+  "repetitions": 5,
+  "schema_version": 1,
+  "script": {
+    "path": "/home/adnan/codex-isolated/torch_spyre_pr2286_a01c627d_20260729/benchmarks/torch_spyre_fp8_matmul/bench_qo_fp8_poc.py",
+    "sha256": "652265289db967e45b8e97e32a55d2646a8c966116bd3a57b44e17da413dae0b"
+  },
+  "software": {
+    "python": "3.12.13",
+    "torch": "2.11.0+aiu.kineto.1.1.2",
+    "torch_spyre": "0.0.1",
+    "torch_spyre_module": "/home/adnan/codex-isolated/torch_spyre_pr2286_a01c627d_20260729/torch_spyre/__init__.py"
+  },
+  "trace_path": "/home/adnan/codex-isolated/torch_spyre_pr2286_a01c627d_20260729/smoke/fp16_m512/kineto_trace.json",
+  "trace_summary": {
+    "category_summary": {
+      "Trace": {
+        "count": 2,
+        "duration_us": 7413.535
+      },
+      "cpu_op": {
+        "count": 25,
+        "duration_us": 2763.0349999999994
+      },
+      "gpu_memcpy": {
+        "count": 5,
+        "duration_us": 75.033
+      },
+      "gpu_memset": {
+        "count": 5,
+        "duration_us": 79.112
+      },
+      "kernel": {
+        "count": 5,
+        "duration_us": 1587.3020000000001
+      },
+      "privateuse1_runtime": {
+        "count": 10,
+        "duration_us": 11.955000000000002
+      },
+      "user_annotation": {
+        "count": 5,
+        "duration_us": 1020.6800000000001
+      }
+    },
+    "kernel_by_name": {
+      "a6bdcee0_sdsc_fused_mm_0_c3db62qs/spyreCodeDir/bundle.mlir#2": {
+        "count": 5,
+        "duration_us": 1587.3020000000001
+      }
+    },
+    "kernel_events": [
+      {
+        "category": "kernel",
+        "duration_us": 317.025,
+        "name": "a6bdcee0_sdsc_fused_mm_0_c3db62qs/spyreCodeDir/bundle.mlir#2"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 318.429,
+        "name": "a6bdcee0_sdsc_fused_mm_0_c3db62qs/spyreCodeDir/bundle.mlir#2"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 317.433,
+        "name": "a6bdcee0_sdsc_fused_mm_0_c3db62qs/spyreCodeDir/bundle.mlir#2"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 317.285,
+        "name": "a6bdcee0_sdsc_fused_mm_0_c3db62qs/spyreCodeDir/bundle.mlir#2"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 317.13,
+        "name": "a6bdcee0_sdsc_fused_mm_0_c3db62qs/spyreCodeDir/bundle.mlir#2"
+      }
+    ]
+  },
+  "variant": "fp16",
+  "wall_mean_us": 663.7497999999999,
+  "wall_total_us": 3318.749,
+  "warmups": 2,
+  "work_division_hint": null
+}

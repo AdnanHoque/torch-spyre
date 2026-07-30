@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "scope": {
+    "hardware": "DD2 / Sentient 1.0",
+    "excluded_hardware": "1p5",
+    "projection": "Granite 3 8B Q/O",
+    "shape": {
+      "K": 4096,
+      "M_values": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128,
+        256,
+        512,
+        1024,
+        2048
+      ],
+      "N": 4096
+    }
+  },
+  "results_branch": {
+    "branch": "ah/fp8",
+    "repository": "https://github.com/AdnanHoque/torch-spyre.git",
+    "head_before_handoff": "71a99a070b07317e15339052aadc429f489cec23"
+  },
+  "torch_spyre_experiment": {
+    "base_commit": "a01c627d57ba18bc442d8b5f73086b2778fdc9d4",
+    "base_tree": "7931ff976f491e240edb9324fb06400482678a47",
+    "base_description": "PR #2286 head",
+    "diff": {
+      "files": 16,
+      "insertions": 502,
+      "deletions": 112,
+      "path": "patches/torch_spyre_qfp8mb_poc.patch",
+      "sha256": "e0bd6c8ff4c9201ecbba2bdf88bef96378ac5a67bd9d0dfef554584cc70a9aba"
+    },
+    "validation": {
+      "device_correctness": false,
+      "optimized_timing": false,
+      "python_compileall": true,
+      "whitespace_check": true
+    }
+  },
+  "deeptools_experiment": {
+    "base_commit": "ee2f97a86c609eeb20ea3ad2d48040259d67ded3",
+    "new_blob": "446443576a02c199714b67f3df8347e2c311df1a",
+    "old_blob": "7ae0fd3366056b1fb687a39ceda53d92a56fdd9c",
+    "patch_path": "patches/deeptools_dd2_fp8mb_corelet_poc.patch",
+    "patch_sha256": "fed9d84ac6b29cb0aa32e47d07f75deaeef005c4c79cc47dfd350db3a9d74517"
+  },
+  "stack": {
+    "DeepTools": "+1401 (ee2f97a)",
+    "Flex": "+388 (81385a4)",
+    "Senlib": "DD2 +194 (951e4c4)",
+    "environment": "/home/adnan/spyre-envs/image-913f394b4b3f/activate.sh",
+    "torch": "2.11.0+aiu.kineto.1.1.2"
+  },
+  "current_boundary": {
+    "corelet_policy_observed": {
+      "batchmatmulfp8mb": {
+        "M": [
+          32,
+          32
+        ]
+      },
+      "qfp8mb": {
+        "M": [
+          8,
+          8
+        ]
+      }
+    },
+    "failure": "compound-coordinate distribution",
+    "file": "dsc/dsc2.cpp",
+    "line": 5862,
+    "successful_qfp8mb_compile": false
+  },
+  "archived_device_results": [
+    {
+      "effective_tflops": 54.116573859290796,
+      "kernel_mean_us": 317.4604,
+      "path": "evidence/results/fp16_m512/result.json",
+      "repetitions": 5,
+      "variant": "fp16"
+    },
+    {
+      "effective_tflops": 12.335346770203952,
+      "kernel_mean_us": 1392.735,
+      "path": "evidence/results/fp8_raw_1x32_m512/result.json",
+      "repetitions": 3,
+      "variant": "fp8_raw_optimized",
+      "work_division": {
+        "M": 1,
+        "N": 32
+      }
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+{
+  "compile": {
+    "backend": "inductor",
+    "compile_and_first_run_ms": 18979.00071,
+    "dynamic": false,
+    "fullgraph": true,
+    "options": {
+      "epilogue_fusion": false
+    }
+  },
+  "correctness": {
+    "all_finite": true,
+    "allclose": true,
+    "atol": 2.0,
+    "cpu_reference_ms": 17.748612,
+    "max_abs_error": 0.4375,
+    "mean_abs_error": 0.040482185781002045,
+    "passed": true,
+    "relative_l2_error": 0.002475576475262642,
+    "relative_l2_limit": 0.1,
+    "rmse": 0.05943991616368294,
+    "rtol": 0.1
+  },
+  "effective_matmul_tflops": 12.335346770203952,
+  "effective_tflops_numerator": "2*M*K*N",
+  "environment": {
+    "DT_OPT": null,
+    "DXP_LX_FRAC_AVAIL": null,
+    "SENCORELETS": null,
+    "SENCORES": null,
+    "TORCHINDUCTOR_CACHE_DIR": "/home/adnan/codex-isolated/torch_spyre_pr2286_a01c627d_20260729/cache_fp8_raw_optimized_m512_1x32"
+  },
+  "graph_contract": {
+    "device_activation_quantization": true,
+    "device_weight_quantization": true,
+    "host_prequantized_fp8": false,
+    "output_scale_application": "none",
+    "quantization_scale_derivation": "excluded; unit FP16 scalars supplied",
+    "raw_scaled_mm_output_dtype": "torch.float16",
+    "scaled_mm_schema_scales": "unit FP16 scalars; ignored by current PR #2286 lowering",
+    "use_fast_accum": false
+  },
+  "kernel_event_count": 3,
+  "kernel_event_duration_median_us": 1395.873,
+  "kernel_mean_us_per_iteration": 1392.735,
+  "kernel_total_us": 4178.205,
+  "logical_shape": {
+    "K": 4096,
+    "M": 512,
+    "N": 4096
+  },
+  "repetitions": 3,
+  "schema_version": 1,
+  "script": {
+    "path": "/home/adnan/codex-isolated/torch_spyre_pr2286_a01c627d_20260729/benchmarks/torch_spyre_fp8_matmul/bench_qo_fp8_poc.py",
+    "sha256": "eb5b112a1b8842f51e3195f6f27a7fbddcfa57d04578be42166c555013a6278a"
+  },
+  "software": {
+    "python": "3.12.13",
+    "torch": "2.11.0+aiu.kineto.1.1.2",
+    "torch_spyre": "0.0.1",
+    "torch_spyre_module": "/home/adnan/codex-isolated/torch_spyre_pr2286_a01c627d_20260729/torch_spyre/__init__.py"
+  },
+  "trace_path": "/home/adnan/codex-isolated/torch_spyre_pr2286_a01c627d_20260729/smoke/fp8_raw_optimized_m512_1x32/kineto_trace.json",
+  "trace_summary": {
+    "category_summary": {
+      "Trace": {
+        "count": 2,
+        "duration_us": 14744.93
+      },
+      "cpu_op": {
+        "count": 15,
+        "duration_us": 5078.008
+      },
+      "gpu_memcpy": {
+        "count": 3,
+        "duration_us": 148.60899999999998
+      },
+      "gpu_memset": {
+        "count": 3,
+        "duration_us": 72.457
+      },
+      "kernel": {
+        "count": 3,
+        "duration_us": 4178.205
+      },
+      "privateuse1_runtime": {
+        "count": 6,
+        "duration_us": 8.903
+      },
+      "user_annotation": {
+        "count": 3,
+        "duration_us": 2152.962
+      }
+    },
+    "kernel_by_name": {
+      "33bac304_sdsc_fused__scaled_mm_quantize_fp8_with_scale_quantize_weight_fp8_with_scale_0_225yi7ij/spyreCodeDir/bundle.mlir#2": {
+        "count": 3,
+        "duration_us": 4178.205
+      }
+    },
+    "kernel_events": [
+      {
+        "category": "kernel",
+        "duration_us": 1396.995,
+        "name": "33bac304_sdsc_fused__scaled_mm_quantize_fp8_with_scale_quantize_weight_fp8_with_scale_0_225yi7ij/spyreCodeDir/bundle.mlir#2"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 1385.337,
+        "name": "33bac304_sdsc_fused__scaled_mm_quantize_fp8_with_scale_quantize_weight_fp8_with_scale_0_225yi7ij/spyreCodeDir/bundle.mlir#2"
+      },
+      {
+        "category": "kernel",
+        "duration_us": 1395.873,
+        "name": "33bac304_sdsc_fused__scaled_mm_quantize_fp8_with_scale_quantize_weight_fp8_with_scale_0_225yi7ij/spyreCodeDir/bundle.mlir#2"
+      }
+    ]
+  },
+  "variant": "fp8_raw_optimized",
+  "wall_mean_us": 2330.192666666667,
+  "wall_total_us": 6990.578,
+  "warmups": 1,
+  "work_division_hint": {
+    "M": 1,
+    "N": 32
+  }
+}

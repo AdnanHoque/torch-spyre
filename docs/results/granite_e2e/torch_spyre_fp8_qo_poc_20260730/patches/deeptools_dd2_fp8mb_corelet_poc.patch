@@ -1,0 +1,34 @@
+diff --git a/dxp/SdscCoreletSplit.cpp b/dxp/SdscCoreletSplit.cpp
+index 7ae0fd336..446443576 100644
+--- a/dxp/SdscCoreletSplit.cpp
++++ b/dxp/SdscCoreletSplit.cpp
+@@ -146,6 +146,8 @@ void Dxp::doCoreletSplitSdsc(SuperDsc* sdsc) {
+         for (int lds_iter = 0; lds_iter < lds_list.size() - 1; lds_iter++) {
+           auto inp_lds = dsc.primaryDsInfo_.at(lds_list.at(lds_iter).dsType_);
+           for (auto iter2 = 0; iter2 < inp_lds.stickDimOrder_.size(); iter2++) {
++            if (inp_lds.stickDimOrder_.at(iter2) != curr_dim) continue;
++
+             if ((inp_lds.stickSize_.at(iter2) > (curr_dim_size / 2)) ||
+                 (fmod((curr_dim_size / 2), inp_lds.stickSize_.at(iter2)) !=
+                  0)) {
+@@ -161,6 +163,20 @@ void Dxp::doCoreletSplitSdsc(SuperDsc* sdsc) {
+       valid_dims.push_back(curr_dim);
+     }
+ 
++    // DD2's minibatch-packed FP8 path is designed to share the stationary
++    // weight tile between the two corelets and divide activation/output rows.
++    // The direct SuperDSC path does not pass through DSM's primary-op corelet
++    // policy, so reproduce that policy narrowly for this proof of concept.
++    const auto op_func = dsc.computeOp_.front().opFuncName;
++    const bool prefer_mb_for_fp8mb =
++        op_func == OpFuncs::Q_FP8_MB ||
++        op_func == OpFuncs::BATCHMATMUL_FP8_FWD_MB;
++    const auto mb_iter =
++        std::find(valid_dims.begin(), valid_dims.end(), PrimaryDimTypes::MB);
++    if (prefer_mb_for_fp8mb && mb_iter != valid_dims.end()) {
++      valid_dims = {PrimaryDimTypes::MB};
++    }
++
+     for (auto curr_dim : valid_dims) {
+       auto curr_dim_size = getDimSize(data_stage_param, curr_dim);
+       bool bcast_found = false;

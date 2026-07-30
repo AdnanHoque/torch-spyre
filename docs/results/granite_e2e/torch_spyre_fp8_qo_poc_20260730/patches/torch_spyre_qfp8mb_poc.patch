@@ -1,0 +1,1150 @@
+diff --git a/tests/inductor/test_core_mapping.py b/tests/inductor/test_core_mapping.py
+index faee385..8f4da01 100644
+--- a/tests/inductor/test_core_mapping.py
++++ b/tests/inductor/test_core_mapping.py
+@@ -23,6 +23,7 @@ from torch_spyre._C import DataFormats
+ from torch_spyre._inductor.codegen.superdsc import parse_op_spec
+ from torch_spyre._inductor.constants import (
+     BATCH_MATMUL_FP8_OP,
++    BATCH_MATMUL_FP8MB_OP,
+     BATCH_MATMUL_OP,
+ )
+ from torch_spyre._inductor.core_mapping import core_to_slice_mapping
+@@ -111,7 +112,9 @@ def _bmm_op_spec(op: str) -> OpSpec:
+     )
+ 
+ 
+-@pytest.mark.parametrize("op", [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP])
++@pytest.mark.parametrize(
++    "op", [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP, BATCH_MATMUL_FP8MB_OP]
++)
+ @pytest.mark.parametrize("reduction_contiguous", [False, True])
+ def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contiguous):
+     class FakeReduction:
+diff --git a/torch_spyre/_C.pyi b/torch_spyre/_C.pyi
+index 00de9f2..25697df 100644
+--- a/torch_spyre/_C.pyi
++++ b/torch_spyre/_C.pyi
+@@ -131,7 +131,11 @@ class ElementArrangement:
+ 
+       EXX2
+ 
++      FP32_TO_DL16
++
+       QFP8WT
++
++      QFP8MB
+     """
+ 
+     DL16_TO_FP32: typing.ClassVar[
+@@ -141,15 +145,21 @@ class ElementArrangement:
+         ElementArrangement
+     ]  # value = <ElementArrangement.QFP8CH: 2>
+     EXX2: typing.ClassVar[ElementArrangement]  # value = <ElementArrangement.EXX2: 3>
++    FP32_TO_DL16: typing.ClassVar[
++        ElementArrangement
++    ]  # value = <ElementArrangement.FP32_TO_DL16: 4>
+     QFP8WT: typing.ClassVar[
+         ElementArrangement
+-    ]  # value = <ElementArrangement.QFP8WT: 4>
++    ]  # value = <ElementArrangement.QFP8WT: 5>
++    QFP8MB: typing.ClassVar[
++        ElementArrangement
++    ]  # value = <ElementArrangement.QFP8MB: 6>
+     STANDARD: typing.ClassVar[
+         ElementArrangement
+     ]  # value = <ElementArrangement.STANDARD: 0>
+     __members__: typing.ClassVar[
+         dict[str, ElementArrangement]
+-    ]  # value = {'STANDARD': <ElementArrangement.STANDARD: 0>, 'DL16_TO_FP32': <ElementArrangement.DL16_TO_FP32: 1>, 'QFP8CH': <ElementArrangement.QFP8CH: 2>, 'EXX2': <ElementArrangement.EXX2: 3>, 'QFP8WT': <ElementArrangement.QFP8WT: 4>}
++    ]  # value = {'STANDARD': <ElementArrangement.STANDARD: 0>, 'DL16_TO_FP32': <ElementArrangement.DL16_TO_FP32: 1>, 'QFP8CH': <ElementArrangement.QFP8CH: 2>, 'EXX2': <ElementArrangement.EXX2: 3>, 'FP32_TO_DL16': <ElementArrangement.FP32_TO_DL16: 4>, 'QFP8WT': <ElementArrangement.QFP8WT: 5>, 'QFP8MB': <ElementArrangement.QFP8MB: 6>}
+     @property
+     def name(self) -> str: ...
+     @property
+diff --git a/torch_spyre/_inductor/codegen/compute_ops.py b/torch_spyre/_inductor/codegen/compute_ops.py
+index e7a5f19..cff1afe 100644
+--- a/torch_spyre/_inductor/codegen/compute_ops.py
++++ b/torch_spyre/_inductor/codegen/compute_ops.py
+@@ -251,25 +251,127 @@ def _build_coord_info(sdsc_spec, tensor, tensor_idx: int) -> dict:
+     """
+     dim_order = sdsc_spec.layouts[tensor.layout]["dim_order"]
+     stick_dim_order = sdsc_spec.layouts[tensor.layout]["stick_dim_order"]
+-    return {
+-        str(dim): gen_coord_info_value(
+-            size=sdsc_spec.iteration_space[dim] // sdsc_spec.work_slices[dim]
+-            if (tensor.scales[dim] == 1)
+-            else 1,
+-            nsplits=sdsc_spec.work_slices[dim] if (tensor.scales[dim] == 1) else 1,
+-            elems_per_stick=tensor.data_format.elems_per_stick(),
+-            is_stick_dim=(dim in stick_dim_order),
+-            is_stick_reduction=(tensor.scales[dim] == -2),
+-            is_fp8_stick=is_fp8,
+-            other_stick_size=other_sz,
+-            stick_idx=st_idx,
+-            tensor_idx=tensor_idx,
+-            opfunc=sdsc_spec.opfunc,
++    stick_size = sdsc_spec.layouts[tensor.layout]["stick_size"]
++    result = {}
++    for dim in dim_order:
++        size = (
++            sdsc_spec.iteration_space[dim] // sdsc_spec.work_slices[dim]
++            if tensor.scales[dim] == 1
++            else 1
++        )
++        nsplits = (
++            sdsc_spec.work_slices[dim] if tensor.scales[dim] == 1 else 1
+         )
+-        for dim in dim_order
+-        for is_fp8, other_sz, st_idx in (
+-            (_compute_fp8_coord_params(tensor, dim, sdsc_spec),)
++        is_fp8, other_sz, st_idx = _compute_fp8_coord_params(
++            tensor, dim, sdsc_spec
+         )
++        if is_fp8 and dim in stick_dim_order:
++            result[str(dim)] = gen_compound_fp8_coord_info_value(
++                size=size,
++                nsplits=nsplits,
++                dim=dim,
++                stick_dim_order=stick_dim_order,
++                stick_size=stick_size,
++            )
++        else:
++            result[str(dim)] = gen_coord_info_value(
++                size=size,
++                nsplits=nsplits,
++                elems_per_stick=tensor.data_format.elems_per_stick(),
++                is_stick_dim=(dim in stick_dim_order),
++                is_stick_reduction=(tensor.scales[dim] == -2),
++                is_fp8_stick=is_fp8,
++                other_stick_size=other_sz,
++                stick_idx=st_idx,
++                tensor_idx=tensor_idx,
++                opfunc=sdsc_spec.opfunc,
++            )
++    return result
++
++
++def gen_compound_fp8_coord_info_value(
++    size: int,
++    nsplits: int,
++    dim: Symbol,
++    stick_dim_order: list[Symbol],
++    stick_size: list[int],
++) -> dict:
++    """Serialize a compound FP8 stick from its physical factors.
++
++    For a layout such as QFP8MB ``[K:8, M:2, K:8]``, the coordinate for one
++    logical dimension contains:
++
++    * one outer group fold (K/64 or M/2), then
++    * every physical within-stick fold in layout order.
++
++    A fold belonging to another logical dimension has alpha zero. A repeated
++    fold of this dimension has alpha equal to the product of its later factors.
++    This yields, for example:
++
++      K -> alphas [64, 8, 0, 1], cardinalities [K/64, 8, 2, 8]
++      M -> alphas [ 2, 0, 1, 0], cardinalities [M/2,  8, 2, 8]
++
++    The same rule gives QFP8WT ``[K:2, N:64]`` without a shape-specific table.
++    """
++
++    if len(stick_dim_order) != len(stick_size) or not stick_size:
++        raise Unsupported(
++            "compound FP8 coordinate generation requires matching non-empty "
++            f"stick labels/sizes, got {stick_dim_order=} {stick_size=}"
++        )
++    atomic_size = 1
++    for stick_dim, factor in zip(stick_dim_order, stick_size):
++        if stick_dim == dim:
++            atomic_size *= factor
++    if atomic_size == 1 or size % atomic_size != 0:
++        raise Unsupported(
++            "compound FP8 coordinate generation requires a whole number of "
++            f"physical groups: dim={dim}, size={size}, atomic={atomic_size}"
++        )
++
++    element_alphas = [atomic_size]
++    element_cardinalities = [size // atomic_size]
++    for i, (stick_dim, factor) in enumerate(zip(stick_dim_order, stick_size)):
++        if stick_dim == dim:
++            alpha = 1
++            for later_dim, later_factor in zip(
++                stick_dim_order[i + 1 :], stick_size[i + 1 :]
++            ):
++                if later_dim == dim:
++                    alpha *= later_factor
++        else:
++            alpha = 0
++        element_alphas.append(alpha)
++        element_cardinalities.append(factor)
++
++    return {
++        "spatial": 3,
++        "temporal": 0,
++        "elemArr": len(element_cardinalities),
++        "padding": "nopad",
++        "folds": {
++            "dim_prop_func": [
++                {"Affine": {"alpha_": size, "beta_": 0}},
++                {"Affine": {"alpha_": 0, "beta_": 0}},
++                {"Affine": {"alpha_": 0, "beta_": 0}},
++                *[
++                    {"Affine": {"alpha_": alpha, "beta_": 0}}
++                    for alpha in element_alphas
++                ],
++            ],
++            "dim_prop_attr": [
++                {"factor_": nsplits, "label_": "core_fold"},
++                {"factor_": 1, "label_": "corelet_fold"},
++                {"factor_": 1, "label_": "row_fold"},
++                *[
++                    {
++                        "factor_": cardinality,
++                        "label_": f"elem_arr_{len(element_cardinalities) - i - 1}",
++                    }
++                    for i, cardinality in enumerate(element_cardinalities)
++                ],
++            ],
++        },
+     }
+ 
+ 
+@@ -329,55 +431,55 @@ def gen_coord_info_value(
+                 ],
+             },
+         }
+-    elif is_stick_dim and is_fp8_stick and not (stick_idx == 0):
++    elif is_stick_dim and tensor_idx == 0 and opfunc == "batchmatmulfp8":
+         return {
+             "spatial": 3,
+             "temporal": 0,
+-            "elemArr": 3,
++            "elemArr": 4,
+             "padding": "nopad",
+             "folds": {
+                 "dim_prop_func": [
+                     {"Affine": {"alpha_": size, "beta_": 0}},
+                     {"Affine": {"alpha_": 0, "beta_": 0}},
+                     {"Affine": {"alpha_": 0, "beta_": 0}},
+-                    {"Affine": {"alpha_": (size // 8), "beta_": 0}},
++                    {"Affine": {"alpha_": 128, "beta_": 0}},
+                     {"Affine": {"alpha_": 8, "beta_": 0}},
++                    {"Affine": {"alpha_": 64, "beta_": 0}},
+                     {"Affine": {"alpha_": 1, "beta_": 0}},
+                 ],
+                 "dim_prop_attr": [
+                     {"factor_": nsplits, "label_": "core_fold"},
+                     {"factor_": 1, "label_": "corelet_fold"},
+                     {"factor_": 1, "label_": "row_fold"},
+-                    {"factor_": 64, "label_": "elem_arr_2"},
++                    {"factor_": (size // 128), "label_": "elem_arr_3"},
++                    {"factor_": 8, "label_": "elem_arr_2"},
+                     {"factor_": 2, "label_": "elem_arr_1"},
+-                    {"factor_": 1, "label_": "elem_arr_0"},
++                    {"factor_": 8, "label_": "elem_arr_0"},
+                 ],
+             },
+         }
+-    elif is_stick_dim and tensor_idx == 0 and opfunc == "batchmatmulfp8":
++    elif is_stick_dim and is_fp8_stick and not (stick_idx == 0):
+         return {
+             "spatial": 3,
+             "temporal": 0,
+-            "elemArr": 4,
++            "elemArr": 3,
+             "padding": "nopad",
+             "folds": {
+                 "dim_prop_func": [
+                     {"Affine": {"alpha_": size, "beta_": 0}},
+                     {"Affine": {"alpha_": 0, "beta_": 0}},
+                     {"Affine": {"alpha_": 0, "beta_": 0}},
+-                    {"Affine": {"alpha_": 128, "beta_": 0}},
++                    {"Affine": {"alpha_": (size // 8), "beta_": 0}},
+                     {"Affine": {"alpha_": 8, "beta_": 0}},
+-                    {"Affine": {"alpha_": 64, "beta_": 0}},
+                     {"Affine": {"alpha_": 1, "beta_": 0}},
+                 ],
+                 "dim_prop_attr": [
+                     {"factor_": nsplits, "label_": "core_fold"},
+                     {"factor_": 1, "label_": "corelet_fold"},
+                     {"factor_": 1, "label_": "row_fold"},
+-                    {"factor_": (size // 128), "label_": "elem_arr_3"},
+-                    {"factor_": 8, "label_": "elem_arr_2"},
++                    {"factor_": 64, "label_": "elem_arr_2"},
+                     {"factor_": 2, "label_": "elem_arr_1"},
+-                    {"factor_": 8, "label_": "elem_arr_0"},
++                    {"factor_": 1, "label_": "elem_arr_0"},
+                 ],
+             },
+         }
+diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
+index de7005b..dede898 100644
+--- a/torch_spyre/_inductor/codegen/superdsc.py
++++ b/torch_spyre/_inductor/codegen/superdsc.py
+@@ -28,6 +28,7 @@ from torch_spyre._inductor.constants import (
+     MATMUL_DIM_LABELS,
+     MATMUL_LAYOUT_LABELS,
+     MATMUL_REDUCTION_OPS,
++    BATCH_MATMUL_FP8MB_OP,
+     RESTICKIFY_OP,
+     TOPK_OPS,
+ )
+@@ -314,8 +315,13 @@ def _get_padded_iteration_space(
+         for idx, dim in enumerate(dim_order):
+             if idx >= len(dev_size) or dim not in stick_dim_order:
+                 continue
+-            effective_stick_size = (
+-                stick_size[0] if len(stick_size) == 1 else stick_size[0] * stick_size[1]
++            # Compound layouts may repeat one logical dim (QFP8MB:
++            # K:8, M:2, K:8). Padding alignment is the product of only the
++            # physical factors that belong to this logical dimension.
++            effective_stick_size = math.prod(
++                size
++                for stick_dim, size in zip(stick_dim_order, stick_size)
++                if stick_dim == dim
+             )
+             unaligned = sdsc_iteration_space[dim] % effective_stick_size
+             if unaligned > 0:
+@@ -419,6 +425,7 @@ def _create_sdsc_tensors(
+ 
+     for i, arg in enumerate(op_spec.args):
+         is_fp8_mm_kernel_arg = arg.element_arrangement == ElementArrangement.QFP8WT
++        is_fp8mb_arg = arg.element_arrangement == ElementArrangement.QFP8MB
+ 
+         # Step 1: Determine dimension order and stick dimension.
+         # Index tensors use their pre-computed layout (their coords have no IndirectAccess).
+@@ -475,7 +482,12 @@ def _create_sdsc_tensors(
+             dev_dim_size = arg.device_size[-stride_idx - 2]
+             it_dim_size = iteration_space[dim]
+             if dim == stick_dim:
+-                stick_size = arg.device_dtype.elems_per_stick()
++                stick_size = (
++                    64
++                    if arg.element_arrangement
++                    in (ElementArrangement.QFP8MB, ElementArrangement.QFP8WT)
++                    else arg.device_dtype.elems_per_stick()
++                )
+                 dev_dim_size *= stick_size
+                 it_dim_size = ((it_dim_size - 1) // stick_size + 1) * stick_size
+ 
+@@ -512,13 +524,19 @@ def _create_sdsc_tensors(
+         effective_stick = [op_stick_dim if stick_dim is None else stick_dim]
+         layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
+ 
+-        # Special handling for FP8 matmul KERNEL tensor
++        # Special handling for DD2 compound FP8 sticks.
+         dtype_stick_size = arg.device_dtype.elems_per_stick()
+         layout_stick_size = [dtype_stick_size]
+-        if is_fp8_mm_kernel_arg:
+-            # FP8 KERNEL needs 2D stick: [2, stick_size/2]
+-            layout_stick_size = [2, dtype_stick_size // 2]
+-            # Use the last two dimensions from dim_order for 2D stick
++        if is_fp8mb_arg:
++            if len(dim_order) != 2 or stick_dim is None:
++                raise RuntimeError(
++                    "QFP8MB codegen requires exactly two logical dimensions"
++                )
++            packed_mb_dim = next(dim for dim in dim_order if dim is not stick_dim)
++            layout_stick_size = [8, 2, 8]
++            effective_stick = [stick_dim, packed_mb_dim, stick_dim]
++        elif is_fp8_mm_kernel_arg:
++            layout_stick_size = [2, 64]
+             effective_stick = dim_order[-2:]
+ 
+         if has_indirect_access:
+@@ -707,7 +725,11 @@ def _extend_matmul_k_to_padded(
+     # (e.g. a slice) of a larger buffer: device_size reflects the underlying
+     # allocation's K extent, not the slice's logical K, so it can be larger
+     # than the matmul's actual K and would over-extend the iteration space.
+-    stick_size = y_arg.device_dtype.elems_per_stick()
++    stick_size = (
++        64
++        if op_spec.op == BATCH_MATMUL_FP8MB_OP
++        else y_arg.device_dtype.elems_per_stick()
++    )
+     k_current = sdsc_iteration_space[k_sym]
+     k_padded = ((k_current + stick_size - 1) // stick_size) * stick_size
+ 
+@@ -778,7 +800,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
+     # virtual mb=1 row when the op's tensor has only the stick dim.
+     mb_sym: Symbol | None = None
+     if (
+-        (DtypeOpTable.is_dtype_op(op_spec.op) or op_spec.op == "qfp8ch")
++        (
++            DtypeOpTable.is_dtype_op(op_spec.op)
++            or op_spec.op in ("qfp8ch", "qfp8mb")
++        )
+         and op_spec.op != IDENTITY_OP
+         and op_stick_dim is not None
+         and all(d is op_stick_dim for d in op_dim_order)
+diff --git a/torch_spyre/_inductor/constants.py b/torch_spyre/_inductor/constants.py
+index a30ed78..c17f069 100644
+--- a/torch_spyre/_inductor/constants.py
++++ b/torch_spyre/_inductor/constants.py
+@@ -19,7 +19,10 @@ BATCH_MATMUL_OP = "batchmatmul"
+ IDENTITY_OP = "identity"
+ RESTICKIFY_OP = "ReStickifyOpHBM"
+ BATCH_MATMUL_FP8_OP = "batchmatmulfp8"
+-MATMUL_REDUCTION_OPS = frozenset({BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP})
++BATCH_MATMUL_FP8MB_OP = "batchmatmulfp8mb"
++MATMUL_REDUCTION_OPS = frozenset(
++    {BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP, BATCH_MATMUL_FP8MB_OP}
++)
+ 
+ # Reduction ops that cannot reduce along the stick dimension.
+ # Native prod reduction is not currently available in the backend.
+@@ -168,8 +171,10 @@ FP8_E4M3FN_MIN = float(FP8_E4M3FN_INFO.min)
+ # Operations that directly handle FP8 dtypes (SEN143_FP8)
+ SPYRE_FP8_OPS = {
+     "qfp8ch",  # Channel-wise FP8 quantization (output: FP8)
++    "qfp8mb",  # DD2 minibatch-packed FP8 quantization (output: FP8)
+     "fp8todl16",  # FP8 to FP16 conversion (input: FP8)
+     "batchmatmulfp8",  # FP8 bmm (inputs: FP8)
++    "batchmatmulfp8mb",  # DD2 minibatch-packed FP8 bmm (inputs: FP8)
+     "qfp8wt",  # FP8 quantization (output: FP8)
+ }
+ 
+diff --git a/torch_spyre/_inductor/customops.py b/torch_spyre/_inductor/customops.py
+index f9f9ff6..79ebbe4 100644
+--- a/torch_spyre/_inductor/customops.py
++++ b/torch_spyre/_inductor/customops.py
+@@ -648,6 +648,23 @@ def _(input: torch.Tensor) -> torch.Tensor:
+     return torch.empty(input.size(), dtype=torch.float8_e4m3fn, device=input.device)
+ 
+ 
++@torch.library.custom_op("spyre::qfp8mb", mutates_args=(), device_types="spyre")
++def qfp8mb(input: torch.Tensor) -> torch.Tensor:
++    """
++    DD2 minibatch-packed FP8 format conversion.
++
++    This PoC only supports a contiguous 2D [M, K] tensor with even M and
++    K divisible by 64. Scaling and clamping are performed by the surrounding
++    quantize_fp8_with_scale decomposition.
++    """
++    pass
++
++
++@qfp8mb.register_fake
++def _(input: torch.Tensor) -> torch.Tensor:
++    return torch.empty(input.size(), dtype=torch.float8_e4m3fn, device=input.device)
++
++
+ @torch.library.custom_op(
+     "spyre::quantize_fp8_with_scale", mutates_args=(), device_types="spyre"
+ )
+diff --git a/torch_spyre/_inductor/decompositions.py b/torch_spyre/_inductor/decompositions.py
+index 262e7b8..a126fe7 100644
+--- a/torch_spyre/_inductor/decompositions.py
++++ b/torch_spyre/_inductor/decompositions.py
+@@ -824,6 +824,10 @@ def spyre_quantize_fp8_with_scale(
+     inv_scale = torch.reciprocal(scale)
+     x_scaled = input * inv_scale
+     x_clamped = torch.ops.spyre.clamp(x_scaled, FP8_E4M3FN_MIN, FP8_E4M3FN_MAX)
++    # DD2's prefill path packs two adjacent M rows into each FP8 activation
++    # stick. Keep odd-M and non-2D cases on the existing channel layout.
++    if input.dim() == 2 and int(input.shape[0]) % 2 == 0:
++        return torch.ops.spyre.qfp8mb(x_clamped)
+     return torch.ops.spyre.qfp8ch(x_clamped)
+ 
+ 
+diff --git a/torch_spyre/_inductor/lowering.py b/torch_spyre/_inductor/lowering.py
+index 9036036..2d8402f 100644
+--- a/torch_spyre/_inductor/lowering.py
++++ b/torch_spyre/_inductor/lowering.py
+@@ -28,6 +28,7 @@ from .constants import (
+     BATCH_MATMUL_OP,
+     COPY_BACK_CANDIDATE_ATTR,
+     BATCH_MATMUL_FP8_OP,
++    BATCH_MATMUL_FP8MB_OP,
+     SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY,
+     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
+ )
+@@ -362,9 +363,17 @@ def lower_scaled_mm(
+     output_dtype = out_dtype if out_dtype is not None else torch.float16
+     reduction_numel = mat1_size[-1]
+ 
++    use_fp8mb = False
+     if mat1_ndim == 2 and mat2_ndim == 2:
+         # [M, K] × [K, N] → [M, N]
+         ranges = [mat1_size[0], mat2_size[1]]
++        m, k, n = (int(mat1_size[0]), int(mat1_size[1]), int(mat2_size[1]))
++        use_fp8mb = m % 2 == 0
++        if use_fp8mb and (k % 64 != 0 or n % 64 != 0):
++            raise Unsupported(
++                "DD2 batchmatmulfp8mb PoC requires M % 2 == 0, "
++                f"K % 64 == 0, and N % 64 == 0; got M={m}, K={k}, N={n}"
++            )
+ 
+         def inner_fn(index, reduction_index):
+             i0, i1 = index
+@@ -395,7 +404,9 @@ def lower_scaled_mm(
+         )
+ 
+     result = Reduction.create(
+-        reduction_type=BATCH_MATMUL_FP8_OP,
++        reduction_type=(
++            BATCH_MATMUL_FP8MB_OP if use_fp8mb else BATCH_MATMUL_FP8_OP
++        ),
+         input_node=[mat1, mat2],
+         device=mat1.get_device(),
+         dst_dtype=output_dtype,
+@@ -1396,6 +1407,32 @@ def lower_qfp8ch(x):
+     return pw
+ 
+ 
++@register_spyre_lowering(torch.ops.spyre.qfp8mb)
++def lower_qfp8mb(x):
++    """
++    Lower the DD2 minibatch-packed FP8 format conversion.
++
++    Layout propagation attaches the physical [K:8, M:2, K:8] stick.
++    """
++
++    fn = lowering.ops_wrapper(torch.ops.spyre.qfp8mb.__name__)
++    x_loader = x.make_loader()
++
++    def inner_fn(index):
++        return fn(x_loader(index))
++
++    pw = Pointwise.create(
++        device=x.get_device(),
++        dtype=torch.float8_e4m3fn,
++        inner_fn=inner_fn,
++        ranges=x.get_size(),
++        origin_node=x.get_origin_node(),
++        traceback=x.get_traceback(),
++    )
++    pw.realize()
++    return pw
++
++
+ @register_spyre_lowering(torch.ops.spyre.qfp8wt)
+ def lower_qfp8wt(x):
+     """
+diff --git a/torch_spyre/_inductor/padding.py b/torch_spyre/_inductor/padding.py
+index 2cd7d1a..b0e51da 100644
+--- a/torch_spyre/_inductor/padding.py
++++ b/torch_spyre/_inductor/padding.py
+@@ -54,7 +54,11 @@ from torch._inductor.ir import (
+ )
+ from torch._inductor.virtualized import V
+ 
+-from .constants import BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP
++from .constants import (
++    BATCH_MATMUL_OP,
++    BATCH_MATMUL_FP8_OP,
++    BATCH_MATMUL_FP8MB_OP,
++)
+ from .ir import FixedTiledLayout
+ from .logging_utils import get_inductor_logger
+ from .pass_utils import (
+@@ -180,7 +184,11 @@ def insert_bmm_padding(graph: GraphLowering) -> None:
+         reduction = op.data
+         if not isinstance(reduction, Reduction):
+             continue
+-        if reduction.reduction_type not in [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP]:
++        if reduction.reduction_type not in [
++            BATCH_MATMUL_OP,
++            BATCH_MATMUL_FP8_OP,
++            BATCH_MATMUL_FP8MB_OP,
++        ]:
+             continue
+ 
+         rw = op.get_read_writes()
+diff --git a/torch_spyre/_inductor/pass_utils.py b/torch_spyre/_inductor/pass_utils.py
+index 11cc61e..1342ad1 100644
+--- a/torch_spyre/_inductor/pass_utils.py
++++ b/torch_spyre/_inductor/pass_utils.py
+@@ -34,7 +34,7 @@ from torch._inductor.ir import (
+ from torch._inductor.scheduler import SchedulerNode
+ from torch._inductor.dependencies import MemoryDep, ReadWrites, StarDep, is_indirect
+ from torch._inductor.virtualized import V
+-from torch_spyre._C import SpyreTensorLayout, get_elem_in_stick
++from torch_spyre._C import ElementArrangement, SpyreTensorLayout, get_elem_in_stick
+ from torch_spyre._inductor.errors import Unsupported
+ from torch_spyre._inductor.op_spec import IndirectAccess
+ 
+@@ -710,6 +710,21 @@ def _check_stick_expr_supported(stick_expr: sympy.Expr, elems_per_stick: int) ->
+         )
+ 
+ 
++def physical_stick_depth(stl: SpyreTensorLayout) -> int:
++    """Return the terminal physical stick extent used by coordinate validation.
++
++    FP8MB and FP8WT are compound-stick arrangements. Their final coordinate
++    covers only the innermost physical factor (8 or 64), rather than all 128
++    FP8 elements in the compound stick.
++    """
++    if stl.element_arrangement in (
++        ElementArrangement.QFP8MB,
++        ElementArrangement.QFP8WT,
++    ):
++        return int(stl.device_size[-1])
++    return stl.elems_per_stick()
++
++
+ def device_coordinates(
+     stl: SpyreTensorLayout,
+     dep: MemoryDep,
+@@ -738,7 +753,7 @@ def device_coordinates(
+         index,
+         indirect_sizes,
+     )
+-    _check_stick_expr_supported(coords[-1], stl.elems_per_stick())
++    _check_stick_expr_supported(coords[-1], physical_stick_depth(stl))
+     return coords
+ 
+ 
+@@ -1057,7 +1072,8 @@ def compute_restickify_needed(
+     assert idc, "device_coordinates returned empty list for input"
+     assert out_idc, "device_coordinates returned empty list for output"
+     # Input stick with an offset always needs restickify to remove the offset.
+-    in_stick_offset_free = is_stick_expr_offset_free(idc[-1], in_stl.elems_per_stick())
++    in_stick_depth = physical_stick_depth(in_stl)
++    in_stick_offset_free = is_stick_expr_offset_free(idc[-1], in_stick_depth)
+     if in_stick_offset_free and stick_compatible([idc, out_idc]):
+         return False, None
+     ic = host_coordinates(in_host, in_dep, ind_sizes)
+@@ -1070,7 +1086,7 @@ def compute_restickify_needed(
+         reduction_vars = in_dep.index.free_symbols - out_dep.index.free_symbols
+         if reduction_vars:
+             red_var = next(iter(reduction_vars))
+-            target_stick = sympy.Mod(red_var, in_stl.elems_per_stick())
++            target_stick = sympy.Mod(red_var, in_stick_depth)
+     return True, compute_restickify_target_layout(
+         in_stl, in_host, target_stick, ic, idc
+     )
+diff --git a/torch_spyre/_inductor/propagate_layouts.py b/torch_spyre/_inductor/propagate_layouts.py
+index 9de4a8f..4edeca2 100644
+--- a/torch_spyre/_inductor/propagate_layouts.py
++++ b/torch_spyre/_inductor/propagate_layouts.py
+@@ -54,6 +54,7 @@ from .errors import Unsupported
+ from .constants import (
+     BATCH_MATMUL_OP,
+     BATCH_MATMUL_FP8_OP,
++    BATCH_MATMUL_FP8MB_OP,
+     COPY_BACK_CANDIDATE_ATTR,
+     DEVICE_NAME,
+     ELIDED_COPY_BACK_ATTR,
+@@ -79,6 +80,7 @@ from .pass_utils import (
+     indirect_info_from_op,
+     is_stick_expr_offset_free,
+     iter_var_id,
++    physical_stick_depth,
+ )
+ from .optimize_restickify import AllSameNode, AnyInNode, FixedInOutNode
+ from .views import matching_dim
+@@ -227,7 +229,7 @@ def _check_supported_input_sticks(args: list[PropArg], op_label: str) -> None:
+                 continue
+             representable += 1
+             stick_expr = coords[-1]
+-            if not is_stick_expr_offset_free(stick_expr, stl.elems_per_stick()):
++            if not is_stick_expr_offset_free(stick_expr, physical_stick_depth(stl)):
+                 raise Unsupported(
+                     f"{op_label}: input arg{i} has stick expression with offset "
+                     f"{stick_expr!r} (likely from slicing the stick dimension); "
+@@ -379,7 +381,9 @@ def _single_arg_op_layout(
+                 # Staggered-EA candidate whose physical stick depth differs from
+                 # elems_per_stick — not a valid input for this conversion path.
+                 return []
+-            if not is_stick_expr_offset_free(in_stick_expr, stl.elems_per_stick()):
++            if not is_stick_expr_offset_free(
++                in_stick_expr, physical_stick_depth(stl)
++            ):
+                 return []
+ 
+             input_ea = stl.element_arrangement
+@@ -457,8 +461,55 @@ def _single_arg_op_layout(
+                 _rescale_stl_for_dtype(stl, output.dtype, ElementArrangement.QFP8CH)
+             ]
+ 
++        case spyreop.qfp8mb.default:
++            # Keep the ordinary logical FP8 layout in torch-spyre IR and mark
++            # its DD2 element arrangement. SuperDSC expands that marker to the
++            # physical [K:8, M:2, K:8] stick. Encoding the physical factors as
++            # extra IR dimensions makes coarse tiling treat them as independent
++            # loop variables and corrupts the logical M/K iteration space.
++            if len(output.size) != 2:
++                raise Unsupported(
++                    f"qfp8mb PoC requires a 2D [M, K] tensor, got {output.size}"
++                )
++            m, k = (concretize_expr(output.size[0]), concretize_expr(output.size[1]))
++            strides = [concretize_expr(s) for s in output.stride]
++            if m % 2 != 0 or k % 64 != 0:
++                raise Unsupported(
++                    "qfp8mb PoC requires M % 2 == 0 and K % 64 == 0; "
++                    f"got M={m}, K={k}"
++                )
++            if strides != [k, 1]:
++                raise Unsupported(
++                    "qfp8mb PoC requires contiguous [M, K] storage; "
++                    f"got strides={strides}"
++                )
++            return [
++                _rescale_stl_for_dtype(
++                    stl,
++                    output.dtype,
++                    ElementArrangement.QFP8MB,
++                )
++            ]
++
+         case spyreop.qfp8wt.default:
+-            # fp16 -> fp8 weight quantization with 2D-stick layout [2, 64].
++            # As with QFP8MB, retain a logical IR layout and let SuperDSC
++            # serialize QFP8WT as the physical [K:2, N:64] stick.
++            if len(output.size) != 2:
++                raise Unsupported(
++                    f"qfp8wt PoC requires a 2D [K, N] tensor, got {output.size}"
++                )
++            k, n = (concretize_expr(output.size[0]), concretize_expr(output.size[1]))
++            strides = [concretize_expr(s) for s in output.stride]
++            if k % 64 != 0 or n % 64 != 0:
++                raise Unsupported(
++                    "qfp8wt PoC requires K % 64 == 0 and N % 64 == 0; "
++                    f"got K={k}, N={n}"
++                )
++            if strides != [n, 1]:
++                raise Unsupported(
++                    "qfp8wt PoC requires contiguous [K, N] storage; "
++                    f"got strides={strides}"
++                )
+             in_elems_per_stick = get_elem_in_stick(in_layout.dtype)
+             stick_dim_size = in_layout.size[-1]
+             unaligned = stick_dim_size % in_elems_per_stick
+@@ -689,6 +740,31 @@ def find_stick_compatible_input_layout(
+     )
+ 
+ 
++def _find_fp8mb_input_layout(
++    arg: PropArg,
++    required_var: sympy.Symbol,
++    required_ea: ElementArrangement,
++    label: str,
++) -> SpyreTensorLayout:
++    """Select an already-materialized DD2 compound-stick input verbatim.
++
++    QFP8MB/QFP8WT cannot be reconstructed by the ordinary one-dimensional
++    restickify path. Their producer must have emitted the exact physical STL.
++    """
++    matching = [
++        stl for stl in arg.layouts if stl.element_arrangement == required_ea
++    ]
++    for stl in matching:
++        coords = try_device_coordinates(stl, arg.dep, None)
++        if coords is not None and required_var in coords[-1].free_symbols:
++            return stl
++    raise Unsupported(
++        f"{BATCH_MATMUL_FP8MB_OP}: {label} requires an existing "
++        f"{required_ea} layout with {required_var} in the terminal physical "
++        f"stick coordinate; candidates={matching}"
++    )
++
++
+ def _matmul_layouts(
+     op: Operation,
+     output: FixedLayout,
+@@ -723,12 +799,20 @@ def _matmul_layouts(
+     reduction_var = find_reduction_var(x.dep, output_dep)
+     generated_var = find_matmul_generated_var(y.dep, x.dep, output_dep)
+ 
+-    x_req_stl = find_stick_compatible_input_layout(
+-        x, reduction_var, data.reduction_type, "x"
+-    )
+-    y_req_stl = find_stick_compatible_input_layout(
+-        y, generated_var, data.reduction_type, "y"
+-    )
++    if data.reduction_type == BATCH_MATMUL_FP8MB_OP:
++        x_req_stl = _find_fp8mb_input_layout(
++            x, reduction_var, ElementArrangement.QFP8MB, "x"
++        )
++        y_req_stl = _find_fp8mb_input_layout(
++            y, generated_var, ElementArrangement.QFP8WT, "y"
++        )
++    else:
++        x_req_stl = find_stick_compatible_input_layout(
++            x, reduction_var, data.reduction_type, "x"
++        )
++        y_req_stl = find_stick_compatible_input_layout(
++            y, generated_var, data.reduction_type, "y"
++        )
+ 
+     out_stick_dim = next(
+         (i for i, c in enumerate(out_coords) if generated_var in c.free_symbols),
+@@ -1095,6 +1179,7 @@ def compute_layouts(
+     if isinstance(data, Reduction) and data.reduction_type in [
+         BATCH_MATMUL_OP,
+         BATCH_MATMUL_FP8_OP,
++        BATCH_MATMUL_FP8MB_OP,
+     ]:
+         return _matmul_layouts(op, output, output_dep, args)
+ 
+diff --git a/torch_spyre/_inductor/span_overflow_hint_analysis.py b/torch_spyre/_inductor/span_overflow_hint_analysis.py
+index 7b7d5c3..d391b87 100644
+--- a/torch_spyre/_inductor/span_overflow_hint_analysis.py
++++ b/torch_spyre/_inductor/span_overflow_hint_analysis.py
+@@ -25,8 +25,9 @@ import sympy
+ from torch._inductor.dependencies import MemoryDep
+ from torch._inductor.ir import ComputedBuffer, FlexibleLayout, Pointwise, Reduction
+ from torch._inductor.virtualized import V
++from torch_spyre._C import ElementArrangement
+ 
+-from .constants import BATCH_MATMUL_OP
++from .constants import MATMUL_REDUCTION_OPS
+ from .errors import Unsupported
+ from .ir import FixedTiledLayout, _resize_device_layout
+ from .logging_utils import get_inductor_logger
+@@ -273,6 +274,28 @@ def _post_tile_stick_alignment_error(
+     if split_count <= 1:
+         return None
+ 
++    ea = original_layout.device_layout.element_arrangement
++    if ea in (ElementArrangement.QFP8MB, ElementArrangement.QFP8WT):
++        if len(original_layout.size) != 2 or selected_host_dim not in (0, 1):
++            return (
++                f"cannot validate compound FP8 tile alignment for "
++                f"{original_layout!r}: expected a 2D host layout"
++            )
++        # Both DD2 compound layouts expose two independent logical
++        # granularities.  QFP8MB is [M:2, K:64]; QFP8WT is [K:2, N:64].
++        # A single "within-stick" dimension cannot represent this contract.
++        stick_elems = (2, 64)[selected_host_dim]
++        full_size = int(original_layout.size[selected_host_dim])
++        tile_size = full_size // split_count
++        if tile_size % stick_elems == 0:
++            return None
++        return (
++            f"split_count {split_count} makes selected host dim "
++            f"{selected_host_dim} tile size {tile_size}, which is not aligned "
++            f"to compound FP8 granularity {stick_elems}; coarse-tile "
++            f"boundaries would cut through a physical stick"
++        )
++
+     within_stick_dim = _within_stick_host_dim(original_layout)
+     if within_stick_dim is None:
+         # Cannot confidently identify the stick dim for this layout -- treat
+@@ -308,7 +331,7 @@ def _is_batch_matmul_reduction(op: ComputedBuffer) -> bool:
+     """
+     return (
+         isinstance(op.data, Reduction)
+-        and getattr(op.data, "reduction_type", None) == BATCH_MATMUL_OP
++        and getattr(op.data, "reduction_type", None) in MATMUL_REDUCTION_OPS
+     )
+ 
+ 
+diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
+index ec861f8..6030300 100644
+--- a/torch_spyre/_inductor/spyre_kernel.py
++++ b/torch_spyre/_inductor/spyre_kernel.py
+@@ -35,6 +35,7 @@ from .constants import (
+     SPYRE_FP32_OPS,
+     BATCH_MATMUL_OP,
+     BATCH_MATMUL_FP8_OP,
++    BATCH_MATMUL_FP8MB_OP,
+     IDENTITY_OP,
+     RESTICKIFY_OP,
+     SEGMENT_OFFSETS,
+@@ -91,7 +92,11 @@ def _preserve_shared_weight_unit_bmm_dim(
+     # OpSpec construction helpers.
+     if SHARED_WEIGHT_UNIT_BMM_INFO_KEY not in op_info:
+         return it_space
+-    if op not in [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP]:
++    if op not in [
++        BATCH_MATMUL_OP,
++        BATCH_MATMUL_FP8_OP,
++        BATCH_MATMUL_FP8MB_OP,
++    ]:
+         return it_space
+     if len(it_space) != 3 or len(args) < 3:
+         return it_space
+@@ -327,6 +332,10 @@ class SpyreOpFuncs:
+     def qfp8ch(x):
+         return PointwiseOp("qfp8ch", [x])
+ 
++    @staticmethod
++    def qfp8mb(x):
++        return PointwiseOp("qfp8mb", [x])
++
+     @staticmethod
+     def qfp8wt(x):
+         return PointwiseOp("qfp8wt", [x])
+@@ -908,7 +917,11 @@ class SpyreKernel(Kernel[CSEVariable]):
+                 f"device_size={list(layout.device_layout.device_size)}, op_info={op_info}"
+             )
+ 
+-        if value.op in [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP]:
++        if value.op in [
++            BATCH_MATMUL_OP,
++            BATCH_MATMUL_FP8_OP,
++            BATCH_MATMUL_FP8MB_OP,
++        ]:
+             if (
+                 len(value.arguments) != 2
+                 or (not isinstance(value.arguments[0], TensorAccess))
+diff --git a/torch_spyre/_inductor/work_division.py b/torch_spyre/_inductor/work_division.py
+index 5954c6e..6705418 100644
+--- a/torch_spyre/_inductor/work_division.py
++++ b/torch_spyre/_inductor/work_division.py
+@@ -40,7 +40,13 @@ from torch._inductor.graph import GraphLowering
+ from torch_spyre._C import ElementArrangement
+ 
+ from .errors import Unsupported
+-from .constants import BATCH_MATMUL_OP, DEVICE_NAME, TOPK_OPS, BATCH_MATMUL_FP8_OP
++from .constants import (
++    BATCH_MATMUL_OP,
++    BATCH_MATMUL_FP8_OP,
++    BATCH_MATMUL_FP8MB_OP,
++    DEVICE_NAME,
++    TOPK_OPS,
++)
+ from .ir import FixedTiledLayout
+ from .pass_utils import (
+     SchedNodeArg,
+@@ -304,11 +310,14 @@ def multi_dim_iteration_space_split(
+     return splits
+ 
+ 
+-def _has_qfp8wt_tensor(tds: list[TensorDep]) -> bool:
+-    """Check if any tensor has QFP8WT element arrangement."""
++_FP8_COMPOUND_EAS = (ElementArrangement.QFP8MB, ElementArrangement.QFP8WT)
++
++
++def _has_fp8_compound_tensor(tds: list[TensorDep]) -> bool:
++    """Check if any tensor uses a DD2 compound FP8 stick."""
+     return any(
+         hasattr(td.layout.device_layout, "element_arrangement")
+-        and td.layout.device_layout.element_arrangement == ElementArrangement.QFP8WT
++        and td.layout.device_layout.element_arrangement in _FP8_COMPOUND_EAS
+         for td in tds
+     )
+ 
+@@ -321,28 +330,52 @@ def _is_qfp8wt_tensor(td: TensorDep) -> bool:
+     )
+ 
+ 
+-def _get_qfp8wt_split_constraints(
++def _compound_stick_granularities(td: TensorDep) -> dict[Symbol, int]:
++    """Return logical atomic sizes encoded by one compound FP8 stick."""
++    ea = td.layout.device_layout.element_arrangement
++    if ea == ElementArrangement.QFP8MB:
++        coords_and_factors = zip(td.device_coords[-3:], (8, 2, 8))
++    elif ea == ElementArrangement.QFP8WT:
++        coords_and_factors = zip(td.device_coords[-2:], (2, 64))
++    else:
++        return {}
++
++    granularities: dict[Symbol, int] = {}
++    for coord, factor in coords_and_factors:
++        if len(coord.free_symbols) != 1:
++            continue
++        var = next(iter(coord.free_symbols))
++        granularities[var] = granularities.get(var, 1) * factor
++    return granularities
++
++
++def _get_fp8_compound_split_constraints(
+     input_tds: list[TensorDep],
+     output_td: TensorDep,
+ ) -> dict[Symbol, int]:
+-    """Return split constraints (=1) for QFP8WT second stick dimension."""
++    """Prevent cross-core K splitting for DD2 compound FP8 operands.
++
++    QFP8WT's non-terminal K:2 factor and QFP8MB's repeated K:8 factors
++    identify the reduction dimension. M remains splittable at granularity 2.
++    """
+     constraints: dict[Symbol, int] = {}
+-    if not _has_qfp8wt_tensor(input_tds + [output_td]):
++    all_tds = input_tds + [output_td]
++    if not _has_fp8_compound_tensor(all_tds):
+         return constraints
+ 
+-    # Kernel tensor (second input for batchmatmul)
+-    if len(input_tds) > 1:
+-        kernel_td = input_tds[1]
+-        if len(kernel_td.device_coords) > 1 and _is_qfp8wt_tensor(kernel_td):
+-            second_stick_vars = kernel_td.device_coords[-2].free_symbols
+-            for var in second_stick_vars:
++    for td in all_tds:
++        ea = td.layout.device_layout.element_arrangement
++        if ea == ElementArrangement.QFP8WT:
++            for var in td.device_coords[-2].free_symbols:
+                 constraints[var] = 1
+-
+-    # Output tensor
+-    if len(output_td.device_coords) > 1 and _is_qfp8wt_tensor(output_td):
+-        second_stick_vars = output_td.device_coords[-2].free_symbols
+-        for var in second_stick_vars:
+-            constraints[var] = 1
++        elif ea == ElementArrangement.QFP8MB:
++            occurrences: dict[Symbol, int] = {}
++            for coord in td.device_coords[-3:]:
++                for var in coord.free_symbols:
++                    occurrences[var] = occurrences.get(var, 0) + 1
++            for var, count in occurrences.items():
++                if count > 1:
++                    constraints[var] = 1
+ 
+     return constraints
+ 
+@@ -361,8 +394,8 @@ def adjust_it_space_for_sticks(
+     convert its size in it_space from elements to sticks. This ensures work
+     division treats sticks as atomic units.
+ 
+-    For QFP8WT tensors (2D stick layouts), both stick dimensions are treated as
+-    atomic units with 128-byte constraint.
++    For DD2 compound FP8 layouts, each logical dimension uses its physical
++    atomic size: QFP8MB M=2/K=64 and QFP8WT K=2/N=64.
+ 
+     When tensors of different dtypes share a stick variable (e.g. a float16
+     input and an int64 argmax output), the largest elems_per_stick is used
+@@ -383,25 +416,23 @@ def adjust_it_space_for_sticks(
+     adjusted_space = dict(it_space)
+     max_elems: dict[Symbol, int] = {}
+     for td in tensor_deps:
+-        # Handle QFP8WT multi-dim stick
++        # Handle DD2 compound FP8 sticks. A logical dimension can occur more
++        # than once in the physical stick (QFP8MB K:8 * K:8 = K:64).
+         if (
+             hasattr(td.layout.device_layout, "element_arrangement")
+-            and td.layout.device_layout.element_arrangement == ElementArrangement.QFP8WT
++            and td.layout.device_layout.element_arrangement in _FP8_COMPOUND_EAS
+         ):
+-            # For QFP8WT, last two device dimensions are the 2D stick [2, 64]
+-            # Both need to be treated as atomic 128-byte units
+-            stick_vars = []
+-            for coord in td.device_coords[-2:]:
+-                if len(coord.free_symbols) == 1:
+-                    var = next(iter(coord.free_symbols))
+-                    if var in adjusted_space:
+-                        stick_vars.append(var)
+-
+-            for stick_var in stick_vars:
+-                # QFP8WT stick size is always 128 bytes (64 elements at fp8)
+-                fp8_stick_elems = td.layout.device_layout.elems_per_stick()
+-                if stick_var not in max_elems or fp8_stick_elems > max_elems[stick_var]:
+-                    max_elems[stick_var] = fp8_stick_elems
++            for stick_var, atomic_elems in _compound_stick_granularities(td).items():
++                if stick_var not in adjusted_space:
++                    continue
++                if stick_var in symbol_meta:
++                    raise Unsupported(
++                        f"symbolic compound-stick dim {stick_var} is not "
++                        f"supported yet (tensor {td.dep.name})"
++                    )
++                max_elems[stick_var] = max(
++                    max_elems.get(stick_var, 1), atomic_elems
++                )
+             continue
+ 
+         stick_expr = td.device_coords[-1]
+@@ -970,12 +1001,13 @@ def span_reduction_pass(
+         all_tds, it_space, it_space_adjusted, stick_vars, max_cores, symbol_meta
+     )
+ 
+-    # For matmul ops with QFP8WT kernels, enforce split constraints
++    # DD2 compound FP8 reductions cannot split K across cores.
+     if isinstance(op.data, Reduction) and op.data.reduction_type in (
+         BATCH_MATMUL_OP,
+         BATCH_MATMUL_FP8_OP,
++        BATCH_MATMUL_FP8MB_OP,
+     ):
+-        qfp8_constraints = _get_qfp8wt_split_constraints(input_tds, output_td)
++        qfp8_constraints = _get_fp8_compound_split_constraints(input_tds, output_td)
+         min_splits.update(qfp8_constraints)
+ 
+     coord_vars = {v for e in output_td.device_coords[:-1] for v in e.free_symbols}
+@@ -1100,8 +1132,8 @@ def work_distribution_pass(
+     # dims with actual committed splits so they don't overlap with priorities.
+     committed_splits = {s: v for s, v in min_splits.items() if v > 1}
+ 
+-    # For matmul ops with QFP8WT kernels, enforce split constraints
+-    qfp8_constraints = _get_qfp8wt_split_constraints(input_tds, output_td)
++    # DD2 compound FP8 reductions cannot split K across cores.
++    qfp8_constraints = _get_fp8_compound_split_constraints(input_tds, output_td)
+     for var, split_val in qfp8_constraints.items():
+         if var in committed_splits:
+             del committed_splits[var]
+@@ -1148,8 +1180,8 @@ def work_distribution_pass(
+         it_space_adjusted, output_td, committed_splits, max_cores, symbol_meta, blocked
+     )
+ 
+-    # Enforce QFP8WT split constraints on the final split
+-    qfp8_constraints = _get_qfp8wt_split_constraints(input_tds, output_td)
++    # Enforce compound-stick split constraints on the final split.
++    qfp8_constraints = _get_fp8_compound_split_constraints(input_tds, output_td)
+     splits.update(qfp8_constraints)
+ 
+     apply_splits(op, splits, output_td)
+@@ -1389,7 +1421,11 @@ def _cost_model_matmul_planner(
+     """
+     if not isinstance(op.data, Reduction):
+         return splits
+-    if op.data.reduction_type not in (BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP):
++    if op.data.reduction_type not in (
++        BATCH_MATMUL_OP,
++        BATCH_MATMUL_FP8_OP,
++        BATCH_MATMUL_FP8MB_OP,
++    ):
+         return splits
+     if committed_splits:
+         return splits
+@@ -1453,8 +1489,8 @@ def _cost_model_matmul_planner(
+     n_divs = [int(d) for d in divisors(n_sticks)]
+     k_divs = [int(d) for d in divisors(k_sticks)]
+ 
+-    # For batchmatmulfp8 with QFP8WT kernels, do not split K
+-    if _has_qfp8wt_tensor(input_tds + [output_td]):
++    # DD2 compound FP8 matmul cannot split K across cores.
++    if _has_fp8_compound_tensor(input_tds + [output_td]):
+         k_divs = [1]
+ 
+     best = None
+@@ -1491,9 +1527,9 @@ def _cost_model_matmul_planner(
+ 
+     # Never trade down to fewer cores than the default distributor already found.
+     if math.prod(new_splits.values()) < math.prod(splits.values()):
+-        if not _has_qfp8wt_tensor(input_tds + [output_td]):
++        if not _has_fp8_compound_tensor(input_tds + [output_td]):
+             return splits
+-        # For QFP8WT, force k_dim = 1 regardless of core count
++        # For compound FP8, force k_dim = 1 regardless of core count.
+         new_splits[k_dim] = 1
+ 
+     logger.debug(
+diff --git a/torch_spyre/csrc/module.cpp b/torch_spyre/csrc/module.cpp
+index eef3760..30e614d 100644
+--- a/torch_spyre/csrc/module.cpp
++++ b/torch_spyre/csrc/module.cpp
+@@ -209,7 +209,8 @@ PYBIND11_MODULE(_C, m) {
+       .value("QFP8CH", spyre::ElementArrangement::QFP8CH)
+       .value("EXX2", spyre::ElementArrangement::EXX2)
+       .value("FP32_TO_DL16", spyre::ElementArrangement::FP32_TO_DL16)
+-      .value("QFP8WT", spyre::ElementArrangement::QFP8WT);
++      .value("QFP8WT", spyre::ElementArrangement::QFP8WT)
++      .value("QFP8MB", spyre::ElementArrangement::QFP8MB);
+ 
+   py::class_<spyre::SpyreTensorLayout> dci_cls(m, "SpyreTensorLayout");
+ 
+diff --git a/torch_spyre/csrc/spyre_tensor_impl.h b/torch_spyre/csrc/spyre_tensor_impl.h
+index e812d85..8353ef0 100644
+--- a/torch_spyre/csrc/spyre_tensor_impl.h
++++ b/torch_spyre/csrc/spyre_tensor_impl.h
+@@ -51,6 +51,7 @@ enum class ElementArrangement {
+   FP32_TO_DL16 = 4,  // non-sequential order produced by fp32->dl16 on-device
+                      // conversions
+   QFP8WT = 5,        // 2D stick layout for FP8 weight tensors
++  QFP8MB = 6,        // DD2 minibatch-packed FP8 activation layout
+ };
+ 
+ inline std::string elementArrangementToString(ElementArrangement ea) {
+@@ -65,6 +66,10 @@ inline std::string elementArrangementToString(ElementArrangement ea) {
+       return "EXX2";
+     case ElementArrangement::FP32_TO_DL16:
+       return "FP32_TO_DL16";
++    case ElementArrangement::QFP8WT:
++      return "QFP8WT";
++    case ElementArrangement::QFP8MB:
++      return "QFP8MB";
+     default:
+       DT_ERROR("Invalid ElementArrangement");
+   }
