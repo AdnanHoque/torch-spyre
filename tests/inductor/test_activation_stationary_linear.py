@@ -18,6 +18,9 @@ import torch
 from torch_spyre._inductor import config
 from torch_spyre._inductor.decompositions import spyre_linear
 from torch_spyre._inductor.errors import Unsupported
+from torch_spyre._inductor.matmul_dataflow import (
+    activation_stationary_work_division,
+)
 
 
 @pytest.mark.parametrize(
@@ -124,3 +127,19 @@ def test_invalid_matmul_dataflow_is_rejected():
         pytest.raises(Unsupported, match="unsupported matmul dataflow"),
     ):
         spyre_linear(activation, weight)
+
+
+@pytest.mark.parametrize(
+    ("m", "k", "n", "expected"),
+    [
+        (1, 4096, 1024, {"M": 1, "N": 16, "K": 2}),
+        (64, 4096, 1024, {"M": 1, "N": 16, "K": 2}),
+        (512, 4096, 1024, {"M": 8, "N": 4, "K": 1}),
+        (512, 12800, 4096, {"M": 4, "N": 8, "K": 1}),
+        (64, 12800, 4096, None),
+        (512, 4096, 4096, None),
+        (512, 4096, 12800, None),
+    ],
+)
+def test_activation_stationary_work_division(m, k, n, expected):
+    assert activation_stationary_work_division(m, k, n) == expected

@@ -32,7 +32,12 @@ from torch_spyre._inductor.codegen.compute_ops import (
     SymbolKind,
     _per_core_symbolic_dim_info,
 )
-from torch_spyre._inductor.codegen.superdsc import _resolve_sdsc_size, compile_op_spec
+from torch_spyre._inductor.codegen.superdsc import (
+    _k_fast_core_to_slice_mapping,
+    _resolve_sdsc_size,
+    _should_use_k_fast_mapping,
+    compile_op_spec,
+)
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.work_division import (
     _collect_symbol_metadata,
@@ -258,6 +263,24 @@ class TestResolveSdscSize(InductorTestCase):
         mock_v = SimpleNamespace(graph=SimpleNamespace(sizevars=sizevars))
         with patch("torch_spyre._inductor.codegen.superdsc.V", mock_v):
             self.assertEqual(_resolve_sdsc_size(s0, {}), 128)
+
+
+def test_k_fast_mapping_accepts_collapsed_decode_matmul():
+    out = sympy.Symbol("out")
+    reduction = sympy.Symbol("in")
+    iteration_space = {
+        out: sympy.Integer(1024),
+        reduction: sympy.Integer(4096),
+    }
+    splits = {out: 16, reduction: 2}
+
+    with config.patch({"core_id_k_fast_emission": True}):
+        assert _should_use_k_fast_mapping(True, iteration_space, splits)
+        mapping = _k_fast_core_to_slice_mapping(iteration_space, splits, 32)
+
+    core_id = sympy.Symbol("core_id")
+    assert mapping["in"] == sympy.Mod(core_id, 2)
+    assert mapping["out"] == sympy.Mod(sympy.floor(core_id / 2), 16)
 
 
 class TestSymbolKindDimension(InductorTestCase):

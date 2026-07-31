@@ -218,7 +218,11 @@ def _should_use_k_fast_mapping(
     if not _spyre_config.core_id_k_fast_emission:
         return False
     dim_list = list(iteration_space.keys())
-    if len(dim_list) < 3:
+    # Singleton output dimensions can disappear before SDSC emission. A
+    # decode-shaped matmul then has the valid collapsed iteration space
+    # ``(out, in)`` rather than ``(mb, out, in)``. ``in`` remains the final
+    # reduction dimension, so K-fast must still fire.
+    if len(dim_list) < 2:
         return False
     return dim_splits[dim_list[-1]] > 1
 

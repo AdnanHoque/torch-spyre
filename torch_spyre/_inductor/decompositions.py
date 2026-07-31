@@ -27,6 +27,7 @@ from . import config, customops  # noqa: F401
 from .matmul_dataflow import (
     ACTIVATION_STATIONARY_SHAPES_ERROR,
     activation_stationary_shape_is_selected,
+    activation_stationary_work_division,
 )
 from . import spyre_hint
 from torch_spyre._C import DataFormats, get_device_dtype
@@ -566,9 +567,23 @@ def spyre_linear(
         padded_input = torch.nn.functional.pad(
             flat_input, (0, 0, 0, physical_m - logical_m)
         )
-        out = torch.matmul(weight, padded_input.transpose(-1, -2)).transpose(-1, -2)[
-            :logical_m
-        ]
+        work_division = activation_stationary_work_division(
+            logical_m,
+            static_k,
+            static_n,
+        )
+        if work_division is None:
+            transposed_out = torch.matmul(
+                weight,
+                padded_input.transpose(-1, -2),
+            )
+        else:
+            with spyre_hint(work_div=work_division):
+                transposed_out = torch.matmul(
+                    weight,
+                    padded_input.transpose(-1, -2),
+                )
+        out = transposed_out.transpose(-1, -2)[:logical_m]
         out = out.reshape(*leading_shape, weight.shape[0])
         if bias is not None:
             out = out + bias
