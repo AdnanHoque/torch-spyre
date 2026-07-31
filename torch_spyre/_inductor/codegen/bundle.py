@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 import json
 import logging
 import os
@@ -48,6 +49,128 @@ logger = get_inductor_logger("sdsc_compile")
 _CompiledEntry = tuple[Any, list[int], list[list[dict]], list[SymbolKind]]
 
 
+def _same_tensor_arg(lhs, rhs) -> bool:
+    """Private probe helper: compare two OpSpec arguments as storage aliases."""
+    return (
+        lhs.device_dtype == rhs.device_dtype
+        and lhs.device_size == rhs.device_size
+        and lhs.device_coordinates == rhs.device_coordinates
+        and lhs.allocation == rhs.allocation
+        and lhs.element_arrangement == rhs.element_arrangement
+    )
+
+
+def _fuse_fp8_bmm_first_scale_epilogue(specs: list) -> list:
+    """Private DD2 probe: co-lower each FP8 BMM and its first scale operation.
+
+    DeepTools' DD2 ``bmm.ddl`` already accepts ``batchnormfwd`` as an optional
+    epilogue.  The normal Torch path emits one SDSC per OpSpec, so this
+    environment-gated experiment replaces the producer/consumer pair with one
+    synthetic OpSpec.  Independent scale/zero producers between the two are
+    moved before the fused operation.  Nested-loop graphs and ambiguous
+    dependency patterns are intentionally left untouched.
+
+    This deliberately runs after allocation.  It is a proof of the backend
+    capability, not the production implementation: a production pass must run
+    before liveness and HBM/LX allocation instead of repairing aliases here.
+    """
+    if os.getenv("TORCH_SPYRE_FP8_FUSE_FIRST_SCALE_EPILOGUE", "0") != "1":
+        return specs
+    if any(isinstance(entry, LoopSpec) for entry in specs):
+        return specs
+
+    rewritten_specs = specs
+    while True:
+        fused_one = False
+        for mm_idx, mm in enumerate(rewritten_specs):
+            if not isinstance(mm, OpSpec) or mm.op != "batchmatmulfp8mb":
+                continue
+            # A previously fused operation retains the BMM name but has the
+            # five-tensor epilogue ABI. Skip it while looking for later pairs.
+            if len(mm.args) != 3:
+                continue
+            mm_output = mm.args[-1]
+            for bn_idx in range(mm_idx + 1, len(rewritten_specs)):
+                bn = rewritten_specs[bn_idx]
+                if not isinstance(bn, OpSpec) or bn.op != "batchnormfwd":
+                    continue
+                if len(bn.args) != 4 or not _same_tensor_arg(mm_output, bn.args[0]):
+                    continue
+
+                between = rewritten_specs[mm_idx + 1 : bn_idx]
+                # Only move operations independent of the raw matmul result.
+                if any(
+                    isinstance(entry, OpSpec)
+                    and any(
+                        arg.is_input and _same_tensor_arg(arg, mm_output)
+                        for arg in entry.args
+                    )
+                    for entry in between
+                ):
+                    # This BMM has another raw-output consumer, so its output
+                    # cannot become an in-place epilogue value. Continue with
+                    # later BMMs instead of disabling fusion for the bundle.
+                    break
+
+                # The original HBM-pool plan may alias the packed activation
+                # and row-scale buffers because their lifetimes do not overlap
+                # before fusion. Moving the scale producer before BMM extends
+                # its lifetime. Reuse the eliminated raw-matmul output slot for
+                # that compact scale so this probe neither overwrites the
+                # activation nor grows the pool.
+                safe_scale = dataclasses.replace(
+                    bn.args[1], allocation=dict(mm_output.allocation)
+                )
+                rewritten_between = []
+                for entry in between:
+                    if not isinstance(entry, OpSpec):
+                        rewritten_between.append(entry)
+                        continue
+                    rewritten_between.append(
+                        dataclasses.replace(
+                            entry,
+                            args=[
+                                dataclasses.replace(
+                                    arg, allocation=dict(mm_output.allocation)
+                                )
+                                if _same_tensor_arg(arg, bn.args[1])
+                                else arg
+                                for arg in entry.args
+                            ],
+                        )
+                    )
+
+                op_info = dict(mm.op_info)
+                op_info["fp8_batchnorm_epilogue"] = True
+                fused = dataclasses.replace(
+                    mm,
+                    args=[
+                        mm.args[0],
+                        mm.args[1],
+                        safe_scale,
+                        bn.args[2],
+                        bn.args[3],
+                    ],
+                    op_info=op_info,
+                )
+                logger.warning(
+                    "PRIVATE FP8 PROBE: co-lowering batchmatmulfp8mb + "
+                    "batchnormfwd into one SDSC"
+                )
+                rewritten_specs = (
+                    rewritten_specs[:mm_idx]
+                    + rewritten_between
+                    + [fused]
+                    + rewritten_specs[bn_idx + 1 :]
+                )
+                fused_one = True
+                break
+            if fused_one:
+                break
+        if not fused_one:
+            return rewritten_specs
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -76,7 +199,7 @@ def generate_bundle(
     if use_symbols is None:
         use_symbols = _spyre_config.bundle_symbolic_args
 
-    specs_list: list = list(specs)
+    specs_list: list = _fuse_fp8_bmm_first_scale_epilogue(list(specs))
 
     if logger.isEnabledFor(logging.INFO):
         logger.info(
