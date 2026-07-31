@@ -909,6 +909,12 @@ def _multi_arg_pointwise_layouts(
                     # Device stick maps to a size-1 (broadcast) / sparse host
                     # axis: compatible.
                     continue
+                if arg.layout.dtype == output.dtype:
+                    # The layout optimizer can restickify a same-dtype STANDARD
+                    # operand into the selected staggered output arrangement.
+                    # This is needed for full-width FP32 scale tensors applied
+                    # after DL16_TO_FP32 conversion.
+                    continue
                 # Stick maps to a real host axis; identify it for the message.
                 c_stride = [concretize_expr(s) for s in arg.layout.stride]
                 mapped = next(
