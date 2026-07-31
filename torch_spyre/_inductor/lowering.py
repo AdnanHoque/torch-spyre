@@ -14,6 +14,7 @@
 
 
 from contextlib import contextmanager
+import inspect
 import os
 from warnings import warn
 
@@ -1285,9 +1286,10 @@ def to_dtype(x, dst_dtype, use_compute_types=True):
         op = torch.ops.spyre.to_dtype_cpu.default
         return eager_fallback(op, x, dst_dtype)
 
-    return lowering.to_dtype(
-        x, dst_dtype, copy=True, use_compute_types=use_compute_types
-    )
+    kwargs = {"copy": True}
+    if "use_compute_types" in inspect.signature(lowering.to_dtype).parameters:
+        kwargs["use_compute_types"] = use_compute_types
+    return lowering.to_dtype(x, dst_dtype, **kwargs)
 
 
 def with_int64_fallback(fn, *args, convert_output=True):
