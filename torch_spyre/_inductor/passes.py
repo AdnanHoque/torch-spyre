@@ -83,6 +83,7 @@ from .deadcode_elimination import deadcode_elimination
 from .dedup_constants import dedup_and_promote_constants
 from .coarse_tile import coarse_tile
 from .split_multi_ops import split_multi_ops, validate_ops
+from .reuse_fp8_quantization import reuse_fp8_activation_quantization
 
 
 logger = get_inductor_logger("passes")
@@ -210,6 +211,7 @@ class CustomPostPasses(_SpyreGraphPassPipeline):
         super().__init__(
             [
                 recover_spyre_hints,
+                reuse_fp8_activation_quantization,
                 # Undo the post-grad re-fusion of add(input, mm(a, b)) back into
                 # aten.addmm, so the resulting mul.Scalar alpha/beta nodes (whose
                 # constants are materialized later by the LoopLevel IR multi-ops
