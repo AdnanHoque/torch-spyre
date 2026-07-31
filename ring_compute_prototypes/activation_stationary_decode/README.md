@@ -9,7 +9,7 @@ For an eligible FP16 linear:
 C = A[M,K] @ W[N,K].T
 ```
 
-Design A explicitly pads logical `M <= 64` to physical M64 and lowers:
+Design A pads logical M to a physical M64 boundary and lowers:
 
 ```text
 C = (W @ padded_A.T).T[:M]
@@ -43,11 +43,14 @@ Eligibility is deliberately narrow:
 - FP16 activation and weight;
 - activation rank at least two;
 - 2D weight;
-- static flattened logical `M` in `[1, 64]`;
+- positive static flattened logical M;
 - matching K;
 - K and N divisible by 64.
 
-Other shapes use the existing decomposition.
+Other shapes use the existing decomposition. Selected Linear weights are
+preloaded in the matching K-stick layout. The same streamed-weight schedule is
+used at prefill and decode so a selected weight is not repacked inside either
+graph.
 
 For staged full-model attribution, restrict the candidate to exact KxN pairs:
 
@@ -103,6 +106,74 @@ python ring_compute_prototypes/activation_stationary_decode/benchmark_abba.py \
 
 Only Kineto `cat == "kernel"` duration is accepted as device timing. The
 candidate event includes padding, identities, restickify, BMM, and slicing.
+
+### Compute-only aligned-M oracle
+
+Use `--boundary compute-only` to isolate the tensor-role/PT schedule from all
+layout conversion:
+
+```bash
+python ring_compute_prototypes/activation_stationary_decode/benchmark_abba.py \
+  --boundary compute-only \
+  --m 64 \
+  --k 12800 \
+  --n 4096 \
+  --warmups 10 \
+  --blocks 30 \
+  --candidate-source manual \
+  --work-division auto \
+  --weight-layout per-arm \
+  --run-dir /tmp/design-a-compute-oracle-m64k12800n4096
+```
+
+The oracle preplaces:
+
+- stock A in K-stick layout and W in N-stick layout;
+- Design A A in M-stick layout and W in K-stick layout;
+- each output in the BMM's direct native layout.
+
+It fails unless both bundles contain exactly one `batchmatmul` root, no
+conversion roots, and an emitted ideal-cycle record.
+
+The accepted 30-block device sweeps with automatic work division are:
+
+| Linear | M64 stock / Design A | M512 stock / Design A |
+|---|---:|---:|
+| K4096 N1024 | 0.8842x | 1.0353x |
+| K4096 N4096 | 1.0380x | 0.8810x |
+| K4096 N12800 | 0.9525x | 0.9406x |
+| K12800 N4096 | 1.0491x | 1.1441x |
+
+Work division must be co-designed with the reversed tensor roles. Use
+`--candidate-m-split`, `--candidate-n-split`, and `--candidate-k-split` for an
+explicit 32-core candidate. `--candidate-core-order auto` is the default and
+keeps placement out of the work-division ablation; `row_major` is a separate
+experiment.
+
+The best measured schedules are:
+
+| Linear | Best M64 stock / Design A | Best M512 stock / Design A |
+|---|---:|---:|
+| K4096 N1024 | 1.0480x (`M1 N16 K2`) | 1.1068x (`M8 N4 K1`) |
+| K4096 N4096 | 1.0380x (auto) | 0.8810x (auto) |
+| K4096 N12800 | 0.9525x (auto) | 0.9549x (`M2 N16 K1`) |
+| K12800 N4096 | 1.0491x (auto) | 1.1454x (`M4 N8 K1`) |
+
+The explicit split changes `M64 K4096 N1024` from an automatic-planner loss to
+a 1.0480x win. At `M512 K4096 N1024`, it improves the full result from 1.0353x
+to 1.1068x. K splitting is useful only for the M64 narrow-output case in this
+sweep; at M512 it adds reduction cost and loses.
+
+Design A is not a universal replacement. The winning policy depends on M, K,
+and N. The strongest result is the down projection at M512: 1.1454x, or 12.69%
+lower latency. The utilization values divide the compiler's ideal PT cycles by
+the one-BMM device event; they are not hardware PT-active counters.
+
+Full precision results and trace hashes are in:
+
+- `compute_oracle_m64_results.json`;
+- `compute_oracle_m512_results.json`.
+- `compute_oracle_work_division_results.json`.
 
 ## Granite E2E
 

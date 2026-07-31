@@ -28,6 +28,8 @@ from torch_spyre._inductor.errors import Unsupported
         (1, 1, 128),
         (2, 4, 128),
         (64, 128),
+        (65, 128),
+        (512, 128),
     ],
 )
 @pytest.mark.parametrize("with_bias", [False, True])
@@ -49,16 +51,29 @@ def test_activation_stationary_linear_matches_reference(shape, with_bias):
     assert actual.shape == expected.shape
 
 
-def test_activation_stationary_linear_falls_back_above_physical_m64():
+def test_activation_stationary_linear_pads_above_physical_m64(monkeypatch):
     torch.manual_seed(20260730)
     activation = torch.randn((65, 128), dtype=torch.float16) * 0.125
     weight = torch.randn((256, 128), dtype=torch.float16) * 0.125
     expected = torch.nn.functional.linear(activation, weight)
+    original_pad = torch.nn.functional.pad
+    padding = []
 
-    with config.patch({"matmul_dataflow": "activation_stationary"}):
+    def record_pad(input, pad, *args, **kwargs):
+        padding.append(pad)
+        return original_pad(input, pad, *args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.functional, "pad", record_pad)
+    with config.patch(
+        {
+            "matmul_dataflow": "activation_stationary",
+            "activation_stationary_shapes": "128x256",
+        }
+    ):
         actual = spyre_linear(activation, weight)
 
     torch.testing.assert_close(actual, expected, rtol=5e-2, atol=2.5e-1)
+    assert padding == [(0, 0, 0, 63)]
 
 
 def test_activation_stationary_shape_allowlist_can_fall_back(monkeypatch):

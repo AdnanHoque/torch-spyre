@@ -24,6 +24,10 @@ import torch._decomp as decomp
 from .constants import DEVICE_NAME, FP8_E4M3_MAX
 from .errors import Unsupported
 from . import config, customops  # noqa: F401
+from .matmul_dataflow import (
+    ACTIVATION_STATIONARY_SHAPES_ERROR,
+    activation_stationary_shape_is_selected,
+)
 from . import spyre_hint
 from torch_spyre._C import DataFormats, get_device_dtype
 
@@ -527,23 +531,20 @@ def spyre_linear(
     logical_m = math.prod(leading_shape) if static_leading_shape else None
     static_k = input.shape[-1] if isinstance(input.shape[-1], int) else None
     static_n = weight.shape[0] if isinstance(weight.shape[0], int) else None
-    selected_shapes = config.activation_stationary_shapes.strip()
     shape_selected = True
-    if config.matmul_dataflow == "activation_stationary" and selected_shapes:
+    if config.matmul_dataflow == "activation_stationary":
         try:
-            allowlist = {
-                tuple(int(value) for value in item.lower().split("x"))
-                for item in selected_shapes.split(",")
-            }
-        except ValueError as error:
-            raise Unsupported(
-                "SPYRE_ACTIVATION_STATIONARY_SHAPES must be a comma-separated KxN list"
-            ) from error
-        if any(len(shape) != 2 for shape in allowlist):
-            raise Unsupported(
-                "SPYRE_ACTIVATION_STATIONARY_SHAPES must be a comma-separated KxN list"
+            shape_selected = (
+                static_k is not None
+                and static_n is not None
+                and activation_stationary_shape_is_selected(
+                    static_k,
+                    static_n,
+                    config.activation_stationary_shapes,
+                )
             )
-        shape_selected = (static_k, static_n) in allowlist
+        except ValueError as error:
+            raise Unsupported(ACTIVATION_STATIONARY_SHAPES_ERROR) from error
     activation_stationary_eligible = (
         config.matmul_dataflow == "activation_stationary"
         and shape_selected
@@ -552,7 +553,7 @@ def spyre_linear(
         and input.dtype == torch.float16
         and weight.dtype == torch.float16
         and logical_m is not None
-        and 0 < logical_m <= 64
+        and logical_m > 0
         and static_k is not None
         and static_n is not None
         and input.shape[-1] == weight.shape[-1]
@@ -560,7 +561,7 @@ def spyre_linear(
         and weight.shape[0] % 64 == 0
     )
     if activation_stationary_eligible:
-        physical_m = 64
+        physical_m = ((logical_m + 63) // 64) * 64
         flat_input = input.reshape(logical_m, input.shape[-1])
         padded_input = torch.nn.functional.pad(
             flat_input, (0, 0, 0, physical_m - logical_m)

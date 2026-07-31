@@ -1,0 +1,119 @@
+{
+  "schema": "activation_stationary_compute_oracle_work_division_v1",
+  "date": "2026-07-31",
+  "device": "adnan-cdx-spyre-dev-pf",
+  "contract": {
+    "dtype": "float16",
+    "warmup_icci_blocks": 10,
+    "measurement_icci_blocks": 30,
+    "events_per_arm": 60,
+    "per_arm_native_activation_layout": true,
+    "per_arm_native_weight_layout": true,
+    "bmm_native_output_layout": true,
+    "required_roots_per_arm": ["batchmatmul"],
+    "candidate_core_order": "auto",
+    "timing_source": "Kineto cat==kernel device event",
+    "core_frequency_mhz": 1100.0,
+    "pt_service_scope": "compiler ideal PT cycles divided by one-BMM device service; not a hardware PT-active counter"
+  },
+  "results": [
+    {
+      "m": 64,
+      "k": 4096,
+      "n": 1024,
+      "candidate_work_division": {"M": 1, "N": 16, "K": 2},
+      "status": "pass",
+      "stock_median_us": 63.8795,
+      "design_a_median_us": 60.9515,
+      "stock_over_design_a": 1.0480381943020272,
+      "paired_block_median": 1.0452209408650797,
+      "ideal_cycles_per_arm": 8192,
+      "stock_ideal_cycle_service_percent": 11.658314055796817,
+      "design_a_ideal_cycle_service_percent": 12.218358411643237,
+      "trace_sha256": "d05177d897337106012e0e18e519fb56bd59ec72039b74d2789f5de1d9c53bf1"
+    },
+    {
+      "m": 512,
+      "k": 4096,
+      "n": 1024,
+      "candidate_work_division": {"M": 8, "N": 4, "K": 1},
+      "status": "pass",
+      "stock_median_us": 102.8755,
+      "design_a_median_us": 92.9515,
+      "stock_over_design_a": 1.106765356126582,
+      "paired_block_median": 1.113084232781646,
+      "ideal_cycles_per_arm": 65536,
+      "stock_ideal_cycle_service_percent": 57.91289647990223,
+      "design_a_ideal_cycle_service_percent": 64.09598749690088,
+      "trace_sha256": "fc30406ab020cb1317e74ebabd2b13ef1247ace3744a3ed90f1c81445c015e5d"
+    },
+    {
+      "m": 512,
+      "k": 4096,
+      "n": 12800,
+      "candidate_work_division": {"M": 2, "N": 16, "K": 1},
+      "status": "pass",
+      "stock_median_us": 1037.379,
+      "design_a_median_us": 1086.3255,
+      "stock_over_design_a": 0.9549430626455883,
+      "paired_block_median": 0.9552519191075131,
+      "ideal_cycles_per_arm": 819200,
+      "stock_ideal_cycle_service_percent": 71.78931448653509,
+      "design_a_ideal_cycle_service_percent": 68.55470784099911,
+      "trace_sha256": "8687582616ab532af32c1bc31f7069b716a6e89ce0077462cc73b3f40f4cdd9b"
+    },
+    {
+      "m": 512,
+      "k": 12800,
+      "n": 4096,
+      "candidate_work_division": {"M": 4, "N": 8, "K": 1},
+      "status": "pass",
+      "stock_median_us": 1218.4945,
+      "design_a_median_us": 1063.847,
+      "stock_over_design_a": 1.1453662979732988,
+      "paired_block_median": 1.1489821458483127,
+      "ideal_cycles_per_arm": 819200,
+      "stock_ideal_cycle_service_percent": 61.11864048030359,
+      "design_a_ideal_cycle_service_percent": 70.00323098408631,
+      "trace_sha256": "1c49b7095e82ea235993d5a60279af2892377aeb32c3490f18c3286e782a504b"
+    }
+  ],
+  "retained_auto_results": [
+    {
+      "m": 64,
+      "k": 4096,
+      "n": 4096,
+      "stock_over_design_a": 1.0379593524094701
+    },
+    {
+      "m": 64,
+      "k": 4096,
+      "n": 12800,
+      "stock_over_design_a": 0.9525215747206051
+    },
+    {
+      "m": 64,
+      "k": 12800,
+      "n": 4096,
+      "stock_over_design_a": 1.049101530348389
+    },
+    {
+      "m": 512,
+      "k": 4096,
+      "n": 4096,
+      "stock_over_design_a": 0.8809652068339422
+    }
+  ],
+  "decision": {
+    "planner_misses": [
+      "M64 K4096 N1024",
+      "M512 K4096 N1024"
+    ],
+    "stock_only": [
+      "M64 K4096 N12800",
+      "M512 K4096 N4096",
+      "M512 K4096 N12800"
+    ],
+    "note": "Explicit work-division and core-order controls are independent. Accepted results leave candidate core order automatic."
+  }
+}

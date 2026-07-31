@@ -1,0 +1,106 @@
+{
+  "schema": "activation_stationary_compute_oracle_m64_sweep_v1",
+  "date": "2026-07-31",
+  "device": "adnan-cdx-spyre-dev-pf",
+  "contract": {
+    "m": 64,
+    "dtype": "float16",
+    "warmup_icci_blocks": 10,
+    "measurement_icci_blocks": 30,
+    "events_per_arm": 60,
+    "work_division": "auto",
+    "per_arm_native_activation_layout": true,
+    "per_arm_native_weight_layout": true,
+    "bmm_native_output_layout": true,
+    "required_roots_per_arm": ["batchmatmul"],
+    "timing_source": "Kineto cat==kernel device event",
+    "core_frequency_mhz": 1100.0,
+    "pt_service_scope": "compiler ideal PT cycles divided by one-BMM device service; not a hardware PT-active counter"
+  },
+  "results": [
+    {
+      "k": 4096,
+      "n": 1024,
+      "status": "pass",
+      "stock_median_us": 63.956,
+      "design_a_median_us": 72.3285,
+      "stock_over_design_a": 0.8842434171868628,
+      "paired_block_median": 0.8986842096178986,
+      "ideal_cycles_per_arm": 8192,
+      "stock_effective_tflops": 8.394379135655763,
+      "design_a_effective_tflops": 7.422674492074357,
+      "stock_ideal_cycle_service_percent": 11.644369140147488,
+      "design_a_ideal_cycle_service_percent": 10.296456759469267,
+      "stock_work_division": {"mb": 4, "out": 4, "in": 2},
+      "design_a_work_division_transposed_coordinates": {
+        "mb": 32,
+        "out": 1,
+        "in": 1
+      },
+      "trace_sha256": "6f8f10ad7abbb3d59d150138800dc5bee2287af7565a83992c9504bcded2c4d5"
+    },
+    {
+      "k": 4096,
+      "n": 4096,
+      "status": "pass",
+      "stock_median_us": 232.24599999999998,
+      "design_a_median_us": 223.7525,
+      "stock_over_design_a": 1.0379593524094701,
+      "paired_block_median": 1.04049012401389,
+      "ideal_cycles_per_arm": 32768,
+      "stock_effective_tflops": 9.246590460115568,
+      "design_a_effective_tflops": 9.59758504597714,
+      "stock_ideal_cycle_service_percent": 12.826524852566207,
+      "design_a_ideal_cycle_service_percent": 13.313411429633595,
+      "stock_work_division": {"mb": 4, "out": 8, "in": 1},
+      "design_a_work_division_transposed_coordinates": {
+        "mb": 32,
+        "out": 1,
+        "in": 1
+      },
+      "trace_sha256": "6aecd60beb9bd27bd04119cb3fab58566e1a377e385f28f6da3b5e504be683ae"
+    },
+    {
+      "k": 4096,
+      "n": 12800,
+      "status": "pass",
+      "stock_median_us": 712.3585,
+      "design_a_median_us": 747.866,
+      "stock_over_design_a": 0.9525215747206051,
+      "paired_block_median": 0.951453202934571,
+      "ideal_cycles_per_arm": 102400,
+      "stock_effective_tflops": 9.420658839615166,
+      "design_a_effective_tflops": 8.973380792815826,
+      "stock_ideal_cycle_service_percent": 13.06798600576944,
+      "design_a_ideal_cycle_service_percent": 12.447538608642336,
+      "stock_work_division": {"mb": 4, "out": 8, "in": 1},
+      "design_a_work_division_transposed_coordinates": {
+        "mb": 32,
+        "out": 1,
+        "in": 1
+      },
+      "trace_sha256": "fd90a1f8f2631c2e4062667e709acaff043ac06968cdef5c4a7fbb133c0bbb34"
+    },
+    {
+      "k": 12800,
+      "n": 4096,
+      "status": "pass",
+      "stock_median_us": 720.1505,
+      "design_a_median_us": 686.445,
+      "stock_over_design_a": 1.049101530348389,
+      "paired_block_median": 1.0470654188102473,
+      "ideal_cycles_per_arm": 102400,
+      "stock_effective_tflops": 9.318727682616341,
+      "design_a_effective_tflops": 9.776291472732703,
+      "stock_ideal_cycle_service_percent": 12.926590912720203,
+      "design_a_ideal_cycle_service_percent": 13.561306308722344,
+      "stock_work_division": {"mb": 4, "out": 8, "in": 1},
+      "design_a_work_division_transposed_coordinates": {
+        "mb": 32,
+        "out": 1,
+        "in": 1
+      },
+      "trace_sha256": "5d4aada65c08cbb706f90901e3a9962d693be7d998900a84e5a11fd03fd7cb5d"
+    }
+  ]
+}

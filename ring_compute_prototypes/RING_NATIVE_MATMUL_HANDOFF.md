@@ -1734,3 +1734,204 @@ https://github.ibm.com/Adnan-Hoque1/spyre-granite-e2e-bench
 branch adnan/sendnn-granite-antoni-repro-20260725
 runbook runbooks/activation_stationary_design_a_e2e.md
 ```
+
+## 2026-07-31: Design A layout diagnosis and compute-only oracle
+
+### Why the first E2E candidate regressed
+
+The production model loader preloads every `nn.Linear` weight in the native
+stock layout: N/out_features is stickified. Design A reverses the tensor roles
+and requires K/in_features to be stickified so W can be the PT West input.
+
+The first fused Design A decoder bundle therefore emitted three extra roots
+around the down projection. The largest restickify converted the complete
+`4096 x 12800` FP16 weight, approximately 100 MiB, on every token. This—not
+the Design A BMM—caused the 39.73% E2E regression.
+
+The original isolated `4.1164x` result was also layout-biased:
+
+- Design A received its native K-stick W;
+- stock received the same K-stick W and had to restickify it to N-stick.
+
+It was mostly a weight-layout conversion comparison, not a PT-compute
+comparison. With each M1 arm's W preloaded in its own native layout, the
+measured program ratio was only `1.07950x`:
+
+```text
+stock:    783.8455 us
+Design A: 726.1175 us
+```
+
+The candidate still contained two padding identities and one activation
+restickify, so a stricter compute-only oracle was required.
+
+### Exact compute-only contract
+
+The authoritative FP16 oracle sweeps M64 and M512 over all four Granite linear
+shapes:
+
+```text
+K4096  x N1024
+K4096  x N4096
+K4096  x N12800
+K12800 x N4096
+```
+
+Host/device copies and compilation are outside the timed boundary. Each arm
+receives its native layouts:
+
+```text
+stock:
+  A is K-stick
+  W is N-stick
+  schedule is A @ W.T
+  C is returned in the direct stock BMM layout
+
+Design A:
+  A is M-stick
+  W is K-stick
+  schedule is W @ A.T
+  C is returned in native [N,M] layout
+```
+
+Correctness normalization transposes Design A's result only after the measured
+device event. Every one of the 16 compiled arm/shape/M combinations passed:
+
+```text
+roots: batchmatmul
+```
+
+There are no identity, pad, slice, restickify, or output-conversion roots.
+Every row also passes CPU-reference, finite-output, shape, and cross-arm
+correctness.
+
+### Matched M64 device and PT-service sweep
+
+Each result uses 10 warmup ICCI blocks and 30 serialized
+incumbent-candidate-candidate-incumbent measurement blocks: 60 exact Kineto
+`cat == "kernel"` events per arm.
+
+| M64 linear | Stock | Design A | Stock / Design A | Paired median |
+|---|---:|---:|---:|---:|
+| K4096 N1024 | 63.956 us | 72.3285 us | 0.884243x | 0.898684x |
+| K4096 N4096 | 232.246 us | 223.7525 us | 1.037959x | 1.040490x |
+| K4096 N12800 | 712.3585 us | 747.866 us | 0.952522x | 0.951453x |
+| K12800 N4096 | 720.1505 us | 686.445 us | 1.049102x | 1.047065x |
+
+| M64 linear | Ideal cycles per arm | Stock proxy | Design A proxy |
+|---|---:|---:|---:|
+| K4096 N1024 | 8,192 | 11.6444% | 10.2965% |
+| K4096 N4096 | 32,768 | 12.8265% | 13.3134% |
+| K4096 N12800 | 102,400 | 13.0680% | 12.4475% |
+| K12800 N4096 | 102,400 | 12.9266% | 13.5613% |
+
+The ordinary planner selected stock M4 N4 K2 for K4096 N1024 and stock
+M4 N8 K1 for the other rows. Design A selected M32 N1 K1 in its transposed BMM
+coordinates for every M64 row.
+
+### Work-division co-design
+
+The first explicit-split probe also forced row-major core placement. That
+conflated two schedule decisions. The benchmark now exposes
+`--candidate-core-order {auto,row_major}` independently, and every accepted
+work-division result below leaves core order automatic.
+
+| Shape | Candidate split | Stock | Design A | Stock / Design A | Paired |
+|---|---:|---:|---:|---:|---:|
+| M64 K4096 N1024 | M1 N16 K2 | 63.8795 us | 60.9515 us | 1.048038x | 1.045221x |
+| M512 K4096 N1024 | M8 N4 K1 | 102.8755 us | 92.9515 us | 1.106765x | 1.113084x |
+| M512 K4096 N12800 | M2 N16 K1 | 1037.379 us | 1086.3255 us | 0.954943x | 0.955252x |
+| M512 K12800 N4096 | M4 N8 K1 | 1218.4945 us | 1063.847 us | 1.145366x | 1.148982x |
+
+All four use the same 10-warmup/30-block protocol, exactly one BMM root per
+arm, native A/W/C layouts, and no conversion roots. Their trace hashes and
+PT-service proxies are recorded in
+`activation_stationary_decode/compute_oracle_work_division_results.json`.
+
+The two `K4096 N1024` rows are genuine planner misses. At M64, splitting K
+two ways is worth its reduction cost because it repairs the narrow-output
+schedule; at M512 every tested K split was substantially slower. The wide
+`K4096 N12800` projection improves slightly with M2 N16 K1 but still loses, so
+it must remain on stock.
+
+### Matched M512 device and PT-service sweep
+
+| M512 linear | Stock | Design A | Stock / Design A | Paired median |
+|---|---:|---:|---:|---:|
+| K4096 N1024 | 102.839 us | 99.337 us | 1.035254x | 1.037663x |
+| K4096 N4096 | 322.1725 us | 365.704 us | 0.880965x | 0.882055x |
+| K4096 N12800 | 1040.134 us | 1105.85 us | 0.940574x | 0.941424x |
+| K12800 N4096 | 1223.9465 us | 1069.745 us | 1.144148x | 1.144167x |
+
+| M512 linear | Ideal cycles per arm | Stock proxy | Design A proxy |
+|---|---:|---:|---:|
+| K4096 N1024 | 65,536 | 57.9335% | 59.9758% |
+| K4096 N4096 | 262,144 | 73.9705% | 65.1655% |
+| K4096 N12800 | 819,200 | 71.5992% | 67.3443% |
+| K12800 N4096 | 819,200 | 60.8464% | 69.6173% |
+
+At M512, the planner selected M8 N4 K1 in both coordinate systems for
+K4096 N1024 and K12800 N4096. Stock used M4 N8 K1 while Design A used
+transposed M8 N4 K1 for K4096 N4096 and K4096 N12800.
+
+The ideal-cycle ratio is a compiler-model proxy over the complete one-BMM
+device service. It is not a hardware PT-active counter. Since every inventory
+contains only BMM, it is the cleanest available comparison of the PT schedules.
+
+### Durable evidence
+
+```text
+pod:
+  adnan-cdx-spyre-dev-pf
+
+M64 run roots:
+  /tmp/design-a-compute-oracle-m64k4096n1024-v1
+  /tmp/design-a-compute-oracle-m64k4096n4096-v1
+  /tmp/design-a-compute-oracle-m64k4096n12800-v1
+  /tmp/design-a-compute-oracle-m64k12800n4096-v4
+
+M512 run roots:
+  /tmp/design-a-compute-oracle-m512k4096n1024-v1
+  /tmp/design-a-compute-oracle-m512k4096n4096-v1
+  /tmp/design-a-compute-oracle-m512k4096n12800-v1
+  /tmp/design-a-compute-oracle-m512k12800n4096-v1
+```
+
+Compact durable ledgers:
+
+```text
+ring_compute_prototypes/activation_stationary_decode/
+  compute_oracle_m64_results.json
+  compute_oracle_m512_results.json
+  compute_oracle_work_division_results.json
+```
+
+### Decision
+
+The tensor-role reversal and its best work division are shape- and
+M-dependent:
+
+- K12800 N4096 wins at both M values and reaches 1.1454x at M512.
+- K4096 N1024 becomes a 1.0480x win at M64 with M1 N16 K2 and reaches
+  1.1068x at M512 with M8 N4 K1.
+- K4096 N4096 crosses in the opposite direction, from a 3.80% win at M64 to a
+  11.90% loss at M512.
+- K4096 N12800 loses at both M values.
+
+Design A is not a multi-x algorithm or a universal replacement. The correct
+policy is shape- and M-selective. In particular, the down projection is the
+strongest candidate across decode and prefill. The conversion-free M512 result
+also proves that the earlier measured M512 loss was caused by residual layout
+conversion rather than the BMM schedule.
+
+The corrected single-layout E2E prototype is preserved but further E2E timing
+is paused. Its one-generation smoke completed prefill and all three decode
+calls with the exact stock output SHA-256:
+
+```text
+29e7f26fed11c801d98f5a04ea00afe62f91471d9404372c66815dbf16df7888
+```
+
+Do not promote its latency until E2E work resumes. The integration problem is
+now precise: make A and C producer-/consumer-native for the winning cells
+without introducing conversion roots.

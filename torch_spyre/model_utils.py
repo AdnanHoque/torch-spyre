@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Optimal weight layout utilities for loading models onto Spyre.
+"""Matmul-aware weight layout utilities for loading models onto Spyre.
 
 Transfers ``nn.Linear`` weights to Spyre with a device layout where the
 ``out_features`` dimension is stickified (the optimal layout for Spyre
-matmul where both operands need their rows in the stick).
+weight-stationary matmul). When the opt-in activation-stationary dataflow
+selects a KxN shape, its weights instead use the default layout, where
+``in_features`` is stickified. That is the native layout for streaming the
+weight through the PT input and avoids repacking the weight inside each graph.
 
 This is achieved using ``dim_order=[1, 0]`` in ``SpyreTensorLayout``,
 which tells the DMA engine to stickify along host dim-0 (out_features)
@@ -63,8 +66,34 @@ from torch_spyre._C import (
     spyre_empty_with_layout,
 )
 from torch_spyre.constants import DEVICE_NAME
+from torch_spyre._inductor import config
+from torch_spyre._inductor.matmul_dataflow import (
+    activation_stationary_shape_is_selected,
+)
 
 logger = get_inductor_logger("model_utils")
+
+
+def _uses_activation_stationary_weight_layout(
+    weight: torch.Tensor,
+    target_dtype: torch.dtype | None,
+) -> bool:
+    """Whether a Linear weight should be preloaded in K-stick layout."""
+    if config.matmul_dataflow != "activation_stationary":
+        return False
+    device_dtype = target_dtype if target_dtype is not None else weight.dtype
+    if device_dtype != torch.float16 or weight.ndim != 2:
+        return False
+    n, k = weight.shape
+    return (
+        k % 64 == 0
+        and n % 64 == 0
+        and activation_stationary_shape_is_selected(
+            k,
+            n,
+            config.activation_stationary_shapes,
+        )
+    )
 
 
 def _ensure_spyre_runtime() -> None:
@@ -148,10 +177,11 @@ def load_model_to_spyre(
 ) -> nn.Module:
     """Transfer model to Spyre with optimal weight layout.
 
-    For each ``nn.Linear``, the weight is transferred using
-    ``dim_order=[1, 0]`` so that ``out_features`` is stickified
-    (optimal for Spyre matmul). Tensor shapes are preserved, so the
-    model works unmodified with the existing inference path.
+    For each ``nn.Linear``, the weight is transferred using the layout native
+    to its selected matmul dataflow. Weight-stationary shapes use
+    ``dim_order=[1, 0]`` so that ``out_features`` is stickified. Selected
+    activation-stationary shapes use the default K-stick layout so the weight
+    can stream without a device-side restickify. Tensor shapes are preserved.
 
     All other parameters and buffers use the default Spyre layout.
 
@@ -163,6 +193,7 @@ def load_model_to_spyre(
     _ensure_spyre_runtime()
 
     linear_count = 0
+    activation_stationary_linear_count = 0
     other_param_count = 0
     buffer_count = 0
 
@@ -180,14 +211,25 @@ def load_model_to_spyre(
             # 2D Linear weight -> optimal stickified layout via dim_order.
             # Everything else (bias, embeddings, norms, ...) -> default layout.
             if is_linear and param_name == "weight" and p.ndim == 2:
-                logger.debug(
-                    "  %s.%s: shape=%s -> Spyre dim_order=[1, 0]",
-                    name,
-                    param_name,
-                    list(p.shape),
-                )
-                dev = _dma_to_spyre_dim_order_swapped(p, target_dtype=dtype)
-                linear_count += 1
+                if _uses_activation_stationary_weight_layout(p, dtype):
+                    logger.debug(
+                        "  %s.%s: shape=%s -> Spyre default K-stick "
+                        "(activation-stationary)",
+                        name,
+                        param_name,
+                        list(p.shape),
+                    )
+                    dev = _dma_to_spyre_default(p, target_dtype=dtype)
+                    activation_stationary_linear_count += 1
+                else:
+                    logger.debug(
+                        "  %s.%s: shape=%s -> Spyre dim_order=[1, 0]",
+                        name,
+                        param_name,
+                        list(p.shape),
+                    )
+                    dev = _dma_to_spyre_dim_order_swapped(p, target_dtype=dtype)
+                    linear_count += 1
             else:
                 logger.debug(
                     "  %s.%s: shape=%s -> Spyre default layout",
@@ -209,10 +251,11 @@ def load_model_to_spyre(
             buffer_count += 1
 
     logger.info(
-        "load_model_to_spyre: %d Linear weights optimized "
-        "(dim_order=[1,0]), %d other params and %d buffers "
-        "transferred with default layout",
+        "load_model_to_spyre: %d weight-stationary Linear weights "
+        "(dim_order=[1,0]), %d activation-stationary Linear weights "
+        "(default K-stick), %d other params and %d buffers transferred",
         linear_count,
+        activation_stationary_linear_count,
         other_param_count,
         buffer_count,
     )

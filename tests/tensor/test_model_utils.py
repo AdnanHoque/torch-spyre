@@ -28,6 +28,7 @@ from torch_spyre.model_utils import (
     load_model_to_spyre,
     patch_module_to_for_spyre,
 )
+from torch_spyre._inductor import config
 
 
 @instantiate_parametrized_tests
@@ -70,6 +71,24 @@ class TestLoadModelToSpyre(TestCase):
         # Linear weight: device_size[0] = out_features/64 = 128/64 = 2
         weight_layout = get_spyre_tensor_layout(model.weight)
         self.assertEqual(weight_layout.device_size[0], 2)
+
+    def test_selected_activation_stationary_weight_uses_k_stick_layout(self):
+        """Selected streamed weights are preloaded in their native layout."""
+        from torch_spyre._C import get_spyre_tensor_layout
+
+        model = nn.Linear(64, 128, bias=False, dtype=torch.float16)
+        with config.patch(
+            {
+                "matmul_dataflow": "activation_stationary",
+                "activation_stationary_shapes": "64x128",
+            }
+        ):
+            load_model_to_spyre(model)
+
+        layout = get_spyre_tensor_layout(model.weight)
+        # Default layout packs the 64-wide K dimension into one stick. The
+        # swapped layout used by stock would report N / 64 == 2 here.
+        self.assertEqual(layout.device_size[0], 1)
 
     def test_load_model_handles_layernorm(self):
         """Non-Linear params/buffers reach Spyre via the default path."""

@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Matched paid timing for incumbent and activation-stationary decode matmul.
+"""Matched timing for incumbent and activation-stationary matmul.
 
 Both arms use the same activation, W[N,K], 32-core budget, compiler stack,
 device, process, and I-C-C-I launch order. Work ownership can be fixed to N32
-or selected independently by the ordinary planner. The candidate pays for
-explicit zero padding, activation restickify, BMM, and output slicing. Only
-Kineto ``cat == "kernel"`` complete-event duration is performance evidence.
+or selected independently by the ordinary planner.
+
+The default ``paid`` boundary includes Design A's padding, activation
+restickify, BMM, and output slice. The ``compute-only`` aligned-M oracle
+preplaces each arm's A and W in its native layout and returns each BMM's native
+C layout. It fails unless both emitted programs contain exactly one BMM root
+and no conversion roots. Only Kineto ``cat == "kernel"`` complete-event
+duration is performance evidence.
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import statistics
@@ -35,6 +41,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmups", type=int, default=10)
     parser.add_argument("--blocks", type=int, default=30)
     parser.add_argument("--seed", type=int, default=20260730)
+    parser.add_argument("--core-frequency-mhz", type=float, default=1100.0)
+    parser.add_argument(
+        "--boundary",
+        choices=("paid", "compute-only"),
+        default="paid",
+    )
     parser.add_argument(
         "--candidate-source",
         choices=("manual", "selector"),
@@ -44,6 +56,27 @@ def parse_args() -> argparse.Namespace:
         "--work-division",
         choices=("n32", "auto"),
         default="n32",
+    )
+    parser.add_argument("--candidate-m-split", type=int, default=0)
+    parser.add_argument("--candidate-n-split", type=int, default=0)
+    parser.add_argument("--candidate-k-split", type=int, default=0)
+    parser.add_argument(
+        "--candidate-core-order",
+        choices=("auto", "row_major"),
+        default="auto",
+        help=(
+            "core placement for an explicit candidate split; keep auto when "
+            "attributing work division independently"
+        ),
+    )
+    parser.add_argument(
+        "--weight-layout",
+        choices=("default", "stationary", "per-arm"),
+        default="default",
+        help=(
+            "HBM layout used for W: default sticks K, stationary sticks N, "
+            "and per-arm gives each algorithm its native preloaded layout"
+        ),
     )
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--expected-torch-head")
@@ -126,14 +159,80 @@ def inventory(cache: Path) -> dict[str, Any]:
             document = json.loads(descriptor.read_text())
             require(len(document) == 1, f"unexpected descriptor: {descriptor}")
             roots.append(next(iter(document)).split("_", 1)[1])
+        ideal_cycles_path = bundle.parent / "perf" / "ideal_cycles.json"
+        ideal_cycles = None
+        if ideal_cycles_path.exists():
+            entries = json.loads(ideal_cycles_path.read_text())
+            totals = [
+                int(entry["ideal_cycles"])
+                for entry in entries
+                if entry.get("sdsc_name") == "TOTAL"
+            ]
+            require(
+                len(totals) == 1,
+                f"expected one ideal-cycle total: {ideal_cycles_path}",
+            )
+            ideal_cycles = totals[0]
         rows.append(
             {
                 "directory": str(bundle.parent),
                 "bundle_sha256": sha256(bundle),
                 "roots": roots,
+                "ideal_cycles": ideal_cycles,
+                "ideal_cycles_path": (
+                    str(ideal_cycles_path) if ideal_cycles_path.exists() else None
+                ),
             }
         )
     return {"bundles": rows}
+
+
+def pt_service(
+    artifacts: dict[str, Any],
+    trace: dict[str, Any],
+    *,
+    m: int,
+    k: int,
+    n: int,
+    core_frequency_mhz: float,
+) -> dict[str, Any]:
+    """Relate compiler ideal PT cycles to measured one-BMM device service."""
+    require(core_frequency_mhz > 0, "core frequency must be positive")
+    flops = 2 * m * k * n
+    rows: dict[str, Any] = {}
+    for role in ("incumbent", "candidate"):
+        event_names = trace[f"{role}_names"]
+        require(len(event_names) == 1, f"{role} must have one kernel identity")
+        event_name = next(iter(event_names))
+        matches = [
+            row
+            for row in artifacts["bundles"]
+            if Path(row["directory"]).name in event_name
+        ]
+        require(len(matches) == 1, f"cannot map {role} event to one bundle")
+        ideal_cycles = matches[0]["ideal_cycles"]
+        require(ideal_cycles is not None, f"{role} ideal cycles were not emitted")
+        median_us = trace[role]["median_us"]
+        ideal_us = ideal_cycles / core_frequency_mhz
+        rows[role] = {
+            "ideal_cycles": ideal_cycles,
+            "ideal_us_at_core_frequency": ideal_us,
+            "device_service_median_us": median_us,
+            "actual_cycles_at_core_frequency": median_us * core_frequency_mhz,
+            "ideal_cycle_over_device_service_percent": 100.0
+            * ideal_us
+            / median_us,
+            "effective_tflops": flops / (median_us * 1e6),
+        }
+    return {
+        "scope": (
+            "compiler ideal PT cycles divided by one-BMM Kineto device service; "
+            "this is a utilization proxy, not a hardware PT-active counter"
+        ),
+        "core_frequency_mhz": core_frequency_mhz,
+        "flops": flops,
+        "arms": rows,
+    }
 
 
 def parse_trace(path: Path, blocks: int) -> dict[str, Any]:
@@ -213,9 +312,45 @@ def parse_trace(path: Path, blocks: int) -> dict[str, Any]:
 def main() -> None:
     args = parse_args()
     require(args.cores == CORES, "first timing contract is exact for 32 cores")
-    require(0 < args.m <= PHYSICAL_M, "logical M must be in [1,64]")
+    require(args.m > 0, "logical M must be positive")
     require(args.k % 64 == 0 and args.n % args.cores == 0, "unaligned shape")
     require(args.warmups > 0 and args.blocks > 0, "timing counts must be positive")
+    if args.boundary == "compute-only":
+        require(
+            args.m % PHYSICAL_M == 0,
+            "compute-only oracle requires M aligned to 64",
+        )
+        require(
+            args.weight_layout == "per-arm",
+            "compute-only oracle requires each arm's native W layout",
+        )
+        require(
+            args.candidate_source == "manual",
+            "compute-only oracle directly expresses both BMM schedules",
+        )
+    candidate_splits = (
+        args.candidate_m_split,
+        args.candidate_n_split,
+        args.candidate_k_split,
+    )
+    if any(candidate_splits):
+        require(
+            args.boundary == "compute-only",
+            "explicit candidate splits are supported by the compute-only oracle",
+        )
+        require(
+            all(split > 0 for split in candidate_splits),
+            "candidate M/N/K splits must all be positive",
+        )
+        require(
+            math.prod(candidate_splits) == args.cores,
+            "candidate M/N/K split product must equal the core count",
+        )
+        candidate_work_div = dict(
+            zip(("M", "N", "K"), candidate_splits, strict=True)
+        )
+    else:
+        candidate_work_div = None
 
     run_dir = args.run_dir.resolve()
     require(not run_dir.exists(), f"run directory exists: {run_dir}")
@@ -223,12 +358,34 @@ def main() -> None:
     run_dir.mkdir(parents=True)
     cache.mkdir()
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = str(cache)
+    if args.boundary == "compute-only":
+        os.environ.setdefault("SENPERFORMANCE", "2")
 
     import torch
     import torch.nn.functional as functional
     import torch_spyre
     import torch_spyre._C as extension
-    from core.profiler import create_profiler
+    try:
+        from core.profiler import create_profiler
+    except ModuleNotFoundError:
+        from torch.profiler import ProfilerActivity, profile
+
+        def create_profiler(
+            torch_module: Any,
+            trace_dir: str,
+            *,
+            profile_memory: bool,
+            with_stack: bool,
+        ) -> Any:
+            return profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1],
+                profile_memory=profile_memory,
+                with_stack=with_stack,
+                on_trace_ready=torch_module.profiler.tensorboard_trace_handler(
+                    trace_dir
+                ),
+            )
+    from torch_spyre.model_utils import _dma_to_spyre_dim_order_swapped
     from torch_spyre._inductor import config as spyre_config
     from torch_spyre._inductor import spyre_hint
     from torch_spyre._inductor.propagate_hints import _reset_counter
@@ -264,8 +421,30 @@ def main() -> None:
     )
     expected = functional.linear(activation_cpu, weight_cpu)
     device = torch.device("spyre")
-    activation = activation_cpu.to(device)
-    weight = weight_cpu.to(device)
+    default_activation = activation_cpu.to(device)
+    m_stick_activation = _dma_to_spyre_dim_order_swapped(activation_cpu)
+    default_weight = weight_cpu.to(device)
+    stationary_weight = _dma_to_spyre_dim_order_swapped(weight_cpu)
+    if args.boundary == "compute-only":
+        incumbent_activation = default_activation
+        candidate_activation = m_stick_activation
+        incumbent_weight = stationary_weight
+        candidate_weight = default_weight
+    elif args.weight_layout == "default":
+        incumbent_activation = default_activation
+        candidate_activation = default_activation
+        incumbent_weight = default_weight
+        candidate_weight = default_weight
+    elif args.weight_layout == "stationary":
+        incumbent_activation = default_activation
+        candidate_activation = default_activation
+        incumbent_weight = stationary_weight
+        candidate_weight = stationary_weight
+    else:
+        incumbent_activation = default_activation
+        candidate_activation = default_activation
+        incumbent_weight = stationary_weight
+        candidate_weight = default_weight
 
     class Incumbent(torch.nn.Module):
         def forward(self, activation: Any, weight: Any) -> Any:
@@ -277,6 +456,22 @@ def main() -> None:
 
     class Candidate(torch.nn.Module):
         def forward(self, activation: Any, weight: Any) -> Any:
+            if args.boundary == "compute-only":
+                # Keep C in the BMM-native [N, M] layout. Correctness
+                # normalization happens outside the measured device program.
+                if candidate_work_div is not None:
+                    if args.candidate_core_order == "row_major":
+                        with spyre_hint(core_order="row_major"):
+                            with spyre_hint(work_div=candidate_work_div):
+                                return torch.matmul(
+                                    weight, activation.transpose(-2, -1)
+                                )
+                    else:
+                        with spyre_hint(work_div=candidate_work_div):
+                            return torch.matmul(
+                                weight, activation.transpose(-2, -1)
+                            )
+                return torch.matmul(weight, activation.transpose(-2, -1))
             if args.candidate_source == "selector":
                 if args.work_division == "n32":
                     with spyre_hint(core_order="row_major"):
@@ -286,15 +481,19 @@ def main() -> None:
             if args.work_division == "n32":
                 with spyre_hint(core_order="row_major"):
                     with spyre_hint(work_div={"N": args.cores}):
+                        padded_m = (
+                            (args.m + PHYSICAL_M - 1) // PHYSICAL_M
+                        ) * PHYSICAL_M
                         padded = functional.pad(
-                            activation, (0, 0, 0, PHYSICAL_M - args.m)
+                            activation, (0, 0, 0, padded_m - args.m)
                         )
                         return torch.matmul(
                             weight, padded.transpose(-2, -1)
                         ).transpose(-2, -1)[: args.m]
-            padded = functional.pad(
-                activation, (0, 0, 0, PHYSICAL_M - args.m)
-            )
+            padded_m = (
+                (args.m + PHYSICAL_M - 1) // PHYSICAL_M
+            ) * PHYSICAL_M
+            padded = functional.pad(activation, (0, 0, 0, padded_m - args.m))
             return torch.matmul(
                 weight, padded.transpose(-2, -1)
             ).transpose(-2, -1)[: args.m]
@@ -303,30 +502,30 @@ def main() -> None:
         "sencores": args.cores,
         "lx_planning": False,
         "lx_planner_relayout": False,
-        "matmul_activation_layout": "reduction",
-        "test_preseeded_lx_relayout": False,
-        "test_lx_relayout_preseed_only": False,
     }
 
-    def prepare_named_dims() -> None:
+    def prepare_named_dims(arm_activation: Any, arm_weight: Any) -> None:
         reset_named_dims()
         _reset_counter()
         declare_tensor_dim("M", args.m)
         declare_tensor_dim("K", args.k)
         declare_tensor_dim("N", args.n)
-        name_tensor_dims(activation, ["M", "K"])
-        name_tensor_dims(weight, ["N", "K"])
+        name_tensor_dims(arm_activation, ["M", "K"])
+        name_tensor_dims(arm_weight, ["N", "K"])
 
     def compile_arm(
-        module: torch.nn.Module, dataflow: str
+        module: torch.nn.Module,
+        dataflow: str,
+        arm_activation: Any,
+        arm_weight: Any,
     ) -> tuple[Callable[..., Any], Any]:
-        prepare_named_dims()
+        prepare_named_dims(arm_activation, arm_weight)
         arm_config = {**config, "matmul_dataflow": dataflow}
         try:
             with spyre_config.patch(arm_config):
                 compiled = torch.compile(module.to(device), fullgraph=True)
             with torch.no_grad(), spyre_config.patch(arm_config):
-                output = compiled(activation, weight)
+                output = compiled(arm_activation, arm_weight)
                 torch.spyre.synchronize()
             return compiled, output
         finally:
@@ -334,21 +533,38 @@ def main() -> None:
             _reset_counter()
 
     incumbent, incumbent_output = compile_arm(
-        Incumbent(), "weight_stationary"
+        Incumbent(),
+        "weight_stationary",
+        incumbent_activation,
+        incumbent_weight,
     )
     candidate, candidate_output = compile_arm(
         Candidate(),
         (
             "activation_stationary"
-            if args.candidate_source == "selector"
+            if args.candidate_source == "selector" and args.boundary == "paid"
             else "weight_stationary"
         ),
+        candidate_activation,
+        candidate_weight,
+    )
+    normalized_candidate_output = (
+        candidate_output.transpose(-2, -1)
+        if args.boundary == "compute-only"
+        else candidate_output
+    )
+    candidate_expected = (
+        expected.transpose(-2, -1)
+        if args.boundary == "compute-only"
+        else expected
     )
     correctness_rows = {
         "incumbent": correctness(torch, incumbent_output, expected),
-        "candidate": correctness(torch, candidate_output, expected),
+        "candidate_native": correctness(
+            torch, candidate_output, candidate_expected
+        ),
         "candidate_matches_incumbent": correctness(
-            torch, candidate_output, incumbent_output
+            torch, normalized_candidate_output, incumbent_output
         ),
     }
     correctness_gate = all(
@@ -358,17 +574,29 @@ def main() -> None:
         for row in correctness_rows.values()
     )
     require(correctness_gate, f"correctness failed: {correctness_rows}")
+    device_layouts = {
+        "incumbent": {
+            "activation": str(incumbent_activation.device_tensor_layout()),
+            "weight": str(incumbent_weight.device_tensor_layout()),
+            "output": str(incumbent_output.device_tensor_layout()),
+        },
+        "candidate": {
+            "activation": str(candidate_activation.device_tensor_layout()),
+            "weight": str(candidate_weight.device_tensor_layout()),
+            "output_native": str(candidate_output.device_tensor_layout()),
+        },
+    }
 
     arms = (
-        ("incumbent", incumbent),
-        ("candidate", candidate),
-        ("candidate", candidate),
-        ("incumbent", incumbent),
+        ("incumbent", incumbent, incumbent_activation, incumbent_weight),
+        ("candidate", candidate, candidate_activation, candidate_weight),
+        ("candidate", candidate, candidate_activation, candidate_weight),
+        ("incumbent", incumbent, incumbent_activation, incumbent_weight),
     )
     with torch.no_grad(), spyre_config.patch(config):
         for _ in range(args.warmups):
-            for _, arm in arms:
-                arm(activation, weight)
+            for _, arm, arm_activation, arm_weight in arms:
+                arm(arm_activation, arm_weight)
                 torch.spyre.synchronize()
 
     trace_dir = run_dir / "trace"
@@ -380,9 +608,9 @@ def main() -> None:
     profiler.start()
     with torch.no_grad(), spyre_config.patch(config):
         for _ in range(args.blocks):
-            for label, arm in arms:
+            for label, arm, arm_activation, arm_weight in arms:
                 started = time.perf_counter_ns()
-                arm(activation, weight)
+                arm(arm_activation, arm_weight)
                 torch.spyre.synchronize()
                 host_wall[label].append(
                     (time.perf_counter_ns() - started) / 1e3
@@ -395,14 +623,25 @@ def main() -> None:
 
     trace = parse_trace(trace_path, args.blocks)
     artifacts = inventory(cache)
-    expected_inventories = {
-        ("ReStickifyOpHBM", "batchmatmul"),
-        ("identity", "identity", "ReStickifyOpHBM", "batchmatmul"),
-    }
     observed_inventories = {
         tuple(row["roots"]) for row in artifacts["bundles"]
     }
-    structural_gate = observed_inventories == expected_inventories
+    if args.boundary == "compute-only":
+        structural_gate = len(artifacts["bundles"]) == 2 and all(
+            row["roots"] == ["batchmatmul"] and row["ideal_cycles"] is not None
+            for row in artifacts["bundles"]
+        )
+    else:
+        expected_inventories = {
+            ("ReStickifyOpHBM", "batchmatmul"),
+            ("identity", "identity", "ReStickifyOpHBM", "batchmatmul"),
+        }
+        structural_gate = (
+            observed_inventories == expected_inventories
+            if args.weight_layout == "default"
+            else len(observed_inventories) == 2
+            and all("batchmatmul" in roots for roots in observed_inventories)
+        )
 
     tracked = run_checked(
         [
@@ -414,8 +653,20 @@ def main() -> None:
             "--untracked-files=no",
         ]
     ).splitlines()
+    pt_service_report = (
+        pt_service(
+            artifacts,
+            trace,
+            m=args.m,
+            k=args.k,
+            n=args.n,
+            core_frequency_mhz=args.core_frequency_mhz,
+        )
+        if args.boundary == "compute-only" and trace["gate"] and structural_gate
+        else None
+    )
     report = {
-        "schema": "activation_stationary_decode_abba_v1",
+        "schema": "activation_stationary_decode_abba_v2",
         "status": (
             "pass"
             if correctness_gate and trace["gate"] and structural_gate
@@ -423,21 +674,32 @@ def main() -> None:
         ),
         "shape": {
             "logical_m": args.m,
-            "physical_m": PHYSICAL_M,
+            "physical_m": (
+                (args.m + PHYSICAL_M - 1) // PHYSICAL_M
+            )
+            * PHYSICAL_M,
             "k": args.k,
             "n": args.n,
         },
         "candidate_source": args.candidate_source,
+        "boundary": args.boundary,
         "work_division": args.work_division,
+        "candidate_work_division": candidate_work_div or "auto",
+        "candidate_core_order": args.candidate_core_order,
+        "weight_layout": args.weight_layout,
+        "device_layouts": device_layouts,
         "order": ["incumbent", "candidate", "candidate", "incumbent"],
         "warmups": args.warmups,
         "blocks": args.blocks,
         "paid_boundary": {
             "inputs_ready_on_device": True,
-            "candidate_padding_inside_event": True,
-            "candidate_restickify_inside_event": True,
+            "candidate_padding_inside_event": args.boundary == "paid",
+            "candidate_restickify_inside_event": args.boundary == "paid",
             "candidate_bmm_inside_event": True,
-            "candidate_output_slice_inside_event": True,
+            "candidate_output_slice_inside_event": args.boundary == "paid",
+            "per_arm_native_activation_layout": args.boundary == "compute-only",
+            "per_arm_native_weight_layout": args.boundary == "compute-only",
+            "bmm_native_output_layout": args.boundary == "compute-only",
             "host_to_device_excluded": True,
             "compile_excluded": True,
         },
@@ -445,6 +707,7 @@ def main() -> None:
         "correctness": correctness_rows,
         "structural_gate": structural_gate,
         "artifacts": artifacts,
+        "pt_service": pt_service_report,
         "timing": {
             "source": "Kineto cat==kernel complete-event duration",
             "trace": trace,
@@ -470,6 +733,7 @@ def main() -> None:
                 for name in (
                     "SENARCH",
                     "SENCORES",
+                    "SENPERFORMANCE",
                     "DT_OPT",
                     "DXP_DEBUG",
                     "DXP_LX_FRAC_AVAIL",
