@@ -83,6 +83,16 @@ def parse_args() -> argparse.Namespace:
             "exclude that work from the timed graph"
         ),
     )
+    parser.add_argument(
+        "--activation-packing",
+        choices=("auto", "channel", "minibatch"),
+        default="auto",
+        help=(
+            "select the FP8 activation stick layout; 'channel' is a "
+            "diagnostic control for the existing QFP8CH path and 'minibatch' "
+            "forces the experimental DD2 QFP8MB path"
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
 
@@ -101,6 +111,14 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("work-division splits must be positive")
     if args.prepack_weight and args.variant == "fp16":
         raise ValueError("--prepack-weight is only valid for FP8 variants")
+    if args.variant == "fp16" and args.activation_packing != "auto":
+        raise ValueError("--activation-packing is only valid for FP8 variants")
+    if args.activation_packing == "minibatch" and (
+        args.m % 2 != 0 or args.k % 64 != 0
+    ):
+        raise ValueError(
+            "minibatch activation packing requires M % 2 == 0 and K % 64 == 0"
+        )
 
 
 def sha256(path: Path) -> str:
@@ -283,10 +301,34 @@ def raw_scaled_mm(
     )
 
 
+def quantize_activation_fp8(
+    activation: torch.Tensor,
+    quant_scale_a: torch.Tensor,
+    activation_packing: str,
+) -> torch.Tensor:
+    """Quantize activation while allowing an explicit physical-layout control."""
+
+    if activation_packing == "auto":
+        return torch.ops.spyre.quantize_fp8_with_scale(
+            activation,
+            quant_scale_a,
+        )
+
+    inv_scale = torch.reciprocal(quant_scale_a)
+    scaled = activation * inv_scale
+    clamped = torch.ops.spyre.clamp(scaled, -448.0, 448.0)
+    if activation_packing == "channel":
+        return torch.ops.spyre.qfp8ch(clamped)
+    if activation_packing == "minibatch":
+        return torch.ops.spyre.qfp8mb(clamped)
+    raise AssertionError(f"unknown activation packing: {activation_packing}")
+
+
 def make_benchmark_fn(
     variant: str,
     work_division: dict[str, int] | None,
     prepack_weight: bool,
+    activation_packing: str,
 ) -> Callable[..., torch.Tensor]:
     if variant == "fp16":
 
@@ -314,8 +356,10 @@ def make_benchmark_fn(
             output_scale_a: torch.Tensor,
             output_scale_b: torch.Tensor,
         ) -> torch.Tensor:
-            activation_fp8 = torch.ops.spyre.quantize_fp8_with_scale(
-                activation, quant_scale_a
+            activation_fp8 = quantize_activation_fp8(
+                activation,
+                quant_scale_a,
+                activation_packing,
             )
             weight_fp8 = (
                 weight
@@ -353,8 +397,10 @@ def make_benchmark_fn(
         output_scale_a: torch.Tensor,
         output_scale_b: torch.Tensor,
     ) -> torch.Tensor:
-        activation_fp8 = torch.ops.spyre.quantize_fp8_with_scale(
-            activation, quant_scale_a
+        activation_fp8 = quantize_activation_fp8(
+            activation,
+            quant_scale_a,
+            activation_packing,
         )
         weight_fp8 = (
             weight
@@ -641,6 +687,7 @@ def main() -> None:
         args.variant,
         work_division,
         args.prepack_weight,
+        args.activation_packing,
     )
     compiled = torch.compile(
         fn,
@@ -726,6 +773,11 @@ def main() -> None:
         "graph_contract": {
             "host_prequantized_fp8": False,
             "device_activation_quantization": args.variant in FP8_VARIANTS,
+            "activation_packing": (
+                args.activation_packing
+                if args.variant in FP8_VARIANTS
+                else "not_applicable"
+            ),
             "device_weight_quantization": (
                 args.variant in FP8_VARIANTS and not args.prepack_weight
             ),
