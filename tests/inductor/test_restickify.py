@@ -1030,6 +1030,38 @@ def test_broadcast_expand_both():
     )
 
 
+# ------- Pointwise ops over flattened producer views ---------
+
+
+def test_pointwise_flattens_leading_singleton_dimension():
+    """A fused pointwise may consume [1, M, K] through an [M, K] view.
+
+    Granite linear layers flatten the batch and token dimensions before
+    dynamic FP8 packing.  The producer can retain its leading singleton in
+    layout propagation even though the pointwise output is two-dimensional.
+    """
+    m, k = 64, 256
+    x = torch.randn((1, m, k), dtype=torch.float16)
+    row_scale = torch.randn((m, 1), dtype=torch.float16)
+
+    _compare(lambda x, scale: x.reshape(m, k) * scale, x, row_scale)
+
+
+def test_pointwise_flattens_real_attention_dimensions():
+    """Address-compatible [1, M, H, D] -> [M, H*D] views remain legal.
+
+    Fused Granite attention exposes this view while normalizing an attention
+    result for the output projection.  There is no host-dimension permutation
+    between the two ranks, so compatibility must be checked from the realized
+    device stick expression.
+    """
+    m, h, d = 64, 4, 64
+    x = torch.randn((1, m, h, d), dtype=torch.float16)
+    row_scale = torch.randn((m, 1), dtype=torch.float16)
+
+    _compare(lambda x, scale: x.reshape(m, h * d) * scale, x, row_scale)
+
+
 # ------- Single-arg op with a size-1 interior dim ---------
 
 

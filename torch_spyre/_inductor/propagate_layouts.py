@@ -315,7 +315,15 @@ def _single_arg_op_layout(
     stick_size = get_elem_in_stick(output.dtype)
 
     if isinstance(data, Reduction):
-        x_dev_coords = device_coordinates(stl, dep, None)
+        # Layout propagation offers a reduction every candidate layout carried
+        # by its producer.  Some compound/staggered conversion layouts cannot
+        # represent this reduction's access pattern (for example, reducing a
+        # DL16_TO_FP32 activation over K).  Reject only that candidate so the
+        # caller can try the remaining layouts; an unsupported candidate is
+        # not evidence that the reduction itself is unsupported.
+        x_dev_coords = try_device_coordinates(stl, dep, None)
+        if x_dev_coords is None:
+            return []
         x_stick_expr = x_dev_coords[-1]
         reduction_var = next(
             iter(dep.index.free_symbols - output_dep.index.free_symbols), None
@@ -381,9 +389,7 @@ def _single_arg_op_layout(
                 # Staggered-EA candidate whose physical stick depth differs from
                 # elems_per_stick — not a valid input for this conversion path.
                 return []
-            if not is_stick_expr_offset_free(
-                in_stick_expr, physical_stick_depth(stl)
-            ):
+            if not is_stick_expr_offset_free(in_stick_expr, physical_stick_depth(stl)):
                 return []
 
             input_ea = stl.element_arrangement
@@ -475,8 +481,7 @@ def _single_arg_op_layout(
             strides = [concretize_expr(s) for s in output.stride]
             if m % 2 != 0 or k % 64 != 0:
                 raise Unsupported(
-                    "qfp8mb PoC requires M % 2 == 0 and K % 64 == 0; "
-                    f"got M={m}, K={k}"
+                    f"qfp8mb PoC requires M % 2 == 0 and K % 64 == 0; got M={m}, K={k}"
                 )
             if strides != [k, 1]:
                 raise Unsupported(
@@ -502,8 +507,7 @@ def _single_arg_op_layout(
             strides = [concretize_expr(s) for s in output.stride]
             if k % 64 != 0 or n % 64 != 0:
                 raise Unsupported(
-                    "qfp8wt PoC requires K % 64 == 0 and N % 64 == 0; "
-                    f"got K={k}, N={n}"
+                    f"qfp8wt PoC requires K % 64 == 0 and N % 64 == 0; got K={k}, N={n}"
                 )
             if strides != [n, 1]:
                 raise Unsupported(
@@ -751,9 +755,7 @@ def _find_fp8mb_input_layout(
     QFP8MB/QFP8WT cannot be reconstructed by the ordinary one-dimensional
     restickify path. Their producer must have emitted the exact physical STL.
     """
-    matching = [
-        stl for stl in arg.layouts if stl.element_arrangement == required_ea
-    ]
+    matching = [stl for stl in arg.layouts if stl.element_arrangement == required_ea]
     for stl in matching:
         coords = try_device_coordinates(stl, arg.dep, None)
         if coords is not None and required_var in coords[-1].free_symbols:
@@ -970,15 +972,76 @@ def _multi_arg_pointwise_layouts(
     c_stride = [concretize_expr(s) for s in output.stride]
 
     def _is_supported_layout(dim_order):
-        for arg in args:
-            # Project output dim_order to input, dropping leading dims missing due to broadcast.
-            rank_diff = len(output.size) - len(arg.layout.size)
-            projected_dim_order = [d - rank_diff for d in dim_order if d >= rank_diff]
-            c_in_size = [concretize_expr(s) for s in arg.layout.size]
-            c_in_stride = [concretize_expr(s) for s in arg.layout.stride]
-            in_stl = SpyreTensorLayout(
-                c_in_size, c_in_stride, output.dtype, projected_dim_order, output_ea
+        try:
+            candidate_out_stl = SpyreTensorLayout(
+                c_size, c_stride, output.dtype, dim_order, output_ea
             )
+        except RuntimeError:
+            return False
+        candidate_out_coord = try_device_coordinates(
+            candidate_out_stl, output_dep, ind_sizes
+        )
+        if candidate_out_coord is None:
+            return False
+        target_stick_expr = candidate_out_coord[-1]
+
+        for arg in args:
+            # Project output dim_order to the input.  The common broadcast case
+            # drops leading output dimensions that are absent from the input.
+            # A fused reshape can expose the inverse relationship: an input may
+            # retain leading singleton dimensions while the pointwise output is
+            # flattened (Granite supplies [1, M, K] and quantizes [M, K]).  Such
+            # singleton dimensions do not change addressing, so prepend them to
+            # the projected order.  Do not generalize this to non-singleton
+            # dimensions: flattening real dimensions needs a view-aware layout
+            # mapping rather than a permutation.
+            rank_diff = len(output.size) - len(arg.layout.size)
+            c_in_size = [concretize_expr(s) for s in arg.layout.size]
+            if rank_diff < 0:
+                # A view may flatten several real producer dimensions into one
+                # pointwise output dimension (for example attention
+                # [B, M, H, D] -> [M, H*D]).  A host-dimension permutation
+                # cannot describe that relationship.  It is nevertheless safe
+                # to reuse an existing producer layout when its realized device
+                # stick expression is already exactly the output candidate's
+                # stick expression.  This is an address-level compatibility
+                # check, not an assumption about which logical dimensions were
+                # flattened.
+                matching_existing_layout = any(
+                    stl.element_arrangement == output_ea
+                    and same_device_size(arg.layout.dtype, output.dtype)
+                    and (coord := try_device_coordinates(stl, arg.dep, ind_sizes))
+                    is not None
+                    and coord[-1] == target_stick_expr
+                    for stl in arg.layouts
+                )
+                if matching_existing_layout:
+                    continue
+            if rank_diff >= 0:
+                projected_dim_order = [
+                    d - rank_diff for d in dim_order if d >= rank_diff
+                ]
+            else:
+                leading_dims = -rank_diff
+                if any(size != 1 for size in c_in_size[:leading_dims]):
+                    return False
+                projected_dim_order = list(range(leading_dims)) + [
+                    d + leading_dims for d in dim_order
+                ]
+            c_in_stride = [concretize_expr(s) for s in arg.layout.stride]
+            try:
+                in_stl = SpyreTensorLayout(
+                    c_in_size,
+                    c_in_stride,
+                    output.dtype,
+                    projected_dim_order,
+                    output_ea,
+                )
+            except RuntimeError:
+                # As above, a single unrepresentable projection invalidates
+                # only this output-stick candidate.  Other output dimensions
+                # may still be legal and are scanned below.
+                return False
             coord = try_device_coordinates(in_stl, arg.dep, ind_sizes)
             if coord is None or not is_stick_expr_offset_free(coord[-1], stick_size):
                 return False
@@ -1542,7 +1605,29 @@ def propagate_spyre_tensor_layouts(
                     op.layouts = [generic_layout(op)]
                 op.restick_cost_fn = AnyInNode.from_args()
             elif isinstance(op.data, (Pointwise, Reduction)):
-                op.layouts = compute_layouts(op, output, output_dep, args)
+                try:
+                    op.layouts = compute_layouts(op, output, output_dep, args)
+                except (Unsupported, RuntimeError) as error:
+                    origins = sorted(
+                        str(origin.target)
+                        for origin in op.data.origins
+                        if getattr(origin, "target", None) is not None
+                    )
+                    input_layouts = [
+                        {
+                            "buffer": arg.dep.name,
+                            "host_size": tuple(arg.layout.size),
+                            "host_stride": tuple(arg.layout.stride),
+                            "device_layouts": [repr(stl) for stl in arg.layouts],
+                        }
+                        for arg in args
+                    ]
+                    raise Unsupported(
+                        f"layout propagation failed for {op.get_name()} "
+                        f"origins={origins}, output_size={tuple(output.size)}, "
+                        f"output_stride={tuple(output.stride)}, "
+                        f"inputs={input_layouts}: {error}"
+                    ) from error
             else:
                 logger.warning(f"Warning: unhandled node type {type(op.data)}")
         elif isinstance(op, FallbackKernel):
