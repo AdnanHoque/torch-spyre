@@ -54,7 +54,11 @@ from torch._inductor.ir import (
 )
 from torch._inductor.virtualized import V
 
-from .constants import BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP
+from .constants import (
+    BATCH_MATMUL_OP,
+    BATCH_MATMUL_FP8_OP,
+    BATCH_MATMUL_FP8MB_OP,
+)
 from .ir import FixedTiledLayout
 from .logging_utils import get_inductor_logger
 from .pass_utils import (
@@ -180,7 +184,11 @@ def insert_bmm_padding(graph: GraphLowering) -> None:
         reduction = op.data
         if not isinstance(reduction, Reduction):
             continue
-        if reduction.reduction_type not in [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP]:
+        if reduction.reduction_type not in [
+            BATCH_MATMUL_OP,
+            BATCH_MATMUL_FP8_OP,
+            BATCH_MATMUL_FP8MB_OP,
+        ]:
             continue
 
         rw = op.get_read_writes()

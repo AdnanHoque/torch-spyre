@@ -54,6 +54,7 @@ from .errors import Unsupported
 from .constants import (
     BATCH_MATMUL_OP,
     BATCH_MATMUL_FP8_OP,
+    BATCH_MATMUL_FP8MB_OP,
     COPY_BACK_CANDIDATE_ATTR,
     DEVICE_NAME,
     ELIDED_COPY_BACK_ATTR,
@@ -79,6 +80,7 @@ from .pass_utils import (
     indirect_info_from_op,
     is_stick_expr_offset_free,
     iter_var_id,
+    physical_stick_depth,
 )
 from .optimize_restickify import AllSameNode, AnyInNode, FixedInOutNode
 from .views import matching_dim
@@ -227,7 +229,7 @@ def _check_supported_input_sticks(args: list[PropArg], op_label: str) -> None:
                 continue
             representable += 1
             stick_expr = coords[-1]
-            if not is_stick_expr_offset_free(stick_expr, stl.elems_per_stick()):
+            if not is_stick_expr_offset_free(stick_expr, physical_stick_depth(stl)):
                 raise Unsupported(
                     f"{op_label}: input arg{i} has stick expression with offset "
                     f"{stick_expr!r} (likely from slicing the stick dimension); "
@@ -379,7 +381,9 @@ def _single_arg_op_layout(
                 # Staggered-EA candidate whose physical stick depth differs from
                 # elems_per_stick — not a valid input for this conversion path.
                 return []
-            if not is_stick_expr_offset_free(in_stick_expr, stl.elems_per_stick()):
+            if not is_stick_expr_offset_free(
+                in_stick_expr, physical_stick_depth(stl)
+            ):
                 return []
 
             input_ea = stl.element_arrangement
@@ -457,8 +461,55 @@ def _single_arg_op_layout(
                 _rescale_stl_for_dtype(stl, output.dtype, ElementArrangement.QFP8CH)
             ]
 
+        case spyreop.qfp8mb.default:
+            # Keep the ordinary logical FP8 layout in torch-spyre IR and mark
+            # its DD2 element arrangement. SuperDSC expands that marker to the
+            # physical [K:8, M:2, K:8] stick. Encoding the physical factors as
+            # extra IR dimensions makes coarse tiling treat them as independent
+            # loop variables and corrupts the logical M/K iteration space.
+            if len(output.size) != 2:
+                raise Unsupported(
+                    f"qfp8mb PoC requires a 2D [M, K] tensor, got {output.size}"
+                )
+            m, k = (concretize_expr(output.size[0]), concretize_expr(output.size[1]))
+            strides = [concretize_expr(s) for s in output.stride]
+            if m % 2 != 0 or k % 64 != 0:
+                raise Unsupported(
+                    "qfp8mb PoC requires M % 2 == 0 and K % 64 == 0; "
+                    f"got M={m}, K={k}"
+                )
+            if strides != [k, 1]:
+                raise Unsupported(
+                    "qfp8mb PoC requires contiguous [M, K] storage; "
+                    f"got strides={strides}"
+                )
+            return [
+                _rescale_stl_for_dtype(
+                    stl,
+                    output.dtype,
+                    ElementArrangement.QFP8MB,
+                )
+            ]
+
         case spyreop.qfp8wt.default:
-            # fp16 -> fp8 weight quantization with 2D-stick layout [2, 64].
+            # As with QFP8MB, retain a logical IR layout and let SuperDSC
+            # serialize QFP8WT as the physical [K:2, N:64] stick.
+            if len(output.size) != 2:
+                raise Unsupported(
+                    f"qfp8wt PoC requires a 2D [K, N] tensor, got {output.size}"
+                )
+            k, n = (concretize_expr(output.size[0]), concretize_expr(output.size[1]))
+            strides = [concretize_expr(s) for s in output.stride]
+            if k % 64 != 0 or n % 64 != 0:
+                raise Unsupported(
+                    "qfp8wt PoC requires K % 64 == 0 and N % 64 == 0; "
+                    f"got K={k}, N={n}"
+                )
+            if strides != [n, 1]:
+                raise Unsupported(
+                    "qfp8wt PoC requires contiguous [K, N] storage; "
+                    f"got strides={strides}"
+                )
             in_elems_per_stick = get_elem_in_stick(in_layout.dtype)
             stick_dim_size = in_layout.size[-1]
             unaligned = stick_dim_size % in_elems_per_stick
@@ -689,6 +740,31 @@ def find_stick_compatible_input_layout(
     )
 
 
+def _find_fp8mb_input_layout(
+    arg: PropArg,
+    required_var: sympy.Symbol,
+    required_ea: ElementArrangement,
+    label: str,
+) -> SpyreTensorLayout:
+    """Select an already-materialized DD2 compound-stick input verbatim.
+
+    QFP8MB/QFP8WT cannot be reconstructed by the ordinary one-dimensional
+    restickify path. Their producer must have emitted the exact physical STL.
+    """
+    matching = [
+        stl for stl in arg.layouts if stl.element_arrangement == required_ea
+    ]
+    for stl in matching:
+        coords = try_device_coordinates(stl, arg.dep, None)
+        if coords is not None and required_var in coords[-1].free_symbols:
+            return stl
+    raise Unsupported(
+        f"{BATCH_MATMUL_FP8MB_OP}: {label} requires an existing "
+        f"{required_ea} layout with {required_var} in the terminal physical "
+        f"stick coordinate; candidates={matching}"
+    )
+
+
 def _matmul_layouts(
     op: Operation,
     output: FixedLayout,
@@ -723,12 +799,20 @@ def _matmul_layouts(
     reduction_var = find_reduction_var(x.dep, output_dep)
     generated_var = find_matmul_generated_var(y.dep, x.dep, output_dep)
 
-    x_req_stl = find_stick_compatible_input_layout(
-        x, reduction_var, data.reduction_type, "x"
-    )
-    y_req_stl = find_stick_compatible_input_layout(
-        y, generated_var, data.reduction_type, "y"
-    )
+    if data.reduction_type == BATCH_MATMUL_FP8MB_OP:
+        x_req_stl = _find_fp8mb_input_layout(
+            x, reduction_var, ElementArrangement.QFP8MB, "x"
+        )
+        y_req_stl = _find_fp8mb_input_layout(
+            y, generated_var, ElementArrangement.QFP8WT, "y"
+        )
+    else:
+        x_req_stl = find_stick_compatible_input_layout(
+            x, reduction_var, data.reduction_type, "x"
+        )
+        y_req_stl = find_stick_compatible_input_layout(
+            y, generated_var, data.reduction_type, "y"
+        )
 
     out_stick_dim = next(
         (i for i, c in enumerate(out_coords) if generated_var in c.free_symbols),
@@ -1095,6 +1179,7 @@ def compute_layouts(
     if isinstance(data, Reduction) and data.reduction_type in [
         BATCH_MATMUL_OP,
         BATCH_MATMUL_FP8_OP,
+        BATCH_MATMUL_FP8MB_OP,
     ]:
         return _matmul_layouts(op, output, output_dep, args)
 

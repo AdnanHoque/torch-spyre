@@ -25,8 +25,9 @@ import sympy
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.ir import ComputedBuffer, FlexibleLayout, Pointwise, Reduction
 from torch._inductor.virtualized import V
+from torch_spyre._C import ElementArrangement
 
-from .constants import BATCH_MATMUL_OP
+from .constants import MATMUL_REDUCTION_OPS
 from .errors import Unsupported
 from .ir import FixedTiledLayout, _resize_device_layout
 from .logging_utils import get_inductor_logger
@@ -273,6 +274,28 @@ def _post_tile_stick_alignment_error(
     if split_count <= 1:
         return None
 
+    ea = original_layout.device_layout.element_arrangement
+    if ea in (ElementArrangement.QFP8MB, ElementArrangement.QFP8WT):
+        if len(original_layout.size) != 2 or selected_host_dim not in (0, 1):
+            return (
+                f"cannot validate compound FP8 tile alignment for "
+                f"{original_layout!r}: expected a 2D host layout"
+            )
+        # Both DD2 compound layouts expose two independent logical
+        # granularities.  QFP8MB is [M:2, K:64]; QFP8WT is [K:2, N:64].
+        # A single "within-stick" dimension cannot represent this contract.
+        stick_elems = (2, 64)[selected_host_dim]
+        full_size = int(original_layout.size[selected_host_dim])
+        tile_size = full_size // split_count
+        if tile_size % stick_elems == 0:
+            return None
+        return (
+            f"split_count {split_count} makes selected host dim "
+            f"{selected_host_dim} tile size {tile_size}, which is not aligned "
+            f"to compound FP8 granularity {stick_elems}; coarse-tile "
+            f"boundaries would cut through a physical stick"
+        )
+
     within_stick_dim = _within_stick_host_dim(original_layout)
     if within_stick_dim is None:
         # Cannot confidently identify the stick dim for this layout -- treat
@@ -308,7 +331,7 @@ def _is_batch_matmul_reduction(op: ComputedBuffer) -> bool:
     """
     return (
         isinstance(op.data, Reduction)
-        and getattr(op.data, "reduction_type", None) == BATCH_MATMUL_OP
+        and getattr(op.data, "reduction_type", None) in MATMUL_REDUCTION_OPS
     )
 
 

@@ -40,7 +40,13 @@ from torch._inductor.graph import GraphLowering
 from torch_spyre._C import ElementArrangement
 
 from .errors import Unsupported
-from .constants import BATCH_MATMUL_OP, DEVICE_NAME, TOPK_OPS, BATCH_MATMUL_FP8_OP
+from .constants import (
+    BATCH_MATMUL_OP,
+    BATCH_MATMUL_FP8_OP,
+    BATCH_MATMUL_FP8MB_OP,
+    DEVICE_NAME,
+    TOPK_OPS,
+)
 from .ir import FixedTiledLayout
 from .pass_utils import (
     SchedNodeArg,
@@ -304,11 +310,14 @@ def multi_dim_iteration_space_split(
     return splits
 
 
-def _has_qfp8wt_tensor(tds: list[TensorDep]) -> bool:
-    """Check if any tensor has QFP8WT element arrangement."""
+_FP8_COMPOUND_EAS = (ElementArrangement.QFP8MB, ElementArrangement.QFP8WT)
+
+
+def _has_fp8_compound_tensor(tds: list[TensorDep]) -> bool:
+    """Check if any tensor uses a DD2 compound FP8 stick."""
     return any(
         hasattr(td.layout.device_layout, "element_arrangement")
-        and td.layout.device_layout.element_arrangement == ElementArrangement.QFP8WT
+        and td.layout.device_layout.element_arrangement in _FP8_COMPOUND_EAS
         for td in tds
     )
 
@@ -321,28 +330,52 @@ def _is_qfp8wt_tensor(td: TensorDep) -> bool:
     )
 
 
-def _get_qfp8wt_split_constraints(
+def _compound_stick_granularities(td: TensorDep) -> dict[Symbol, int]:
+    """Return logical atomic sizes encoded by one compound FP8 stick."""
+    ea = td.layout.device_layout.element_arrangement
+    if ea == ElementArrangement.QFP8MB:
+        coords_and_factors = zip(td.device_coords[-3:], (8, 2, 8))
+    elif ea == ElementArrangement.QFP8WT:
+        coords_and_factors = zip(td.device_coords[-2:], (2, 64))
+    else:
+        return {}
+
+    granularities: dict[Symbol, int] = {}
+    for coord, factor in coords_and_factors:
+        if len(coord.free_symbols) != 1:
+            continue
+        var = next(iter(coord.free_symbols))
+        granularities[var] = granularities.get(var, 1) * factor
+    return granularities
+
+
+def _get_fp8_compound_split_constraints(
     input_tds: list[TensorDep],
     output_td: TensorDep,
 ) -> dict[Symbol, int]:
-    """Return split constraints (=1) for QFP8WT second stick dimension."""
+    """Prevent cross-core K splitting for DD2 compound FP8 operands.
+
+    QFP8WT's non-terminal K:2 factor and QFP8MB's repeated K:8 factors
+    identify the reduction dimension. M remains splittable at granularity 2.
+    """
     constraints: dict[Symbol, int] = {}
-    if not _has_qfp8wt_tensor(input_tds + [output_td]):
+    all_tds = input_tds + [output_td]
+    if not _has_fp8_compound_tensor(all_tds):
         return constraints
 
-    # Kernel tensor (second input for batchmatmul)
-    if len(input_tds) > 1:
-        kernel_td = input_tds[1]
-        if len(kernel_td.device_coords) > 1 and _is_qfp8wt_tensor(kernel_td):
-            second_stick_vars = kernel_td.device_coords[-2].free_symbols
-            for var in second_stick_vars:
+    for td in all_tds:
+        ea = td.layout.device_layout.element_arrangement
+        if ea == ElementArrangement.QFP8WT:
+            for var in td.device_coords[-2].free_symbols:
                 constraints[var] = 1
-
-    # Output tensor
-    if len(output_td.device_coords) > 1 and _is_qfp8wt_tensor(output_td):
-        second_stick_vars = output_td.device_coords[-2].free_symbols
-        for var in second_stick_vars:
-            constraints[var] = 1
+        elif ea == ElementArrangement.QFP8MB:
+            occurrences: dict[Symbol, int] = {}
+            for coord in td.device_coords[-3:]:
+                for var in coord.free_symbols:
+                    occurrences[var] = occurrences.get(var, 0) + 1
+            for var, count in occurrences.items():
+                if count > 1:
+                    constraints[var] = 1
 
     return constraints
 
@@ -361,8 +394,8 @@ def adjust_it_space_for_sticks(
     convert its size in it_space from elements to sticks. This ensures work
     division treats sticks as atomic units.
 
-    For QFP8WT tensors (2D stick layouts), both stick dimensions are treated as
-    atomic units with 128-byte constraint.
+    For DD2 compound FP8 layouts, each logical dimension uses its physical
+    atomic size: QFP8MB M=2/K=64 and QFP8WT K=2/N=64.
 
     When tensors of different dtypes share a stick variable (e.g. a float16
     input and an int64 argmax output), the largest elems_per_stick is used
@@ -383,25 +416,23 @@ def adjust_it_space_for_sticks(
     adjusted_space = dict(it_space)
     max_elems: dict[Symbol, int] = {}
     for td in tensor_deps:
-        # Handle QFP8WT multi-dim stick
+        # Handle DD2 compound FP8 sticks. A logical dimension can occur more
+        # than once in the physical stick (QFP8MB K:8 * K:8 = K:64).
         if (
             hasattr(td.layout.device_layout, "element_arrangement")
-            and td.layout.device_layout.element_arrangement == ElementArrangement.QFP8WT
+            and td.layout.device_layout.element_arrangement in _FP8_COMPOUND_EAS
         ):
-            # For QFP8WT, last two device dimensions are the 2D stick [2, 64]
-            # Both need to be treated as atomic 128-byte units
-            stick_vars = []
-            for coord in td.device_coords[-2:]:
-                if len(coord.free_symbols) == 1:
-                    var = next(iter(coord.free_symbols))
-                    if var in adjusted_space:
-                        stick_vars.append(var)
-
-            for stick_var in stick_vars:
-                # QFP8WT stick size is always 128 bytes (64 elements at fp8)
-                fp8_stick_elems = td.layout.device_layout.elems_per_stick()
-                if stick_var not in max_elems or fp8_stick_elems > max_elems[stick_var]:
-                    max_elems[stick_var] = fp8_stick_elems
+            for stick_var, atomic_elems in _compound_stick_granularities(td).items():
+                if stick_var not in adjusted_space:
+                    continue
+                if stick_var in symbol_meta:
+                    raise Unsupported(
+                        f"symbolic compound-stick dim {stick_var} is not "
+                        f"supported yet (tensor {td.dep.name})"
+                    )
+                max_elems[stick_var] = max(
+                    max_elems.get(stick_var, 1), atomic_elems
+                )
             continue
 
         stick_expr = td.device_coords[-1]
@@ -970,12 +1001,13 @@ def span_reduction_pass(
         all_tds, it_space, it_space_adjusted, stick_vars, max_cores, symbol_meta
     )
 
-    # For matmul ops with QFP8WT kernels, enforce split constraints
+    # DD2 compound FP8 reductions cannot split K across cores.
     if isinstance(op.data, Reduction) and op.data.reduction_type in (
         BATCH_MATMUL_OP,
         BATCH_MATMUL_FP8_OP,
+        BATCH_MATMUL_FP8MB_OP,
     ):
-        qfp8_constraints = _get_qfp8wt_split_constraints(input_tds, output_td)
+        qfp8_constraints = _get_fp8_compound_split_constraints(input_tds, output_td)
         min_splits.update(qfp8_constraints)
 
     coord_vars = {v for e in output_td.device_coords[:-1] for v in e.free_symbols}
@@ -1100,8 +1132,8 @@ def work_distribution_pass(
     # dims with actual committed splits so they don't overlap with priorities.
     committed_splits = {s: v for s, v in min_splits.items() if v > 1}
 
-    # For matmul ops with QFP8WT kernels, enforce split constraints
-    qfp8_constraints = _get_qfp8wt_split_constraints(input_tds, output_td)
+    # DD2 compound FP8 reductions cannot split K across cores.
+    qfp8_constraints = _get_fp8_compound_split_constraints(input_tds, output_td)
     for var, split_val in qfp8_constraints.items():
         if var in committed_splits:
             del committed_splits[var]
@@ -1148,8 +1180,8 @@ def work_distribution_pass(
         it_space_adjusted, output_td, committed_splits, max_cores, symbol_meta, blocked
     )
 
-    # Enforce QFP8WT split constraints on the final split
-    qfp8_constraints = _get_qfp8wt_split_constraints(input_tds, output_td)
+    # Enforce compound-stick split constraints on the final split.
+    qfp8_constraints = _get_fp8_compound_split_constraints(input_tds, output_td)
     splits.update(qfp8_constraints)
 
     apply_splits(op, splits, output_td)
@@ -1389,7 +1421,11 @@ def _cost_model_matmul_planner(
     """
     if not isinstance(op.data, Reduction):
         return splits
-    if op.data.reduction_type not in (BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP):
+    if op.data.reduction_type not in (
+        BATCH_MATMUL_OP,
+        BATCH_MATMUL_FP8_OP,
+        BATCH_MATMUL_FP8MB_OP,
+    ):
         return splits
     if committed_splits:
         return splits
@@ -1453,8 +1489,8 @@ def _cost_model_matmul_planner(
     n_divs = [int(d) for d in divisors(n_sticks)]
     k_divs = [int(d) for d in divisors(k_sticks)]
 
-    # For batchmatmulfp8 with QFP8WT kernels, do not split K
-    if _has_qfp8wt_tensor(input_tds + [output_td]):
+    # DD2 compound FP8 matmul cannot split K across cores.
+    if _has_fp8_compound_tensor(input_tds + [output_td]):
         k_divs = [1]
 
     best = None
@@ -1491,9 +1527,9 @@ def _cost_model_matmul_planner(
 
     # Never trade down to fewer cores than the default distributor already found.
     if math.prod(new_splits.values()) < math.prod(splits.values()):
-        if not _has_qfp8wt_tensor(input_tds + [output_td]):
+        if not _has_fp8_compound_tensor(input_tds + [output_td]):
             return splits
-        # For QFP8WT, force k_dim = 1 regardless of core count
+        # For compound FP8, force k_dim = 1 regardless of core count.
         new_splits[k_dim] = 1
 
     logger.debug(

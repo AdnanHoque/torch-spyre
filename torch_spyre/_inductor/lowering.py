@@ -28,6 +28,7 @@ from .constants import (
     BATCH_MATMUL_OP,
     COPY_BACK_CANDIDATE_ATTR,
     BATCH_MATMUL_FP8_OP,
+    BATCH_MATMUL_FP8MB_OP,
     SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY,
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
 )
@@ -362,9 +363,17 @@ def lower_scaled_mm(
     output_dtype = out_dtype if out_dtype is not None else torch.float16
     reduction_numel = mat1_size[-1]
 
+    use_fp8mb = False
     if mat1_ndim == 2 and mat2_ndim == 2:
         # [M, K] × [K, N] → [M, N]
         ranges = [mat1_size[0], mat2_size[1]]
+        m, k, n = (int(mat1_size[0]), int(mat1_size[1]), int(mat2_size[1]))
+        use_fp8mb = m % 2 == 0
+        if use_fp8mb and (k % 64 != 0 or n % 64 != 0):
+            raise Unsupported(
+                "DD2 batchmatmulfp8mb PoC requires M % 2 == 0, "
+                f"K % 64 == 0, and N % 64 == 0; got M={m}, K={k}, N={n}"
+            )
 
         def inner_fn(index, reduction_index):
             i0, i1 = index
@@ -395,7 +404,9 @@ def lower_scaled_mm(
         )
 
     result = Reduction.create(
-        reduction_type=BATCH_MATMUL_FP8_OP,
+        reduction_type=(
+            BATCH_MATMUL_FP8MB_OP if use_fp8mb else BATCH_MATMUL_FP8_OP
+        ),
         input_node=[mat1, mat2],
         device=mat1.get_device(),
         dst_dtype=output_dtype,
@@ -1379,6 +1390,32 @@ def lower_qfp8ch(x):
     """
 
     fn = lowering.ops_wrapper(torch.ops.spyre.qfp8ch.__name__)
+    x_loader = x.make_loader()
+
+    def inner_fn(index):
+        return fn(x_loader(index))
+
+    pw = Pointwise.create(
+        device=x.get_device(),
+        dtype=torch.float8_e4m3fn,
+        inner_fn=inner_fn,
+        ranges=x.get_size(),
+        origin_node=x.get_origin_node(),
+        traceback=x.get_traceback(),
+    )
+    pw.realize()
+    return pw
+
+
+@register_spyre_lowering(torch.ops.spyre.qfp8mb)
+def lower_qfp8mb(x):
+    """
+    Lower the DD2 minibatch-packed FP8 format conversion.
+
+    Layout propagation attaches the physical [K:8, M:2, K:8] stick.
+    """
+
+    fn = lowering.ops_wrapper(torch.ops.spyre.qfp8mb.__name__)
     x_loader = x.make_loader()
 
     def inner_fn(index):

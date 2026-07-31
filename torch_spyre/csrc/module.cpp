@@ -209,7 +209,8 @@ PYBIND11_MODULE(_C, m) {
       .value("QFP8CH", spyre::ElementArrangement::QFP8CH)
       .value("EXX2", spyre::ElementArrangement::EXX2)
       .value("FP32_TO_DL16", spyre::ElementArrangement::FP32_TO_DL16)
-      .value("QFP8WT", spyre::ElementArrangement::QFP8WT);
+      .value("QFP8WT", spyre::ElementArrangement::QFP8WT)
+      .value("QFP8MB", spyre::ElementArrangement::QFP8MB);
 
   py::class_<spyre::SpyreTensorLayout> dci_cls(m, "SpyreTensorLayout");
 

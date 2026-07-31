@@ -23,6 +23,7 @@ from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import parse_op_spec
 from torch_spyre._inductor.constants import (
     BATCH_MATMUL_FP8_OP,
+    BATCH_MATMUL_FP8MB_OP,
     BATCH_MATMUL_OP,
 )
 from torch_spyre._inductor.core_mapping import core_to_slice_mapping
@@ -111,7 +112,9 @@ def _bmm_op_spec(op: str) -> OpSpec:
     )
 
 
-@pytest.mark.parametrize("op", [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP])
+@pytest.mark.parametrize(
+    "op", [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP, BATCH_MATMUL_FP8MB_OP]
+)
 @pytest.mark.parametrize("reduction_contiguous", [False, True])
 def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contiguous):
     class FakeReduction:

@@ -35,6 +35,7 @@ from .constants import (
     SPYRE_FP32_OPS,
     BATCH_MATMUL_OP,
     BATCH_MATMUL_FP8_OP,
+    BATCH_MATMUL_FP8MB_OP,
     IDENTITY_OP,
     RESTICKIFY_OP,
     SEGMENT_OFFSETS,
@@ -91,7 +92,11 @@ def _preserve_shared_weight_unit_bmm_dim(
     # OpSpec construction helpers.
     if SHARED_WEIGHT_UNIT_BMM_INFO_KEY not in op_info:
         return it_space
-    if op not in [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP]:
+    if op not in [
+        BATCH_MATMUL_OP,
+        BATCH_MATMUL_FP8_OP,
+        BATCH_MATMUL_FP8MB_OP,
+    ]:
         return it_space
     if len(it_space) != 3 or len(args) < 3:
         return it_space
@@ -326,6 +331,10 @@ class SpyreOpFuncs:
     @staticmethod
     def qfp8ch(x):
         return PointwiseOp("qfp8ch", [x])
+
+    @staticmethod
+    def qfp8mb(x):
+        return PointwiseOp("qfp8mb", [x])
 
     @staticmethod
     def qfp8wt(x):
@@ -908,7 +917,11 @@ class SpyreKernel(Kernel[CSEVariable]):
                 f"device_size={list(layout.device_layout.device_size)}, op_info={op_info}"
             )
 
-        if value.op in [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP]:
+        if value.op in [
+            BATCH_MATMUL_OP,
+            BATCH_MATMUL_FP8_OP,
+            BATCH_MATMUL_FP8MB_OP,
+        ]:
             if (
                 len(value.arguments) != 2
                 or (not isinstance(value.arguments[0], TensorAccess))

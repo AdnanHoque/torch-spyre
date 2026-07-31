@@ -648,6 +648,23 @@ def _(input: torch.Tensor) -> torch.Tensor:
     return torch.empty(input.size(), dtype=torch.float8_e4m3fn, device=input.device)
 
 
+@torch.library.custom_op("spyre::qfp8mb", mutates_args=(), device_types="spyre")
+def qfp8mb(input: torch.Tensor) -> torch.Tensor:
+    """
+    DD2 minibatch-packed FP8 format conversion.
+
+    This PoC only supports a contiguous 2D [M, K] tensor with even M and
+    K divisible by 64. Scaling and clamping are performed by the surrounding
+    quantize_fp8_with_scale decomposition.
+    """
+    pass
+
+
+@qfp8mb.register_fake
+def _(input: torch.Tensor) -> torch.Tensor:
+    return torch.empty(input.size(), dtype=torch.float8_e4m3fn, device=input.device)
+
+
 @torch.library.custom_op(
     "spyre::quantize_fp8_with_scale", mutates_args=(), device_types="spyre"
 )

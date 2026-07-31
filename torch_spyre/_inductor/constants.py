@@ -19,7 +19,10 @@ BATCH_MATMUL_OP = "batchmatmul"
 IDENTITY_OP = "identity"
 RESTICKIFY_OP = "ReStickifyOpHBM"
 BATCH_MATMUL_FP8_OP = "batchmatmulfp8"
-MATMUL_REDUCTION_OPS = frozenset({BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP})
+BATCH_MATMUL_FP8MB_OP = "batchmatmulfp8mb"
+MATMUL_REDUCTION_OPS = frozenset(
+    {BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP, BATCH_MATMUL_FP8MB_OP}
+)
 
 # Reduction ops that cannot reduce along the stick dimension.
 # Native prod reduction is not currently available in the backend.
@@ -168,8 +171,10 @@ FP8_E4M3FN_MIN = float(FP8_E4M3FN_INFO.min)
 # Operations that directly handle FP8 dtypes (SEN143_FP8)
 SPYRE_FP8_OPS = {
     "qfp8ch",  # Channel-wise FP8 quantization (output: FP8)
+    "qfp8mb",  # DD2 minibatch-packed FP8 quantization (output: FP8)
     "fp8todl16",  # FP8 to FP16 conversion (input: FP8)
     "batchmatmulfp8",  # FP8 bmm (inputs: FP8)
+    "batchmatmulfp8mb",  # DD2 minibatch-packed FP8 bmm (inputs: FP8)
     "qfp8wt",  # FP8 quantization (output: FP8)
 }
 

@@ -28,6 +28,7 @@ from torch_spyre._inductor.constants import (
     MATMUL_DIM_LABELS,
     MATMUL_LAYOUT_LABELS,
     MATMUL_REDUCTION_OPS,
+    BATCH_MATMUL_FP8MB_OP,
     RESTICKIFY_OP,
     TOPK_OPS,
 )
@@ -314,8 +315,13 @@ def _get_padded_iteration_space(
         for idx, dim in enumerate(dim_order):
             if idx >= len(dev_size) or dim not in stick_dim_order:
                 continue
-            effective_stick_size = (
-                stick_size[0] if len(stick_size) == 1 else stick_size[0] * stick_size[1]
+            # Compound layouts may repeat one logical dim (QFP8MB:
+            # K:8, M:2, K:8). Padding alignment is the product of only the
+            # physical factors that belong to this logical dimension.
+            effective_stick_size = math.prod(
+                size
+                for stick_dim, size in zip(stick_dim_order, stick_size)
+                if stick_dim == dim
             )
             unaligned = sdsc_iteration_space[dim] % effective_stick_size
             if unaligned > 0:
@@ -419,6 +425,7 @@ def _create_sdsc_tensors(
 
     for i, arg in enumerate(op_spec.args):
         is_fp8_mm_kernel_arg = arg.element_arrangement == ElementArrangement.QFP8WT
+        is_fp8mb_arg = arg.element_arrangement == ElementArrangement.QFP8MB
 
         # Step 1: Determine dimension order and stick dimension.
         # Index tensors use their pre-computed layout (their coords have no IndirectAccess).
@@ -475,7 +482,12 @@ def _create_sdsc_tensors(
             dev_dim_size = arg.device_size[-stride_idx - 2]
             it_dim_size = iteration_space[dim]
             if dim == stick_dim:
-                stick_size = arg.device_dtype.elems_per_stick()
+                stick_size = (
+                    64
+                    if arg.element_arrangement
+                    in (ElementArrangement.QFP8MB, ElementArrangement.QFP8WT)
+                    else arg.device_dtype.elems_per_stick()
+                )
                 dev_dim_size *= stick_size
                 it_dim_size = ((it_dim_size - 1) // stick_size + 1) * stick_size
 
@@ -512,13 +524,19 @@ def _create_sdsc_tensors(
         effective_stick = [op_stick_dim if stick_dim is None else stick_dim]
         layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
 
-        # Special handling for FP8 matmul KERNEL tensor
+        # Special handling for DD2 compound FP8 sticks.
         dtype_stick_size = arg.device_dtype.elems_per_stick()
         layout_stick_size = [dtype_stick_size]
-        if is_fp8_mm_kernel_arg:
-            # FP8 KERNEL needs 2D stick: [2, stick_size/2]
-            layout_stick_size = [2, dtype_stick_size // 2]
-            # Use the last two dimensions from dim_order for 2D stick
+        if is_fp8mb_arg:
+            if len(dim_order) != 2 or stick_dim is None:
+                raise RuntimeError(
+                    "QFP8MB codegen requires exactly two logical dimensions"
+                )
+            packed_mb_dim = next(dim for dim in dim_order if dim is not stick_dim)
+            layout_stick_size = [8, 2, 8]
+            effective_stick = [stick_dim, packed_mb_dim, stick_dim]
+        elif is_fp8_mm_kernel_arg:
+            layout_stick_size = [2, 64]
             effective_stick = dim_order[-2:]
 
         if has_indirect_access:
@@ -707,7 +725,11 @@ def _extend_matmul_k_to_padded(
     # (e.g. a slice) of a larger buffer: device_size reflects the underlying
     # allocation's K extent, not the slice's logical K, so it can be larger
     # than the matmul's actual K and would over-extend the iteration space.
-    stick_size = y_arg.device_dtype.elems_per_stick()
+    stick_size = (
+        64
+        if op_spec.op == BATCH_MATMUL_FP8MB_OP
+        else y_arg.device_dtype.elems_per_stick()
+    )
     k_current = sdsc_iteration_space[k_sym]
     k_padded = ((k_current + stick_size - 1) // stick_size) * stick_size
 
@@ -778,7 +800,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     # virtual mb=1 row when the op's tensor has only the stick dim.
     mb_sym: Symbol | None = None
     if (
-        (DtypeOpTable.is_dtype_op(op_spec.op) or op_spec.op == "qfp8ch")
+        (
+            DtypeOpTable.is_dtype_op(op_spec.op)
+            or op_spec.op in ("qfp8ch", "qfp8mb")
+        )
         and op_spec.op != IDENTITY_OP
         and op_stick_dim is not None
         and all(d is op_stick_dim for d in op_dim_order)

@@ -51,6 +51,7 @@ enum class ElementArrangement {
   FP32_TO_DL16 = 4,  // non-sequential order produced by fp32->dl16 on-device
                      // conversions
   QFP8WT = 5,        // 2D stick layout for FP8 weight tensors
+  QFP8MB = 6,        // DD2 minibatch-packed FP8 activation layout
 };
 
 inline std::string elementArrangementToString(ElementArrangement ea) {
@@ -65,6 +66,10 @@ inline std::string elementArrangementToString(ElementArrangement ea) {
       return "EXX2";
     case ElementArrangement::FP32_TO_DL16:
       return "FP32_TO_DL16";
+    case ElementArrangement::QFP8WT:
+      return "QFP8WT";
+    case ElementArrangement::QFP8MB:
+      return "QFP8MB";
     default:
       DT_ERROR("Invalid ElementArrangement");
   }

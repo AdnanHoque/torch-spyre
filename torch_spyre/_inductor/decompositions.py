@@ -824,6 +824,10 @@ def spyre_quantize_fp8_with_scale(
     inv_scale = torch.reciprocal(scale)
     x_scaled = input * inv_scale
     x_clamped = torch.ops.spyre.clamp(x_scaled, FP8_E4M3FN_MIN, FP8_E4M3FN_MAX)
+    # DD2's prefill path packs two adjacent M rows into each FP8 activation
+    # stick. Keep odd-M and non-2D cases on the existing channel layout.
+    if input.dim() == 2 and int(input.shape[0]) % 2 == 0:
+        return torch.ops.spyre.qfp8mb(x_clamped)
     return torch.ops.spyre.qfp8ch(x_clamped)
 
 

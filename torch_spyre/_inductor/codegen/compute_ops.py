@@ -251,25 +251,127 @@ def _build_coord_info(sdsc_spec, tensor, tensor_idx: int) -> dict:
     """
     dim_order = sdsc_spec.layouts[tensor.layout]["dim_order"]
     stick_dim_order = sdsc_spec.layouts[tensor.layout]["stick_dim_order"]
+    stick_size = sdsc_spec.layouts[tensor.layout]["stick_size"]
+    result = {}
+    for dim in dim_order:
+        size = (
+            sdsc_spec.iteration_space[dim] // sdsc_spec.work_slices[dim]
+            if tensor.scales[dim] == 1
+            else 1
+        )
+        nsplits = (
+            sdsc_spec.work_slices[dim] if tensor.scales[dim] == 1 else 1
+        )
+        is_fp8, other_sz, st_idx = _compute_fp8_coord_params(
+            tensor, dim, sdsc_spec
+        )
+        if is_fp8 and dim in stick_dim_order:
+            result[str(dim)] = gen_compound_fp8_coord_info_value(
+                size=size,
+                nsplits=nsplits,
+                dim=dim,
+                stick_dim_order=stick_dim_order,
+                stick_size=stick_size,
+            )
+        else:
+            result[str(dim)] = gen_coord_info_value(
+                size=size,
+                nsplits=nsplits,
+                elems_per_stick=tensor.data_format.elems_per_stick(),
+                is_stick_dim=(dim in stick_dim_order),
+                is_stick_reduction=(tensor.scales[dim] == -2),
+                is_fp8_stick=is_fp8,
+                other_stick_size=other_sz,
+                stick_idx=st_idx,
+                tensor_idx=tensor_idx,
+                opfunc=sdsc_spec.opfunc,
+            )
+    return result
+
+
+def gen_compound_fp8_coord_info_value(
+    size: int,
+    nsplits: int,
+    dim: Symbol,
+    stick_dim_order: list[Symbol],
+    stick_size: list[int],
+) -> dict:
+    """Serialize a compound FP8 stick from its physical factors.
+
+    For a layout such as QFP8MB ``[K:8, M:2, K:8]``, the coordinate for one
+    logical dimension contains:
+
+    * one outer group fold (K/64 or M/2), then
+    * every physical within-stick fold in layout order.
+
+    A fold belonging to another logical dimension has alpha zero. A repeated
+    fold of this dimension has alpha equal to the product of its later factors.
+    This yields, for example:
+
+      K -> alphas [64, 8, 0, 1], cardinalities [K/64, 8, 2, 8]
+      M -> alphas [ 2, 0, 1, 0], cardinalities [M/2,  8, 2, 8]
+
+    The same rule gives QFP8WT ``[K:2, N:64]`` without a shape-specific table.
+    """
+
+    if len(stick_dim_order) != len(stick_size) or not stick_size:
+        raise Unsupported(
+            "compound FP8 coordinate generation requires matching non-empty "
+            f"stick labels/sizes, got {stick_dim_order=} {stick_size=}"
+        )
+    atomic_size = 1
+    for stick_dim, factor in zip(stick_dim_order, stick_size):
+        if stick_dim == dim:
+            atomic_size *= factor
+    if atomic_size == 1 or size % atomic_size != 0:
+        raise Unsupported(
+            "compound FP8 coordinate generation requires a whole number of "
+            f"physical groups: dim={dim}, size={size}, atomic={atomic_size}"
+        )
+
+    element_alphas = [atomic_size]
+    element_cardinalities = [size // atomic_size]
+    for i, (stick_dim, factor) in enumerate(zip(stick_dim_order, stick_size)):
+        if stick_dim == dim:
+            alpha = 1
+            for later_dim, later_factor in zip(
+                stick_dim_order[i + 1 :], stick_size[i + 1 :]
+            ):
+                if later_dim == dim:
+                    alpha *= later_factor
+        else:
+            alpha = 0
+        element_alphas.append(alpha)
+        element_cardinalities.append(factor)
+
     return {
-        str(dim): gen_coord_info_value(
-            size=sdsc_spec.iteration_space[dim] // sdsc_spec.work_slices[dim]
-            if (tensor.scales[dim] == 1)
-            else 1,
-            nsplits=sdsc_spec.work_slices[dim] if (tensor.scales[dim] == 1) else 1,
-            elems_per_stick=tensor.data_format.elems_per_stick(),
-            is_stick_dim=(dim in stick_dim_order),
-            is_stick_reduction=(tensor.scales[dim] == -2),
-            is_fp8_stick=is_fp8,
-            other_stick_size=other_sz,
-            stick_idx=st_idx,
-            tensor_idx=tensor_idx,
-            opfunc=sdsc_spec.opfunc,
-        )
-        for dim in dim_order
-        for is_fp8, other_sz, st_idx in (
-            (_compute_fp8_coord_params(tensor, dim, sdsc_spec),)
-        )
+        "spatial": 3,
+        "temporal": 0,
+        "elemArr": len(element_cardinalities),
+        "padding": "nopad",
+        "folds": {
+            "dim_prop_func": [
+                {"Affine": {"alpha_": size, "beta_": 0}},
+                {"Affine": {"alpha_": 0, "beta_": 0}},
+                {"Affine": {"alpha_": 0, "beta_": 0}},
+                *[
+                    {"Affine": {"alpha_": alpha, "beta_": 0}}
+                    for alpha in element_alphas
+                ],
+            ],
+            "dim_prop_attr": [
+                {"factor_": nsplits, "label_": "core_fold"},
+                {"factor_": 1, "label_": "corelet_fold"},
+                {"factor_": 1, "label_": "row_fold"},
+                *[
+                    {
+                        "factor_": cardinality,
+                        "label_": f"elem_arr_{len(element_cardinalities) - i - 1}",
+                    }
+                    for i, cardinality in enumerate(element_cardinalities)
+                ],
+            ],
+        },
     }
 
 
@@ -329,31 +431,6 @@ def gen_coord_info_value(
                 ],
             },
         }
-    elif is_stick_dim and is_fp8_stick and not (stick_idx == 0):
-        return {
-            "spatial": 3,
-            "temporal": 0,
-            "elemArr": 3,
-            "padding": "nopad",
-            "folds": {
-                "dim_prop_func": [
-                    {"Affine": {"alpha_": size, "beta_": 0}},
-                    {"Affine": {"alpha_": 0, "beta_": 0}},
-                    {"Affine": {"alpha_": 0, "beta_": 0}},
-                    {"Affine": {"alpha_": (size // 8), "beta_": 0}},
-                    {"Affine": {"alpha_": 8, "beta_": 0}},
-                    {"Affine": {"alpha_": 1, "beta_": 0}},
-                ],
-                "dim_prop_attr": [
-                    {"factor_": nsplits, "label_": "core_fold"},
-                    {"factor_": 1, "label_": "corelet_fold"},
-                    {"factor_": 1, "label_": "row_fold"},
-                    {"factor_": 64, "label_": "elem_arr_2"},
-                    {"factor_": 2, "label_": "elem_arr_1"},
-                    {"factor_": 1, "label_": "elem_arr_0"},
-                ],
-            },
-        }
     elif is_stick_dim and tensor_idx == 0 and opfunc == "batchmatmulfp8":
         return {
             "spatial": 3,
@@ -378,6 +455,31 @@ def gen_coord_info_value(
                     {"factor_": 8, "label_": "elem_arr_2"},
                     {"factor_": 2, "label_": "elem_arr_1"},
                     {"factor_": 8, "label_": "elem_arr_0"},
+                ],
+            },
+        }
+    elif is_stick_dim and is_fp8_stick and not (stick_idx == 0):
+        return {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 3,
+            "padding": "nopad",
+            "folds": {
+                "dim_prop_func": [
+                    {"Affine": {"alpha_": size, "beta_": 0}},
+                    {"Affine": {"alpha_": 0, "beta_": 0}},
+                    {"Affine": {"alpha_": 0, "beta_": 0}},
+                    {"Affine": {"alpha_": (size // 8), "beta_": 0}},
+                    {"Affine": {"alpha_": 8, "beta_": 0}},
+                    {"Affine": {"alpha_": 1, "beta_": 0}},
+                ],
+                "dim_prop_attr": [
+                    {"factor_": nsplits, "label_": "core_fold"},
+                    {"factor_": 1, "label_": "corelet_fold"},
+                    {"factor_": 1, "label_": "row_fold"},
+                    {"factor_": 64, "label_": "elem_arr_2"},
+                    {"factor_": 2, "label_": "elem_arr_1"},
+                    {"factor_": 1, "label_": "elem_arr_0"},
                 ],
             },
         }

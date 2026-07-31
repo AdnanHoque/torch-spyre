@@ -34,7 +34,7 @@ from torch._inductor.ir import (
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.dependencies import MemoryDep, ReadWrites, StarDep, is_indirect
 from torch._inductor.virtualized import V
-from torch_spyre._C import SpyreTensorLayout, get_elem_in_stick
+from torch_spyre._C import ElementArrangement, SpyreTensorLayout, get_elem_in_stick
 from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.op_spec import IndirectAccess
 
@@ -710,6 +710,21 @@ def _check_stick_expr_supported(stick_expr: sympy.Expr, elems_per_stick: int) ->
         )
 
 
+def physical_stick_depth(stl: SpyreTensorLayout) -> int:
+    """Return the terminal physical stick extent used by coordinate validation.
+
+    FP8MB and FP8WT are compound-stick arrangements. Their final coordinate
+    covers only the innermost physical factor (8 or 64), rather than all 128
+    FP8 elements in the compound stick.
+    """
+    if stl.element_arrangement in (
+        ElementArrangement.QFP8MB,
+        ElementArrangement.QFP8WT,
+    ):
+        return int(stl.device_size[-1])
+    return stl.elems_per_stick()
+
+
 def device_coordinates(
     stl: SpyreTensorLayout,
     dep: MemoryDep,
@@ -738,7 +753,7 @@ def device_coordinates(
         index,
         indirect_sizes,
     )
-    _check_stick_expr_supported(coords[-1], stl.elems_per_stick())
+    _check_stick_expr_supported(coords[-1], physical_stick_depth(stl))
     return coords
 
 
@@ -1057,7 +1072,8 @@ def compute_restickify_needed(
     assert idc, "device_coordinates returned empty list for input"
     assert out_idc, "device_coordinates returned empty list for output"
     # Input stick with an offset always needs restickify to remove the offset.
-    in_stick_offset_free = is_stick_expr_offset_free(idc[-1], in_stl.elems_per_stick())
+    in_stick_depth = physical_stick_depth(in_stl)
+    in_stick_offset_free = is_stick_expr_offset_free(idc[-1], in_stick_depth)
     if in_stick_offset_free and stick_compatible([idc, out_idc]):
         return False, None
     ic = host_coordinates(in_host, in_dep, ind_sizes)
@@ -1070,7 +1086,7 @@ def compute_restickify_needed(
         reduction_vars = in_dep.index.free_symbols - out_dep.index.free_symbols
         if reduction_vars:
             red_var = next(iter(reduction_vars))
-            target_stick = sympy.Mod(red_var, in_stl.elems_per_stick())
+            target_stick = sympy.Mod(red_var, in_stick_depth)
     return True, compute_restickify_target_layout(
         in_stl, in_host, target_stick, ic, idc
     )
