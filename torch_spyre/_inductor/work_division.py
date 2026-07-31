@@ -430,9 +430,7 @@ def adjust_it_space_for_sticks(
                         f"symbolic compound-stick dim {stick_var} is not "
                         f"supported yet (tensor {td.dep.name})"
                     )
-                max_elems[stick_var] = max(
-                    max_elems.get(stick_var, 1), atomic_elems
-                )
+                max_elems[stick_var] = max(max_elems.get(stick_var, 1), atomic_elems)
             continue
 
         stick_expr = td.device_coords[-1]
@@ -1309,9 +1307,7 @@ def _matmul_split_cost(
         1.0,
         (pt_passes / profile.target_pt_passes) ** _PT_EFFICIENCY_EXPONENT,
     )
-    compute_us = (B * M * N * K / cores_used) / (
-        profile.peak_macs_us_core * pt_eff
-    )
+    compute_us = (B * M * N * K / cores_used) / (profile.peak_macs_us_core * pt_eff)
 
     # HBM: every input operand is broadcast to the cohort of cores splitting the
     # orthogonal dim. Past _COHORT_LIMIT the broadcasts contend for the shared
@@ -1384,9 +1380,7 @@ def _matmul_split_cost(
         else filled_m_tile_factor
         * max(
             0.0,
-            math.log2(
-                (profile.target_n_tile_elems * _COHORT_LIMIT) / max(1, N)
-            ),
+            math.log2((profile.target_n_tile_elems * _COHORT_LIMIT) / max(1, N)),
         )
         * max(
             0.0,
@@ -1563,8 +1557,7 @@ def _cost_model_matmul_planner(
 
     profile = (
         _FP8_MATMUL_COST_PROFILE
-        if op.data.reduction_type
-        in (BATCH_MATMUL_FP8_OP, BATCH_MATMUL_FP8MB_OP)
+        if op.data.reduction_type in (BATCH_MATMUL_FP8_OP, BATCH_MATMUL_FP8MB_OP)
         else _DL16_MATMUL_COST_PROFILE
     )
 

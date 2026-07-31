@@ -63,4 +63,3 @@ def test_fp8_cost_profile_models_fma8_and_mixed_precision_bytes():
 
     assert fp8.peak_macs_us_core == 2 * fp16.peak_macs_us_core
     assert (fp8.lhs_bytes, fp8.rhs_bytes, fp8.output_bytes) == (1, 1, 2)
-
