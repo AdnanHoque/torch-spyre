@@ -18,44 +18,173 @@ import sympy
 import torch_spyre._inductor.work_division as work_division
 
 
-def _best_qo_fp8_split(m: int) -> tuple[int, int]:
+M_VALUES = (1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048)
+GRANITE_TP1_SHAPES = {
+    "kv": (4096, 1024),
+    "qo": (4096, 4096),
+    "gate_up": (4096, 12800),
+    "down": (12800, 4096),
+}
+GRANITE_TP1_EXPECTED_SPLITS = {
+    "kv": (
+        (1, 8),
+        (1, 8),
+        (2, 8),
+        (4, 8),
+        (4, 8),
+        (4, 8),
+        (4, 8),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+    ),
+    "qo": (
+        (1, 32),
+        (1, 32),
+        (2, 16),
+        (4, 8),
+        (4, 8),
+        (4, 8),
+        (4, 8),
+        (4, 8),
+        (4, 8),
+        (4, 8),
+        (8, 4),
+        (8, 4),
+    ),
+    "gate_up": (
+        (1, 10),
+        (1, 10),
+        (2, 10),
+        (4, 5),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+    ),
+    "down": (
+        (1, 8),
+        (1, 8),
+        (2, 8),
+        (4, 8),
+        (4, 8),
+        (4, 8),
+        (4, 8),
+        (4, 8),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+        (8, 4),
+    ),
+}
+GRANITE_TP1_CASES = [
+    pytest.param(
+        projection,
+        m,
+        *GRANITE_TP1_SHAPES[projection],
+        expected,
+        id=f"{projection}-m{m}",
+    )
+    for projection in GRANITE_TP1_SHAPES
+    for m, expected in zip(M_VALUES, GRANITE_TP1_EXPECTED_SPLITS[projection])
+]
+
+
+def _best_granite_fp8_split(
+    m: int, k: int, n: int, *, enforce_weight_storage: bool = True
+) -> tuple[int, int]:
+    # QFP8MB packs two activation rows together for even M. M=1 takes the
+    # QFP8CH path, so it has no two-row atomicity constraint.
+    m_basis = m // 2 if m % 2 == 0 else m
+    n_basis = n // 64
     candidates = []
-    for m_split in (1, 2, 4, 8, 16, 32):
-        if m % m_split != 0 or (m // m_split) % 2 != 0:
-            continue
-        n_split = 32 // m_split
-        cost = work_division._matmul_split_cost(
-            (1, 1),
-            (m, m_split),
-            (4096, n_split),
-            (4096, 1),
-            32,
-            shared_weight=True,
-            profile=work_division._FP8_MATMUL_COST_PROFILE,
-        )
-        candidates.append((cost, m_split, n_split))
+    for m_split in map(int, work_division.divisors(m_basis)):
+        for n_split in map(int, work_division.divisors(n_basis)):
+            if m_split * n_split > 32:
+                continue
+            if (
+                enforce_weight_storage
+                and not work_division._physical_output_split_is_legal(n, n_split, 128)
+            ):
+                continue
+            cost = work_division._matmul_split_cost(
+                (1, 1),
+                (m, m_split),
+                (n, n_split),
+                (k, 1),
+                32,
+                shared_weight=True,
+                profile=work_division._FP8_MATMUL_COST_PROFILE,
+            )
+            candidates.append((cost, m_split, n_split))
     _, m_split, n_split = min(candidates)
     return m_split, n_split
 
 
+@pytest.mark.parametrize(("projection", "m", "k", "n", "expected"), GRANITE_TP1_CASES)
+def test_fp8_granite_cost_choice_is_physically_legal(projection, m, k, n, expected):
+    del projection
+    m_split, n_split = _best_granite_fp8_split(m, k, n)
+
+    assert (m_split, n_split) == expected
+    assert m_split * n_split <= 32
+    assert (m // m_split) % (2 if m % 2 == 0 else 1) == 0
+    assert (n // n_split) % 64 == 0
+    assert work_division._physical_output_split_is_legal(n, n_split, 128)
+
+
+@pytest.mark.parametrize(("projection", "m", "k", "n", "expected"), GRANITE_TP1_CASES)
+def test_fp8_granite_scale_mapping_preserves_matmul_output_split(
+    projection, m, k, n, expected
+):
+    del projection, k
+    m_split, n_split = expected
+    m_dim, n_dim = sympy.symbols("m n", integer=True)
+    producer_splits = {}
+    if m_split > 1:
+        producer_splits[sympy.Integer(n)] = m_split
+    if n_split > 1:
+        producer_splits[sympy.Integer(1)] = n_split
+
+    expected_scale_splits = {}
+    if m_split > 1:
+        expected_scale_splits[m_dim] = m_split
+    if n_split > 1:
+        expected_scale_splits[n_dim] = n_split
+    assert (
+        work_division._map_producer_output_splits(
+            producer_splits,
+            m_dim * n + n_dim,
+            {m_dim: sympy.Integer(m), n_dim: sympy.Integer(n)},
+        )
+        == expected_scale_splits
+    )
+
+
 @pytest.mark.parametrize(
     ("m", "expected"),
-    [
-        (2, (1, 32)),
-        (4, (2, 16)),
-        (8, (4, 8)),
-        (16, (4, 8)),
-        (32, (4, 8)),
-        (64, (4, 8)),
-        (128, (4, 8)),
-        (256, (4, 8)),
-        (512, (4, 8)),
-        (1024, (8, 4)),
-        (2048, (8, 4)),
-    ],
+    [(1, (1, 10)), (2, (1, 10)), (4, (2, 10)), (8, (4, 5))],
 )
-def test_fp8_qo_cost_profile_tracks_dd2_oracle(m, expected):
-    assert _best_qo_fp8_split(m) == expected
+def test_fp8_gate_up_supports_non_power_of_two_core_grids(m, expected):
+    assert _best_granite_fp8_split(m, 4096, 12800) == expected
+
+
+def test_fp8_gate_up_m512_rejects_unrepresentable_weight_split():
+    # Output-stick alignment alone picks 4x8, but 100 packed QFP8WT storage
+    # groups cannot be divided eight ways. Without this guard, later layout
+    # rewriting clamps only the matmul to 4x4 and leaves both scale ops at 4x8.
+    assert _best_granite_fp8_split(512, 4096, 12800, enforce_weight_storage=False) == (
+        4,
+        8,
+    )
+    assert not work_division._physical_output_split_is_legal(12800, 8, 128)
+    assert _best_granite_fp8_split(512, 4096, 12800) == (8, 4)
 
 
 def test_fp8_cost_profile_models_fma8_and_mixed_precision_bytes():
