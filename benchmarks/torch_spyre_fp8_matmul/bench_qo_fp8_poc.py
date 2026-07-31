@@ -84,6 +84,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--prepack-activation",
+        action="store_true",
+        help=(
+            "quantize the activation once in a separate compiled graph; this "
+            "is a diagnostic raw-matmul control, not the production contract"
+        ),
+    )
+    parser.add_argument(
         "--activation-packing",
         choices=("auto", "channel", "minibatch"),
         default="auto",
@@ -111,6 +119,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("work-division splits must be positive")
     if args.prepack_weight and args.variant == "fp16":
         raise ValueError("--prepack-weight is only valid for FP8 variants")
+    if args.prepack_activation and args.variant == "fp16":
+        raise ValueError("--prepack-activation is only valid for FP8 variants")
     if args.variant == "fp16" and args.activation_packing != "auto":
         raise ValueError("--activation-packing is only valid for FP8 variants")
     if args.activation_packing == "minibatch" and (
@@ -328,6 +338,7 @@ def make_benchmark_fn(
     variant: str,
     work_division: dict[str, int] | None,
     prepack_weight: bool,
+    prepack_activation: bool,
     activation_packing: str,
 ) -> Callable[..., torch.Tensor]:
     if variant == "fp16":
@@ -356,10 +367,14 @@ def make_benchmark_fn(
             output_scale_a: torch.Tensor,
             output_scale_b: torch.Tensor,
         ) -> torch.Tensor:
-            activation_fp8 = quantize_activation_fp8(
-                activation,
-                quant_scale_a,
-                activation_packing,
+            activation_fp8 = (
+                activation
+                if prepack_activation
+                else quantize_activation_fp8(
+                    activation,
+                    quant_scale_a,
+                    activation_packing,
+                )
             )
             weight_fp8 = (
                 weight
@@ -397,10 +412,14 @@ def make_benchmark_fn(
         output_scale_a: torch.Tensor,
         output_scale_b: torch.Tensor,
     ) -> torch.Tensor:
-        activation_fp8 = quantize_activation_fp8(
-            activation,
-            quant_scale_a,
-            activation_packing,
+        activation_fp8 = (
+            activation
+            if prepack_activation
+            else quantize_activation_fp8(
+                activation,
+                quant_scale_a,
+                activation_packing,
+            )
         )
         weight_fp8 = (
             weight
@@ -667,6 +686,95 @@ def main() -> None:
             },
         }
 
+    timed_activation = activation
+    activation_prepack_metadata: dict[str, object] = {
+        "enabled": False,
+        "separate_compiled_graph": False,
+        "excluded_from_profile": True,
+    }
+    if args.prepack_activation:
+
+        def activation_prepack_fn(
+            activation_input: torch.Tensor,
+            unit_scale: torch.Tensor,
+        ) -> torch.Tensor:
+            return quantize_activation_fp8(
+                activation_input,
+                unit_scale,
+                args.activation_packing,
+            )
+
+        compiled_activation_prepack = torch.compile(
+            activation_prepack_fn,
+            backend="inductor",
+            dynamic=False,
+            fullgraph=True,
+            options=compile_options,
+        )
+        activation_prepack_start_ns = time.perf_counter_ns()
+        timed_activation = compiled_activation_prepack(activation, quant_scale_a)
+        synchronize()
+        activation_prepack_compile_and_first_run_ms = (
+            time.perf_counter_ns() - activation_prepack_start_ns
+        ) / 1.0e6
+
+        if timed_activation.dtype != torch.float8_e4m3fn:
+            raise RuntimeError(
+                "activation prepack returned "
+                f"{timed_activation.dtype}, expected E4M3FN"
+            )
+        if tuple(timed_activation.shape) != (args.m, args.k):
+            raise RuntimeError(
+                "activation prepack returned shape "
+                f"{tuple(timed_activation.shape)}, expected {(args.m, args.k)}"
+            )
+
+        from torch_spyre._C import ElementArrangement
+
+        expected_arrangement = (
+            ElementArrangement.QFP8CH
+            if args.activation_packing == "channel"
+            or (args.activation_packing == "auto" and args.m % 2 != 0)
+            else ElementArrangement.QFP8MB
+        )
+        prepacked_activation_layout = timed_activation.device_tensor_layout()
+        if prepacked_activation_layout is None:
+            raise RuntimeError("prepacked activation has no SpyreTensorLayout")
+        if prepacked_activation_layout.element_arrangement != expected_arrangement:
+            raise RuntimeError(
+                "prepacked activation arrangement mismatch: expected "
+                f"{expected_arrangement}, got "
+                f"{prepacked_activation_layout.element_arrangement}"
+            )
+        activation_prepack_metadata = {
+            "enabled": True,
+            "separate_compiled_graph": True,
+            "excluded_from_profile": True,
+            "operation": (
+                "spyre.qfp8ch"
+                if expected_arrangement == ElementArrangement.QFP8CH
+                else "spyre.qfp8mb"
+            ),
+            "input": {
+                "shape": [args.m, args.k],
+                "dtype": str(activation.dtype),
+            },
+            "output": {
+                "shape": [args.m, args.k],
+                "dtype": str(timed_activation.dtype),
+                "layout": spyre_layout_metadata(timed_activation),
+            },
+            "compile": {
+                "backend": "inductor",
+                "dynamic": False,
+                "fullgraph": True,
+                "options": compile_options,
+                "compile_and_first_run_ms": (
+                    activation_prepack_compile_and_first_run_ms
+                ),
+            },
+        }
+
     work_division = (
         optimized_work_division(
             args.m,
@@ -679,7 +787,7 @@ def main() -> None:
     )
     if args.variant in OPTIMIZED_VARIANTS:
         annotate_named_dimensions(
-            activation,
+            timed_activation,
             timed_weight,
             output_scale_a,
             output_scale_b,
@@ -692,6 +800,7 @@ def main() -> None:
         args.variant,
         work_division,
         args.prepack_weight,
+        args.prepack_activation,
         args.activation_packing,
     )
     compiled = torch.compile(
@@ -708,7 +817,7 @@ def main() -> None:
         (activation, weight)
         if args.variant == "fp16"
         else (
-            activation,
+            timed_activation,
             timed_weight,
             quant_scale_a,
             quant_scale_b,
@@ -777,7 +886,13 @@ def main() -> None:
         "logical_shape": {"M": args.m, "K": args.k, "N": args.n},
         "graph_contract": {
             "host_prequantized_fp8": False,
-            "device_activation_quantization": args.variant in FP8_VARIANTS,
+            "device_activation_quantization": (
+                args.variant in FP8_VARIANTS and not args.prepack_activation
+            ),
+            "device_activation_quantization_in_timed_graph": (
+                args.variant in FP8_VARIANTS and not args.prepack_activation
+            ),
+            "prepacked_activation_input": args.prepack_activation,
             "activation_packing": (
                 args.activation_packing
                 if args.variant in FP8_VARIANTS
@@ -802,6 +917,7 @@ def main() -> None:
             ),
             "use_fast_accum": False,
         },
+        "activation_prepack": activation_prepack_metadata,
         "weight_prepack": prepack_metadata,
         "work_division_hint": work_division,
         "compile": {
