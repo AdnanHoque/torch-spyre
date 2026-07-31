@@ -1419,7 +1419,11 @@ class _ViewPrep(NamedTuple):
 
 
 def _prepare_per_core_view(
-    op: Operation, dep: MemoryDep, buf_name: str
+    op: Operation,
+    dep: MemoryDep,
+    buf_name: str,
+    *,
+    parts: "Optional[tuple[dict, sympy.Expr, sympy.Expr]]" = None,
 ) -> Optional[_ViewPrep]:
     """Compute the candidate-invariant pieces of a per-core view once.
 
@@ -1427,14 +1431,21 @@ def _prepare_per_core_view(
     the view is then unrepresentable for *every* candidate, so callers map
     ``None`` to the unrepresentable result without entering the per-candidate
     path.
+
+    ``parts`` supplies ``(iter_space, write_index, read_index)`` explicitly.
+    The default reads the pre-scheduler geometry from ``op``; post-fusion
+    callers provide the SchedulerNode geometry that codegen will emit.
     """
-    # The op-level write_index / read_index (for *any* buffer the op writes /
-    # reads, not necessarily buf_name) bridge stride-keyed coeff_splits back to
-    # scheduler symbols.
-    rw = op_read_writes(op)
-    write_index = next(iter(rw.writes)).index
-    read_index = next((d.index for d in rw.reads), write_index)
-    iter_space = iteration_space_from_op(op)
+    if parts is not None:
+        iter_space, write_index, read_index = parts
+    else:
+        # The op-level write_index / read_index (for *any* buffer the op writes /
+        # reads, not necessarily buf_name) bridge stride-keyed coeff_splits back
+        # to scheduler symbols.
+        rw = op_read_writes(op)
+        write_index = next(iter(rw.writes)).index
+        read_index = next((d.index for d in rw.reads), write_index)
+        iter_space = iteration_space_from_op(op)
 
     buf_op = V.graph.get_buffer(buf_name)
     buf_layout = buf_op.layout
@@ -1693,6 +1704,27 @@ def _per_core_view_on_buf(
     if cache is not None:
         cache[key] = result
     return result
+
+
+def per_core_view_scheduled(
+    node: "SchedulerNode", dep: MemoryDep, buf_name: str
+) -> tuple[PerCoreView, bool, bool]:
+    """Build a per-core view from the final post-fusion scheduler geometry."""
+    op = node.node
+    coeff_splits: tuple[dict, dict] = getattr(op, "op_it_space_splits", ({}, {}))
+    if not any(n > 1 for d in coeff_splits for n in d.values()):
+        return (PerCoreView(work_slice_dims=(), core_to_slot=()), False, True)
+
+    rw = node.read_writes
+    write_dep = next((d for d in rw.writes if isinstance(d, MemoryDep)), None)
+    if write_dep is None:
+        return (PerCoreView(work_slice_dims=(), core_to_slot=()), False, False)
+    read_index = next(
+        (d.index for d in rw.reads if isinstance(d, MemoryDep)), write_dep.index
+    )
+    parts = (iteration_space(node), write_dep.index, read_index)
+    prep = _prepare_per_core_view(op, dep, buf_name, parts=parts)
+    return _per_core_view_from_prep(prep, coeff_splits)
 
 
 def format_operations(operations: list[Operation]) -> str:

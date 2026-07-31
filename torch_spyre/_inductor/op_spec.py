@@ -126,6 +126,11 @@ class TensorArg:
                   allocated into the off-chip HBM intermediates segment by
                   hbm_pool_planning.py. See
                   docs/source/compiler/hbm_pool_planning.md.
+        allocation_core_id_to_device_slice: Optional physical ownership of an
+                LX allocation. Keys are device-dimension indices; SuperDSC
+                codegen maps them to SDSC dimensions using the tensor layout.
+        allocation_device_dim_splits: Optional allocation fold geometry keyed
+                by the same device-dimension indices.
     """
 
     is_input: bool
@@ -139,6 +144,8 @@ class TensorArg:
     element_arrangement: ElementArrangement = dataclasses.field(
         default_factory=lambda: ElementArrangement.STANDARD
     )
+    allocation_core_id_to_device_slice: dict[str, dict[str, int]] | None = None
+    allocation_device_dim_splits: dict[str, int] | None = None
 
 
 @dataclasses.dataclass
@@ -181,6 +188,8 @@ class OpSpec:
         default_factory=dict
     )
     debug_handle: DebugHandle | None = None
+    dim_labels_override: list[str] | None = None
+    layout_labels_override: list[str] | None = None
 
 
 @dataclasses.dataclass

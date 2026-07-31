@@ -22,6 +22,7 @@ from torch._inductor.utils import (
     get_fused_kernel_name,
     sympy_product,
 )
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.scheduler import (
     BaseScheduling,
     BaseSchedulerNode,
@@ -33,7 +34,14 @@ from torch._inductor.codecache import code_hash
 from torch.utils._ordered_set import OrderedSet
 
 from .spyre_kernel import SpyreKernel
-from .pass_utils import iteration_space
+from .lx_relayout import (
+    LX_RELAYOUT_ATTR,
+    LXRelayoutPlan,
+    per_core_view_matches_lx_relayout_side,
+    rebind_lx_relayout_iteration_geometry,
+)
+from .pass_utils import iteration_space, per_core_view_scheduled
+from . import config as _spyre_config
 from .logging_utils import get_inductor_logger
 from .op_spec import LoopSpec
 
@@ -210,6 +218,244 @@ def build_loop_scheduler_nodes(
                 seen[key] = name
 
     return result
+
+
+def _lx_resident(node: SchedulerNode) -> bool:
+    """True if ``node``'s output buffer was pinned into LX by scratchpad planning."""
+    allocation = getattr(getattr(node.node, "layout", None), "allocation", None)
+    return allocation is not None and "lx" in allocation
+
+
+def align_lx_producer_loop_order(
+    nodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
+    """Pre-fusion pass: match an LX buffer's producer loop order to its consumers'.
+
+    LX is per-core scratchpad, so every op touching an LX-resident buffer must
+    agree on which core owns which slice.  That mapping is *positional*:
+    ``core_to_slice_mapping`` hands out ``core_id`` strides in iteration-space
+    order, so a producer that walks the buffer in a different dim order than its
+    consumers read it gets a transposed core->slice assignment.  The split
+    factors still multiply to the same core count, so nothing downstream
+    complains -- each core simply reads the slice a different core wrote, and the
+    kernel silently returns another core's data.
+
+    Scratchpad planning creates the clone that pins a graph input into LX, and it
+    builds that clone in the buffer's natural dim order, which need not match how
+    the consumers read it.  Through PyTorch 2.12 Inductor's
+    ``loop_ordering_after_fusion`` happened to rewrite the clone into the
+    consumers' order, so the assignments lined up by accident.  As of 2.13 the
+    reorder is computed and then discarded (see
+    ``Scheduler._try_reorder_loops_for_candidates``), which exposed the
+    incoherence as wrong results for any two reductions sharing one LX-pinned
+    input.  Align the orders here so correctness does not rest on an Inductor
+    scoring heuristic.
+
+    Consumers of an LX buffer are already known to agree with each other -- a
+    disagreement is a core-division mismatch that keeps the buffer in HBM (see
+    ``get_ncores_for_buffers``) -- so matching the first consumer matches all.
+    """
+    planned_sources = {
+        source_name
+        for node in nodes
+        for inner in node.get_nodes()
+        for source_name in getattr(inner.node, LX_RELAYOUT_ATTR, {})
+    }
+    producers: dict[str, SchedulerNode] = {}
+    for node in nodes:
+        if isinstance(node, SchedulerNode) and _lx_resident(node):
+            for dep in node.read_writes.writes:
+                if isinstance(dep, MemoryDep) and dep.name not in planned_sources:
+                    producers[dep.name] = node
+
+    if not producers:
+        return nodes
+
+    # Keyed by producer, not by buffer: reordering a producer twice would leave
+    # it matching only whichever consumer came last.  A ComputedBuffer has a
+    # single output (multi-output ops carry no device_layout and never reach LX),
+    # so one alignment per producer covers every LX buffer it writes.
+    aligned: OrderedSet[str] = OrderedSet()
+    for node in nodes:
+        if not isinstance(node, SchedulerNode):
+            continue
+        for read in node.read_writes.reads:
+            if not isinstance(read, MemoryDep):
+                continue
+            producer = producers.get(read.name)
+            if producer is None or producer is node:
+                continue
+            if producer.get_name() in aligned:
+                continue
+            write = next(
+                (
+                    dep
+                    for dep in producer.read_writes.writes
+                    if isinstance(dep, MemoryDep) and dep.name == read.name
+                ),
+                None,
+            )
+            if write is None:
+                continue
+            # Reorders `producer`'s loops so its write dep matches `read`.
+            if producer.reorder_loops_by_dep_pair(write, read):
+                aligned.add(producer.get_name())
+                logger.debug(
+                    "align_lx_producer_loop_order: %s reordered to match %s's "
+                    "read of LX buffer %s",
+                    producer.get_name(),
+                    node.get_name(),
+                    read.name,
+                )
+
+    return nodes
+
+
+def demote_incoherent_lx_buffers(
+    nodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
+    """Post-fusion pass: drop an LX buffer whose users disagree on core->slice.
+
+    LX planning runs before the Scheduler exists, so it reasons about each op's
+    *pre*-scheduler ranges. ``core_to_slice_mapping`` is positional -- it hands
+    ``core_id`` strides out in iteration-space order -- and Inductor's
+    ``loop_ordering_after_fusion`` may permute a fused op's ranges after planning
+    has already committed. When it permutes one user of an LX buffer and not
+    another, the two disagree about which core owns which slice: each core writes
+    one slice and reads back a different one. LX is per-core scratchpad with no
+    other copy, so the read is silently wrong (#2062).
+
+    Planning cannot see that permutation, so re-check here, where the ranges are
+    final, and demote any buffer whose users no longer agree. Clearing ``"lx"``
+    is all that is needed: this runs before ``hbm_pool_planning``, which claims
+    exactly the intermediates LX did not, so a demoted buffer lands in the HBM
+    intermediates segment on its way through.
+
+    Deliberately verification-only -- it never *adds* residency and never
+    rewrites a loop order, so it cannot perturb a graph whose users already
+    agree.
+
+    Complements :func:`align_lx_producer_loop_order`, which runs pre-fusion and
+    rewrites a producer's loop order to match its consumers'. That pass fixes the
+    incoherence it can reach; this one is the backstop for what it cannot -- a
+    disagreement introduced after it ran, or a view too irregular to represent --
+    where the only safe answer is to give up LX residency.
+    """
+    if not _spyre_config.lx_planning:
+        return nodes
+
+    # dep is needed per (node, buffer): a node reading and writing the same
+    # buffer contributes one entry per access, so an in-place op whose read and
+    # write views diverge is caught too.
+    users: dict[str, list[tuple[SchedulerNode, MemoryDep]]] = {}
+    lx_names: OrderedSet[str] = OrderedSet()
+    relayout_plans: dict[str, list[LXRelayoutPlan]] = {}
+    for node in nodes:
+        for inner in node.get_nodes():
+            if not isinstance(inner, SchedulerNode):
+                continue
+            for source_name, plan in getattr(inner.node, LX_RELAYOUT_ATTR, {}).items():
+                if isinstance(plan, LXRelayoutPlan):
+                    relayout_plans.setdefault(source_name, []).append(plan)
+            if _lx_resident(inner):
+                for dep in inner.read_writes.writes:
+                    if isinstance(dep, MemoryDep):
+                        lx_names.add(dep.name)
+            rw = inner.read_writes
+            for dep in list(rw.reads) + list(rw.writes):
+                if isinstance(dep, MemoryDep):
+                    users.setdefault(dep.name, []).append((inner, dep))
+
+    for name in lx_names:
+        ref = None
+        culprit = None
+        plans = relayout_plans.get(name, [])
+        source_plan = plans[0] if plans else None
+        if source_plan is not None and any(
+            plan.source_core_id_to_device_slice
+            != source_plan.source_core_id_to_device_slice
+            or plan.source_device_dim_splits != source_plan.source_device_dim_splits
+            or plan.source_lx_address != source_plan.source_lx_address
+            for plan in plans[1:]
+        ):
+            culprit = "relayout consumers disagree on source ownership"
+        for node, dep in users.get(name, []):
+            if culprit is not None:
+                break
+            view, _, representable = per_core_view_scheduled(node, dep, name)
+            if not representable:
+                culprit = f"{node.get_name()} view unrepresentable"
+                break
+            consumer_plan = getattr(node.node, LX_RELAYOUT_ATTR, {}).get(name)
+            if source_plan is not None:
+                expected_plan = consumer_plan or source_plan
+                if not per_core_view_matches_lx_relayout_side(
+                    node.node,
+                    view,
+                    expected_plan,
+                    destination=consumer_plan is not None,
+                ):
+                    side = "destination" if consumer_plan is not None else "source"
+                    culprit = (
+                        f"{node.get_name()} no longer matches relayout {side} ownership"
+                    )
+                    break
+                if consumer_plan is not None:
+                    source_buf = V.graph.try_get_buffer(name)
+                    source_layout = getattr(source_buf, "layout", None)
+                    stl = getattr(source_layout, "device_layout", None)
+                    rebound = (
+                        rebind_lx_relayout_iteration_geometry(
+                            consumer_plan,
+                            stl,
+                            dep,
+                            tuple(iteration_space(node)),
+                        )
+                        if stl is not None
+                        else None
+                    )
+                    if rebound is None:
+                        culprit = (
+                            f"{node.get_name()} relayout iteration geometry "
+                            "is no longer materializable"
+                        )
+                        break
+                    rebound_plans = dict(getattr(node.node, LX_RELAYOUT_ATTR, {}))
+                    rebound_plans[name] = rebound
+                    setattr(node.node, LX_RELAYOUT_ATTR, rebound_plans)
+                continue
+            if ref is None:
+                ref = view
+            elif view != ref:
+                culprit = f"{node.get_name()} disagrees: {view} != {ref}"
+                break
+        if culprit is None:
+            continue
+        buf = V.graph.try_get_buffer(name)
+        layout = getattr(buf, "layout", None)
+        allocation = getattr(layout, "allocation", None)
+        if allocation is not None:
+            allocation.pop("lx", None)
+        # A stale plan carries concrete S1/S2 LX addresses. Remove it whenever
+        # the source is demoted so codegen cannot emit a shuffle from storage
+        # that the producer no longer writes.
+        for node in nodes:
+            for inner in node.get_nodes():
+                plans_for_consumer = getattr(inner.node, LX_RELAYOUT_ATTR, None)
+                if (
+                    not isinstance(plans_for_consumer, dict)
+                    or name not in plans_for_consumer
+                ):
+                    continue
+                remaining = dict(plans_for_consumer)
+                remaining.pop(name)
+                if remaining:
+                    setattr(inner.node, LX_RELAYOUT_ATTR, remaining)
+                else:
+                    delattr(inner.node, LX_RELAYOUT_ATTR)
+        logger.info("demoted %s out of LX: %s", name, culprit)
+
+    return nodes
 
 
 class SuperDSCScheduling(BaseScheduling):

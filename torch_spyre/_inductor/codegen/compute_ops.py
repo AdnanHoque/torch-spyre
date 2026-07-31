@@ -255,13 +255,11 @@ def _build_coord_info(sdsc_spec, tensor, tensor_idx: int) -> dict:
     stick_size = sdsc_spec.layouts[tensor.layout]["stick_size"]
     result = {}
     for dim in dim_order:
-        size = (
-            sdsc_spec.iteration_space[dim] // sdsc_spec.work_slices[dim]
+        size = _per_core_coord_size(sdsc_spec, tensor, dim)
+        nsplits = (
+            tensor.core_splits.get(dim, sdsc_spec.work_slices[dim])
             if tensor.scales[dim] == 1
             else 1
-        )
-        nsplits = (
-            sdsc_spec.work_slices[dim] if tensor.scales[dim] == 1 else 1
         )
         is_fp8, other_sz, st_idx = _compute_fp8_coord_params(
             tensor, dim, sdsc_spec
@@ -394,6 +392,13 @@ def _compute_fp8_coord_params(tensor, dim, sdsc_spec):
         other_stick_size = 1
 
     return is_fp8_stick, other_stick_size, stick_idx
+
+
+def _per_core_coord_size(sdsc_spec, tensor, dim) -> int:
+    if tensor.scales[dim] != 1:
+        return 1
+    splits = tensor.core_splits.get(dim, sdsc_spec.work_slices[dim])
+    return sdsc_spec.iteration_space[dim] // splits
 
 
 def gen_coord_info_value(
@@ -1308,7 +1313,8 @@ def generate_sdsc(
                                         "coordInfo": _build_coord_info(
                                             sdsc_spec, tensor, i
                                         ),
-                                        "coreIdToWkSlice_": {},
+                                        "coreIdToWkSlice_": tensor.allocation_core_id_to_wk_slice
+                                        or {},
                                     },
                                 }
                                 for i, tensor in enumerate(sdsc_spec.args)

@@ -77,7 +77,11 @@ from .scratchpad.allocator import (
     scratchpad_planning,
 )
 from .fusion import spyre_fuse_nodes
-from .scheduler import build_loop_scheduler_nodes
+from .scheduler import (
+    align_lx_producer_loop_order,
+    build_loop_scheduler_nodes,
+    demote_incoherent_lx_buffers,
+)
 from .constants import DEVICE_NAME
 from .deadcode_elimination import deadcode_elimination
 from .dedup_constants import dedup_and_promote_constants
@@ -240,7 +244,13 @@ class CustomPreFusionPasses(_SpyreNodePassPipeline):
     # are visible to SuperDSCScheduling.can_fuse_vertical/horizontal (which return
     # False), so loop groups survive Inductor fusion intact.
     def __init__(self):
-        super().__init__([propagate_mutation_layouts, build_loop_scheduler_nodes])
+        super().__init__(
+            [
+                propagate_mutation_layouts,
+                align_lx_producer_loop_order,
+                build_loop_scheduler_nodes,
+            ]
+        )
 
 
 class CustomPostFusionPasses(_SpyreNodePassPipeline):
@@ -253,8 +263,11 @@ class CustomPostFusionPasses(_SpyreNodePassPipeline):
     """
 
     def __init__(self):
-        # HBM-Pool Planning
-        super().__init__([hbm_pool_planning, spyre_fuse_nodes])
+        # Re-check final core ownership before assigning any demoted buffer to
+        # the HBM intermediate pool.
+        super().__init__(
+            [demote_incoherent_lx_buffers, hbm_pool_planning, spyre_fuse_nodes]
+        )
 
 
 # Several pre-scheduling steps are config-gated or need arguments beyond the
