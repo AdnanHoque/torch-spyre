@@ -365,8 +365,8 @@ def _single_arg_op_layout(
 
     # Single-arg pointwise
     assert isinstance(data, Pointwise)
-    origin_node = next(iter(data.origins))
-    aten_op = origin_node.target
+    origin_node = next(iter(data.origins), None)
+    aten_op = origin_node.target if origin_node is not None else None
     match aten_op:
         case prims.convert_element_type.default if not same_device_size(
             in_layout.dtype, output.dtype

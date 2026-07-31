@@ -271,14 +271,28 @@ def _patch_tensor_for_spyre():
         # add lambda guard on tensor's child manager
         # same node as TENSOR_MATCH!
         tensor_guard_manager = self.get_guard_manager(guard)
-        tensor_guard_manager.add_lambda_guard(
-            lambda x: (
+        def layout_guard(x):
+            return (
                 x.device.type != DEVICE_NAME
                 or x.device_tensor_layout() == expected_layout
-            ),
-            [f"SpyreTensorLayout({guard.name}) == {expected_layout}"],
-            guard.user_stack,
-        )
+            )
+
+        verbose_code_parts = [
+            f"SpyreTensorLayout({guard.name}) == {expected_layout}"
+        ]
+        try:
+            tensor_guard_manager.add_lambda_guard(
+                layout_guard,
+                verbose_code_parts,
+                guard.user_stack,
+            )
+        except TypeError:
+            # Torch 2.10 predates the user-stack argument.  Keep this narrow
+            # compatibility path for the pinned Kineto measurement runtime.
+            tensor_guard_manager.add_lambda_guard(
+                layout_guard,
+                verbose_code_parts,
+            )
 
     GuardBuilder.TENSOR_MATCH = _spyre_TENSOR_MATCH
     # ───────────────────FxGraph Cache Key Extension ───────────────────

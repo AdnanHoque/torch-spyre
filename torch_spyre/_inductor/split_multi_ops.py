@@ -714,8 +714,13 @@ def split_multi_ops(graph: GraphLowering):
     env = {}
     for tbs in gl.name_to_users.values():
         for tb in tbs:
-            if tb.data.origins:
-                fx_node = next(iter(tb.data.origins))
+            # Torch 2.11 may place an InputBuffer directly in name_to_users,
+            # while older versions wrapped it in a TensorBox/StorageBox.
+            # Origins live on the IR object in either representation.
+            ir_node = getattr(tb, "data", tb)
+            origins = getattr(ir_node, "origins", ())
+            if origins:
+                fx_node = next(iter(origins))
                 env[fx_node] = tb
     gl.env.update(env)
 
