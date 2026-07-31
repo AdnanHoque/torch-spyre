@@ -841,6 +841,149 @@ def spyre_quantize_weight_fp8_with_scale(
     return torch.ops.spyre.qfp8wt(x_clamped)
 
 
+def _validate_scaled_mm_scale_shapes(
+    mat1: torch.Tensor,
+    mat2: torch.Tensor,
+    scale_a: torch.Tensor,
+    scale_b: torch.Tensor,
+) -> None:
+    """Validate the DD2 tensorwise/per-row ``_scaled_mm`` scale contract."""
+
+    m = mat1.shape[0]
+    n = mat2.shape[1]
+    tensorwise = scale_a.numel() == 1 and scale_b.numel() == 1
+    rowwise = tuple(scale_a.shape) == (m, 1) and tuple(scale_b.shape) == (1, n)
+    if not (tensorwise or rowwise):
+        raise Unsupported(
+            "Spyre DD2 _scaled_mm supports tensorwise scales or per-row/per-column "
+            f"scales; expected scalars or ({m}, 1) and (1, {n}), got "
+            f"{tuple(scale_a.shape)} and {tuple(scale_b.shape)}"
+        )
+
+
+@register_spyre_decompositions([torch.ops.aten._scaled_mm.default])
+def spyre_scaled_mm(
+    mat1: torch.Tensor,
+    mat2: torch.Tensor,
+    scale_a: torch.Tensor,
+    scale_b: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    scale_result: torch.Tensor | None = None,
+    out_dtype: torch.dtype | None = None,
+    use_fast_accum: bool = False,
+) -> torch.Tensor:
+    """Implement the public ``aten._scaled_mm`` value semantics on DD2.
+
+    The FP8 reduction remains a backend primitive.  Scale application, bias,
+    result scaling, and output conversion are deliberately represented as
+    ordinary graph operations so none of the public arguments can be ignored.
+    A later lowering pass may replace the two scale multiplications with a
+    specialized DD2 implementation without changing this contract.
+    """
+
+    if mat1.dim() != 2 or mat2.dim() != 2:
+        raise Unsupported(
+            "Spyre DD2 aten._scaled_mm currently requires two 2D tensors, "
+            f"got {mat1.dim()}D and {mat2.dim()}D"
+        )
+    if mat1.dtype != torch.float8_e4m3fn or mat2.dtype != torch.float8_e4m3fn:
+        raise Unsupported(
+            "Spyre DD2 aten._scaled_mm requires E4M3 FP8 inputs, got "
+            f"{mat1.dtype} and {mat2.dtype}"
+        )
+    if mat1.shape[1] != mat2.shape[0]:
+        raise Unsupported(
+            "Spyre DD2 aten._scaled_mm contraction mismatch: "
+            f"{tuple(mat1.shape)} and {tuple(mat2.shape)}"
+        )
+    if scale_a.dtype != torch.float32 or scale_b.dtype != torch.float32:
+        raise Unsupported(
+            "Spyre DD2 aten._scaled_mm requires FP32 scale_a and scale_b, got "
+            f"{scale_a.dtype} and {scale_b.dtype}"
+        )
+    _validate_scaled_mm_scale_shapes(mat1, mat2, scale_a, scale_b)
+
+    if not use_fast_accum:
+        raise Unsupported(
+            "Spyre DD2 aten._scaled_mm requires use_fast_accum=True. "
+            "DeepTools currently exposes one native FP8 accumulation schedule; "
+            "silently treating the strict mode as fast accumulation would violate "
+            "the public operator contract."
+        )
+
+    output_dtype = mat1.dtype if out_dtype is None else out_dtype
+    if output_dtype not in (
+        torch.float8_e4m3fn,
+        torch.float16,
+        torch.float32,
+    ):
+        raise Unsupported(
+            "Spyre DD2 aten._scaled_mm supports FP8 E4M3, FP16, or FP32 output, "
+            f"got {output_dtype}"
+        )
+
+    result = torch.ops.spyre.fp8_matmul_raw(mat1, mat2, True)
+
+    if bias is not None:
+        if bias.dtype not in (torch.float16, torch.float32):
+            raise Unsupported(
+                f"Spyre DD2 aten._scaled_mm bias must be FP16 or FP32, got {bias.dtype}"
+            )
+        if tuple(bias.shape) != (mat2.shape[1],):
+            raise Unsupported(
+                "Spyre DD2 aten._scaled_mm bias must have shape (N,), "
+                f"got {tuple(bias.shape)} for N={mat2.shape[1]}"
+            )
+
+    tensorwise_scales = scale_a.numel() == 1 and scale_b.numel() == 1
+    if tensorwise_scales:
+        # The DD2 FP32-to-DL16 conversion template cannot lower a rank-zero
+        # tensor.  Keep tensorwise scales in FP32; this is also the exact
+        # PyTorch value path for scalar scales.
+        result = result.to(torch.float32)
+        result = result * scale_a
+        result = result * scale_b
+    else:
+        # DD2 exposes the same specialized scale-and-zero-shift operation used
+        # by SenDNN's FP8 fission.  Convert only the compact M- and N-element
+        # scale vectors to the FP16 stick format required by batchnormfwd; the
+        # MxN result remains FP16 throughout both broadcasts.
+        zero = torch.zeros((), dtype=torch.float16, device=result.device)
+        result = torch.ops.spyre.apply_fp8_scale(
+            result, scale_a.to(torch.float16), zero
+        )
+        # batchnormfwd computes input*scale+offset.  Put the optional (N,)
+        # bias in the second scale pass instead of launching a third full MxN
+        # pointwise operation.
+        second_offset = zero if bias is None else bias.to(torch.float16)
+        result = torch.ops.spyre.apply_fp8_scale(
+            result, scale_b.to(torch.float16), second_offset
+        )
+        bias = None
+
+    if bias is not None:
+        result = result + bias.to(result.dtype)
+
+    # PyTorch applies scale_result only while converting the accumulator to an
+    # FP8 output.  It is ignored for FP16/FP32 output.
+    if output_dtype == torch.float8_e4m3fn:
+        result = result.to(torch.float32)
+        if scale_result is not None:
+            if scale_result.dtype != torch.float32 or scale_result.numel() != 1:
+                raise Unsupported(
+                    "Spyre DD2 FP8 output requires a scalar FP32 scale_result, "
+                    f"got shape={tuple(scale_result.shape)}, dtype={scale_result.dtype}"
+                )
+            # PyTorch defines scale_result as a multiplier on the accumulator
+            # immediately before conversion to FP8.
+            result = result * scale_result
+        result = result.to(torch.float16)
+        result = torch.ops.spyre.clamp(result, FP8_E4M3FN_MIN, FP8_E4M3FN_MAX)
+        return torch.ops.spyre.qfp8ch(result)
+
+    return result if result.dtype == output_dtype else result.to(output_dtype)
+
+
 @register_spyre_decompositions([torch.ops.aten.prod.dim_int])
 def spyre_prod_dim_int(
     input: torch.Tensor, dim: int, keepdim: bool = False

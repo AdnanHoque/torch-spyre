@@ -341,6 +341,12 @@ class SpyreOpFuncs:
         return PointwiseOp("qfp8wt", [x])
 
     @staticmethod
+    def apply_fp8_scale(x, scale, offset):
+        # DeepTools calls the SenDNN graph node BnPrecZeroShft, but SuperDSC
+        # consumes the emitted compute-op name.
+        return PointwiseOp("batchnormfwd", [x, scale, offset])
+
+    @staticmethod
     def relu(x):
         return PointwiseOp("relufwd", [x])
 

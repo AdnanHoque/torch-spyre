@@ -332,18 +332,25 @@ def _ensure_synthetic_origin(result, target, args: tuple) -> None:
     buf.origins = OrderedSet([fx_node])
 
 
-# TODO:This is just place holder now; Real implementation will follow
-@register_spyre_lowering(torch.ops.aten._scaled_mm.default)
-def lower_scaled_mm(
+@register_spyre_lowering(torch.ops.spyre.fp8_matmul_raw)
+def lower_fp8_matmul_raw(
     mat1,
     mat2,
-    scale_a=None,
-    scale_b=None,
-    bias=None,
-    scale_result=None,
-    out_dtype=None,
     use_fast_accum=False,
 ):
+    """Lower the scale-free DD2 FP8 reduction primitive.
+
+    Public ``aten._scaled_mm`` semantics are handled by its Spyre
+    decomposition.  This lowering therefore cannot accidentally discard
+    scales, bias, or output-conversion arguments.
+    """
+
+    if not use_fast_accum:
+        raise Unsupported(
+            "Spyre DD2 fp8_matmul_raw requires fast accumulation; the backend "
+            "does not expose a distinct strict-accumulation FP8 program."
+        )
+
     mat1.realize()
     mat2.realize()
     mat1_loader = mat1.make_loader()
@@ -362,7 +369,7 @@ def lower_scaled_mm(
     if mat2_dtype not in [torch.float8_e4m3fn]:
         raise ValueError(f"Expected FP8 input for mat2, got {mat2_dtype}")
 
-    output_dtype = out_dtype if out_dtype is not None else torch.float16
+    output_dtype = torch.float16
     reduction_numel = mat1_size[-1]
 
     use_fp8mb = False
@@ -408,13 +415,11 @@ def lower_scaled_mm(
 
     else:
         raise Unsupported(
-            f"_scaled_mm with shapes {mat1_size} and {mat2_size} not supported"
+            f"fp8_matmul_raw with shapes {mat1_size} and {mat2_size} not supported"
         )
 
     result = Reduction.create(
-        reduction_type=(
-            BATCH_MATMUL_FP8MB_OP if use_fp8mb else BATCH_MATMUL_FP8_OP
-        ),
+        reduction_type=(BATCH_MATMUL_FP8MB_OP if use_fp8mb else BATCH_MATMUL_FP8_OP),
         input_node=[mat1, mat2],
         device=mat1.get_device(),
         dst_dtype=output_dtype,
@@ -429,11 +434,51 @@ def lower_scaled_mm(
     if logger.isEnabledFor(logging.DEBUG):
         result_buf = V.graph.get_buffer(result.get_name())
         logger.debug(
-            f"_scaled_mm (FP8): mat1{[int(s) for s in mat1_size]} @ mat2{[int(s) for s in mat2_size]} "
+            f"fp8_matmul_raw: mat1{[int(s) for s in mat1_size]} @ mat2{[int(s) for s in mat2_size]} "
             f"-> {[int(s) for s in result_buf.get_size()]}, "
-            f"mat1_dtype={mat1_dtype}, mat2_dtype={mat2_dtype}, out_dtype={output_dtype}"
+            f"mat1_dtype={mat1_dtype}, mat2_dtype={mat2_dtype}, "
+            f"out_dtype={output_dtype}, use_fast_accum={use_fast_accum}"
         )
 
+    return result
+
+
+@register_spyre_lowering(
+    torch.ops.spyre.apply_fp8_scale,
+    type_promotion_kind=None,
+    override_return_dtype=torch.float16,
+)
+def lower_apply_fp8_scale(input, scale, offset):
+    """Lower one scale application to DeepTools ``batchnormfwd``."""
+
+    output_size = input.get_size()
+    scale = lowering.expand(scale, output_size)
+    offset = lowering.expand(offset, output_size)
+    input.realize()
+    scale.realize()
+    offset.realize()
+
+    fn = lowering.ops_wrapper(torch.ops.spyre.apply_fp8_scale.__name__)
+    input_loader = input.make_loader()
+    scale_loader = scale.make_loader()
+    offset_loader = offset.make_loader()
+
+    def inner_fn(index):
+        return fn(
+            input_loader(index),
+            scale_loader(index),
+            offset_loader(index),
+        )
+
+    result = Pointwise.create(
+        device=input.get_device(),
+        dtype=torch.float16,
+        inner_fn=inner_fn,
+        ranges=output_size,
+        origin_node=V.get_current_node(),
+        traceback=input.get_traceback(),
+    )
+    result.realize()
     return result
 
 

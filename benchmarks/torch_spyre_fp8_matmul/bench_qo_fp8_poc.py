@@ -17,15 +17,14 @@ compiled graph before correctness, warmups, and profiling:
 The timed graph then consumes that QFP8WT tensor directly.  This models a
 static model weight while retaining dynamic activation quantization.
 
-The raw variants stop at the FP16 matmul output.  The scaled variants
-additionally apply the output scales explicitly:
+The raw variants stop at the FP16 matmul output.  The scaled variants exercise
+the real ``aten._scaled_mm`` contract:
 
-    raw FP16 -> FP32 -> per-row scale -> per-column scale -> FP16
+    raw FP16 -> per-row FP16 scale -> per-column FP16 scale -> FP16
 
-The current FP8 enablement branch accepts the scale arguments required by
-``aten._scaled_mm`` but does not apply them in the lowering.  Unit FP16 schema
-scales make that omission neutral; the explicit pointwise operations model the
-two scale-application stages without relying on incomplete lowering semantics.
+The scale operations are introduced by the Spyre ``aten._scaled_mm``
+decomposition.  This keeps correctness and performance accounting on the same
+code path instead of reconstructing scale application in the benchmark.
 """
 
 from __future__ import annotations
@@ -65,6 +64,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n", type=int, default=4096)
     parser.add_argument("--warmups", type=int, default=5)
     parser.add_argument("--reps", type=int, default=20)
+    parser.add_argument(
+        "--fast-accum",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "forward use_fast_accum to aten._scaled_mm/fp8_matmul_raw; DD2 "
+            "currently supports only the default enabled mode and rejects "
+            "--no-fast-accum explicitly"
+        ),
+    )
     parser.add_argument(
         "--m-split",
         type=int,
@@ -123,9 +132,7 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--prepack-activation is only valid for FP8 variants")
     if args.variant == "fp16" and args.activation_packing != "auto":
         raise ValueError("--activation-packing is only valid for FP8 variants")
-    if args.activation_packing == "minibatch" and (
-        args.m % 2 != 0 or args.k % 64 != 0
-    ):
+    if args.activation_packing == "minibatch" and (args.m % 2 != 0 or args.k % 64 != 0):
         raise ValueError(
             "minibatch activation packing requires M % 2 == 0 and K % 64 == 0"
         )
@@ -293,21 +300,27 @@ def annotate_named_dimensions(
 def raw_scaled_mm(
     activation_fp8: torch.Tensor,
     weight_fp8: torch.Tensor,
-    quant_scale_a: torch.Tensor,
-    quant_scale_b: torch.Tensor,
+    use_fast_accum: bool,
 ) -> torch.Tensor:
-    # Torch 2.11 requires both scale tensors in the public schema.  The current
-    # FP8 enablement lowering ignores them.  They are unit scalars here, so this
-    # is neutral; explicit output scaling below is the only non-unit scale path.
+    return torch.ops.spyre.fp8_matmul_raw(activation_fp8, weight_fp8, use_fast_accum)
+
+
+def scaled_mm(
+    activation_fp8: torch.Tensor,
+    weight_fp8: torch.Tensor,
+    output_scale_a: torch.Tensor,
+    output_scale_b: torch.Tensor,
+    use_fast_accum: bool,
+) -> torch.Tensor:
     return torch.ops.aten._scaled_mm.default(
         activation_fp8,
         weight_fp8,
-        quant_scale_a,
-        quant_scale_b,
+        output_scale_a,
+        output_scale_b,
         None,
         None,
         torch.float16,
-        False,
+        use_fast_accum,
     )
 
 
@@ -340,6 +353,7 @@ def make_benchmark_fn(
     prepack_weight: bool,
     prepack_activation: bool,
     activation_packing: str,
+    use_fast_accum: bool,
 ) -> Callable[..., torch.Tensor]:
     if variant == "fp16":
 
@@ -384,22 +398,19 @@ def make_benchmark_fn(
                 )
             )
             with spyre_hint(work_div=work_division):
-                result = raw_scaled_mm(
-                    activation_fp8,
-                    weight_fp8,
-                    quant_scale_a,
-                    quant_scale_b,
+                result = (
+                    scaled_mm(
+                        activation_fp8,
+                        weight_fp8,
+                        output_scale_a,
+                        output_scale_b,
+                        use_fast_accum,
+                    )
+                    if scaled
+                    else raw_scaled_mm(activation_fp8, weight_fp8, use_fast_accum)
                 )
             if not scaled:
                 return result
-            with spyre_hint(work_div=work_division):
-                result = result.to(torch.float32)
-            with spyre_hint(work_div=work_division):
-                result = result * output_scale_a
-            with spyre_hint(work_div=work_division):
-                result = result * output_scale_b
-            with spyre_hint(work_div=work_division):
-                result = result.to(torch.float16)
             return result
 
         return fp8_optimized_fn
@@ -424,22 +435,20 @@ def make_benchmark_fn(
         weight_fp8 = (
             weight
             if prepack_weight
-            else torch.ops.spyre.quantize_weight_fp8_with_scale(
-                weight, quant_scale_b
+            else torch.ops.spyre.quantize_weight_fp8_with_scale(weight, quant_scale_b)
+        )
+        result = (
+            scaled_mm(
+                activation_fp8,
+                weight_fp8,
+                output_scale_a,
+                output_scale_b,
+                use_fast_accum,
             )
+            if scaled
+            else raw_scaled_mm(activation_fp8, weight_fp8, use_fast_accum)
         )
-        result = raw_scaled_mm(
-            activation_fp8,
-            weight_fp8,
-            quant_scale_a,
-            quant_scale_b,
-        )
-        if not scaled:
-            return result
-        result = result.to(torch.float32)
-        result = result * output_scale_a
-        result = result * output_scale_b
-        return result.to(torch.float16)
+        return result
 
     return fp8_baseline_fn
 
@@ -720,8 +729,7 @@ def main() -> None:
 
         if timed_activation.dtype != torch.float8_e4m3fn:
             raise RuntimeError(
-                "activation prepack returned "
-                f"{timed_activation.dtype}, expected E4M3FN"
+                f"activation prepack returned {timed_activation.dtype}, expected E4M3FN"
             )
         if tuple(timed_activation.shape) != (args.m, args.k):
             raise RuntimeError(
@@ -802,6 +810,7 @@ def main() -> None:
         args.prepack_weight,
         args.prepack_activation,
         args.activation_packing,
+        args.fast_accum,
     )
     compiled = torch.compile(
         fn,
@@ -908,14 +917,15 @@ def main() -> None:
             "quantization_scale_derivation": "excluded; unit FP16 scalars supplied",
             "raw_scaled_mm_output_dtype": "torch.float16",
             "output_scale_application": (
-                "FP16 -> FP32 -> row FP32 mul -> column FP32 mul -> FP16"
+                "aten._scaled_mm contract: compact FP32 scales -> FP16, then "
+                "two FP16 batchnormfwd scale broadcasts"
                 if args.variant in SCALED_VARIANTS
                 else "none"
             ),
             "scaled_mm_schema_scales": (
-                "unit FP16 scalars; ignored by current PR #2286 lowering"
+                "FP32 per-row activation and per-column weight scales"
             ),
-            "use_fast_accum": False,
+            "use_fast_accum": args.fast_accum,
         },
         "activation_prepack": activation_prepack_metadata,
         "weight_prepack": prepack_metadata,

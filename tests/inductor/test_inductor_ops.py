@@ -378,7 +378,7 @@ _SCALED_MM_SHAPES = [
 
 # scale_a, scale_b, bias
 _SCALED_MM_PARAMS = [
-    (1.0, 1.0, 0.0),
+    (0.5, 0.25, 0.125),
 ]
 
 SCALED_MM_TESTS = {
@@ -387,11 +387,23 @@ SCALED_MM_TESTS = {
         torch.rand((shape[1], shape[2]), dtype=torch.float16),
         torch.tensor(sa, dtype=torch.float16),
         torch.tensor(sb, dtype=torch.float16),
-        torch.tensor(b, dtype=torch.float16),
+        torch.tensor(sa, dtype=torch.float32),
+        torch.tensor(sb, dtype=torch.float32),
+        torch.full((shape[2],), b, dtype=torch.float16),
     )
     for shape in _SCALED_MM_SHAPES
     for sa, sb, b in _SCALED_MM_PARAMS
 }
+
+SCALED_MM_TESTS["rowwise_4x128x1024"] = (
+    torch.rand((4, 128), dtype=torch.float16),
+    torch.rand((128, 1024), dtype=torch.float16),
+    torch.tensor(0.5, dtype=torch.float16),
+    torch.tensor(0.25, dtype=torch.float16),
+    torch.linspace(0.25, 1.0, 4, dtype=torch.float32).reshape(4, 1),
+    torch.linspace(0.125, 0.5, 1024, dtype=torch.float32).reshape(1, 1024),
+    torch.linspace(-0.25, 0.25, 1024, dtype=torch.float16),
+)
 
 FP32_EPS = torch.finfo(torch.float32).eps  # 1.1920928955078125e-07
 FP16_EPS = torch.finfo(torch.float16).eps  # 0.0009765625
@@ -6587,33 +6599,106 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
             run_eager=False,
         )
 
-    def test_fp8_scaled_mm_cpu(self, a, b, scale_a, scale_b, bias):
+    def test_fp8_scaled_mm_cpu(
+        self, a, b, quant_scale_a, quant_scale_b, scale_a, scale_b, bias
+    ):
         """Test _scaled_mm with FP8 inputs."""
 
-        def spyre_fn(a, b, scale_a, scale_b, bias):
-            q_a = torch.ops.spyre.quantize_fp8_with_scale(a, scale_a)
-            q_b = torch.ops.spyre.quantize_weight_fp8_with_scale(b, scale_b)
+        def spyre_fn(a, b, quant_scale_a, quant_scale_b, scale_a, scale_b, bias):
+            q_a = torch.ops.spyre.quantize_fp8_with_scale(a, quant_scale_a)
+            q_b = torch.ops.spyre.quantize_weight_fp8_with_scale(b, quant_scale_b)
             return torch.ops.aten._scaled_mm(
-                q_a, q_b, scale_a, scale_b, bias=bias, out_dtype=torch.float16
+                q_a,
+                q_b,
+                scale_a,
+                scale_b,
+                bias=bias,
+                out_dtype=torch.float16,
+                use_fast_accum=True,
             )
 
-        def pytorch_fn(a, b, scale_a, scale_b, bias=None):
+        def pytorch_fn(a, b, quant_scale_a, quant_scale_b, scale_a, scale_b, bias=None):
             q_a = (
-                (a / scale_a)
+                (a / quant_scale_a)
                 .clamp(-448.0, 448.0)
                 .to(torch.float8_e4m3fn)
                 .to(torch.float16)
             )
             q_b = (
-                (b / scale_b)
+                (b / quant_scale_b)
                 .clamp(-448.0, 448.0)
                 .to(torch.float8_e4m3fn)
                 .to(torch.float16)
             )
-            return (q_a @ q_b) * (scale_a * scale_b) + bias
+            return ((q_a @ q_b) * (scale_a * scale_b) + bias).to(torch.float16)
 
         compare_with_pytorch(
-            spyre_fn, pytorch_fn, a, b, scale_a, scale_b, bias, atol=0.1, rtol=0.1
+            spyre_fn,
+            pytorch_fn,
+            a,
+            b,
+            quant_scale_a,
+            quant_scale_b,
+            scale_a,
+            scale_b,
+            bias,
+            atol=0.1,
+            rtol=0.1,
+        )
+
+    def test_fp8_scaled_mm_fp8_result_scale(self):
+        """FP8 output applies scale_result before the final E4M3 conversion."""
+
+        a = torch.rand((4, 128), dtype=torch.float16)
+        b = torch.rand((128, 128), dtype=torch.float16)
+        quant_scale_a = torch.tensor(0.5, dtype=torch.float16)
+        quant_scale_b = torch.tensor(0.25, dtype=torch.float16)
+        scale_a = torch.tensor(0.5, dtype=torch.float32)
+        scale_b = torch.tensor(0.25, dtype=torch.float32)
+        bias = torch.full((128,), 0.125, dtype=torch.float16)
+        scale_result = torch.tensor(0.5, dtype=torch.float32)
+        dequant_scale = torch.tensor(1.0, dtype=torch.float16)
+
+        def spyre_fn(a, b, qsa, qsb, sa, sb, bias, sr, dequant_scale):
+            q_a = torch.ops.spyre.quantize_fp8_with_scale(a, qsa)
+            q_b = torch.ops.spyre.quantize_weight_fp8_with_scale(b, qsb)
+            result_fp8 = torch.ops.aten._scaled_mm(
+                q_a,
+                q_b,
+                sa,
+                sb,
+                bias=bias,
+                scale_result=sr,
+                out_dtype=torch.float8_e4m3fn,
+                use_fast_accum=True,
+            )
+            return torch.ops.spyre.dequantize_fp8_with_scale(result_fp8, dequant_scale)
+
+        def pytorch_fn(a, b, qsa, qsb, sa, sb, bias, sr, dequant_scale):
+            q_a = (a / qsa).clamp(-448.0, 448.0).to(torch.float8_e4m3fn)
+            q_b = (b / qsb).clamp(-448.0, 448.0).to(torch.float8_e4m3fn)
+            result = q_a.to(torch.float32) @ q_b.to(torch.float32)
+            result = result * sa * sb + bias.to(torch.float32)
+            result = (result * sr).clamp(-448.0, 448.0)
+            return result.to(torch.float8_e4m3fn).to(torch.float16) * dequant_scale
+
+        compare_with_pytorch(
+            spyre_fn,
+            pytorch_fn,
+            a,
+            b,
+            quant_scale_a,
+            quant_scale_b,
+            scale_a,
+            scale_b,
+            bias,
+            scale_result,
+            dequant_scale,
+            # DD2 exposes the raw FP8 reduction in FP16 before result scaling;
+            # a value can therefore land in the adjacent E4M3 bucket relative
+            # to the all-FP32 reference.  One bucket is 8 at this magnitude.
+            atol=8.0,
+            rtol=0.15,
         )
 
     def test_is_nonzero_cpu(self, *args):

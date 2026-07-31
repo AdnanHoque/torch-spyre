@@ -665,6 +665,72 @@ def _(input: torch.Tensor) -> torch.Tensor:
     return torch.empty(input.size(), dtype=torch.float8_e4m3fn, device=input.device)
 
 
+@torch.library.custom_op("spyre::fp8_matmul_raw", mutates_args=(), device_types="spyre")
+def fp8_matmul_raw(
+    mat1: torch.Tensor,
+    mat2: torch.Tensor,
+    use_fast_accum: bool = False,
+) -> torch.Tensor:
+    """Raw DD2 FP8 matmul used by the ``aten._scaled_mm`` decomposition.
+
+    This op deliberately has no scale or bias inputs.  Keeping the primitive
+    reduction separate makes the public ``_scaled_mm`` semantics explicit in
+    the FX graph and prevents the lowering from silently dropping arguments.
+    DD2 exposes the reduction result as FP16.
+    """
+    pass
+
+
+@fp8_matmul_raw.register_fake
+def _(
+    mat1: torch.Tensor,
+    mat2: torch.Tensor,
+    use_fast_accum: bool = False,
+) -> torch.Tensor:
+    if mat1.dim() != 2 or mat2.dim() != 2:
+        raise RuntimeError(
+            "spyre::fp8_matmul_raw requires two 2D tensors, "
+            f"got {mat1.dim()}D and {mat2.dim()}D"
+        )
+    if mat1.shape[1] != mat2.shape[0]:
+        raise RuntimeError(
+            "spyre::fp8_matmul_raw contraction mismatch: "
+            f"{tuple(mat1.shape)} and {tuple(mat2.shape)}"
+        )
+    return torch.empty(
+        (mat1.shape[0], mat2.shape[1]),
+        dtype=torch.float16,
+        device=mat1.device,
+    )
+
+
+@torch.library.custom_op(
+    "spyre::apply_fp8_scale", mutates_args=(), device_types="spyre"
+)
+def apply_fp8_scale(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    offset: torch.Tensor,
+) -> torch.Tensor:
+    """Apply one FP16 scale using DD2's specialized broadcast operation."""
+    pass
+
+
+@apply_fp8_scale.register_fake
+def _(
+    input: torch.Tensor,
+    scale: torch.Tensor,
+    offset: torch.Tensor,
+) -> torch.Tensor:
+    if input.dtype != torch.float16:
+        raise RuntimeError(f"apply_fp8_scale requires FP16 input, got {input.dtype}")
+    if scale.dtype != torch.float16:
+        raise RuntimeError(f"apply_fp8_scale requires FP16 scale, got {scale.dtype}")
+    if offset.dtype != torch.float16:
+        raise RuntimeError(f"apply_fp8_scale requires FP16 offset, got {offset.dtype}")
+    return torch.empty_like(input, dtype=torch.float16)
+
+
 @torch.library.custom_op(
     "spyre::quantize_fp8_with_scale", mutates_args=(), device_types="spyre"
 )
