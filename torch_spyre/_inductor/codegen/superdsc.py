@@ -476,6 +476,12 @@ def _create_sdsc_tensors(
                 scales[dim] = 1
 
             strides[dim] = _calculate_device_stride(stride_idx, arg.device_size)
+            if is_fp8mb_arg and dim != stick_dim:
+                # One QFP8MB physical stick packs two adjacent logical M rows.
+                # The ordinary logical STL therefore overstates the physical
+                # row-group stride by 2. Correct the per-core base advance for
+                # both the qfp8mb producer and batchmatmulfp8mb consumer.
+                strides[dim] //= 2
             offsets[dim] = 0
             dim_device_stride = math.prod(arg.device_size[-stride_idx - 1 :])
 
