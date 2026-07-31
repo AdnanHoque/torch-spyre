@@ -1671,6 +1671,28 @@ latency. Its magnitude is nevertheless too large to dismiss as timing noise.
 The accepted isolated `4.1164x` down-projection result is insufficient to
 predict fused-layer E2E performance.
 
+Durable device run roots:
+
+```text
+stock:
+  /home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/\
+  latest_cost_model_granite_block_20260724_202708/\
+  antoni_exact_repro_20260724/runs/\
+  full_40_layer_b1_s512_1x4_stock_completion_b83e5cfd_20260731_v1
+
+down-only Design A:
+  /home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/\
+  latest_cost_model_granite_block_20260724_202708/\
+  antoni_exact_repro_20260724/runs/\
+  full_40_layer_b1_s512_1x4_design_a_down_only_2c1ab140_20260731_v1
+```
+
+Their trace SHA-256 values are
+`ba555f5468696f13c674a5f4ec5ee1e690adb7899fa4cfd8340c58279781f894`
+and
+`8eaf8dcd534cb5b052a1103b7c1bd154b10f2aaf0b059fb0a50b016fbd12caa4`
+respectively.
+
 ### All-eligible compiler blocker
 
 With an empty allowlist, prefill completes and produces token `203`. The first
@@ -1685,6 +1707,15 @@ line 803
 The failing fused bundle contains the two `K4096 -> N12800` gate/up linears
 and the `K12800 -> N4096` down linear. The same revision with
 `weight_stationary` completes, isolating the failure to the new dataflow.
+
+Exact failed-run root:
+
+```text
+/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/\
+latest_cost_model_granite_block_20260724_202708/\
+antoni_exact_repro_20260724/runs/\
+full_40_layer_b1_s512_1x4_design_a_completion_b83e5cfd_20260731_v1
+```
 
 ### Decision
 
