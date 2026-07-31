@@ -41,10 +41,10 @@ from torch_spyre._C import ElementArrangement
 
 from .errors import Unsupported
 from .constants import (
-    BATCH_MATMUL_OP,
     BATCH_MATMUL_FP8_OP,
     BATCH_MATMUL_FP8MB_OP,
     DEVICE_NAME,
+    MATMUL_REDUCTION_OPS,
     TOPK_OPS,
 )
 from .ir import FixedTiledLayout
@@ -985,6 +985,13 @@ def span_reduction_pass(
     Writes results to op.op_it_space_splits. If no span violation exists,
     op.op_it_space_splits is left unset (apply_splits is a no-op for splits <= 1).
     """
+    # Pre-scheduling may be run more than once on the same IR while layouts are
+    # refined. A split left by the previous work-distribution pass is not a
+    # mandatory span split for this invocation. Clear it before recomputing,
+    # otherwise the cost-model pass mistakes the stale split for a hard bound.
+    if hasattr(op, "op_it_space_splits"):
+        delattr(op, "op_it_space_splits")
+
     it_space = iteration_space_from_op(op)
     input_tds, output_td = collect_tensor_deps(op, args)
     all_tds = input_tds + [output_td]
@@ -1002,10 +1009,9 @@ def span_reduction_pass(
     )
 
     # DD2 compound FP8 reductions cannot split K across cores.
-    if isinstance(op.data, Reduction) and op.data.reduction_type in (
-        BATCH_MATMUL_OP,
-        BATCH_MATMUL_FP8_OP,
-        BATCH_MATMUL_FP8MB_OP,
+    if (
+        isinstance(op.data, Reduction)
+        and op.data.reduction_type in MATMUL_REDUCTION_OPS
     ):
         qfp8_constraints = _get_fp8_compound_split_constraints(input_tds, output_td)
         min_splits.update(qfp8_constraints)
@@ -1482,11 +1488,7 @@ def _cost_model_matmul_planner(
     """
     if not isinstance(op.data, Reduction):
         return splits
-    if op.data.reduction_type not in (
-        BATCH_MATMUL_OP,
-        BATCH_MATMUL_FP8_OP,
-        BATCH_MATMUL_FP8MB_OP,
-    ):
+    if op.data.reduction_type not in MATMUL_REDUCTION_OPS:
         return splits
     if committed_splits:
         return splits
@@ -1747,7 +1749,7 @@ def _cost_model_divide_op(op: ComputedBuffer, max_cores: int) -> bool:
     """
     if not isinstance(op.data, Reduction):
         return False
-    if op.data.reduction_type != BATCH_MATMUL_OP:
+    if op.data.reduction_type not in MATMUL_REDUCTION_OPS:
         return False
     if not config.ignore_work_division_hints and _has_work_div_hint(op):
         # User hints take ownership of the split decision; do not override them.
