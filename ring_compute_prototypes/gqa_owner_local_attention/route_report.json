@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "descriptor": "/tmp/gqa_sparse_route_evidence_20260731_v18/debug/2_shuffle-Relayout0/2_shuffle-Relayout0.out.out.out.json",
+  "smc": "/tmp/gqa_sparse_route_evidence_20260731_v18/debug/2_shuffle-Relayout0/smc.txt",
+  "gate": true,
+  "gates": {
+    "one_route_per_kv_head": true,
+    "sources_are_cohort_roots": true,
+    "four_consumers_per_route": true,
+    "three_hops_per_route": true,
+    "link_work_hits_recipient_lower_bound": true,
+    "live_stgu_ldgu_match": true
+  },
+  "source_core_ids": [
+    0,
+    4,
+    8,
+    12,
+    16,
+    20,
+    24,
+    28
+  ],
+  "route_count": 8,
+  "remote_relation_count": 24,
+  "payload_bytes_per_source": 16384,
+  "selected_mode_histogram": {
+    "1": 8
+  },
+  "hop_units": 24,
+  "recipient_lower_bound_hop_units": 24,
+  "link_work_efficiency": 1.0,
+  "link_bytes": 393216,
+  "remote_delivered_bytes": 393216,
+  "smc_instruction_counts": {
+    "L3_STGU": 8,
+    "L3_LDGU": 24,
+    "L3_GTRIMM": 32
+  },
+  "routes": [
+    {
+      "source": 0,
+      "consumers": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "selected_mode": 1,
+      "min_hops": 3
+    },
+    {
+      "source": 8,
+      "consumers": [
+        8,
+        9,
+        10,
+        11
+      ],
+      "selected_mode": 1,
+      "min_hops": 3
+    },
+    {
+      "source": 12,
+      "consumers": [
+        12,
+        13,
+        14,
+        15
+      ],
+      "selected_mode": 1,
+      "min_hops": 3
+    },
+    {
+      "source": 16,
+      "consumers": [
+        16,
+        17,
+        18,
+        19
+      ],
+      "selected_mode": 1,
+      "min_hops": 3
+    },
+    {
+      "source": 20,
+      "consumers": [
+        20,
+        21,
+        22,
+        23
+      ],
+      "selected_mode": 1,
+      "min_hops": 3
+    },
+    {
+      "source": 24,
+      "consumers": [
+        24,
+        25,
+        26,
+        27
+      ],
+      "selected_mode": 1,
+      "min_hops": 3
+    },
+    {
+      "source": 28,
+      "consumers": [
+        28,
+        29,
+        30,
+        31
+      ],
+      "selected_mode": 1,
+      "min_hops": 3
+    },
+    {
+      "source": 4,
+      "consumers": [
+        4,
+        5,
+        6,
+        7
+      ],
+      "selected_mode": 1,
+      "min_hops": 3
+    }
+  ]
+}

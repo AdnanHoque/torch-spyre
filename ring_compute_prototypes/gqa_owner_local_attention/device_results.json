@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "scope": "sparse_cohort_root_q_broadcast_plus_owner_local_multi_block_qk",
+  "device": {
+    "pod": "adnan-spyre-current-pf",
+    "namespace": "a6-quantization",
+    "compiler_checkout": "/home/adnan/codex-isolated/gqa_sparse_attention_20260731_v1",
+    "compiler_head": "9b3449e732717c834f78ef0f8897a729c8da8f65",
+    "compiler_diff_sha256": "a88cf15f9db30a6d6151c411cca590838d200942bff2539dfc9c04010bdc1fdc",
+    "probe_sha256": "63be46c8aa05e674c333705360900f3943deabdca412abaca18ae9b889c9b407",
+    "dxp_wrapper_sha256": "49892af2251912a67a5b13c318fdc09b4ec8f9ed370a42410735ad7184b37941"
+  },
+  "runs": [
+    {
+      "q_route": "broadcast",
+      "run_dir": "/tmp/gqa_owner_qk_sparse_20260731_v14",
+      "correctness_gate": true,
+      "structural_gate": true,
+      "trace_gate": true,
+      "device_us": {
+        "median": 25.3315,
+        "mean": 25.4109,
+        "min": 25.218,
+        "max": 25.981,
+        "samples": [
+          25.27,
+          25.981,
+          25.35,
+          25.218,
+          25.296,
+          25.332,
+          25.27,
+          25.407,
+          25.654,
+          25.331
+        ]
+      },
+      "bundle_sha256": "68d8c333277fad7df56428e4e1eaf7c016984cc0fd4482e5c6deece686ef8a99",
+      "summary_sha256": "65bfe84157295d13bc7de2a118dfef317684d03b4624b9a9a2ecdeb608ab5923",
+      "trace_sha256": "0a5571b4d14aaf50b99f0df84c92aac8a05e104587c094921de51be8e55da967"
+    },
+    {
+      "q_route": "hbm",
+      "run_dir": "/tmp/gqa_owner_qk_sparse_hbm_20260731_v15",
+      "correctness_gate": true,
+      "structural_gate": true,
+      "trace_gate": true,
+      "device_us": {
+        "median": 27.0875,
+        "mean": 27.0747,
+        "min": 26.449,
+        "max": 27.629,
+        "samples": [
+          27.035,
+          27.162,
+          27.14,
+          26.751,
+          26.706,
+          26.449,
+          27.448,
+          26.994,
+          27.629,
+          27.433
+        ]
+      },
+      "bundle_sha256": "3fe96c42702f6e08e1042162cf49d6f11874fc5ea3911a53d565ca8d394d44d0",
+      "summary_sha256": "2d02f50af325ab6ae3a885b8a89c5ae8214b56bcb941c0c027f3720426a794d4",
+      "trace_sha256": "b6f7f82e72e05467141543b00d09372dbddd98d9e51d02f1e38cbf9d8e15b56b"
+    },
+    {
+      "q_route": "broadcast",
+      "run_dir": "/tmp/gqa_owner_qk_sparse_20260731_v16",
+      "correctness_gate": true,
+      "structural_gate": true,
+      "trace_gate": true,
+      "device_us": {
+        "median": 25.4225,
+        "mean": 25.5207,
+        "min": 25.254,
+        "max": 25.984,
+        "samples": [
+          25.314,
+          25.254,
+          25.314,
+          25.756,
+          25.772,
+          25.984,
+          25.417,
+          25.428,
+          25.633,
+          25.335
+        ]
+      },
+      "bundle_sha256": "68d8c333277fad7df56428e4e1eaf7c016984cc0fd4482e5c6deece686ef8a99",
+      "summary_sha256": "37fdacf5b6f75ff0dfb2badc989d54d82e0d2b508da7837813ecedca6cf4093e",
+      "trace_sha256": "0991d9a1e50102f32a1bec334d2207a7359fcb0dc7b4408afb07f1f798555776"
+    },
+    {
+      "q_route": "hbm",
+      "run_dir": "/tmp/gqa_owner_qk_sparse_hbm_20260731_v17",
+      "correctness_gate": true,
+      "structural_gate": true,
+      "trace_gate": true,
+      "device_us": {
+        "median": 27.076,
+        "mean": 27.0727,
+        "min": 26.691,
+        "max": 27.482,
+        "samples": [
+          26.937,
+          26.808,
+          26.691,
+          27.365,
+          27.108,
+          27.061,
+          27.091,
+          26.95,
+          27.234,
+          27.482
+        ]
+      },
+      "bundle_sha256": "3fe96c42702f6e08e1042162cf49d6f11874fc5ea3911a53d565ca8d394d44d0",
+      "summary_sha256": "5fea4aad141f2e343ac51b63c23de029bc1b3baead8f061b1d7aefefb9b52241",
+      "trace_sha256": "d429a68135ae36a80a4997a053dec103dd7f1ff078dedcb88528b22881600b98"
+    }
+  ],
+  "aggregate": {
+    "broadcast_median_of_run_medians_us": 25.377,
+    "hbm_median_of_run_medians_us": 27.08175,
+    "speedup_hbm_over_broadcast": 1.0671769712732002,
+    "latency_reduction_percent": 6.294829543881031,
+    "paired_speedups": [
+      1.0693208061109685,
+      1.0650408103058315
+    ]
+  }
+}
