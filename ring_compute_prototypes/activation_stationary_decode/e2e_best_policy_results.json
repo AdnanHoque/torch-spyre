@@ -1,0 +1,74 @@
+{
+  "schema": "activation_stationary_granite_best_policy_smoke_v1",
+  "date": "2026-07-31",
+  "torch_spyre_revision": "b5d2d4650691deb0e9516678096e8efb023f8405",
+  "workload": {
+    "model": "ibm-granite/granite-3.3-8b-instruct",
+    "decoder_layers": 40,
+    "batch_size": 1,
+    "prompt_tokens": 512,
+    "generated_token_phases": 4,
+    "measured_generations": 1,
+    "dtype": "float16",
+    "weights": "unfused",
+    "attention": "sdpa",
+    "timing_source": "Kineto cat==kernel device events"
+  },
+  "arms": {
+    "stock": {
+      "matmul_dataflow": "weight_stationary",
+      "run_root": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/latest_cost_model_granite_block_20260724_202708/antoni_exact_repro_20260724/runs/full_40_layer_b1_s512_1x4_design_a_best_stock_b5d2d465_20260731_v1",
+      "trace_sha256": "e615bb6657e9621fc97dd4fa35f7062e3d379b173c11787b1268d8d39d3c5e57",
+      "output_sha256": "29e7f26fed11c801d98f5a04ea00afe62f91471d9404372c66815dbf16df7888",
+      "prefill_ms": 380.755282,
+      "decode_average_ms": 162.94727100000003
+    },
+    "design_a_down_only": {
+      "matmul_dataflow": "activation_stationary",
+      "activation_stationary_shapes": "12800x4096",
+      "run_root": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/latest_cost_model_granite_block_20260724_202708/antoni_exact_repro_20260724/runs/full_40_layer_b1_s512_1x4_design_a_best_down_only_b5d2d465_20260731_v1",
+      "trace_sha256": "26cd09f6b00386f0dde27958f0409ab6c581606e6f4a44b4f0b745c988144f4d",
+      "output_sha256": "29e7f26fed11c801d98f5a04ea00afe62f91471d9404372c66815dbf16df7888",
+      "prefill_ms": 442.9449759999999,
+      "decode_average_ms": 229.13239933333332
+    },
+    "design_a_down_plus_n1024": {
+      "matmul_dataflow": "activation_stationary",
+      "activation_stationary_shapes": "4096x1024,12800x4096",
+      "run_root": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/latest_cost_model_granite_block_20260724_202708/antoni_exact_repro_20260724/runs/full_40_layer_b1_s512_1x4_design_a_best_down_n1024_b5d2d465_20260731_v1",
+      "status": "first_decode_compile_failed",
+      "error": "Unexpected stick expression 1 in optimize_restickify layout feasibility"
+    }
+  },
+  "comparison": {
+    "output_exact_byte_gate": true,
+    "design_a_prefill_change_percent": 16.333245247008765,
+    "design_a_decode_change_percent": 40.61751260217994,
+    "stock_over_design_a_prefill": 0.8595995047475155,
+    "stock_over_design_a_decode": 0.7111489753264896
+  },
+  "structure": {
+    "stock_prefill_kernels_per_layer": 1,
+    "design_a_prefill_kernels_per_layer": 1,
+    "stock_steady_decode_kernels_per_layer": 1,
+    "design_a_steady_decode_kernels_per_layer": 1,
+    "stock_steady_decode_layer_ms": [3.952611175, 3.9551748],
+    "design_a_steady_decode_layer_ms": [5.543820375, 5.637295475],
+    "collapsed_m_k_fast_emitted": true,
+    "collapsed_m_k_fast_first_pairs": [[0, 1], [2, 3], [4, 5], [6, 7]]
+  },
+  "decision": {
+    "best_e2e_policy": "weight_stationary",
+    "five_generation_promotion_run": false,
+    "reason": "The one-generation candidate screen is correct but regresses prefill by 16.33% and decode by 40.62%; the broader candidate fails compilation."
+  },
+  "conversion_free_projection": {
+    "method": "Sum the matched compute-only savings for winning Granite linear cells and divide by the measured stock fused-layer or four-phase device time.",
+    "decode_safe_policy_percent": 1.000765,
+    "decode_with_m64_n4096_percent": 1.430159,
+    "prefill_percent": 1.888686,
+    "four_phase_safe_policy_speedup": 1.013672,
+    "four_phase_with_m64_n4096_speedup": 1.016078,
+    "status": "modeled_from_measured_microbenchmarks_not_e2e_measured"
+  }
+}

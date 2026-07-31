@@ -210,10 +210,26 @@ export SPYRE_MATMUL_DATAFLOW=activation_stationary
 export SPYRE_ACTIVATION_STATIONARY_SHAPES=12800x4096
 ```
 
-At exact revision `2c1ab140d23f7e200ef45ef26b057229cb393727`, that scope
-completed the full 40-layer B1/S512 generation and matched the stock decoded
-output byte-for-byte. Its one-generation device trace was about 39.73% slower
-on average decode, however. An empty shape allowlist selects every eligible
-linear and currently fails first-decode compilation in Deeptools output reuse.
-See the dated E2E section in `../RING_NATIVE_MATMUL_HANDOFF.md`; do not present
-the isolated 2.36x-4.12x timings as Granite E2E speedups.
+At revision `b5d2d4650691deb0e9516678096e8efb023f8405`, this scope uses
+K-stick weights, the measured M512 split, and the collapsed-M K-fast fix. It
+completed the full 40-layer B1/S512 generation and matched stock output
+byte-for-byte, but still regressed the one-generation device screen:
+
+| Device phase | Stock | Down-only Design A | Change |
+|---|---:|---:|---:|
+| Prefill | 380.755 ms | 442.945 ms | +16.33% |
+| Decode average | 162.947 ms | 229.132 ms | +40.62% |
+
+Adding the compute-only-winning `4096x1024` shape reaches first-decode
+compilation and fails layout feasibility on an unsupported stick expression.
+Therefore the best demonstrated E2E policy remains `weight_stationary`; no
+five-generation Design A timing run was justified. Exact roots, trace hashes,
+and phase structure are in `e2e_best_policy_results.json` and the dated
+handoff section. Do not present the compute-only results as Granite E2E
+speedups.
+
+If the winning BMMs can be integrated without incremental conversion work,
+their microbenchmark deltas project to about 1.00%-1.43% steady-decode gain,
+1.89% prefill gain, and 1.37%-1.61% speedup over the measured
+one-prefill/three-decode bracket. This projection is the integration target,
+not a measured E2E result.

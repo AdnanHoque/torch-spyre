@@ -1935,3 +1935,141 @@ calls with the exact stock output SHA-256:
 Do not promote its latency until E2E work resumes. The integration problem is
 now precise: make A and C producer-/consumer-native for the winning cells
 without introducing conversion roots.
+
+## 2026-07-31: best-policy E2E rerun after work-division co-design
+
+### Production schedule integration
+
+Revision `b5d2d4650691deb0e9516678096e8efb023f8405` wires only the
+device-measured Design A schedules into the real `aten.linear`
+decomposition:
+
+```text
+physical M64  K4096  N1024 -> M1 N16 K2
+physical M512 K4096  N1024 -> M8 N4 K1
+physical M512 K12800 N4096 -> M4 N8 K1
+```
+
+The first production compile exposed a narrow compiler gap that the
+compute-only oracle did not: logical M1 collapses the BMM iteration space from
+`(mb,out,in)` to `(out,in)`, and the K-fast gate rejected fewer than three
+axes. The gate now accepts this valid two-axis matmul. Emitted
+`coreIdToWkSlice` proves adjacent K pairs:
+
+```text
+core 0,1 -> out 0, in 0,1
+core 2,3 -> out 1, in 0,1
+core 4,5 -> out 2, in 0,1
+core 6,7 -> out 3, in 0,1
+```
+
+The focused decomposition, loader, and codegen suite passes `65 passed`.
+
+### Exact E2E screen
+
+Both successful arms used the same clean Torch-Spyre revision, runtime
+extension, B1/S512 40-layer Granite model, FP16 unfused weights, SDPA, one
+unprofiled materialization generation, and one measured four-phase generation.
+Only Kineto `cat == "kernel"` device time is compared.
+
+| Device phase | Best incumbent | Down-only Design A | Candidate change |
+|---|---:|---:|---:|
+| Prefill | 380.755 ms | 442.945 ms | +16.33% |
+| Decode average | 162.947 ms | 229.132 ms | +40.62% |
+
+Both outputs have exact SHA-256:
+
+```text
+29e7f26fed11c801d98f5a04ea00afe62f91471d9404372c66815dbf16df7888
+```
+
+The regression is inside the fused layer, not launch count:
+
+| Phase | Stock kernels/layer | Design A kernels/layer | Stock layer | Design A layer |
+|---|---:|---:|---:|---:|
+| Prefill | 1 | 1 | 9.239 ms | 10.856 ms |
+| Steady decode 1 | 1 | 1 | 3.953 ms | 5.544 ms |
+| Steady decode 2 | 1 | 1 | 3.955 ms | 5.637 ms |
+
+K-stick model loading removes the original full-weight layout mismatch, but
+the fused Design A graphs still introduce activation/output relayouts around
+the reversed BMM. Across the compiled graph variants, the candidate inventory
+contains substantially more `ReStickifyOpHBM` roots than stock. The isolated
+one-BMM compute gain is therefore not the current E2E limiter.
+
+The broader winner-only allowlist:
+
+```text
+4096x1024,12800x4096
+```
+
+completed prefill, then failed first-decode compilation in
+`optimize_restickify` with:
+
+```text
+Unexpected stick expression 1: expected Mod(var, 64), a bare variable, 0,
+or any of those with a constant offset
+```
+
+### Durable evidence and stop call
+
+```text
+clean source:
+  /home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/\
+  latest_cost_model_granite_block_20260724_202708/\
+  antoni_exact_repro_20260724/torch-spyre-design-a-b5d2d465-wt
+
+stock:
+  /home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/\
+  latest_cost_model_granite_block_20260724_202708/\
+  antoni_exact_repro_20260724/runs/\
+  full_40_layer_b1_s512_1x4_design_a_best_stock_b5d2d465_20260731_v1
+
+down-only:
+  /home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/\
+  latest_cost_model_granite_block_20260724_202708/\
+  antoni_exact_repro_20260724/runs/\
+  full_40_layer_b1_s512_1x4_design_a_best_down_only_b5d2d465_20260731_v1
+
+down plus N1024 compile failure:
+  /home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/\
+  latest_cost_model_granite_block_20260724_202708/\
+  antoni_exact_repro_20260724/runs/\
+  full_40_layer_b1_s512_1x4_design_a_best_down_n1024_b5d2d465_20260731_v1
+```
+
+Trace SHA-256:
+
+```text
+stock:     e615bb6657e9621fc97dd4fa35f7062e3d379b173c11787b1268d8d39d3c5e57
+down-only: 26cd09f6b00386f0dde27958f0409ab6c581606e6f4a44b4f0b745c988144f4d
+```
+
+The compact ledger is
+`activation_stationary_decode/e2e_best_policy_results.json`.
+
+### Conversion-free E2E expectation
+
+The compute-only gains imply a low-single-digit E2E target, not a 14.5%
+model-level gain. A Granite layer contains two `K4096 -> N1024` projections,
+two `K4096 -> N4096` projections, two losing `K4096 -> N12800` projections,
+and one `K12800 -> N4096` projection. Applying Design A only where the
+matched microbenchmark wins gives:
+
+| Phase | Winning Design A cells | Saved per layer | Projected phase gain |
+|---|---|---:|---:|
+| Decode / physical M64 | N1024 x2 + down | 39.561 us | 1.00% |
+| Decode / physical M64, including N4096 x2 | Above + N4096 x2 | 56.548 us | 1.43% |
+| Prefill / M512 | N1024 x2 + down | 174.496 us | 1.89% |
+
+Against the measured one-prefill/three-decode stock bracket, these cells
+project to a `1.0137x` safe-policy E2E speedup, or `1.0161x` if the M64
+`K4096 -> N4096` winner also integrates cleanly. This is an Amdahl-style
+zero-incremental-conversion estimate: it assumes the fused graph gets the
+compute-only BMM timings and pays no new activation/output relayout cost.
+
+Stop: do not spend the five-generation timing budget on this implementation.
+The best demonstrated E2E setting is the incumbent `weight_stationary`
+dataflow. The next Design A work is not more work-division tuning; it is
+producer-/consumer-native A/C layout integration that removes the residual
+fused relayouts, followed by a new one-generation screen.
