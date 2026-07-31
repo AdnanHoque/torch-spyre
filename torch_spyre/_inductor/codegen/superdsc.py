@@ -523,6 +523,11 @@ def _create_sdsc_tensors(
 
         effective_stick = [op_stick_dim if stick_dim is None else stick_dim]
         layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
+        if op_spec.op == "qfp8mb":
+            # The DD2 PACKMERGE template is an explicit input -> packed-output
+            # conversion. Match SenDNN's semantic layout roles instead of the
+            # generic pointwise OUTPUT/KERNEL label order.
+            layout_labels = ["INPUT", "OUTPUT", "KERNEL", "KERNEL_IDX"]
 
         # Special handling for DD2 compound FP8 sticks.
         dtype_stick_size = arg.device_dtype.elems_per_stick()
