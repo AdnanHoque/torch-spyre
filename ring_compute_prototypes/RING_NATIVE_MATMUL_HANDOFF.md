@@ -2304,3 +2304,64 @@ exact timed roots:
   /tmp/design-a-compute-oracle-isolated-m512k4096n12800-m2n16k1-v1
   /tmp/design-a-compute-oracle-isolated-m512k12800n4096-m4n8k1-v1
 ```
+
+## 2026-07-31: Design A down projection versus SenDNN
+
+The conversion-free Design A winner was bracketed against a fresh SenDNN FP16
+matmul on the same `adnan-cdx-spyre-dev-pf` device for:
+
+```text
+M=512, K=12800, N=4096, FP16 output
+```
+
+The execution order was:
+
+```text
+SenDNN 10 warmups + 60 events
+Design A 10 warmups + 60 events
+SenDNN 10 warmups + 60 events
+Design A 30 warmups + 60 events
+SenDNN 10 warmups + 60 events
+```
+
+Every run passed correctness. SenDNN emitted one `fp16_bmm` kernel event per
+Predict. Design A retained exactly one BMM root per arm, native preplaced A/W,
+native C, no conversion roots, and the explicit `M4 N8 K1` candidate grid.
+
+| Comparison | SenDNN median | Design A median | SenDNN speedup | SenDNN lower latency |
+|---|---:|---:|---:|---:|
+| Equal-warmup primary bracket | 1006.0895 us | 1051.2275 us | **1.044865x** | **4.2938%** |
+| Longer Design A warmup sensitivity | 1006.1955 us | 1043.9160 us | **1.037488x** | **3.6134%** |
+| All events pooled | 1006.1395 us | 1047.0805 us | **1.040691x** | **3.9100%** |
+
+The primary effective throughput is 53.362 TFLOP/s for SenDNN and 51.071
+TFLOP/s for Design A. Event ranges are disjoint in both controlled brackets.
+The result is therefore not a noise-level tie: SenDNN remains faster by about
+3.6%-4.3% under the fresh protocols.
+
+The boundary is intentionally device-only. SenDNN static-model preparation is
+excluded, and its separately categorized `gpu_memcpy` and `gpu_memset` events
+are not counted. Design A similarly excludes host transfer and uses native
+preplaced activation, weight, and output layouts. This is not a one-process
+framework ABBA: the pinned SenDNN frontend uses Torch 2.10 while Design A uses
+Torch 2.11. Both ran serially on the same pod and current installed DD2
+DeepTools/Senlib stack.
+
+The paired fresh Torch-Spyre incumbent measured 1216.0395 us. Design A lowers
+that to 1051.2275 us (`1.1568x`) and closes about 78.5% of the latency distance
+from stock Torch-Spyre to SenDNN, but leaves roughly 45.1 us in the primary
+bracket. The next useful analysis is emitted SenDNN final-SDSC/SMC versus
+Design A SMC attribution for that residual; another work-division sweep is
+not justified by this result alone.
+
+Durable artifacts:
+
+```text
+repository:
+  ring_compute_prototypes/activation_stationary_decode/compare_sendnn_design_a.py
+  ring_compute_prototypes/activation_stationary_decode/sendnn_down_m512_comparison.json
+
+device:
+  pod: adnan-cdx-spyre-dev-pf
+  root: /tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63
+```

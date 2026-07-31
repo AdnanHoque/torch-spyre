@@ -1,0 +1,467 @@
+{
+  "all_gates": true,
+  "comparisons": {
+    "all_events_pooled": {
+      "design_a_effective_tflops": 51.27312675577475,
+      "design_a_latency_increase_percent_vs_sendnn": 4.069117652174478,
+      "design_a_median_us": 1047.0805,
+      "event_ranges_disjoint": true,
+      "sendnn_effective_tflops": 53.359490607415765,
+      "sendnn_latency_reduction_percent_vs_design_a": 3.9100145595300484,
+      "sendnn_median_us": 1006.1395,
+      "sendnn_speedup_over_design_a": 1.0406911765217448,
+      "winner": "sendnn"
+    },
+    "longer_design_a_warmup_sensitivity": {
+      "design_a_effective_tflops": 51.428554787933116,
+      "design_a_latency_increase_percent_vs_sendnn": 3.7488241599172456,
+      "design_a_median_us": 1043.9160000000002,
+      "event_ranges_disjoint": true,
+      "sendnn_effective_tflops": 53.35652087491944,
+      "sendnn_latency_reduction_percent_vs_design_a": 3.613365443196591,
+      "sendnn_median_us": 1006.1955,
+      "sendnn_speedup_over_design_a": 1.0374882415991724,
+      "winner": "sendnn"
+    },
+    "primary_equal_warmup_bracket": {
+      "design_a_effective_tflops": 51.070858781757515,
+      "design_a_latency_increase_percent_vs_sendnn": 4.486479582581859,
+      "design_a_median_us": 1051.2275,
+      "event_ranges_disjoint": true,
+      "sendnn_effective_tflops": 53.36214243365029,
+      "sendnn_latency_reduction_percent_vs_design_a": 4.293837442418498,
+      "sendnn_median_us": 1006.0895,
+      "sendnn_speedup_over_design_a": 1.0448647958258186,
+      "winner": "sendnn"
+    }
+  },
+  "decision": "Design A beats the Torch-Spyre incumbent for this shape but does not beat the pinned SenDNN FP16 matmul. SenDNN remains the performance target.",
+  "device": "adnan-cdx-spyre-dev-pf",
+  "dtype": "FP16",
+  "flops": 53687091200,
+  "generated_at": "2026-07-31T16:03:11.658920+00:00",
+  "method": {
+    "design_a_boundary": "activation and weight preplaced in native device layouts; one BMM root; native device output; conversions and host transfer excluded",
+    "launch_order": "SenDNN, Design A warm10, SenDNN, Design A warm30, SenDNN",
+    "not_claimed": [
+      "host or Granite end-to-end speedup",
+      "hardware stall or ring-utilization counters",
+      "identical generated program or input layout"
+    ],
+    "not_matched": [
+      "not one-process ABBA across frameworks",
+      "SenDNN uses torch 2.10 while Design A uses torch 2.11",
+      "operand values differ, although dense FP16 scheduling is data-independent"
+    ],
+    "performance_scope": "Kineto cat==kernel complete-event duration",
+    "sen_dnn_boundary": "static weight preparation excluded; gpu_memcpy/gpu_memset and host wall excluded; one fp16_bmm kernel event per Predict"
+  },
+  "run_root": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63",
+  "runs": {
+    "design_a": {
+      "warm10": {
+        "blocks": 30,
+        "candidate_work_division": {
+          "K": 1,
+          "M": 4,
+          "N": 8
+        },
+        "correctness": {
+          "candidate_matches_incumbent": {
+            "allclose_rtol_5e2_atol_2_5e1": true,
+            "finite": true,
+            "max_abs_error": 0.0703125,
+            "mean_abs_error": 0.0050478745251894,
+            "shape_exact": true
+          },
+          "candidate_native": {
+            "allclose_rtol_5e2_atol_2_5e1": true,
+            "finite": true,
+            "max_abs_error": 0.078125,
+            "mean_abs_error": 0.008421659469604492,
+            "shape_exact": true
+          },
+          "incumbent": {
+            "allclose_rtol_5e2_atol_2_5e1": true,
+            "finite": true,
+            "max_abs_error": 0.0625,
+            "mean_abs_error": 0.006915607489645481,
+            "shape_exact": true
+          }
+        },
+        "device_event": {
+          "category": "kernel",
+          "roots": [
+            "batchmatmul"
+          ]
+        },
+        "directory": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/design_a_mid_v2",
+        "hashes": {
+          "summary_sha256": "18fad235aefb12c92050f4d90ddb6fe4bb4a15e410b1c4b40732ac85d56e967c",
+          "trace_sha256": "8289df8e76659f59cdf363cd7940f98e86d770fc4630a371d97fe3e19842ef6f"
+        },
+        "paid_boundary": {
+          "bmm_native_output_layout": true,
+          "candidate_bmm_inside_event": true,
+          "candidate_output_slice_inside_event": false,
+          "candidate_padding_inside_event": false,
+          "candidate_restickify_inside_event": false,
+          "compile_excluded": true,
+          "host_to_device_excluded": true,
+          "inputs_ready_on_device": true,
+          "per_arm_native_activation_layout": true,
+          "per_arm_native_weight_layout": true
+        },
+        "provenance": {
+          "deeptools_path": "/opt/ibm/spyre/deeptools/share",
+          "dxp_standalone": "/opt/ibm/spyre/deeptools/bin/dxp_standalone",
+          "environment": {
+            "DT_OPT": null,
+            "DXP_BACKEND_LX_FRAC_AVAIL": null,
+            "DXP_DEBUG": null,
+            "DXP_LX_FRAC_AVAIL": null,
+            "SENARCH": null,
+            "SENCORES": null,
+            "SENPERFORMANCE": "2"
+          },
+          "extension": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/latest_cost_model_granite_block_20260724_202708/antoni_exact_repro_20260724/torch-spyre-98ac91e/torch_spyre/_C.so",
+          "extension_sha256": "1f4d328fbce73cb2e96b819437e4aebb7b760b6f8cbe361782a8ce1526f22db1",
+          "probe": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/latest_cost_model_granite_block_20260724_202708/antoni_exact_repro_20260724/torch-spyre-design-a-2c1ab140/ring_compute_prototypes/activation_stationary_decode/benchmark_abba.py",
+          "probe_sha256": "bd6d56a68f34cd899bdf6d0ce8a9e8c1254eb45045fcd8108d1b5351143d60d8",
+          "torch_spyre_head": "2c1ab140d23f7e200ef45ef26b057229cb393727",
+          "torch_spyre_root": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/latest_cost_model_granite_block_20260724_202708/antoni_exact_repro_20260724/torch-spyre-design-a-2c1ab140",
+          "torch_spyre_tracked_status": [
+            "M ring_compute_prototypes/activation_stationary_decode/benchmark_abba.py",
+            " M tests/inductor/test_activation_stationary_linear.py",
+            " M tests/inductor/test_codegen.py",
+            " M tests/tensor/test_model_utils.py",
+            " M torch_spyre/_inductor/codegen/superdsc.py",
+            " M torch_spyre/_inductor/config.py",
+            " M torch_spyre/_inductor/decompositions.py",
+            " M torch_spyre/model_utils.py"
+          ],
+          "torch_version": "2.11.0+aiu.kineto.1.1.2"
+        },
+        "pt_service": {
+          "actual_cycles_at_core_frequency": 1156350.25,
+          "device_service_median_us": 1051.2275,
+          "effective_tflops": 51.070858781757515,
+          "ideal_cycle_over_device_service_percent": 70.84358739923307,
+          "ideal_cycles": 819200,
+          "ideal_us_at_core_frequency": 744.7272727272727
+        },
+        "timing": {
+          "count": 60,
+          "first_ten_median_us": 1070.951,
+          "last_ten_median_us": 1044.949,
+          "maximum_us": 1076.348,
+          "mean_us": 1052.7546,
+          "median_us": 1051.2275,
+          "minimum_us": 1021.219,
+          "stdev_us": 14.061158409014167
+        },
+        "warmups": 10
+      },
+      "warm30": {
+        "blocks": 30,
+        "candidate_work_division": {
+          "K": 1,
+          "M": 4,
+          "N": 8
+        },
+        "correctness": {
+          "candidate_matches_incumbent": {
+            "allclose_rtol_5e2_atol_2_5e1": true,
+            "finite": true,
+            "max_abs_error": 0.0703125,
+            "mean_abs_error": 0.0050478745251894,
+            "shape_exact": true
+          },
+          "candidate_native": {
+            "allclose_rtol_5e2_atol_2_5e1": true,
+            "finite": true,
+            "max_abs_error": 0.078125,
+            "mean_abs_error": 0.008421659469604492,
+            "shape_exact": true
+          },
+          "incumbent": {
+            "allclose_rtol_5e2_atol_2_5e1": true,
+            "finite": true,
+            "max_abs_error": 0.0625,
+            "mean_abs_error": 0.006915607489645481,
+            "shape_exact": true
+          }
+        },
+        "device_event": {
+          "category": "kernel",
+          "roots": [
+            "batchmatmul"
+          ]
+        },
+        "directory": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/design_a_mid_v3_warm30",
+        "hashes": {
+          "summary_sha256": "bc6ecdaa2c7038cb17631fcee6175054830149f7e9531ca32d2c86f05fca583a",
+          "trace_sha256": "800c3cb2938c49a9204675ab741f053a333f1b51805f84321d686a693596662d"
+        },
+        "paid_boundary": {
+          "bmm_native_output_layout": true,
+          "candidate_bmm_inside_event": true,
+          "candidate_output_slice_inside_event": false,
+          "candidate_padding_inside_event": false,
+          "candidate_restickify_inside_event": false,
+          "compile_excluded": true,
+          "host_to_device_excluded": true,
+          "inputs_ready_on_device": true,
+          "per_arm_native_activation_layout": true,
+          "per_arm_native_weight_layout": true
+        },
+        "provenance": {
+          "deeptools_path": "/opt/ibm/spyre/deeptools/share",
+          "dxp_standalone": "/opt/ibm/spyre/deeptools/bin/dxp_standalone",
+          "environment": {
+            "DT_OPT": null,
+            "DXP_BACKEND_LX_FRAC_AVAIL": null,
+            "DXP_DEBUG": null,
+            "DXP_LX_FRAC_AVAIL": null,
+            "SENARCH": null,
+            "SENCORES": null,
+            "SENPERFORMANCE": "2"
+          },
+          "extension": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/latest_cost_model_granite_block_20260724_202708/antoni_exact_repro_20260724/torch-spyre-98ac91e/torch_spyre/_C.so",
+          "extension_sha256": "1f4d328fbce73cb2e96b819437e4aebb7b760b6f8cbe361782a8ce1526f22db1",
+          "probe": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/latest_cost_model_granite_block_20260724_202708/antoni_exact_repro_20260724/torch-spyre-design-a-2c1ab140/ring_compute_prototypes/activation_stationary_decode/benchmark_abba.py",
+          "probe_sha256": "bd6d56a68f34cd899bdf6d0ce8a9e8c1254eb45045fcd8108d1b5351143d60d8",
+          "torch_spyre_head": "2c1ab140d23f7e200ef45ef26b057229cb393727",
+          "torch_spyre_root": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/latest_cost_model_granite_block_20260724_202708/antoni_exact_repro_20260724/torch-spyre-design-a-2c1ab140",
+          "torch_spyre_tracked_status": [
+            "M ring_compute_prototypes/activation_stationary_decode/benchmark_abba.py",
+            " M tests/inductor/test_activation_stationary_linear.py",
+            " M tests/inductor/test_codegen.py",
+            " M tests/tensor/test_model_utils.py",
+            " M torch_spyre/_inductor/codegen/superdsc.py",
+            " M torch_spyre/_inductor/config.py",
+            " M torch_spyre/_inductor/decompositions.py",
+            " M torch_spyre/model_utils.py"
+          ],
+          "torch_version": "2.11.0+aiu.kineto.1.1.2"
+        },
+        "pt_service": {
+          "actual_cycles_at_core_frequency": 1148307.6,
+          "device_service_median_us": 1043.9160000000002,
+          "effective_tflops": 51.42855478793312,
+          "ideal_cycle_over_device_service_percent": 71.33976993620873,
+          "ideal_cycles": 819200,
+          "ideal_us_at_core_frequency": 744.7272727272727
+        },
+        "timing": {
+          "count": 60,
+          "first_ten_median_us": 1055.4275,
+          "last_ten_median_us": 1050.7335,
+          "maximum_us": 1065.47,
+          "mean_us": 1043.30535,
+          "median_us": 1043.9160000000002,
+          "minimum_us": 1020.604,
+          "stdev_us": 10.8622522866959
+        },
+        "warmups": 30
+      }
+    },
+    "sendnn": {
+      "final": {
+        "correctness": {
+          "actual_max": 7.9609375,
+          "actual_min": -5.921875,
+          "allclose": true,
+          "atol": 0.25,
+          "cpu_reference_wall_ms": 26.567957,
+          "execute_status": "Status OK",
+          "max_abs_error": 0.142578125,
+          "mean_abs_error": 0.03627532720565796,
+          "passed": true,
+          "reference_max": 7.859375,
+          "reference_min": -5.875,
+          "relative_l2_error": 0.017392568290233612,
+          "relative_l2_limit": 0.06,
+          "rmse": 0.04502116143703461,
+          "rtol": 0.02
+        },
+        "device_event": {
+          "category": "kernel",
+          "name": "fp16_bmm"
+        },
+        "environment": {
+          "DEEPRT_EXPORT_DIR": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/sendnn_final_v1/export",
+          "DTCOMPILER_EXPORT_DIR": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/sendnn_final_v1/export",
+          "DTCOMPILER_KEEP_EXPORT": "true",
+          "DT_OPT": "autopilot=1",
+          "DXP_LX_FRAC_AVAIL": null,
+          "LX_PLANNING": null,
+          "TORCH_DEVICE_BACKEND_AUTOLOAD": "0"
+        },
+        "excluded_device_categories": [
+          "gpu_memcpy",
+          "gpu_memset"
+        ],
+        "hashes": {
+          "benchmark_sha256": "3536cfcb912779e2f04013df04d534e0c11b2d38a43152ca235e21b713bbd046",
+          "result_sha256": "d1e1f4701475af8745519fcc1dd365b6d2a8cce9d85969968529276081fcc248",
+          "trace_sha256": "e0d3da0c8aed408352ae49499d734dfd696be821235e0d61fea9f957bf291f82",
+          "wrapper_sha256": "a5873a426ba376ca2f97172567d09e6402923f3281a40ecfb53e7949bdb174f9"
+        },
+        "profile": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/sendnn_final_v1/profile",
+        "repetitions": 60,
+        "software": {
+          "platform": "Linux-5.14.0-427.102.1.el9_4.x86_64-x86_64-with-glibc2.39",
+          "python": "3.12.13 (main, Apr 16 2026, 00:00:00) [GCC 14.3.1 20251022 (Red Hat 14.3.1-4)]",
+          "sendnn_distribution": null,
+          "sendnn_module": "/opt/ibm/spyre/runtime/lib/sendnn.cpython-312-x86_64-linux-gnu.so",
+          "torch": "2.10.0+aiu.kineto.1.1.1",
+          "torch_sendnn_distribution": "1.3.0+main.1.1bef083.0"
+        },
+        "timing": {
+          "count": 60,
+          "first_ten_median_us": 1005.79,
+          "last_ten_median_us": 1006.2925,
+          "maximum_us": 1008.798,
+          "mean_us": 1006.2315,
+          "median_us": 1006.152,
+          "minimum_us": 1004.759,
+          "stdev_us": 0.9025113455317652
+        },
+        "warmups": 10
+      },
+      "post": {
+        "correctness": {
+          "actual_max": 7.9609375,
+          "actual_min": -5.921875,
+          "allclose": true,
+          "atol": 0.25,
+          "cpu_reference_wall_ms": 28.089055,
+          "execute_status": "Status OK",
+          "max_abs_error": 0.142578125,
+          "mean_abs_error": 0.03627532720565796,
+          "passed": true,
+          "reference_max": 7.859375,
+          "reference_min": -5.875,
+          "relative_l2_error": 0.017392568290233612,
+          "relative_l2_limit": 0.06,
+          "rmse": 0.04502116143703461,
+          "rtol": 0.02
+        },
+        "device_event": {
+          "category": "kernel",
+          "name": "fp16_bmm"
+        },
+        "environment": {
+          "DEEPRT_EXPORT_DIR": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/sendnn_post_v1/export",
+          "DTCOMPILER_EXPORT_DIR": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/sendnn_post_v1/export",
+          "DTCOMPILER_KEEP_EXPORT": "true",
+          "DT_OPT": "autopilot=1",
+          "DXP_LX_FRAC_AVAIL": null,
+          "LX_PLANNING": null,
+          "TORCH_DEVICE_BACKEND_AUTOLOAD": "0"
+        },
+        "excluded_device_categories": [
+          "gpu_memcpy",
+          "gpu_memset"
+        ],
+        "hashes": {
+          "benchmark_sha256": "3536cfcb912779e2f04013df04d534e0c11b2d38a43152ca235e21b713bbd046",
+          "result_sha256": "ad1de5a190c66eed3874528b9d864cbfaa5134d13cde51c33888c558542fdf41",
+          "trace_sha256": "bd323a7f9c2c00ca78b1333300b00772bfb6199f2e2e55ddae6b47adcbc8492f",
+          "wrapper_sha256": "a5873a426ba376ca2f97172567d09e6402923f3281a40ecfb53e7949bdb174f9"
+        },
+        "profile": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/sendnn_post_v1/profile",
+        "repetitions": 60,
+        "software": {
+          "platform": "Linux-5.14.0-427.102.1.el9_4.x86_64-x86_64-with-glibc2.39",
+          "python": "3.12.13 (main, Apr 16 2026, 00:00:00) [GCC 14.3.1 20251022 (Red Hat 14.3.1-4)]",
+          "sendnn_distribution": null,
+          "sendnn_module": "/opt/ibm/spyre/runtime/lib/sendnn.cpython-312-x86_64-linux-gnu.so",
+          "torch": "2.10.0+aiu.kineto.1.1.1",
+          "torch_sendnn_distribution": "1.3.0+main.1.1bef083.0"
+        },
+        "timing": {
+          "count": 60,
+          "first_ten_median_us": 1005.9875,
+          "last_ten_median_us": 1006.3415,
+          "maximum_us": 1008.538,
+          "mean_us": 1006.2736333333334,
+          "median_us": 1006.2339999999999,
+          "minimum_us": 1004.395,
+          "stdev_us": 0.8138964238160509
+        },
+        "warmups": 10
+      },
+      "pre": {
+        "correctness": {
+          "actual_max": 7.9609375,
+          "actual_min": -5.921875,
+          "allclose": true,
+          "atol": 0.25,
+          "cpu_reference_wall_ms": 27.723058,
+          "execute_status": "Status OK",
+          "max_abs_error": 0.142578125,
+          "mean_abs_error": 0.03627532720565796,
+          "passed": true,
+          "reference_max": 7.859375,
+          "reference_min": -5.875,
+          "relative_l2_error": 0.017392568290233612,
+          "relative_l2_limit": 0.06,
+          "rmse": 0.04502116143703461,
+          "rtol": 0.02
+        },
+        "device_event": {
+          "category": "kernel",
+          "name": "fp16_bmm"
+        },
+        "environment": {
+          "DEEPRT_EXPORT_DIR": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/sendnn_pre_v3/export",
+          "DTCOMPILER_EXPORT_DIR": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/sendnn_pre_v3/export",
+          "DTCOMPILER_KEEP_EXPORT": "true",
+          "DT_OPT": "autopilot=1",
+          "DXP_LX_FRAC_AVAIL": null,
+          "LX_PLANNING": null,
+          "TORCH_DEVICE_BACKEND_AUTOLOAD": "0"
+        },
+        "excluded_device_categories": [
+          "gpu_memcpy",
+          "gpu_memset"
+        ],
+        "hashes": {
+          "benchmark_sha256": "3536cfcb912779e2f04013df04d534e0c11b2d38a43152ca235e21b713bbd046",
+          "result_sha256": "3c9302009c2766e5fb733d5d91d3f3bf7f597c01d57b64f134bb9d78200c9fe9",
+          "trace_sha256": "748037178d8a36b4cdc99ebf34435cd6fc00c4b3b2c6f5fcc386093b52f1975c",
+          "wrapper_sha256": "a5873a426ba376ca2f97172567d09e6402923f3281a40ecfb53e7949bdb174f9"
+        },
+        "profile": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63/sendnn_pre_v3/profile",
+        "repetitions": 60,
+        "software": {
+          "platform": "Linux-5.14.0-427.102.1.el9_4.x86_64-x86_64-with-glibc2.39",
+          "python": "3.12.13 (main, Apr 16 2026, 00:00:00) [GCC 14.3.1 20251022 (Red Hat 14.3.1-4)]",
+          "sendnn_distribution": null,
+          "sendnn_module": "/opt/ibm/spyre/runtime/lib/sendnn.cpython-312-x86_64-linux-gnu.so",
+          "torch": "2.10.0+aiu.kineto.1.1.1",
+          "torch_sendnn_distribution": "1.3.0+main.1.1bef083.0"
+        },
+        "timing": {
+          "count": 60,
+          "first_ten_median_us": 1006.779,
+          "last_ten_median_us": 1005.392,
+          "maximum_us": 1007.89,
+          "mean_us": 1006.0432833333333,
+          "median_us": 1005.886,
+          "minimum_us": 1004.31,
+          "stdev_us": 0.8433277122364528
+        },
+        "warmups": 10
+      }
+    }
+  },
+  "schema": "sendnn_vs_design_a_m512_down_v1",
+  "shape": {
+    "K": 12800,
+    "M": 512,
+    "N": 4096
+  }
+}

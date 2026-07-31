@@ -312,6 +312,55 @@ Durable evidence:
 - device SMC root: `/tmp/design_a_smc_m512_20260731.fCyy0i` on
   `adnan-cdx-spyre-dev-pf`.
 
+### M512 down projection versus SenDNN
+
+The strongest Design A cell was compared directly with SenDNN FP16 matmul on
+the same `adnan-cdx-spyre-dev-pf` device:
+
+```text
+[512, 12800] @ [12800, 4096] -> FP16 [512, 4096]
+```
+
+The serialized launch order was SenDNN, Design A, SenDNN, Design A, SenDNN.
+Every run passed its CPU-reference correctness gate. Each SenDNN run contains
+60 `cat == kernel`, `fp16_bmm` events. Each Design A run contains 60 candidate
+BMM events from 30 ICCI blocks and passes the one-BMM structural gate.
+
+| Comparison | SenDNN median | Design A median | SenDNN / A throughput | SenDNN latency advantage |
+|---|---:|---:|---:|---:|
+| Primary, equal 10-warmup bracket | 1006.0895 us | 1051.2275 us | **1.0449x** | **4.29%** |
+| Design A 30-warmup sensitivity | 1006.1955 us | 1043.9160 us | **1.0375x** | **3.61%** |
+| All events pooled | 1006.1395 us | 1047.0805 us | **1.0407x** | **3.91%** |
+
+The primary throughput is 53.362 TFLOP/s for SenDNN versus 51.071 TFLOP/s
+for Design A. The event ranges are disjoint in both controlled comparisons:
+the fastest Design A event is still slower than the slowest bracketing SenDNN
+event. The earlier archived, cross-stack measurements also agree in direction
+(`1003.4225 us` SenDNN versus `1063.847 us` Design A), but are not used as the
+primary result.
+
+This is a device-kernel comparison, not host or Granite E2E timing. SenDNN's
+static weight preparation is outside the measured Predict loop, and its
+`gpu_memcpy`/`gpu_memset` events are excluded. Design A preplaces A and W in
+its native device layouts and requests native C, so it likewise excludes
+conversion and host transfer. The two frameworks use different frontends
+(SenDNN with Torch 2.10 and Design A with Torch 2.11), so this is a serialized
+same-device bracket rather than one-process ABBA.
+
+The fresh Design A run still improves over its paired Torch-Spyre incumbent
+(`1216.0395 -> 1051.2275 us`, 13.55% lower) and closes about 78.5% of the
+incumbent-to-SenDNN latency gap. It does not surpass SenDNN. The remaining
+target is approximately 38-45 us, depending on the Design A warmup protocol.
+
+Durable evidence:
+
+- `compare_sendnn_design_a.py`: validates both framework boundaries and
+  computes the bracketed comparisons;
+- `sendnn_down_m512_comparison.json`: all run statistics, correctness,
+  provenance, hashes, and explicit non-claims;
+- device root:
+  `/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63`.
+
 ### Large-M result
 
 The same conversion-free oracle was repeated at M4096 and M16384. The
