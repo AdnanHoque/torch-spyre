@@ -525,16 +525,36 @@ def spyre_linear(
     leading_shape = input.shape[:-1]
     static_leading_shape = all(isinstance(size, int) for size in leading_shape)
     logical_m = math.prod(leading_shape) if static_leading_shape else None
+    static_k = input.shape[-1] if isinstance(input.shape[-1], int) else None
+    static_n = weight.shape[0] if isinstance(weight.shape[0], int) else None
+    selected_shapes = config.activation_stationary_shapes.strip()
+    shape_selected = True
+    if config.matmul_dataflow == "activation_stationary" and selected_shapes:
+        try:
+            allowlist = {
+                tuple(int(value) for value in item.lower().split("x"))
+                for item in selected_shapes.split(",")
+            }
+        except ValueError as error:
+            raise Unsupported(
+                "SPYRE_ACTIVATION_STATIONARY_SHAPES must be a comma-separated KxN list"
+            ) from error
+        if any(len(shape) != 2 for shape in allowlist):
+            raise Unsupported(
+                "SPYRE_ACTIVATION_STATIONARY_SHAPES must be a comma-separated KxN list"
+            )
+        shape_selected = (static_k, static_n) in allowlist
     activation_stationary_eligible = (
         config.matmul_dataflow == "activation_stationary"
+        and shape_selected
         and input.dim() >= 2
         and weight.dim() == 2
         and input.dtype == torch.float16
         and weight.dtype == torch.float16
         and logical_m is not None
         and 0 < logical_m <= 64
-        and isinstance(input.shape[-1], int)
-        and isinstance(weight.shape[0], int)
+        and static_k is not None
+        and static_n is not None
         and input.shape[-1] == weight.shape[-1]
         and input.shape[-1] % 64 == 0
         and weight.shape[0] % 64 == 0
@@ -545,9 +565,9 @@ def spyre_linear(
         padded_input = torch.nn.functional.pad(
             flat_input, (0, 0, 0, physical_m - logical_m)
         )
-        out = torch.matmul(
-            weight, padded_input.transpose(-1, -2)
-        ).transpose(-1, -2)[:logical_m]
+        out = torch.matmul(weight, padded_input.transpose(-1, -2)).transpose(-1, -2)[
+            :logical_m
+        ]
         out = out.reshape(*leading_shape, weight.shape[0])
         if bias is not None:
             out = out + bias

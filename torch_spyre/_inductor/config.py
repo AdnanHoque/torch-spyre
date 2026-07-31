@@ -33,9 +33,16 @@ global_stick_optimizer: bool = os.environ.get("GLOBAL_STICK_OPTIMIZER", "1") == 
 # small activation in XRF, and stream the large weight through the PT input.
 # The first implementation is deliberately limited to eligible aten.linear
 # decompositions; unsupported shapes retain the existing dataflow.
-matmul_dataflow: Literal["weight_stationary", "activation_stationary"] = (
-    os.environ.get("SPYRE_MATMUL_DATAFLOW", "weight_stationary")
+matmul_dataflow: Literal["weight_stationary", "activation_stationary"] = os.environ.get(
+    "SPYRE_MATMUL_DATAFLOW", "weight_stationary"
 )  # type: ignore[assignment]
+
+# Optional comma-separated KxN allowlist for activation-stationary rollout and
+# attribution, for example ``4096x12800,12800x4096``. Empty means every
+# otherwise eligible shape. This is ignored by the weight-stationary path.
+activation_stationary_shapes: str = os.environ.get(
+    "SPYRE_ACTIVATION_STATIONARY_SHAPES", ""
+)
 
 allow_all_ops_in_lx_planning: bool = False
 

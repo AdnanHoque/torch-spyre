@@ -61,6 +61,41 @@ def test_activation_stationary_linear_falls_back_above_physical_m64():
     torch.testing.assert_close(actual, expected, rtol=5e-2, atol=2.5e-1)
 
 
+def test_activation_stationary_shape_allowlist_can_fall_back(monkeypatch):
+    activation = torch.randn((1, 128), dtype=torch.float16)
+    weight = torch.randn((256, 128), dtype=torch.float16)
+
+    def unexpected_pad(*args, **kwargs):
+        raise AssertionError("non-selected shape entered activation stationary")
+
+    monkeypatch.setattr(torch.nn.functional, "pad", unexpected_pad)
+    with config.patch(
+        {
+            "matmul_dataflow": "activation_stationary",
+            "activation_stationary_shapes": "128x64",
+        }
+    ):
+        actual = spyre_linear(activation, weight)
+
+    assert actual.shape == (1, 256)
+
+
+def test_invalid_activation_stationary_shape_allowlist_is_rejected():
+    activation = torch.randn((1, 128), dtype=torch.float16)
+    weight = torch.randn((256, 128), dtype=torch.float16)
+
+    with (
+        config.patch(
+            {
+                "matmul_dataflow": "activation_stationary",
+                "activation_stationary_shapes": "not-a-shape",
+            }
+        ),
+        pytest.raises(Unsupported, match="comma-separated KxN list"),
+    ):
+        spyre_linear(activation, weight)
+
+
 def test_weight_stationary_remains_default():
     assert config.matmul_dataflow == "weight_stationary"
 

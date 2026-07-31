@@ -49,6 +49,15 @@ Eligibility is deliberately narrow:
 
 Other shapes use the existing decomposition.
 
+For staged full-model attribution, restrict the candidate to exact KxN pairs:
+
+```bash
+export SPYRE_ACTIVATION_STATIONARY_SHAPES=4096x12800,12800x4096
+```
+
+An empty allowlist selects every otherwise eligible shape. The allowlist is a
+rollout/attribution control; it does not change either matmul algorithm.
+
 ## Focused validation
 
 Host-side decomposition tests:
