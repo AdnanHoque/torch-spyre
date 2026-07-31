@@ -1207,15 +1207,58 @@ def work_distribution_pass(
 
 _PT_ROWS = 8  # PT block rows per corelet
 
+
+@dataclasses.dataclass(frozen=True)
+class _MatmulCostProfile:
+    """Precision-specific inputs to the analytic matmul cost model.
+
+    The remaining coefficients below describe DD2 scheduling effects shared by
+    both precisions. These fields are the quantities that change mechanically
+    when FMA becomes FMA8 and the two input tensors become one byte per value.
+    The two tile targets are device-fit coefficients expressed in logical
+    elements, so they must also be precision-specific.
+    """
+
+    peak_macs_us_core: float
+    lhs_bytes: int
+    rhs_bytes: int
+    output_bytes: int
+    target_pt_passes: int
+    target_m_tie_passes: int
+    target_n_tile_elems: int
+
+
 # Constants for the matmul cost model (_matmul_split_cost). Each is either an
 # AIU hardware limit or a coefficient fit to measured device kernel times.
-_TARGET_PT_PASSES = 5  # per-core M that keeps the PT pipeline full = this * _PT_ROWS
-_TARGET_M_TIE_PASSES = 4  # enough M lanes to keep the stationary weights fed
 _PT_EFFICIENCY_EXPONENT = 0.25
 _M_MIN = _PT_ROWS // 2  # below half a PT pass an m-split buys nothing
-_PEAK_MACS_US_CORE = (98.304e12 / 2 / 32) / 1e6  # DL16 peak / 32 cores, MACs/us/core
+_DL16_PEAK_MACS_US_CORE = (98.304e12 / 2 / 32) / 1e6
+_DL16_MATMUL_COST_PROFILE = _MatmulCostProfile(
+    peak_macs_us_core=_DL16_PEAK_MACS_US_CORE,
+    lhs_bytes=2,
+    rhs_bytes=2,
+    output_bytes=2,
+    target_pt_passes=5,
+    target_m_tie_passes=4,
+    target_n_tile_elems=512,
+)
+_FP8_MATMUL_COST_PROFILE = _MatmulCostProfile(
+    # FMA8 performs two FP8 products per 16-bit PT lane. Accumulation and the
+    # exposed output remain 16-bit, while both streamed operands are one byte.
+    peak_macs_us_core=2 * _DL16_PEAK_MACS_US_CORE,
+    lhs_bytes=1,
+    rhs_bytes=1,
+    output_bytes=2,
+    target_pt_passes=5,
+    # DD2 Q/O oracle fit: retain four M cohorts through M=512, then expose
+    # eight at M>=1024. Keep this explicitly profile-local until it is
+    # validated on projection families beyond K=N=4096.
+    target_m_tie_passes=16,
+    # A 1024-element FP8 weight tile occupies the same bytes as the calibrated
+    # 512-element DL16 tile.
+    target_n_tile_elems=1024,
+)
 _HBM_BW_GBS = 204.8  # LPDDR5 aggregate peak bandwidth
-_DTYPE_BYTES = 2  # fp16
 _PSUM_PER_CORE_ELEM_US = 1.0e-3
 _BMM_PSUM_PER_CORE_ELEM_US = 1.0e-4
 _COHORT_LIMIT = 8  # cores sharing a broadcast before it contends for bandwidth
@@ -1223,16 +1266,13 @@ _COHORT_PENALTY_EXPONENT = 0.75
 _M_LANE_UNDERUSE_PENALTY_US = 10.0  # tie-break when too few M lanes are used
 _M_TILE_UNDERFILL_TARGET = 16  # rows/core below this pay PT startup overhead
 _M_TILE_UNDERFILL_PENALTY_US = 30.0
-_TARGET_N_TILE_ELEMS = 512  # per-core N wider than this loses schedule efficiency
-_WIDE_N_TILE_PENALTY_US = 25.0  # per log2 step over _TARGET_N_TILE_ELEMS
+_WIDE_N_TILE_PENALTY_US = 25.0  # per log2 step over the profile's N target
 _CORE_UNDERUSE_PENALTY_US = (
     150.0  # soft replacement for the old hard full-core fallback
 )
 _BMM_BATCH_SPLIT_PENALTY_US = 10.0  # true-BMM batch split cost per log2 step
 _LARGE_M_TILE_SHAPE_PENALTY_US = 20.0
 _SHARED_DOWN_N_SPLIT_PENALTY_US = 10.0
-_SHARED_NARROW_OUTPUT_REF = _TARGET_N_TILE_ELEMS * _COHORT_LIMIT
-_SHARED_N_TILE_TARGET = _TARGET_N_TILE_ELEMS // 4
 
 
 def _matmul_split_cost(
@@ -1242,6 +1282,7 @@ def _matmul_split_cost(
     k_axis: tuple[int, int],
     max_cores: int,
     shared_weight: bool = False,
+    profile: _MatmulCostProfile = _DL16_MATMUL_COST_PROFILE,
 ) -> float:
     """Estimated kernel time in microseconds for ``[B,M,K]@[B,K,N]`` run with
     the given core split. Each axis is a ``(size, split)`` pair so a dim's size
@@ -1254,18 +1295,27 @@ def _matmul_split_cost(
 
     # Compute: per-core MACs over peak, derated when the per-core M tile is too
     # short to fill the PT pipeline. The PT array streams M in passes of
-    # _PT_ROWS; below _TARGET_PT_PASSES passes its startup/drain overhead is
-    # amortised over too little work, and that overhead grows sub-linearly.
+    # _PT_ROWS; below the profile's target number of passes its startup/drain
+    # overhead is amortised over too little work and grows sub-linearly.
     m_t = M // m if m else 1
     pt_passes = max(1.0, m_t / _PT_ROWS)
-    pt_eff = min(1.0, (pt_passes / _TARGET_PT_PASSES) ** _PT_EFFICIENCY_EXPONENT)
-    compute_us = (B * M * N * K / cores_used) / (_PEAK_MACS_US_CORE * pt_eff)
+    pt_eff = min(
+        1.0,
+        (pt_passes / profile.target_pt_passes) ** _PT_EFFICIENCY_EXPONENT,
+    )
+    compute_us = (B * M * N * K / cores_used) / (
+        profile.peak_macs_us_core * pt_eff
+    )
 
     # HBM: every input operand is broadcast to the cohort of cores splitting the
     # orthogonal dim. Past _COHORT_LIMIT the broadcasts contend for the shared
     # link, so effective bandwidth falls off linearly with cohort size.
     weight_batches = 1 if shared_weight else B
-    bytes_total = (B * M * K + weight_batches * K * N + B * M * N) * _DTYPE_BYTES
+    bytes_total = (
+        B * M * K * profile.lhs_bytes
+        + weight_batches * K * N * profile.rhs_bytes
+        + B * M * N * profile.output_bytes
+    )
     fanout_split = max(m, n) if shared_weight else n
     cohort_penalty = max(
         1.0, (fanout_split / _COHORT_LIMIT) ** _COHORT_PENALTY_EXPONENT
@@ -1284,7 +1334,10 @@ def _matmul_split_cost(
     # the opposite case where an M split makes each per-core tile too short.
     target_m = max(
         _M_MIN,
-        min(max_cores // 2, max(1, M // (_TARGET_M_TIE_PASSES * _PT_ROWS))),
+        min(
+            max_cores // 2,
+            max(1, M // (profile.target_m_tie_passes * _PT_ROWS)),
+        ),
     )
     m_lane_underuse_us = (
         max(0.0, math.log2(target_m / max(1, m))) * _M_LANE_UNDERUSE_PENALTY_US
@@ -1299,7 +1352,7 @@ def _matmul_split_cost(
     # are not pulled away from PT-friendly M tiles.
     n_t = N // n if n else N
     wide_n_us = (
-        max(0.0, math.log2(max(1, n_t) / _TARGET_N_TILE_ELEMS))
+        max(0.0, math.log2(max(1, n_t) / profile.target_n_tile_elems))
         * _WIDE_N_TILE_PENALTY_US
     )
 
@@ -1323,8 +1376,16 @@ def _matmul_split_cost(
         0.0
         if not shared_weight
         else filled_m_tile_factor
-        * max(0.0, math.log2(_SHARED_NARROW_OUTPUT_REF / max(1, N)))
-        * max(0.0, math.log2(max(1, n_t) / _SHARED_N_TILE_TARGET))
+        * max(
+            0.0,
+            math.log2(
+                (profile.target_n_tile_elems * _COHORT_LIMIT) / max(1, N)
+            ),
+        )
+        * max(
+            0.0,
+            math.log2(max(1, n_t) / (profile.target_n_tile_elems // 4)),
+        )
         * (_LARGE_M_TILE_SHAPE_PENALTY_US / 4)
     )
     shared_down_n_split_us = (
@@ -1430,15 +1491,19 @@ def _cost_model_matmul_planner(
     if committed_splits:
         return splits
 
-    # Classify the output coord dims: the stickified one is N, the rest index
-    # rows. Of those row dims, M is the one appearing in a single input (the
-    # LHS); batch dims appear in both.
+    # Classify the output coord dims from the output's own terminal stick
+    # coordinate. Using the union-wide ``stick_vars`` here is incorrect for
+    # QFP8MB: its activation stick makes M atomic in pairs even though M is
+    # still an output row dimension. The old test therefore saw both M and N
+    # as stick dims, declined to model the op, and left it to the generic
+    # one-dimensional distributor.
     output_coord_vars = {
         v for e in output_td.device_coords[:-1] for v in e.free_symbols
     }
     ordered_output_coord_vars = [d for d in it_space_adjusted if d in output_coord_vars]
-    n_dims = [d for d in ordered_output_coord_vars if d in stick_vars]
-    row_dims = [d for d in ordered_output_coord_vars if d not in stick_vars]
+    output_stick_vars = output_td.device_coords[-1].free_symbols
+    n_dims = [d for d in ordered_output_coord_vars if d in output_stick_vars]
+    row_dims = [d for d in ordered_output_coord_vars if d not in output_stick_vars]
     if len(n_dims) != 1 or not row_dims:
         return splits
     n_dim = n_dims[0]
@@ -1468,14 +1533,15 @@ def _cost_model_matmul_planner(
         return splits
     k_dim = reduction[0]
 
-    # The iteration space measures N and K in sticks; the cost model wants real
-    # elements so its byte and MAC counts are physical.
-    elems_per_stick = output_td.layout.device_layout.device_dtype.elems_per_stick()
-    M_e = concretize_expr(it_space_adjusted[m_dim])
+    # Any dimension touched by a physical stick is measured in atomic sticks
+    # in ``it_space_adjusted``. Restore logical element counts for the byte and
+    # MAC model, while continuing to enumerate split factors from the adjusted
+    # counts so a core never divides a QFP8MB row pair or another stick atom.
+    M_e = concretize_expr(it_space_adjusted[m_dim]) * stick_vars.get(m_dim, 1)
     n_sticks = concretize_expr(it_space_adjusted[n_dim])
     k_sticks = concretize_expr(it_space_adjusted[k_dim])
-    N_e = n_sticks * elems_per_stick
-    K_e = k_sticks * elems_per_stick
+    N_e = n_sticks * stick_vars.get(n_dim, 1)
+    K_e = k_sticks * stick_vars.get(k_dim, 1)
 
     batch_sizes = [concretize_expr(it_space_adjusted[bd]) for bd in batch_dims]
     B_total = math.prod(batch_sizes)
@@ -1485,13 +1551,20 @@ def _cost_model_matmul_planner(
         if batch_dims
         else [()]
     )
-    m_divs = [int(d) for d in divisors(M_e)]
+    m_divs = [int(d) for d in divisors(concretize_expr(it_space_adjusted[m_dim]))]
     n_divs = [int(d) for d in divisors(n_sticks)]
     k_divs = [int(d) for d in divisors(k_sticks)]
 
     # DD2 compound FP8 matmul cannot split K across cores.
     if _has_fp8_compound_tensor(input_tds + [output_td]):
         k_divs = [1]
+
+    profile = (
+        _FP8_MATMUL_COST_PROFILE
+        if op.data.reduction_type
+        in (BATCH_MATMUL_FP8_OP, BATCH_MATMUL_FP8MB_OP)
+        else _DL16_MATMUL_COST_PROFILE
+    )
 
     best = None
     best_cost = float("inf")
@@ -1509,6 +1582,7 @@ def _cost_model_matmul_planner(
                         (K_e, kk),
                         max_cores,
                         shared_weight=rhs_loaded_once,
+                        profile=profile,
                     )
                     if c < best_cost:
                         best_cost = c
