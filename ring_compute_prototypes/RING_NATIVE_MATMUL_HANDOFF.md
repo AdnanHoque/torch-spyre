@@ -1361,3 +1361,247 @@ The decision gate is strict: if the paid M64 candidate does not beat the
 incumbent despite its extra roots, stop this path. If it wins, the first
 production optimization is producer-native physical-M64 activation layout so
 the padding and transpose do not materialize in HBM.
+
+## 2026-07-30: Design A implemented and paid across Granite decode linears
+
+### Outcome
+
+The decision gate above passed decisively. Design A is now an opt-in
+production-facing Torch-Spyre decomposition, not only a manually written
+prototype. It is correct and faster on all four isolated Granite decode
+linears tested.
+
+The selector is intentionally default-off:
+
+```text
+SPYRE_MATMUL_DATAFLOW=weight_stationary      # existing default
+SPYRE_MATMUL_DATAFLOW=activation_stationary  # Design A
+```
+
+No new backend operation, raw send/receive primitive, or special work-division
+hint was added. The implementation reuses:
+
+- the existing `aten.linear` decomposition point;
+- ordinary `pad`, `matmul`, transpose, reshape, and slice operations;
+- the existing BMM backend and ordinary work-division planner;
+- the existing restickify lowering, with one narrow computed-producer fix.
+
+For eligible FP16 linears, the selector:
+
+1. flattens the logical leading dimensions into `M`;
+2. requires `1 <= M <= 64`, 2D `W[N,K]`, matching K, and stick-aligned K/N;
+3. zero-pads the activation to physical M64;
+4. lowers `A @ W.T` as `(W @ padded_A.T).T[:M]`;
+5. restores the original leading dimensions and adds bias when present.
+
+Unsupported shapes retain the existing weight-stationary decomposition. An
+unknown selector value fails closed with `Unsupported`.
+
+### Paid matched device timing
+
+Each row below is a fresh same-process matched comparison with:
+
+- inputs already on the Spyre device;
+- the ordinary planner for both arms (`--work-division auto`);
+- 10 serialized warmup blocks;
+- 30 `incumbent-candidate-candidate-incumbent` timing blocks;
+- 60 exact Kineto `cat == "kernel"` events per arm;
+- compile, host-to-device copy, and host wall time excluded;
+- all candidate padding, identities, activation restickify, BMM, and output
+  slicing included in the device event.
+
+| Logical linear | Incumbent median | Design A median | Incumbent / Design A | Paired-block median |
+|---|---:|---:|---:|---:|
+| `M1 K4096 N1024` | 203.471 us | 86.2645 us | **2.3587x** | 2.4040x |
+| `M1 K4096 N4096` | 821.6505 us | 237.5025 us | **3.4595x** | 3.4566x |
+| `M1 K4096 N12800` | 2710.962 us | 771.686 us | **3.5130x** | 3.5093x |
+| `M1 K12800 N4096` | 2999.917 us | 728.777 us | **4.1164x** | 4.1111x |
+
+All four summaries have `status=pass`, exact output shape, finite output,
+CPU-reference allclose, candidate/incumbent allclose, exact event count, and
+the expected emitted root inventories.
+
+Candidate maximum absolute error against the FP16 CPU reference was:
+
+| Logical linear | Maximum absolute error |
+|---|---:|
+| `M1 K4096 N1024` | 0.013671875 |
+| `M1 K4096 N4096` | 0.015625 |
+| `M1 K4096 N12800` | 0.017578125 |
+| `M1 K12800 N4096` | 0.0546875 |
+
+The primary speedup is the ratio of the two arm medians. The paired-block
+median is reported separately as a drift check; it agrees closely in every
+case.
+
+### Structural attribution
+
+Every incumbent bundle has:
+
+```text
+ReStickifyOpHBM
+batchmatmul
+```
+
+Every Design A bundle has:
+
+```text
+identity
+identity
+ReStickifyOpHBM
+batchmatmul
+```
+
+Thus the candidate wins while paying for its explicit physical-M64
+construction and activation restickify. This is not a hidden free-padding
+oracle.
+
+For `M1 K4096 N4096`, the automatic-selector candidate emits the exact same
+bundle SHA-256 as the earlier manually written fixed-N32 candidate:
+
+```text
+a3697974bc3b2ba20b1048d9a7cb78ff9afd8d226a3c04ca2db67dafc5225830
+```
+
+That establishes that the production selector realizes the intended
+activation-stationary dataflow rather than finding an unrelated graph. The
+original N dimension becomes BMM `mb`, and the ordinary planner distributes it
+over the 32-core budget.
+
+The most defensible mechanism remains the PT tensor-role change:
+
+- incumbent: small A is the West input; large W is repeatedly block-loaded as
+  the XRF kernel;
+- Design A: large W is the West input stream; padded A.T is the small
+  XRF-stationary kernel.
+
+Unique weight HBM bytes are unchanged. The large measured win is consistent
+with replacing repeated W kernel-load phases by the ordinary streaming input
+path while keeping PT fed. This pass does not yet contain counters that split
+the gain into HMI service, XRF load stalls, and PT occupancy, so that causal
+breakdown remains a strong architectural explanation rather than a measured
+counter decomposition.
+
+This side experiment does not use RIU, SFP, multicast, or LX-to-LX. It is not
+evidence for the paused ring-native algorithm. It is a separate PT/HMI
+dataflow win.
+
+### Compiler changes and focused tests
+
+Local and shared-PVC implementation files:
+
+```text
+torch_spyre/_inductor/config.py
+torch_spyre/_inductor/decompositions.py
+torch_spyre/_inductor/insert_restickify.py
+tests/inductor/test_activation_stationary_linear.py
+tests/inductor/test_restickify.py
+ring_compute_prototypes/activation_stationary_decode/benchmark_abba.py
+```
+
+The new decomposition tests cover:
+
+- 2D and 3D activations;
+- logical M1, M8, and M64;
+- bias and no-bias;
+- fallback above physical M64;
+- unchanged default behavior;
+- invalid-selector rejection.
+
+The computed-pad restickify regression exercises the actual
+pad-transpose-BMM-slice path. The combined focused run on
+`adnan-spyre-current-pf` passed:
+
+```text
+14 passed
+```
+
+Current source hashes:
+
+| File | SHA-256 |
+|---|---|
+| `torch_spyre/_inductor/config.py` | `01bb94f088d11b9bba35dca869849f036cd68ae82c9917f485f02b24322d8fa6` |
+| `torch_spyre/_inductor/decompositions.py` | `e7b455c5e517ee605524fc8b019875318345294b2d02f1eb6550af4e662804e1` |
+| `torch_spyre/_inductor/insert_restickify.py` | `11da63c12fd519fed0eeb14d6be6225260aa071e3af1270523264d480dab6a4f` |
+| `tests/inductor/test_activation_stationary_linear.py` | `a1669874c5be6e1d43a7b09609f44050ee2723f1de0da927eaea511a4c890e4c` |
+| `tests/inductor/test_restickify.py` | `57f509259df2cc2f161c9b4cadf4eeeaaa6b0244d2962ea37f34d9247d71dddf` |
+| `benchmark_abba.py` | `b0ddf93dc610af4da33cb23afa4f032ece8ff2e82364bab7c98d5fd45eae085c` |
+
+The same hashes were verified in the device checkout before the accepted
+measurements.
+
+### Durable timing evidence
+
+All accepted timing summaries are under:
+
+```text
+/home/adnan/codex-isolated/activation_stationary_decode_20260730_v1/timing
+```
+
+| Run directory | Summary SHA-256 | Trace SHA-256 |
+|---|---|---|
+| `m1k4096n1024_selector_auto_full_v1` | `9fd357e5f6442efbb17cda74780687c7ac71cbffede6a22711a54a4d53c3619c` | `7ed1b4929729ee18f3326935dc03a5ed2f1b263faf4ba2d381b0dae8e1baaeb7` |
+| `m1k4096n4096_selector_auto_full_v1` | `fb7dce76443d8965a6707cdc6f30dbe2002d76c7d633e4fd6741a3fc7911a0e7` | `e2813d3bb6b0aee2b787b69907c1a020a2370610b84ea446840c00f26d73f1f6` |
+| `m1k4096n12800_selector_auto_full_v1` | `7cf249849b6af5cb33b956d17b059ccc4d847f6109e2df67e9103afdd294d011` | `0404c82dd53d932b74b8ad8f4501ab16dfb4fa62c4c448ae78d348a3840dc526` |
+| `m1k12800n4096_selector_auto_full_v1` | `3fec195fbc357473f065b5672eb15f4e60412b36c3ce10a0126ec356b610a5d7` | `af21423a5bc10e1cec817168767363533fa46c3dbbf84e07f7a2903a8797a9e0` |
+
+Candidate bundle SHA-256 values:
+
+| Logical linear | Candidate bundle SHA-256 |
+|---|---|
+| `M1 K4096 N1024` | `960df89fb145fb34b82125b639cc4bc9c6e84c5aeac97b3270b30f8a2edd8545` |
+| `M1 K4096 N4096` | `a3697974bc3b2ba20b1048d9a7cb78ff9afd8d226a3c04ca2db67dafc5225830` |
+| `M1 K4096 N12800` | `5c8eab2bc8d22b31249cf687b6eebcf17250f88b22660a28dfea13798f63088d` |
+| `M1 K12800 N4096` | `1759af727f2a467e706e0f8c13cfd9482dab47b872691200f5740580b1fde00a` |
+
+Pinned stack:
+
+```text
+Torch-Spyre:
+  /home/adnan/codex-isolated/ring_matmul_true_os_torch_20260722_v1
+  HEAD 80701411a151fa6402d08ce7586f671883e1e66b
+
+Kineto Python:
+  /home/adnan/spyre-envs/main-ac3c7395/kineto-venv/bin/python
+  torch 2.11.0+aiu.kineto.1.1.2
+
+Torch-Spyre extension:
+  /home/adnan/spyre-envs/main-ac3c7395/torch-spyre/torch_spyre/_C.so
+  SHA-256 b681beeb640d5b8524dadfcc787d9ad2725db357adcf4e75f707d92d907487d4
+
+Deeptools:
+  /home/adnan/codex-isolated/deeptools-master-e3944781
+  HEAD e3944781cb25b76abeb9b3e87c1f5c5879e84229
+  /home/adnan/codex-isolated/deeptools-master-e3944781-build/dxp/dxp_standalone
+```
+
+The Torch-Spyre checkout remains dirty with the earlier ring-native work plus
+this experiment. The summaries record the full tracked status. Nothing in
+this section claims that the implementation is isolated on a clean production
+branch.
+
+### Current boundary and next step
+
+This is a strong isolated linear-kernel result, not a Granite end-to-end
+result. In particular:
+
+- no Granite graph has selected the new dataflow yet;
+- the activation is ready on-device at the timing boundary, but the current
+  graph still constructs/re-stickifies the physical-M64 kernel through HBM;
+- token correctness, model correctness, and end-to-end decode latency are
+  unmeasured;
+- the implementation code remains local and on the shared device checkout;
+  only this handoff is published.
+
+The shortest next step is no longer more microkernel tuning. It is a controlled
+Granite integration:
+
+1. enable `activation_stationary` only for the four eligible decode linears;
+2. run token/model correctness first;
+3. capture a fresh matched end-to-end decode bracket;
+4. only after that, make the producer emit a physical-M64 activation kernel
+   directly in LX to remove the two identities and HBM restickify.
+
+Because the paid implementation already wins by 2.36x to 4.12x in isolation,
+producer-native LX is an optimization opportunity, not a prerequisite for
+proving Design A.
