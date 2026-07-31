@@ -66,6 +66,7 @@ class LXRelayoutPlan:
     destination_device_dim_splits: dict[str, int]
     shuffle_iteration_symbols: tuple[sympy.Symbol, ...]
     device_dim_to_iteration_symbol: dict[str, sympy.Symbol]
+    destination_size_ratio: int
     source_lx_address: int | None = None
     destination_lx_address: int | None = None
 
@@ -86,16 +87,16 @@ def _intervals_overlap(
     )
 
 
-def _is_equal_footprint_geometry(
+def _destination_size_ratio(
     producer_map: dict[str, dict[str, int]],
     producer_splits: dict[str, int],
     consumer_map: dict[str, dict[str, int]],
     consumer_splits: dict[str, int],
-) -> bool:
-    """Whether two complete per-core partitions admit a bounded shuffle."""
+) -> int | None:
+    """Return S2:S1 per-core size ratio for exact uniform shuffle geometry."""
 
     if producer_map.keys() != consumer_map.keys():
-        return False
+        return None
 
     def slice_count(core_map: dict[str, dict[str, int]]) -> int:
         return len(
@@ -127,6 +128,8 @@ def _is_equal_footprint_geometry(
     fanout_values = set(fanout.values())
     fanin_values = set(fanin.values())
     uniform = len(fanout_values) == 1 and len(fanin_values) == 1
+    max_fanout = max(fanout_values, default=0)
+    max_fanin = max(fanin_values, default=0)
     covers_all_cores = (
         min(fanout_values, default=0) > 0 and min(fanin_values, default=0) > 0
     )
@@ -136,13 +139,18 @@ def _is_equal_footprint_geometry(
     consumer_is_partitioned = slice_count(consumer_map) == len(
         consumer_map
     ) and math.prod(consumer_splits.values()) == len(consumer_map)
-    return (
-        transfer_count > 0
-        and covers_all_cores
-        and uniform
-        and producer_is_partitioned
-        and consumer_is_partitioned
-    )
+    if transfer_count == 0 or not covers_all_cores or not uniform:
+        return None
+    if producer_is_partitioned and consumer_is_partitioned:
+        return 1
+    if (
+        producer_is_partitioned
+        and not consumer_is_partitioned
+        and max_fanout > 1
+        and max_fanin > 1
+    ):
+        return max_fanin
+    return None
 
 
 def _single_write_dep(op: ComputedBuffer, buf_name: str) -> MemoryDep | None:
@@ -486,12 +494,13 @@ def collect_lx_relayout_plans(
             dense_consumer_core_slices, dense_consumer_work_slice_dims = _dense_view(
                 consumer_core_slices, consumer_work_slice_dims, relayout_dims
             )
-            if not _is_equal_footprint_geometry(
+            destination_size_ratio = _destination_size_ratio(
                 dense_producer_core_slices,
                 dense_producer_work_slice_dims,
                 dense_consumer_core_slices,
                 dense_consumer_work_slice_dims,
-            ):
+            )
+            if destination_size_ratio is None:
                 source_is_covered = False
                 break
 
@@ -525,6 +534,7 @@ def collect_lx_relayout_plans(
                 destination_device_dim_splits=dense_consumer_work_slice_dims,
                 shuffle_iteration_symbols=shuffle_iteration_symbols,
                 device_dim_to_iteration_symbol=device_dim_to_iteration_symbol,
+                destination_size_ratio=destination_size_ratio,
             )
             if plan.consumer_name in direct_consumers:
                 source_is_covered = False

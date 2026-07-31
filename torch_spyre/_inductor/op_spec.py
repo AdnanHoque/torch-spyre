@@ -188,8 +188,13 @@ class OpSpec:
         default_factory=dict
     )
     debug_handle: DebugHandle | None = None
+    # Explicit communication ops can repeat a logical work slice across more
+    # participating cores than the op's logical work split implies.
+    num_cores_override: int | None = None
     dim_labels_override: list[str] | None = None
     layout_labels_override: list[str] | None = None
+    gather_dim: Symbol | None = None
+    replicas_contiguous: bool = False
 
 
 @dataclasses.dataclass

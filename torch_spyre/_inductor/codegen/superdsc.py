@@ -938,7 +938,12 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         symbol_mapping[dim]: value[-1] if not has_indirect_access else 1
         for dim, value in op_spec.iteration_space.items()
     }
-    num_cores = math.prod(dim_splits.values())
+    logical_core_count = math.prod(dim_splits.values())
+    num_cores = (
+        logical_core_count
+        if op_spec.num_cores_override is None
+        else op_spec.num_cores_override
+    )
 
     work_slices = {
         symbol_mapping[sym]: wk_slice if not has_indirect_access else 1
@@ -1066,19 +1071,29 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     # can add unit axes to either mapping independently.
     mapping_dims = tuple(sdsc_iteration_space)
     mapping_splits = tuple(int(dim_splits[dim]) for dim in mapping_dims)
-    # Generic reductions do not yet define the same physical cohort contract as
-    # matmul partial sums.
-    contiguous_dim = (
-        len(mapping_splits) - 1
-        if is_matmul and _spyre_config.core_id_k_fast_emission
-        else None
-    )
+    gather_dim = symbol_mapping.get(op_spec.gather_dim)
+    contiguous_dim: int | None
+    if (
+        gather_dim is not None
+        and gather_dim in mapping_dims
+        and dim_splits[gather_dim] > 1
+    ):
+        contiguous_dim = mapping_dims.index(gather_dim)
+    else:
+        # Generic reductions do not yet define the same physical cohort contract
+        # as matmul partial sums.
+        contiguous_dim = (
+            len(mapping_splits) - 1
+            if is_matmul and _spyre_config.core_id_k_fast_emission
+            else None
+        )
     # TODO: Choose the mapping before LX planning and pass it through to codegen.
     core_id_to_work_slice = core_to_slice_mapping(
         mapping_dims,
         mapping_splits,
         num_cores,
         contiguous_dim=contiguous_dim,
+        replicas_contiguous=op_spec.replicas_contiguous,
     )
 
     # Collect index tensor indices for indirect access

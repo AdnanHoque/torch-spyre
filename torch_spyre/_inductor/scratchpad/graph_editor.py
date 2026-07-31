@@ -17,6 +17,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ops_handler import WrapperHandler
 from torch_spyre._inductor.pass_utils import (
     apply_splits_from_index_coeff,
+    copy_fx_custom_meta,
     copy_op_metadata,
     iteration_space_from_op,
     splits_by_index_coeff,
@@ -144,6 +145,9 @@ class GraphEditor:
         new_fx_node = self.fx_graph.create_node(
             "call_function", self.clone_aten_op, (buf_fx,)
         )
+        hint_source = buffer_users[0] if input else buffer
+        for origin in hint_source.origins:
+            copy_fx_custom_meta(origin, new_fx_node)
         for user in old_users:
             user.args = tuple(new_fx_node if ar is buf_fx else ar for ar in user.args)
         self.lowering.orig_gm.recompile()

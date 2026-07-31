@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from sympy import Integer, Mod, Symbol, floor
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.virtualized import V
@@ -25,15 +27,18 @@ import torch_spyre._inductor.spyre_kernel as spyre_kernel_module
 
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
+from torch_spyre._inductor.constants import BATCH_MATMUL_OP
+from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.lx_relayout import (
     LX_RELAYOUT_ATTR,
     LXRelayoutPlan,
-    _is_equal_footprint_geometry,
+    _destination_size_ratio,
     per_core_view_matches_lx_relayout_side,
     rebind_lx_relayout_iteration_geometry,
 )
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
-from torch_spyre._inductor.pass_utils import PerCoreView
+from torch_spyre._inductor.pass_utils import PerCoreView, copy_fx_custom_meta
+from torch_spyre._inductor.propagate_hints import get_gather_dim
 from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
 from torch_spyre._inductor.scratchpad.firstfit_bestfit_solver import (
     FirstFitLayoutSolver,
@@ -83,8 +88,29 @@ def _dense_plan(
         destination_device_dim_splits={"0": 32, "1": 1},
         shuffle_iteration_symbols=(m, n),
         device_dim_to_iteration_symbol={"0": m, "1": n},
+        destination_size_ratio=1,
         source_lx_address=0x24000,
         destination_lx_address=0x44000,
+    )
+
+
+def _all_gather_plan() -> LXRelayoutPlan:
+    h, lk, d = Symbol("h"), Symbol("lk"), Symbol("d")
+    return LXRelayoutPlan(
+        source_name="buf_k",
+        consumer_name="consumer",
+        source_core_id_to_device_slice={
+            str(core): {"0": core // 8, "1": core % 8} for core in range(32)
+        },
+        destination_core_id_to_device_slice={
+            str(core): {"0": core // 8, "1": 0} for core in range(32)
+        },
+        source_device_dim_splits={"0": 4, "1": 8},
+        destination_device_dim_splits={"0": 4, "1": 1},
+        shuffle_iteration_symbols=(h, lk, d),
+        device_dim_to_iteration_symbol={"0": h, "1": lk},
+        destination_size_ratio=8,
+        source_lx_address=0x24000,
     )
 
 
@@ -101,18 +127,16 @@ def _compile_shuffle(shuffle_spec):
 
 def test_relayout_emits_owner_maps_and_one_shuffle_per_source():
     plan = _dense_plan()
-    assert _is_equal_footprint_geometry(
-        plan.source_core_id_to_device_slice,
-        plan.source_device_dim_splits,
-        plan.destination_core_id_to_device_slice,
-        plan.destination_device_dim_splits,
+    assert (
+        _destination_size_ratio(
+            plan.source_core_id_to_device_slice,
+            plan.source_device_dim_splits,
+            plan.destination_core_id_to_device_slice,
+            plan.destination_device_dim_splits,
+        )
+        == 1
     )
-    assert not _is_equal_footprint_geometry(
-        {"0": {"0": 0}, "1": {"0": 1}},
-        {"0": 2},
-        {"0": {"0": 0}, "1": {"0": 0}},
-        {"0": 1},
-    )
+    assert _destination_size_ratio({}, {}, {}, {}) is None
 
     m, n = plan.shuffle_iteration_symbols
     source_arg = TensorArg(
@@ -560,3 +584,95 @@ def test_planned_restickify_source_is_eligible_for_lx_reuse(monkeypatch):
     assert not allocator._op_output_good_for_lx_reuse(
         _ComputedBuffer("buf_k", _MutationLayout())
     )
+
+
+def test_gather_dim_hint_is_preserved_and_validated():
+    src = SimpleNamespace(meta={"custom": {"_hint_1": {"gather_dim": "Lq"}}})
+    dst = SimpleNamespace(meta={"custom": {"_hint_2": {"work_div": {"H": 4}}}})
+    copy_fx_custom_meta(src, dst)
+
+    lq = Symbol("lq")
+    op = SimpleNamespace(origins=[dst], work_div_loop_info={lq: ["Lq"]})
+    assert get_gather_dim(op) == lq
+    assert set(dst.meta["custom"]) == {"_hint_1", "_hint_2"}
+
+    copy_fx_custom_meta(SimpleNamespace(meta={"custom": None}), dst)
+    assert set(dst.meta["custom"]) == {"_hint_1", "_hint_2"}
+
+    dst.meta["custom"]["_hint_3"] = {"gather_dim": "typo"}
+    with pytest.raises(Unsupported, match="does not match any loop dimension"):
+        get_gather_dim(op)
+
+
+def test_grouped_gather_sizes_s2_and_emits_replica_geometry():
+    plan = _all_gather_plan()
+    assert (
+        _destination_size_ratio(
+            plan.source_core_id_to_device_slice,
+            plan.source_device_dim_splits,
+            plan.destination_core_id_to_device_slice,
+            plan.destination_device_dim_splits,
+        )
+        == 8
+    )
+
+    graph = _DummyGraph("producer", plan.consumer_name)
+    source = LifetimeBoundBuffer(plan.source_name, size=128 * 1024, uses=[0, 1])
+    allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
+    allocator._lx_relayout_plans_by_edge = {plan.edge_key: plan}
+    buffers = [source]
+    allocator._append_lx_relayout_destinations(graph, buffers)
+    destination = next(
+        buffer for buffer in buffers if buffer.name == plan.destination_name
+    )
+    assert destination.size == 1024 * 1024
+
+    h, lk, d = plan.shuffle_iteration_symbols
+    lq = Symbol("lq")
+    source_arg = TensorArg(
+        is_input=True,
+        arg_index=-1,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[4, 4096, 2, 64],
+        device_coordinates=[h, lk, floor(d / 64), Mod(d, 64)],
+        allocation={"lx": plan.source_lx_address},
+        name=plan.source_name,
+    )
+    consumer_spec = OpSpec(
+        op=BATCH_MATMUL_OP,
+        is_reduction=True,
+        iteration_space={
+            h: (Integer(4), 4),
+            lq: (Integer(512), 8),
+            lk: (Integer(4096), 1),
+            d: (Integer(128), 1),
+        },
+        args=[source_arg],
+        op_info={},
+        gather_dim=lq,
+    )
+    shuffle_spec, consumer_arg = _materialize_explicit_lx_shuffle(
+        source_arg,
+        consumer_spec,
+        replace(plan, destination_lx_address=0x44000),
+    )
+
+    assert shuffle_spec.num_cores_override == 32
+    assert shuffle_spec.replicas_contiguous
+    assert consumer_arg.allocation == {"lx": 0x44000}
+    root, allocations = _compile_shuffle(shuffle_spec)
+    head_dim = next(
+        dim for dim, splits in root["numWkSlicesPerDim_"].items() if splits == 4
+    )
+    assert [root["coreIdToWkSlice_"][str(core)][head_dim] for core in range(32)] == [
+        head for head in range(4) for _ in range(8)
+    ]
+
+    input_map = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
+    output_map = allocations[1]["coordinates_"]["coreIdToWkSlice_"]
+    assert input_map["0"] != input_map["4"]
+    assert output_map["0"] == output_map["4"]
+    input_out = allocations[0]["coordinates_"]["coordInfo"]["out"]["folds"]
+    output_out = allocations[1]["coordinates_"]["coordInfo"]["out"]["folds"]
+    assert input_out["dim_prop_attr"][0]["factor_"] == 8
+    assert output_out["dim_prop_attr"][0]["factor_"] == 1

@@ -1001,7 +1001,7 @@ class ScratchpadAllocator:
             source_uses = [use for use in source.uses if use != consumer_use]
             source.uses = sorted({*source_uses, shuffle_use})
             destination_size = round_up_to_alignment(
-                source.size,
+                source.size * plan.destination_size_ratio,
                 _LX_ALLOCATION_GRANULARITY_BYTES,
             )
             destination = LifetimeBoundBuffer(

@@ -558,7 +558,10 @@ def _assign_dim_hints_impl(operations: list[Operation]) -> None:
             continue
 
         assert dp is not None  # guaranteed by op_hints check above
-        if any(hint_dict.get("work_div") for hint_dict in op_hints.values()):
+        if any(
+            hint_dict.get("work_div") or hint_dict.get("gather_dim")
+            for hint_dict in op_hints.values()
+        ):
             op.work_div_loop_info = {  # type: ignore[attr-defined]
                 sym: list(names) for sym, names in dp.loop_var_dims.items()
             }

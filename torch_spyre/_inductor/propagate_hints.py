@@ -26,6 +26,7 @@ from torch._dynamo.symbolic_convert import InstructionTranslator
 from torch._inductor.ir import Operation
 
 from .logging_utils import get_inductor_logger
+from .errors import Unsupported
 from .patches import OBSERVER_HOOKS_KEY
 
 logger = get_inductor_logger("propagate_hints")
@@ -112,6 +113,24 @@ def get_op_hints(op: Operation) -> dict[int, dict[str, Any]]:
         if m:
             hints[int(m.group(1))] = v
     return hints
+
+
+def get_gather_dim(op: Operation) -> sympy.Symbol | None:
+    """Resolve an op's named gather dimension to its loop symbol."""
+
+    loop_dims = getattr(op, "work_div_loop_info", {})
+    for _, hint in sorted(get_op_hints(op).items(), reverse=True):
+        name = hint.get("gather_dim")
+        if name is not None:
+            gather_dim = next(
+                (sym for sym, names in loop_dims.items() if name in names), None
+            )
+            if gather_dim is None:
+                raise Unsupported(
+                    f"gather_dim hint {name!r} does not match any loop dimension"
+                )
+            return gather_dim
+    return None
 
 
 def log_new_nodes(node: torch.fx.Node):

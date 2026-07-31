@@ -69,6 +69,7 @@ from .op_spec import (
     UnimplementedOp as OpSpecUnimplementedOp,
     format_op_spec_list,
 )
+from .propagate_hints import get_gather_dim
 from torch_spyre._inductor.provenance import build_debug_handle
 
 logger = get_inductor_logger("spyre_kernel")
@@ -97,6 +98,7 @@ def _materialize_explicit_lx_shuffle(
     destination_name = plan.destination_name
     producer_map = plan.source_core_id_to_device_slice
     consumer_map = plan.destination_core_id_to_device_slice
+    participant_count = len(consumer_map)
     assert source_address is not None, (
         f"allocator recorded LX relayout without S1 address for {plan.source_name}"
     )
@@ -190,12 +192,19 @@ def _materialize_explicit_lx_shuffle(
         args=[source, destination_output],
         op_info={},
         symbolic_dim_bounds=dict(consumer_spec.symbolic_dim_bounds),
+        num_cores_override=participant_count,
         dim_labels_override=[
             symbol_to_label[symbol] for symbol in shuffle_iteration_space
         ],
         layout_labels_override=(
             ["KERNEL", *LAYOUT_LABELS] if consumer_is_matmul else LAYOUT_LABELS
         ),
+        gather_dim=(
+            consumer_spec.gather_dim
+            if consumer_spec.gather_dim in shuffle_iteration_space
+            else None
+        ),
+        replicas_contiguous=consumer_spec.gather_dim is not None,
     )
     return shuffle, destination_input
 
@@ -900,6 +909,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             tiled_symbols=tiled_syms,
             symbolic_dim_bounds=symbolic_dim_bounds,
             debug_handle=debug_handle,
+            gather_dim=get_gather_dim(ir_node),
         )
 
     def remove_kernel_local_buffers(self) -> None:
@@ -1339,6 +1349,8 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                 buf.writeline(
                     f"symbolic_dim_bounds={_serialize_value(op_spec.symbolic_dim_bounds)},"
                 )
+                if op_spec.num_cores_override is not None:
+                    buf.writeline(f"num_cores_override={op_spec.num_cores_override},")
                 if op_spec.dim_labels_override is not None:
                     buf.writeline(
                         f"dim_labels_override={op_spec.dim_labels_override!r},"
@@ -1347,6 +1359,10 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                     buf.writeline(
                         f"layout_labels_override={op_spec.layout_labels_override!r},"
                     )
+                if op_spec.gather_dim is not None:
+                    buf.writeline(f"gather_dim={sympy_str(op_spec.gather_dim)},")
+                if op_spec.replicas_contiguous:
+                    buf.writeline("replicas_contiguous=True,")
                 if op_spec.debug_handle is not None:
                     # Source-to-kernel provenance must survive the OpSpec ->
                     # generated-source -> exec round-trip. DebugHandle/SourceLoc

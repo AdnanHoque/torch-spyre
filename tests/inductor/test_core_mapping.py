@@ -113,10 +113,21 @@ def _bmm_op_spec(op: str) -> OpSpec:
 
 
 @pytest.mark.parametrize(
-    "op", [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP, BATCH_MATMUL_FP8MB_OP]
+    "op,reduction_contiguous,gather_contiguous",
+    [
+        (BATCH_MATMUL_OP, False, False),
+        (BATCH_MATMUL_OP, True, False),
+        (BATCH_MATMUL_FP8_OP, False, False),
+        (BATCH_MATMUL_FP8_OP, True, False),
+        (BATCH_MATMUL_FP8MB_OP, False, False),
+        (BATCH_MATMUL_FP8MB_OP, True, False),
+        (BATCH_MATMUL_OP, True, True),
+        (BATCH_MATMUL_FP8MB_OP, True, True),
+    ],
 )
-@pytest.mark.parametrize("reduction_contiguous", [False, True])
-def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contiguous):
+def test_planner_and_sdsc_use_the_same_mapping(
+    monkeypatch, op, reduction_contiguous, gather_contiguous
+):
     class FakeReduction:
         def __init__(self, reduction_type):
             self.reduction_type = reduction_type
@@ -140,6 +151,8 @@ def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contig
 
     op_spec = _bmm_op_spec(op)
     dims = tuple(op_spec.iteration_space)
+    gather_dim = dims[1] if gather_contiguous else None
+    op_spec.gather_dim = gather_dim
     splits = dict(zip(dims, (2, 4, 4)))
     monkeypatch.setattr(
         pass_utils_module, "apply_splits_from_index_coeff", lambda *_: splits
@@ -158,6 +171,7 @@ def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contig
         num_stick=0,
         num_stick_stride=0,
         is_matmul=pass_utils_module._is_matmul_op(FakeComputedBuffer(op)),
+        gather_dim=gather_dim,
     )
     planner_view, _, representable = pass_utils_module._per_core_view_from_prep(
         prep, ({1: 2, 2: 4}, {3: 4})
@@ -170,3 +184,8 @@ def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contig
     }
     assert representable
     assert dict(planner_view.core_to_slot) == sdsc_output_mapping
+    if gather_dim is not None:
+        core_id = sympy.Symbol("core_id")
+        assert [
+            int(sdsc_output_mapping[1].subs(core_id, core)) for core in range(4)
+        ] == list(range(4))

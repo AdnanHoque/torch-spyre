@@ -25,7 +25,7 @@ from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 from .logging_utils import get_inductor_logger
 from .errors import Unsupported
-from .pass_utils import replace_computed_buffer_body
+from .pass_utils import copy_fx_custom_meta, replace_computed_buffer_body
 from .constants import is_ea_compatible
 from torch_spyre._C import SpyreTensorLayout, ElementArrangement
 from torch_spyre.constants import DEVICE_NAME
@@ -516,6 +516,7 @@ def _make_intermediate_bufs(
 
         with gl.graph.inserting_before(orig_node):
             new_node = gl.graph.create_node("call_function", target, args, clean_kw)
+        copy_fx_custom_meta(orig_node, new_node)
 
         # Propagate metadata for shape inference
         if input_nodes and "val" in input_nodes[0].meta:

@@ -28,11 +28,13 @@ def core_to_slice_mapping(
     num_cores: int,
     *,
     contiguous_dim: int | None = None,
+    replicas_contiguous: bool = False,
 ) -> dict[str, Expr]:
     """Return the logical work slice assigned to each physical core.
 
     By default dimensions vary in iteration-space order. ``contiguous_dim``
     moves one caller-selected dimension first so its participants are adjacent.
+    ``replicas_contiguous`` packs repeated copies of each logical slice together.
     """
 
     dims = tuple(dims)
@@ -53,6 +55,11 @@ def core_to_slice_mapping(
         dim_order.insert(0, contiguous_dim)
 
     core_id: Expr = Symbol("core_id")
+    if replicas_contiguous:
+        replicas = num_cores // logical_cores
+        if replicas > 1:
+            core_id = floor(core_id / Integer(replicas))
+
     stride = Integer(1)
     result: dict[str, Expr] = {}
     for dim in dim_order:
