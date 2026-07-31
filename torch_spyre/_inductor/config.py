@@ -27,6 +27,16 @@ hbm_planning: bool = _get_env_bool("SPYRE_INDUCTOR_MEMORY_PLAN", True)
 
 global_stick_optimizer: bool = os.environ.get("GLOBAL_STICK_OPTIMIZER", "1") == "1"
 
+# Matmul tensor-role selection. ``weight_stationary`` preserves the existing
+# linear decomposition. ``activation_stationary`` is an opt-in decode dataflow:
+# flatten up to 64 logical rows, zero-pad to the physical M64 PT tile, park the
+# small activation in XRF, and stream the large weight through the PT input.
+# The first implementation is deliberately limited to eligible aten.linear
+# decompositions; unsupported shapes retain the existing dataflow.
+matmul_dataflow: Literal["weight_stationary", "activation_stationary"] = (
+    os.environ.get("SPYRE_MATMUL_DATAFLOW", "weight_stationary")
+)  # type: ignore[assignment]
+
 allow_all_ops_in_lx_planning: bool = False
 
 # Opt-in extension to LX planning: materialize compatible producer and

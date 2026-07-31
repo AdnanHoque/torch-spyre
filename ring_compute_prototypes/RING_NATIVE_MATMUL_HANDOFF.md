@@ -1516,19 +1516,24 @@ pad-transpose-BMM-slice path. The combined focused run on
 14 passed
 ```
 
-Current source hashes:
+Branch source hashes:
 
 | File | SHA-256 |
 |---|---|
-| `torch_spyre/_inductor/config.py` | `01bb94f088d11b9bba35dca869849f036cd68ae82c9917f485f02b24322d8fa6` |
+| `torch_spyre/_inductor/config.py` | `9f8a2fdc131a2f5fe5c847e2108893e4b3279e48551db2d0b723b0a28756450c` |
 | `torch_spyre/_inductor/decompositions.py` | `e7b455c5e517ee605524fc8b019875318345294b2d02f1eb6550af4e662804e1` |
-| `torch_spyre/_inductor/insert_restickify.py` | `11da63c12fd519fed0eeb14d6be6225260aa071e3af1270523264d480dab6a4f` |
+| `torch_spyre/_inductor/insert_restickify.py` | `f60699513028b79d3192f3cef66341af27c442a288aba9c3a99660488157d7bb` |
 | `tests/inductor/test_activation_stationary_linear.py` | `a1669874c5be6e1d43a7b09609f44050ee2723f1de0da927eaea511a4c890e4c` |
 | `tests/inductor/test_restickify.py` | `57f509259df2cc2f161c9b4cadf4eeeaaa6b0244d2962ea37f34d9247d71dddf` |
-| `benchmark_abba.py` | `b0ddf93dc610af4da33cb23afa4f032ece8ff2e82364bab7c98d5fd45eae085c` |
+| `benchmark_abba.py` | `1a2a8ae03cb8563b1e57aa9438563aeae352bd2d405ae41cde4c12b70aeee3ec` |
 
-The same hashes were verified in the device checkout before the accepted
-measurements.
+The accepted measurements used benchmark SHA-256
+`b0ddf93dc610af4da33cb23afa4f032ece8ff2e82364bab7c98d5fd45eae085c`.
+The branch version changes only its descriptive module docstring. The
+decomposition and focused test hashes above match the measured checkout.
+`config.py` and `insert_restickify.py` have different whole-file hashes because
+the measured dirty checkout contained unrelated ring-prototype configuration
+and pass changes; the Design A hunks are the same narrow implementation.
 
 ### Durable timing evidence
 
@@ -1590,8 +1595,11 @@ result. In particular:
   graph still constructs/re-stickifies the physical-M64 kernel through HBM;
 - token correctness, model correctness, and end-to-end decode latency are
   unmeasured;
-- the implementation code remains local and on the shared device checkout;
-  only this handoff is published.
+- the implementation, focused tests, model, probe, and matched timing harness
+  are tracked on `ah/communication-cost-model`;
+- the matched Granite/SenDNN E2E runbooks remain in
+  `Adnan-Hoque1/spyre-granite-e2e-bench` branch
+  `adnan/sendnn-granite-antoni-repro-20260725`.
 
 The shortest next step is no longer more microkernel tuning. It is a controlled
 Granite integration:

@@ -23,7 +23,7 @@ import torch._decomp as decomp
 
 from .constants import DEVICE_NAME, FP8_E4M3_MAX
 from .errors import Unsupported
-from . import customops  # noqa: F401
+from . import config, customops  # noqa: F401
 from . import spyre_hint
 from torch_spyre._C import DataFormats, get_device_dtype
 
@@ -512,6 +512,47 @@ def spyre_softplus(
 def spyre_linear(
     input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor | None = None
 ) -> torch.Tensor:
+    if config.matmul_dataflow not in (
+        "weight_stationary",
+        "activation_stationary",
+    ):
+        raise Unsupported(
+            "unsupported matmul dataflow "
+            f"{config.matmul_dataflow!r}; expected 'weight_stationary' "
+            "or 'activation_stationary'"
+        )
+
+    leading_shape = input.shape[:-1]
+    static_leading_shape = all(isinstance(size, int) for size in leading_shape)
+    logical_m = math.prod(leading_shape) if static_leading_shape else None
+    activation_stationary_eligible = (
+        config.matmul_dataflow == "activation_stationary"
+        and input.dim() >= 2
+        and weight.dim() == 2
+        and input.dtype == torch.float16
+        and weight.dtype == torch.float16
+        and logical_m is not None
+        and 0 < logical_m <= 64
+        and isinstance(input.shape[-1], int)
+        and isinstance(weight.shape[0], int)
+        and input.shape[-1] == weight.shape[-1]
+        and input.shape[-1] % 64 == 0
+        and weight.shape[0] % 64 == 0
+    )
+    if activation_stationary_eligible:
+        physical_m = 64
+        flat_input = input.reshape(logical_m, input.shape[-1])
+        padded_input = torch.nn.functional.pad(
+            flat_input, (0, 0, 0, physical_m - logical_m)
+        )
+        out = torch.matmul(
+            weight, padded_input.transpose(-1, -2)
+        ).transpose(-1, -2)[:logical_m]
+        out = out.reshape(*leading_shape, weight.shape[0])
+        if bias is not None:
+            out = out + bias
+        return out
+
     weight = weight.transpose(-1, -2)
     while weight.dim() < input.dim():
         weight = torch.unsqueeze(weight, 0)

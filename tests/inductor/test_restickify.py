@@ -443,6 +443,28 @@ def test_matmul_xt_yt(matmul_tensors_ab_ba):
     )
 
 
+def test_matmul_with_padded_computed_kernel_restickify():
+    """A computed pad feeding a transposed kernel must remain FX-resolvable."""
+    m, physical_m, k, n = 8, 64, 64, 64
+    activation = torch.randn((m, k), dtype=torch.float16) * 0.1
+    weight = torch.randn((n, k), dtype=torch.float16) * 0.1
+
+    def activation_stationary(activation, weight):
+        padded = torch.nn.functional.pad(
+            activation, (0, 0, 0, physical_m - m)
+        )
+        return torch.matmul(weight, padded.t()).t()[:m]
+
+    # The final slice is a non-contiguous CPU view but a compact Spyre result;
+    # this regression is about value correctness and producer resolution.
+    _compare(
+        activation_stationary,
+        activation,
+        weight,
+        check_strides=False,
+    )
+
+
 # ------- Batched Matmul Tests ---------
 
 BMM_SIZES = [(3, 128, 64)]

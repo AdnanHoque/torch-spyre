@@ -43,6 +43,37 @@ from torch.utils._ordered_set import OrderedSet
 logger = get_inductor_logger("insert_restickify")
 
 
+def _find_fx_arg_node(
+    graph_lowering: GraphLowering, arg_name: str
+) -> torch.fx.Node | None:
+    """Find the FX value that owns ``arg_name``.
+
+    Graph inputs and views normally have an exact ``env`` TensorBox name match.
+    A realized computed producer can instead be referenced through a view whose
+    TensorBox name differs from the load dependency name. In that case the
+    computed buffer's FX origin is the authoritative value to feed to the
+    synthetic restickify call.
+    """
+    exact = [
+        fx_node
+        for fx_node, tb in graph_lowering.env.items()
+        if isinstance(fx_node, torch.fx.Node)
+        and isinstance(tb, TensorBox)
+        and tb.get_name() == arg_name
+    ]
+    if exact:
+        return exact[0]
+
+    arg_buffer = graph_lowering.get_buffer(arg_name)
+    origin_matches = [
+        fx_node
+        for fx_node in getattr(arg_buffer, "origins", ())
+        if isinstance(fx_node, torch.fx.Node)
+        and isinstance(graph_lowering.env.get(fx_node), TensorBox)
+    ]
+    return origin_matches[0] if origin_matches else None
+
+
 def _fixed_tiled(layout: FixedLayout, stl: SpyreTensorLayout) -> FixedTiledLayout:
     return FixedTiledLayout(
         layout.device, layout.dtype, layout.size, layout.stride, stl
@@ -110,20 +141,18 @@ def _create_restickify_node(
             env[tb_fx_node] = tb
     graph_lowering.env.update(env)
 
-    # Search env by buffer name to find the FX node to pass to restickify.
-    fx_arg_node = next(
-        fx_node
-        for fx_node, tb in graph_lowering.env.items()
-        if isinstance(fx_node, torch.fx.Node)
-        and isinstance(tb, TensorBox)
-        and tb.get_name() == arg_name
-    )
+    # Search env by buffer name, then fall back to the authoritative FX origin
+    # for a realized computed producer. Some compiler-created pointwise buffers
+    # have no FX origin; those are lowered directly from their IR buffer below.
+    fx_arg_node = _find_fx_arg_node(graph_lowering, arg_name)
     # Insert at a valid position in the FX graph; the operations list order is
     # authoritative pre-scheduler, not position in the FX graph.
     first_compute_node = next(n for n in fx_graph.nodes if n.op != "placeholder")
     with fx_graph.inserting_before(first_compute_node):
         restick_fx_node = fx_graph.create_node(
-            "call_function", torch.ops.spyre.restickify.default, (fx_arg_node,)
+            "call_function",
+            torch.ops.spyre.restickify.default,
+            (fx_arg_node,) if fx_arg_node is not None else (),
         )
     # Propagate hint metadata from the consumer op so assign_dim_hints can assign
     # dim_hints to the restickify buffer after insertion.
@@ -131,8 +160,22 @@ def _create_restickify_node(
         if "custom" in consumer_fx_node.meta:
             copy_fx_custom_meta(consumer_fx_node, restick_fx_node)
             break
-    # Lower the FX node; run_node registers the output in graph.buffers and graph.operations.
-    restick_tb = graph_lowering.run_node(restick_fx_node)
+    # Lower the FX node; run_node registers the output in graph.buffers and
+    # graph.operations. Compiler-created pointwise buffers can have no FX value
+    # at all (for example, an explicit pad introduced before a transposed
+    # matmul). In that case call the same lowering with a TensorBox over the
+    # already-realized IR buffer.
+    if fx_arg_node is not None:
+        restick_tb = graph_lowering.run_node(restick_fx_node)
+    else:
+        source = TensorBox(StorageBox(graph_lowering.get_buffer(arg_name)))
+        with (
+            graph_lowering.set_current_node(restick_fx_node),
+            V.set_current_node(restick_fx_node),
+        ):
+            restick_tb = graph_lowering.call_function(
+                torch.ops.spyre.restickify.default, (source,), {}
+            )
     restick_buff = restick_tb.data.data  # TensorBox -> StorageBox -> ComputedBuffer
     assert isinstance(restick_buff, ComputedBuffer), (
         f"Expected ComputedBuffer, got {type(restick_buff).__name__}"
