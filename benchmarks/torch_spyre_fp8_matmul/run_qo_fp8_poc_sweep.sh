@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Serialized DD2-only runner for the experimental torch-spyre Q/O FP8 path.
+# Serialized DD2-only runner for the torch-spyre Q/O FP8 planner experiment.
 # Split FP8_M_VALUES across pods if desired, but never launch two cases on one
 # device pod at the same time.
 
@@ -14,6 +14,10 @@ FP8_REPS="${FP8_REPS:-20}"
 FP8_K="${FP8_K:-4096}"
 FP8_N="${FP8_N:-4096}"
 FP8_CORELET_PRELOAD="${FP8_CORELET_PRELOAD:-}"
+FP8_DXP_PRELOAD="${FP8_DXP_PRELOAD:-/opt/ibm/spyre/deeptools/lib/libdxp.so}"
+FP8_INCLUDE_RAW_CONTROL="${FP8_INCLUDE_RAW_CONTROL:-1}"
+FP8_INCLUDE_SCALED="${FP8_INCLUDE_SCALED:-0}"
+FP8_FORCE_ORACLE_AB="${FP8_FORCE_ORACLE_AB:-0}"
 
 stack_text="${SENARCH:-} ${SENTARGET:-} ${DEEPTOOLS_PATH:-} ${LD_LIBRARY_PATH:-} ${FP8_CORELET_PRELOAD}"
 shopt -s nocasematch
@@ -26,7 +30,7 @@ shopt -u nocasematch
 mkdir -p "$STUDY_ROOT"
 status_file="$STUDY_ROOT/status.tsv"
 if [[ ! -f "$status_file" ]]; then
-  printf 'M\tvariant\tstatus\tresult\n' >"$status_file"
+  printf 'M\tlabel\tvariant\tstatus\tresult\n' >"$status_file"
 fi
 
 if [[ -n "$FP8_CORELET_PRELOAD" ]]; then
@@ -34,7 +38,11 @@ if [[ -n "$FP8_CORELET_PRELOAD" ]]; then
     echo "FP8_CORELET_PRELOAD does not exist: $FP8_CORELET_PRELOAD" >&2
     exit 2
   fi
-  export LD_PRELOAD="$FP8_CORELET_PRELOAD${LD_PRELOAD:+:$LD_PRELOAD}"
+  if [[ ! -f "$FP8_DXP_PRELOAD" ]]; then
+    echo "FP8_DXP_PRELOAD does not exist: $FP8_DXP_PRELOAD" >&2
+    exit 2
+  fi
+  export LD_PRELOAD="$FP8_CORELET_PRELOAD:$FP8_DXP_PRELOAD${LD_PRELOAD:+:$LD_PRELOAD}"
 fi
 
 export SENCORES="${SENCORES:-32}"
@@ -43,10 +51,12 @@ unset TORCH_SPYRE_DOWNCAST_WARN
 
 run_case() {
   local m="$1"
-  local variant="$2"
-  local case_root="$STUDY_ROOT/m${m}_k${FP8_K}_n${FP8_N}/$variant"
+  local label="$2"
+  local variant="$3"
+  shift 3
+  local case_root="$STUDY_ROOT/m${m}_k${FP8_K}_n${FP8_N}/$label"
   local cache_root="$case_root/torchinductor_cache"
-  local -a extra_args=()
+  local -a extra_args=("$@")
 
   if [[ "$variant" == fp8_* ]]; then
     extra_args+=(--prepack-weight)
@@ -65,17 +75,26 @@ run_case() {
       --output-dir "$case_root/profile" \
       "${extra_args[@]}" \
       >"$case_root/run.log" 2>&1; then
-    printf '%s\t%s\tPASS\t%s\n' \
-      "$m" "$variant" "$case_root/profile/result.json" | tee -a "$status_file"
+    printf '%s\t%s\t%s\tPASS\t%s\n' \
+      "$m" "$label" "$variant" "$case_root/profile/result.json" \
+      | tee -a "$status_file"
   else
-    printf '%s\t%s\tFAIL\t%s\n' \
-      "$m" "$variant" "$case_root/run.log" | tee -a "$status_file"
+    printf '%s\t%s\t%s\tFAIL\t%s\n' \
+      "$m" "$label" "$variant" "$case_root/run.log" | tee -a "$status_file"
     return 1
   fi
 }
 
 for m in $FP8_M_VALUES; do
-  run_case "$m" fp16
-  run_case "$m" fp8_baseline
-  run_case "$m" fp8_optimized
+  run_case "$m" fp16 fp16
+  run_case "$m" automatic_fp8 fp8_raw_baseline
+  if [[ "$FP8_INCLUDE_RAW_CONTROL" == 1 ]]; then
+    run_case "$m" raw_fp8 fp8_raw_baseline --prepack-activation
+  fi
+  if [[ "$FP8_INCLUDE_SCALED" == 1 ]]; then
+    run_case "$m" scaled_fp8 fp8_baseline
+  fi
+  if [[ "$FP8_FORCE_ORACLE_AB" == 1 ]]; then
+    run_case "$m" forced_fp8 fp8_raw_optimized
+  fi
 done
