@@ -1089,3 +1089,275 @@ The shortest next pass is deliberately bounded:
 Do not add RIU/SFP ring traffic, run correctness, or begin timing until a
 completion control passes. This pass localized the compiler/runtime blocker;
 it did not demonstrate an algorithmic speedup.
+
+## 2026-07-30: activation-stationary decode matmul side experiment
+
+### Scope and decision
+
+The ring-native output-stationary investigation above is paused, not replaced.
+This bounded side experiment evaluates a different PT dataflow for Granite
+decode matmuls whose logical `M` is small and whose physical PT execution is
+padded to `M=64`.
+
+For a source linear with `A[M,K]`, `W[N,K]`, and `C=A@W.T`, the candidate is:
+
+```python
+padded_a = torch.nn.functional.pad(A, (0, 0, 0, 64 - M))
+C = (W @ padded_a.T).T[:M]
+```
+
+The algebra asks the existing weight-stationary BMM substrate to cast the
+tensors into different hardware roles:
+
+| PT role | Incumbent `A @ W.T` | Candidate `(W @ A.T).T` |
+|---|---|---|
+| West-to-East streamed input | `A` | `W` |
+| XRF-stationary kernel | `W` | `A.T` |
+| North-to-South reduction/output | `C` | `C.T` |
+
+The candidate freezes the same 32-way ownership of the original `N` dimension.
+It does not use a different work division to manufacture a win, and it does not
+use LX-to-LX communication. This is intentionally a PT/HMI dataflow experiment
+while ring-native work is paused.
+
+### First-principles corrections
+
+The original design note's exact-fit statement needs the physical decode
+padding:
+
+```text
+M8  x K1024 x FP16 = 16 KiB per corelet, not 128 KiB
+M64 x K1024 x FP16 = 128 KiB per corelet, exactly one corelet XRF
+```
+
+For `M1 x K4096 x N4096`:
+
+- logical `A`: 8 KiB;
+- physical padded `A`: 512 KiB across four K1024 corelet tiles;
+- each corelet's stationary A tile: exactly 128 KiB;
+- `W`: 32 MiB;
+- output: 8 KiB logical;
+- unique weight HBM bytes: 32 MiB in both incumbent and candidate.
+
+Therefore this design does **not** reduce the incumbent's unique HBM weight
+traffic. Its credible lever is narrower: the large weight becomes the ordinary
+PT West input stream, while the small padded activation is block-loaded into
+XRF. If this wins, it should be because W delivery and PT execution overlap
+better than repeated W XRF block-load phases. The HMI weight floor remains the
+same in both arms. No multicast or bandwidth-reduction claim is made for a
+single N-sharded decode matmul.
+
+Design B from the same note is the ordinary weight-stationary dataflow already
+used by the incumbent. It is a useful architecture explanation, but it is not a
+new algorithm by itself.
+
+### Device result: correct physical-M64 realization
+
+The exact logical Granite decode control `M1 x K4096 x N4096` passed on
+`adnan-spyre-dev-pf` after explicit zero-padding to physical M64.
+
+The emitted BMM descriptor is:
+
+```text
+logical BMM: mb=4096, in=4096, out=64
+work slices: mb=32, in=1, out=1
+
+INPUT  layout=[mb,in],  stick=[in]   # W is the West stream
+KERNEL layout=[in,out], stick=[out]  # padded A.T is the XRF kernel
+OUTPUT layout=[mb,out], stick=[out]  # transposed C ownership
+```
+
+The complete root inventory is:
+
+```text
+identity
+identity
+ReStickifyOpHBM
+batchmatmul
+```
+
+The two identity roots create the 63 zero rows and copy the logical row into
+the physical M64 activation. The restickify is the small activation transpose;
+there is no standalone W shuffle. Original `N=4096` is `mb` in the transposed
+BMM and is owned 32 ways.
+
+All fail-closed correctness gates passed:
+
+| Profile | allclose | finite | max absolute error |
+|---|---:|---:|---:|
+| positive | yes | yes | 0.015625 |
+| poison activation | yes | yes | 0.0234375 |
+| poison weight | yes | yes | 0.015625 |
+
+Both poison profiles changed the device output. The final probe status is
+`pass`.
+
+No Kineto timing and no Granite end-to-end run were performed. This section
+makes no latency or speedup claim.
+
+### Compiler substrate added
+
+Explicit padding exposed one narrow Torch-Spyre gap. Restickify insertion could
+resolve graph inputs and FX-backed views, but raised `StopIteration` when the
+required input was a compiler-created pointwise buffer with no FX origin.
+
+The local patch extends `_create_restickify_node` as follows:
+
+1. retain the existing exact FX/TensorBox lookup;
+2. use an FX origin when a realized producer has one;
+3. only when a compiler-created buffer has no FX value, call the same registered
+   restickify lowering directly with a `TensorBox(StorageBox(buffer))`.
+
+The targeted regression:
+
+```text
+tests/inductor/test_restickify.py::
+test_matmul_with_padded_computed_kernel_restickify
+```
+
+passes on `adnan-spyre-current-pf`:
+
+```text
+1 passed in 13.15s
+```
+
+This is the only production-code change in this side experiment. It is not yet
+committed as production code because the candidate has not been timed.
+
+### Source/binary compatibility finding
+
+The older coordinator Deeptools source at:
+
+```text
+/home/adnan/codex-isolated/ring_matmul_b35_coordinator_20260729/deeptools
+```
+
+contains a unary DDL template that binds optional `shuffle`, but the installed
+`/opt/ibm/spyre/deeptools/bin/dxp_standalone` registry does not expose that
+operation. The padded graph therefore aborted before device execution.
+
+The exact generated bundle compiles successfully with the existing matched
+current Deeptools pair:
+
+```text
+source:
+/home/adnan/codex-isolated/deeptools-master-e3944781
+HEAD e3944781cb25b76abeb9b3e87c1f5c5879e84229
+
+binary:
+/home/adnan/codex-isolated/deeptools-master-e3944781-build/dxp/dxp_standalone
+SHA-256 c22185db3cbfa071dd8d261343e71a5c09543eae83c9d19e86e90d729e43a131
+```
+
+No redundant shuffle implementation was added.
+
+### Durable paths and hashes
+
+Mac source paths:
+
+```text
+ring_compute_prototypes/activation_stationary_decode/design_a_model.py
+ring_compute_prototypes/activation_stationary_decode/test_design_a_model.py
+ring_compute_prototypes/activation_stationary_decode/probe.py
+torch_spyre/_inductor/insert_restickify.py
+tests/inductor/test_restickify.py
+```
+
+| File | SHA-256 |
+|---|---|
+| `design_a_model.py` | `c37c1bd7279e345151f1b4d89bce40c6e1ccb814ddbd568c5e8f1f6736c1800f` |
+| `test_design_a_model.py` | `234d61e11ea1b71afc58641be8626fb00e4fa626ff6705fc520275898624e921` |
+| `probe.py` | `fd389ce033c2e05755641cb9faa99e5f1f469a95584e6cfd2674e267c42404fa` |
+| `insert_restickify.py` | `11da63c12fd519fed0eeb14d6be6225260aa071e3af1270523264d480dab6a4f` |
+| `test_restickify.py` | `57f509259df2cc2f161c9b4cadf4eeeaaa6b0244d2962ea37f34d9247d71dddf` |
+
+Shared-PVC prototype root:
+
+```text
+/home/adnan/codex-isolated/activation_stationary_decode_20260730_v1
+```
+
+Passing run:
+
+```text
+/home/adnan/codex-isolated/activation_stationary_decode_20260730_v1/\
+runs/m1k4096n4096_activation_stationary_padded64_v5
+```
+
+Passing summary SHA-256:
+
+```text
+fa2635dd94a5e9afed3e0f2671a96a8f7f8a7ddb51992ce0c8da0739d5dd2098
+```
+
+Bundle SHA-256:
+
+```text
+a3697974bc3b2ba20b1048d9a7cb78ff9afd8d226a3c04ca2db67dafc5225830
+```
+
+Matched DXP replay:
+
+```text
+/home/adnan/codex-isolated/activation_stationary_decode_20260730_v1/\
+redxp/m1_padded64_master_e3944781_v1
+```
+
+The Torch-Spyre device checkout is:
+
+```text
+/home/adnan/codex-isolated/ring_matmul_true_os_torch_20260722_v1
+HEAD 80701411a151fa6402d08ce7586f671883e1e66b
+```
+
+It remains dirty with the earlier ring-native work plus this experiment. The
+compiler and test files above were copied only after verifying that their pod
+versions matched the local HEAD versions exactly.
+
+Useful failed/discovery runs are preserved:
+
+```text
+runs/m1k4096n4096_activation_stationary_v3
+  singleton M folded out; DXP reuse-dimension assertion
+
+runs/m8k4096n4096_activation_stationary_v2
+  implicit M64 descriptor but non-zero/undefined padded lanes; incorrect
+
+runs/m64k4096n4096_activation_stationary_v2
+  direct physical-M64 candidate; device-correct and exact role mapping
+
+runs/m1k4096n4096_activation_stationary_padded64_v1
+  original restickify FX lookup StopIteration
+
+runs/m1k4096n4096_activation_stationary_padded64_v2
+  first computed-origin fallback still had no FX origin
+
+runs/m1k4096n4096_activation_stationary_padded64_v3
+  Torch-Spyre compile succeeded; old Deeptools source/binary mismatch
+
+runs/m1k4096n4096_activation_stationary_padded64_v4
+  device-correct; probe inventory gate was stale
+
+runs/m1k4096n4096_activation_stationary_padded64_v5
+  final passing correctness and structural control
+```
+
+### Next bounded pass
+
+The shortest honest next step is timing, not more compiler work:
+
+1. add a serialized fresh-process `incumbent-candidate-candidate-incumbent`
+   Kineto bracket for `M1 x K4096 x N4096`;
+2. require exact `cat == "kernel"` device events and include the entire paid
+   four-root candidate bundle;
+3. compare against a freshly compiled same-environment incumbent using the
+   same N32 ownership;
+4. only if the candidate wins, remove or fuse the two padding identities and
+   activation restickify;
+5. then repeat correctness/timing for Granite `N=1024`, `N=12800`, and
+   `K=12800 -> N=4096` decode linears before graph integration.
+
+The decision gate is strict: if the paid M64 candidate does not beat the
+incumbent despite its extra roots, stop this path. If it wins, the first
+production optimization is producer-native physical-M64 activation layout so
+the padding and transpose do not materialize in HBM.
