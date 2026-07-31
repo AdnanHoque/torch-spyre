@@ -921,3 +921,171 @@ Conversely, if the HMI-local control completes and is competitive, the next
 high-value step is not another PT micro-optimization. It is attaching RIU A
 delivery to the same schedule, then adding SFP pair sharing and measuring the
 two fabrics as one overlapped algorithm.
+
+## 2026-07-30 output-free A/L0/PT discriminator
+
+This is the latest completion boundary and supersedes the earlier proposal to
+separate PT forwarding with a balanced synthetic output. A narrower valid
+control was compiled and run.
+
+### Why the control is valid
+
+Deleting the result transaction in source DDL is not a valid discriminator in
+the current compiler. DDC uses the ordinary output transaction to bind tensor
+data-connects and preserve datastage row continuity. Making the result absent
+in both HBM and LX first exposed several legitimate `isPresent()` bugs and then
+failed those DDC invariants before code generation.
+
+The successful diagnostic keeps the ordinary output transaction through DDC,
+then removes its service operations before DCG/DCC. The local-only hook is
+enabled by:
+
+```bash
+export DXP_DIAGNOSTIC_PRUNE_OUTPUT_STORE=1
+```
+
+It removes only:
+
+```text
+transfer_lds2_src:lx_dst:hbm
+sync_send_lxsu_to_l3su
+sync_receive_l3su_from_lxsu
+sync_send_l3su_to_lxsu
+sync_receive_lxsu_from_l3su
+```
+
+This hook is a diagnostic instrument, not proposed production functionality.
+It lives in the detached Deeptools tree:
+
+```text
+/home/adnan/codex-isolated/ring_matmul_b35_coordinator_20260729/deeptools
+base commit: b35cece729c0ae1707ea71bf5a0d3c4451358a07
+```
+
+That tree contains unrelated pre-existing changes. Reapply only the named
+patches below; do not transfer its full diff.
+
+### Structural proof
+
+The K32 and K16 controls both retain the A LX-to-L0 stream and 1,024 PT FMA
+instructions. K16 expresses the same K32 work as two K16 epochs. Both satisfy
+all of these emitted-code gates across the 32 cores:
+
+| Gate | K32 | K16 |
+|---|---:|---:|
+| `PTOP_FMA` | 1,024 | 1,024 |
+| `L0_SYNC tilesize=32` | 128 | 0 |
+| `L0_SYNC tilesize=16` | 0 | 128 |
+| `PTOP_XRFACCESS` | 0 | 0 |
+| `tgts=result` | 0 | 0 |
+| PE payload | 0 | 0 |
+| SFP payload | 0 | 0 |
+| `LX_ST` | 0 | 0 |
+| `L3_STMU` | 0 | 0 |
+| `L3_SYNC synctag=163` | 0 | 0 |
+
+Therefore neither artifact has a stranded external output consumer. W/XRF,
+PT-result forwarding, PE/SFP result transfer, LX output service, and HBM
+output service are all absent.
+
+### Device result
+
+Each arm was launched as a zero-input, no-D2H, untimed completion probe with a
+hard 90-second timeout. Both reached `device_synchronize`, reported possible
+lost completion after 60 seconds, and were terminated at the outer timeout.
+The producer-only recovery control passed immediately after each arm through
+`kernel_and_device_synchronize`.
+
+| Arm | Completion | Immediate recovery |
+|---|---|---|
+| A-only/output-free K32 | timeout | pass |
+| A-only/output-free K16 | timeout | pass |
+
+No numerical correctness or performance result exists for either arm.
+
+Shared-PVC artifacts and evidence:
+
+```text
+/home/adnan/codex-isolated/os_hmi2_focused_main_20260730/\
+k32_a_only_internal_output_v16
+/home/adnan/codex-isolated/os_hmi2_focused_main_20260730/\
+k32_a_only_internal_output_completion_manifest_20260730.json
+/home/adnan/codex-isolated/os_hmi2_focused_main_20260730/\
+k32_a_only_internal_output_clc_20260730_v1.log
+/home/adnan/codex-isolated/os_hmi2_focused_main_20260730/\
+post_a_only_internal_output_recovery_20260730_v1/result.json
+
+/home/adnan/codex-isolated/os_hmi2_focused_main_20260730/\
+k16_a_only_internal_output_v17
+/home/adnan/codex-isolated/os_hmi2_focused_main_20260730/\
+k16_a_only_internal_output_completion_manifest_20260730.json
+/home/adnan/codex-isolated/os_hmi2_focused_main_20260730/\
+k16_a_only_internal_output_clc_20260730_v1.log
+/home/adnan/codex-isolated/os_hmi2_focused_main_20260730/\
+post_k16_a_only_internal_output_recovery_20260730_v1/result.json
+```
+
+Compile roots:
+
+```text
+/tmp/os_hmi2_k32_a_only_postddc_pruned_20260730_v16
+/tmp/os_hmi2_k16_a_only_postddc_pruned_20260730_v17
+```
+
+Artifact hashes:
+
+| Artifact | K32 SHA-256 | K16 SHA-256 |
+|---|---|---|
+| DDL | `09c15850162b1a4ed39ba016811bf7862f40f00f9209cdcd07e192f3d8fa4d43` | `84f1677238405ed25973a69d3d79ed4de99e9972be684bd4a180912788e58c3f` |
+| bundle | `8f096dd0da33e3286ac26678488b686575b9cda4626e47aea556ed15c69ce6dd` | `8f096dd0da33e3286ac26678488b686575b9cda4626e47aea556ed15c69ce6dd` |
+| `spyrecode.json` | `caf89f44395f02e8a8d8f7e166e637859dd097776d23fe21e3f4d3340e759338` | `81fd90cb283d0e1386bb382d7f5f054a6af7cb56f16657566195ded1ea0cc236` |
+| `init_binary.bin` | `2540c3513007472aebe673303cf33fc068fb225770e550c3424227e56c29e14f` | `edef4d99a7580478a5af967ce276f0f65f1e41a3f6db370d23155c838c2704bc` |
+| SMC | `252c451d96af3e1a25bdf56b747b40fca074e1813776759899cc7cff28aaa33f` | `042b037a891ddf03868d69ae1e2d7a50d4153bf59e00faa87606db4e62bcfaba` |
+| timeout log | `e5d3d0650b84392d22fce0ddf137024c34e77d427e4a2f0c16303468a89d9739` | `3ad0e552ac892f0e9d7088164b23ca74cb115c168bc1f1e539fe2333cf5da2a5` |
+| manifest | `bbc0de8d9c3f414ae585a480f7f52d273e1611d1ad1918b54bbffcc516ea82d9` | `58c9e0a9cc80b7d3d6a932983f0baedbfecf1f84044dea92516bbe5f04dd2767` |
+
+Both recovery result files hash to:
+
+```text
+02f53185a5623d9d8f8e9e1551453c11cfda4c2159c40c81d8a5519b148a8d33
+```
+
+### Local diagnostic patches
+
+These files are on the Mac under this repository's untracked `tmp/`
+directory. None is committed as production code.
+
+| Patch | Purpose | SHA-256 |
+|---|---|---|
+| `tmp/deeptools_lx_only_corelet_split.patch` | honor HBM presence during corelet split paging | `ae4144cfd73106b8dfc177358fb41e76d7c91b25c3a6d4ae67cc482e37f6bfe3` |
+| `tmp/deeptools_lx_only_l3_paging.patch` | honor HBM presence in L3 paging | `5314df3577dc80676c21f809cf95f7c0b56b9f23d5df3b2dce1b7609d1d0472e` |
+| `tmp/deeptools_lx_presence_pin.patch` | require present LX memory before treating a tensor as LX-pinned | `757512933949ae43ad42da16daabf9865c8ee815a269d438844182c854cf0771` |
+| `tmp/deeptools_absent_lx_chunk_validation.patch` | skip LX chunk validation for absent/unallocated LX memory | `6a5dacdc6a27b048f972a1085dfb70b5476a2d4b04f09eda455abaddf1edf3cd` |
+| `tmp/deeptools_dataconnect_diagnostic.patch` | name the consumer in missing-producer diagnostics | `db888a22101eb9cf9ec6587560d31bb9284422d3909e644e902412967b6565a2` |
+| `tmp/deeptools_postddc_output_prune.patch` | remove output service after DDC for this discriminator | `06a750e94cd294c09d71920e973ffb91161a8126e6de840d5b59ef58a1c666ee` |
+| `tmp/k32_direct_egress_a_only.patch` | remove W/XRF and result forwarding | `1b6a68d782a364da327eee7a14fa2e06b16c8ecfa9d5bf72b1f3a03e8709141c` |
+| `tmp/k32_noegress_k16_tile.patch` | express the matched control with K16 epochs | `b3d896cc9e38099967bdf64ae8dbbff1bacbe833c28829a9ab338ddd7eaf40c4` |
+
+### Revised blocker and next bounded pass
+
+The blocker is now upstream of result handoff:
+
+```text
+A LX -> L0 implicit-sync -> PT execution
+```
+
+The evidence rules out W/XRF, output forwarding, both output fabrics, and K32
+maximum epoch depth as necessary causes. It does not yet distinguish an
+A/L0 implicit-sync protocol error from a PT compute/bundle relationship error.
+
+The shortest next pass is deliberately bounded:
+
+1. compile and run matched K8, K4, and K2 A-only/output-free controls;
+2. if K2 also loses completion, stop depth tuning;
+3. compare the same LX/L0 stream against a known-good stock PT
+   micro-schedule;
+4. run a matched drain control without recurrent PT FMA.
+
+Do not add RIU/SFP ring traffic, run correctness, or begin timing until a
+completion control passes. This pass localized the compiler/runtime blocker;
+it did not demonstrate an algorithmic speedup.
