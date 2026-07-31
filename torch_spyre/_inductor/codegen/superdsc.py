@@ -45,7 +45,12 @@ from torch_spyre._inductor.op_spec import (
     DebugHandle,
     IndirectAccess,
     OpSpec,
+    PhysicalCoreIds,
+    PhysicalCoreOrder,
+    SUPPORTED_PHYSICAL_CORE_ORDERS,
     TensorArg,
+    WORK_DIV_INNER_FIRST,
+    validate_physical_core_ids,
 )
 from torch_spyre._inductor.dtype_ops import DtypeOpTable
 
@@ -118,6 +123,7 @@ class SDSCSpec:
     )
     indirect_access_indices: list[int] = dataclasses.field(default_factory=list)
     debug_handle: DebugHandle | None = None
+    physical_core_ids: PhysicalCoreIds | None = None
 
     def __str__(self) -> str:
         iter_space = ", ".join(f"{k}={v}" for k, v in self.iteration_space.items())
@@ -201,6 +207,67 @@ def _k_fast_core_to_slice_mapping(
     for d in dim_list[:-1]:
         reordered[d] = iteration_space[d]
     return _get_core_to_slice_mapping(reordered, dim_splits, num_cores)
+
+
+def _work_div_inner_first_core_to_slice_mapping(
+    iteration_space, dim_splits: dict[Symbol, int], num_cores: int
+) -> dict[Symbol, Expr]:
+    """Map the innermost logical work-division axis to adjacent cores.
+
+    Synthetic communication roots may have more participating cores than
+    logical work slices. Their replica index is made fastest, so each logical
+    cohort occupies one contiguous physical-core interval.
+    """
+
+    logical_core_count = math.prod(dim_splits.values())
+    if (
+        logical_core_count <= 0
+        or num_cores < logical_core_count
+        or num_cores % logical_core_count != 0
+    ):
+        raise ValueError(
+            "num_cores must be a positive multiple of the logical work split "
+            f"({logical_core_count}), got {num_cores}"
+        )
+
+    reordered = dict(reversed(list(iteration_space.items())))
+    result = _get_core_to_slice_mapping(reordered, dim_splits, logical_core_count)
+    replica_count = num_cores // logical_core_count
+    if replica_count > 1:
+        core_id = Symbol("core_id")
+        logical_core_id = floor(core_id / Integer(replica_count))
+        result = {
+            dim: expr.xreplace({core_id: logical_core_id})
+            for dim, expr in result.items()
+        }
+    return result
+
+
+def _select_core_to_slice_mapping(
+    is_matmul: bool,
+    iteration_space,
+    dim_splits: dict[Symbol, int],
+    num_cores: int,
+    physical_core_order: PhysicalCoreOrder | None,
+) -> dict[Symbol, Expr]:
+    """Select one root's mapping without consulting a global override."""
+
+    if physical_core_order is not None:
+        if physical_core_order not in SUPPORTED_PHYSICAL_CORE_ORDERS:
+            allowed = ", ".join(sorted(SUPPORTED_PHYSICAL_CORE_ORDERS))
+            raise ValueError(
+                f"physical_core_order must be one of [{allowed}], "
+                f"got {physical_core_order!r}"
+            )
+        if physical_core_order == WORK_DIV_INNER_FIRST:
+            return _work_div_inner_first_core_to_slice_mapping(
+                iteration_space, dim_splits, num_cores
+            )
+        raise AssertionError(f"unhandled physical_core_order {physical_core_order!r}")
+
+    if _should_use_k_fast_mapping(is_matmul, iteration_space, dim_splits):
+        return _k_fast_core_to_slice_mapping(iteration_space, dim_splits, num_cores)
+    return _get_core_to_slice_mapping(iteration_space, dim_splits, num_cores)
 
 
 def _should_use_k_fast_mapping(
@@ -970,14 +1037,16 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     if _is_topk(op_spec.op):
         num_inputs = 1  # topk has exactly 1 input tensor and 1 output tensor
 
-    if _should_use_k_fast_mapping(is_matmul, sdsc_iteration_space, dim_splits):
-        core_id_to_work_slice = _k_fast_core_to_slice_mapping(
-            sdsc_iteration_space, dim_splits, num_cores
-        )
-    else:
-        core_id_to_work_slice = _get_core_to_slice_mapping(
-            sdsc_iteration_space, dim_splits, num_cores
-        )
+    core_id_to_work_slice = _select_core_to_slice_mapping(
+        is_matmul,
+        sdsc_iteration_space,
+        dim_splits,
+        num_cores,
+        op_spec.physical_core_order,
+    )
+    physical_core_ids = validate_physical_core_ids(
+        op_spec.physical_core_ids, expected_count=num_cores
+    )
 
     # Collect index tensor indices for indirect access
     indirect_access_indices = [
@@ -1004,6 +1073,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
             symbolic_dims=symbolic_dims,
             indirect_access_indices=indirect_access_indices,
             debug_handle=op_spec.debug_handle,
+            physical_core_ids=physical_core_ids,
         ),
         symbol_mapping,
     )

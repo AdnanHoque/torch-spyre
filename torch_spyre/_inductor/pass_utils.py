@@ -35,18 +35,22 @@ from torch._inductor.dependencies import MemoryDep, ReadWrites, StarDep
 from torch._inductor.virtualized import V
 from torch_spyre._C import SpyreTensorLayout, get_elem_in_stick
 from torch_spyre._inductor.errors import Unsupported
-from torch_spyre._inductor.op_spec import IndirectAccess
+from torch_spyre._inductor.op_spec import (
+    IndirectAccess,
+    PhysicalCoreIds,
+    PhysicalCoreOrder,
+    validate_physical_core_ids,
+)
 
 from . import config
 from .codegen.superdsc import (
-    _get_core_to_slice_mapping,
-    _k_fast_core_to_slice_mapping,
-    _should_use_k_fast_mapping,
+    _select_core_to_slice_mapping,
 )
 from .constants import BATCH_MATMUL_OP, ELIDED_COPY_BACK_ATTR
 from .ir import FixedTiledLayout, SpyreConstantFallback
 from .logging_utils import get_inductor_logger
 from .loop_info import copy_op_metadata
+from .propagate_hints import get_physical_core_ids, get_physical_core_order
 from .views import compute_coordinates, matching_dim
 
 # PyTorch's default lower bound for size symbols (sizes 0/1 are specialised).
@@ -1357,6 +1361,18 @@ class PerCoreView:
 
     work_slice_dims: tuple[tuple[int, int], ...]
     core_to_slot: tuple[tuple[int, Expr], ...]
+    physical_core_ids: PhysicalCoreIds = ()
+
+
+def _canonical_physical_core_ids(
+    physical_core_ids: PhysicalCoreIds | None, core_count: int
+) -> PhysicalCoreIds:
+    validated = validate_physical_core_ids(
+        physical_core_ids, expected_count=core_count
+    )
+    if validated is None or validated == tuple(range(core_count)):
+        return ()
+    return validated
 
 
 def _is_matmul_op(op: Operation) -> bool:
@@ -1394,6 +1410,8 @@ class _ViewPrep(NamedTuple):
     num_stick: int
     num_stick_stride: int
     is_matmul: bool
+    physical_core_order: PhysicalCoreOrder | None
+    physical_core_ids: PhysicalCoreIds | None
 
 
 def _prepare_per_core_view(
@@ -1460,6 +1478,8 @@ def _prepare_per_core_view(
         num_stick=num_stick,
         num_stick_stride=num_stick_stride,
         is_matmul=_is_matmul_op(op),
+        physical_core_order=get_physical_core_order(op),
+        physical_core_ids=get_physical_core_ids(op),
     )
 
 
@@ -1479,7 +1499,20 @@ def _per_core_view_from_prep(
     # No real split -> whole-buffer view, representable regardless of layout. Must
     # precede the ``prep is None`` guard to match the original ordering.
     if not any(n > 1 for d in coeff_splits for n in d.values()):
-        return (PerCoreView(work_slice_dims=(), core_to_slot=()), False, True)
+        physical_core_ids = (
+            _canonical_physical_core_ids(prep.physical_core_ids, 1)
+            if prep is not None
+            else ()
+        )
+        return (
+            PerCoreView(
+                work_slice_dims=(),
+                core_to_slot=(),
+                physical_core_ids=physical_core_ids,
+            ),
+            False,
+            True,
+        )
     if prep is None:
         return unrepresentable
 
@@ -1579,16 +1612,19 @@ def _per_core_view_from_prep(
         work_slice_dims[dev_dim] = split
         sym_to_device_dim[sym] = dev_dim
 
-    # Step 3: build the core→slot mapping using the same gate codegen uses
-    # (_should_use_k_fast_mapping), so K-fast matmul ops compare under the
-    # K-cohort-adjacent ordering they will actually emit.
+    # Step 3: build the core→slot mapping through the same root-scoped
+    # selector codegen uses, so planning and emission compare identical views.
     num_cores = int(math.prod(per_sym.values()))
-    is_matmul = prep.is_matmul
-    if _should_use_k_fast_mapping(is_matmul, iter_space, per_sym):
-        _mapping_func = _k_fast_core_to_slice_mapping
-    else:
-        _mapping_func = _get_core_to_slice_mapping
-    core_to_slot_by_name = _mapping_func(iter_space, per_sym, num_cores)
+    physical_core_ids = _canonical_physical_core_ids(
+        prep.physical_core_ids, num_cores
+    )
+    core_to_slot_by_name = _select_core_to_slice_mapping(
+        prep.is_matmul,
+        iter_space,
+        per_sym,
+        num_cores,
+        prep.physical_core_order,
+    )
     # Re-key by the buffer's device-dim index (canonical) instead of the op's
     # iter symbol name. Two ops with the same per-core slicing on this buffer
     # compare equal even if they name their iter axes differently.
@@ -1602,6 +1638,7 @@ def _per_core_view_from_prep(
     view = PerCoreView(
         work_slice_dims=tuple(sorted(work_slice_dims.items())),
         core_to_slot=tuple(pruned_core_to_slot),
+        physical_core_ids=physical_core_ids,
     )
     return (view, has_partial_reduction, True)
 

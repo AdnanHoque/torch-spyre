@@ -14,7 +14,7 @@
 
 
 import dataclasses
-from typing import Any
+from typing import Any, cast
 
 import regex as re
 import sympy
@@ -24,6 +24,13 @@ import torch.fx.traceback
 from torch._inductor.ir import Operation
 
 from .logging_utils import get_inductor_logger
+from .errors import Unsupported
+from .op_spec import (
+    PhysicalCoreIds,
+    PhysicalCoreOrder,
+    SUPPORTED_PHYSICAL_CORE_ORDERS,
+    validate_physical_core_ids,
+)
 
 logger = get_inductor_logger("propagate_hints")
 
@@ -91,6 +98,58 @@ def get_op_hints(op: Operation) -> dict[int, dict[str, Any]]:
         if m:
             hints[int(m.group(1))] = v
     return hints
+
+
+def get_physical_core_order(op: Operation) -> PhysicalCoreOrder | None:
+    """Resolve and validate an op's explicit physical-core-order contract.
+
+    Absence is the production default. Multiple enclosing hint scopes may
+    repeat the same value, but conflicting or unknown values fail closed.
+    """
+
+    values: list[tuple[int, str]] = []
+    for hint_id, hint in sorted(get_op_hints(op).items()):
+        if "physical_core_order" not in hint:
+            continue
+        value = hint["physical_core_order"]
+        if not isinstance(value, str) or value not in SUPPORTED_PHYSICAL_CORE_ORDERS:
+            allowed = ", ".join(sorted(SUPPORTED_PHYSICAL_CORE_ORDERS))
+            raise Unsupported(
+                "physical_core_order must be one of "
+                f"[{allowed}], got {value!r} in spyre_hint {hint_id}"
+            )
+        values.append((hint_id, value))
+
+    if not values:
+        return None
+    unique = {value for _, value in values}
+    if len(unique) != 1:
+        raise Unsupported(f"conflicting physical_core_order hints: {values}")
+    return cast(PhysicalCoreOrder, values[-1][1])
+
+
+def get_physical_core_ids(op: Operation) -> PhysicalCoreIds | None:
+    """Resolve an optional root-scoped sparse physical-core placement."""
+
+    values: list[tuple[int, PhysicalCoreIds]] = []
+    for hint_id, hint in sorted(get_op_hints(op).items()):
+        if "physical_core_ids" not in hint:
+            continue
+        try:
+            value = validate_physical_core_ids(hint["physical_core_ids"])
+        except (TypeError, ValueError) as error:
+            raise Unsupported(
+                f"invalid physical_core_ids in spyre_hint {hint_id}: {error}"
+            ) from error
+        assert value is not None
+        values.append((hint_id, value))
+
+    if not values:
+        return None
+    unique = {value for _, value in values}
+    if len(unique) != 1:
+        raise Unsupported(f"conflicting physical_core_ids hints: {values}")
+    return values[-1][1]
 
 
 def collect_spyre_hints(graph: torch.fx.Graph) -> None:

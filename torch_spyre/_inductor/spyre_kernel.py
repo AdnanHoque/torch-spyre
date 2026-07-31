@@ -68,6 +68,7 @@ from .op_spec import (
     TensorArg,
     UnimplementedOp as OpSpecUnimplementedOp,
 )
+from .propagate_hints import get_physical_core_ids, get_physical_core_order
 from torch_spyre._inductor.provenance import build_debug_handle
 
 logger = get_inductor_logger("spyre_kernel")
@@ -217,6 +218,8 @@ def _materialize_explicit_lx_shuffle(
         layout_labels_override=(
             ["KERNEL", *LAYOUT_LABELS] if consumer_is_matmul else LAYOUT_LABELS
         ),
+        physical_core_order=consumer_spec.physical_core_order,
+        physical_core_ids=consumer_spec.physical_core_ids,
     )
     return shuffle, destination_input
 
@@ -876,6 +879,8 @@ class SpyreKernel(Kernel[CSEVariable]):
             tiled_symbols=tiled_syms,
             symbolic_dim_bounds=symbolic_dim_bounds,
             debug_handle=debug_handle,
+            physical_core_order=get_physical_core_order(ir_node),
+            physical_core_ids=get_physical_core_ids(ir_node),
         )
 
     def remove_kernel_local_buffers(self) -> None:
@@ -1299,6 +1304,14 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                 if op_spec.layout_labels_override is not None:
                     buf.writeline(
                         f"layout_labels_override={op_spec.layout_labels_override!r},"
+                    )
+                if op_spec.physical_core_order is not None:
+                    buf.writeline(
+                        f"physical_core_order={op_spec.physical_core_order!r},"
+                    )
+                if op_spec.physical_core_ids is not None:
+                    buf.writeline(
+                        f"physical_core_ids={op_spec.physical_core_ids!r},"
                     )
                 if op_spec.debug_handle is not None:
                     # Source-to-kernel provenance must survive the OpSpec ->

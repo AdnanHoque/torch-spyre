@@ -16,6 +16,7 @@
 import dataclasses
 
 from torch_spyre._C import encode_constant, DataFormats
+from torch_spyre._inductor.op_spec import MAX_PHYSICAL_CORES
 from sympy import Symbol
 
 
@@ -442,13 +443,41 @@ def generate_sdsc(
         tiled_symbols = []
 
     out_idx = len(sdsc_spec.args) - 1
+    physical_core_ids = (
+        tuple(sdsc_spec.physical_core_ids)
+        if sdsc_spec.physical_core_ids is not None
+        else tuple(range(sdsc_spec.num_cores))
+    )
+    if len(physical_core_ids) != sdsc_spec.num_cores:
+        raise ValueError(
+            "physical_core_ids must contain one entry per active core: "
+            f"{physical_core_ids} vs num_cores={sdsc_spec.num_cores}"
+        )
+    dense_core_ids = tuple(range(sdsc_spec.num_cores))
+    core_fold_factor = (
+        sdsc_spec.num_cores
+        if physical_core_ids == dense_core_ids
+        else MAX_PHYSICAL_CORES
+    )
+    logical_physical_cores = tuple(enumerate(physical_core_ids))
     core_id_to_wk_slice = {
-        str(c): {
-            str(dim): int(expr.subs({Symbol("core_id"): c}))
+        str(physical_core): {
+            str(dim): int(expr.subs({Symbol("core_id"): logical_core}))
             for dim, expr in sdsc_spec.core_id_to_work_slice.items()
         }
-        for c in range(sdsc_spec.num_cores)
+        for logical_core, physical_core in logical_physical_cores
     }
+    first_core_id = physical_core_ids[0]
+
+    def expand_core_fold_data(active: dict[str, str]) -> dict[str, str]:
+        """Fill an SDSC core-fold map while retaining sparse active IDs."""
+
+        default = active[f"[{first_core_id}, 0, 0]"]
+        return {
+            f"[{core}, 0, 0]": active.get(f"[{core}, 0, 0]", default)
+            for core in range(core_fold_factor)
+        }
+
     symbolic_dims = sdsc_spec.symbolic_dims or {}
 
     # Register dimension symbols BEFORE address symbols so their IDs never collide.
@@ -567,7 +596,9 @@ def generate_sdsc(
             core0_addr = (
                 tensor.start_address
                 + core_idx_to_slice_offset(
-                    tensor, core_id_to_wk_slice["0"], sdsc_spec.work_slices
+                    tensor,
+                    core_id_to_wk_slice[str(first_core_id)],
+                    sdsc_spec.work_slices,
                 )
                 * nb
             )
@@ -642,15 +673,17 @@ def generate_sdsc(
                 per_level_strides = [{} for _ in tiled_symbols]
             if not any_tiled:
                 # Non-tiled HBM: register per-core addresses.
-                for c in range(sdsc_spec.num_cores):
+                for logical_core, physical_core in logical_physical_cores:
                     addr = (
                         tensor.start_address
                         + core_idx_to_slice_offset(
-                            tensor, core_id_to_wk_slice[str(c)], sdsc_spec.work_slices
+                            tensor,
+                            core_id_to_wk_slice[str(physical_core)],
+                            sdsc_spec.work_slices,
                         )
                         * nb
                     )
-                    if c == 0:
+                    if logical_core == 0:
                         if tensor.arg_index < 0:
                             offset_as_symbol(addr, SymbolKind.pool())
                         # kernel / kernel_slice already registered above; skip c==0
@@ -676,15 +709,17 @@ def generate_sdsc(
             else:
                 # Tiled HBM: symbol value = per-core iter-0 base address.
                 # The affine map adds loop_var * tile_stride on top at runtime.
-                for c in range(sdsc_spec.num_cores):
+                for logical_core, physical_core in logical_physical_cores:
                     addr = (
                         tensor.start_address
                         + core_idx_to_slice_offset(
-                            tensor, core_id_to_wk_slice[str(c)], sdsc_spec.work_slices
+                            tensor,
+                            core_id_to_wk_slice[str(physical_core)],
+                            sdsc_spec.work_slices,
                         )
                         * nb
                     )
-                    if c == 0:
+                    if logical_core == 0:
                         if tensor.arg_index < 0:
                             offset_as_symbol(addr, SymbolKind.pool())
                         # kernel / kernel_slice already registered above; skip c==0
@@ -707,10 +742,12 @@ def generate_sdsc(
             # All per-core addresses were already registered by the per-tensor loop
             # above. Look them up using the same key scheme as offset_as_symbol.
             if "lx" in tensor.allocation:
-                return {
-                    f"[{c}, 0, 0]": str(tensor.start_address)
-                    for c in range(sdsc_spec.num_cores)
-                }
+                return expand_core_fold_data(
+                    {
+                        f"[{core}, 0, 0]": str(tensor.start_address)
+                        for core in physical_core_ids
+                    }
+                )
             nb = num_bytes(tensor.data_format)
             is_pool_tensor = tensor.arg_index < 0 and "pool" in tensor.allocation
             # Hoist kernel-tensor compile-time offsets so they are not
@@ -727,30 +764,34 @@ def generate_sdsc(
                 core0_addr_lookup = (
                     tensor.start_address
                     + core_idx_to_slice_offset(
-                        tensor, core_id_to_wk_slice["0"], sdsc_spec.work_slices
+                        tensor,
+                        core_id_to_wk_slice[str(first_core_id)],
+                        sdsc_spec.work_slices,
                     )
                     * nb
                 )
             result = {}
-            for c in range(sdsc_spec.num_cores):
+            for logical_core, physical_core in logical_physical_cores:
                 addr = (
                     tensor.start_address
                     + core_idx_to_slice_offset(
-                        tensor, core_id_to_wk_slice[str(c)], sdsc_spec.work_slices
+                        tensor,
+                        core_id_to_wk_slice[str(physical_core)],
+                        sdsc_spec.work_slices,
                     )
                     * nb
                 )
                 if is_pool_tensor:
                     key: tuple | int = ("pool", addr)
-                elif c == 0:
+                elif logical_core == 0:
                     key = c0_slice_key
                 else:
                     # c>0: per-core derived address.  When addr == core0_addr
                     # (non-split tensor, all cores share one address) no derived
                     # symbol was registered — reuse the c==0 sliced-base key.
                     key = c0_slice_key if addr == core0_addr_lookup else addr
-                result[f"[{c}, 0, 0]"] = str(local_symbols[key])
-            return result
+                result[f"[{physical_core}, 0, 0]"] = str(local_symbols[key])
+            return expand_core_fold_data(result)
 
     else:
         # use_symbols=False: bake concrete HBM addresses directly into the JSON.
@@ -759,20 +800,26 @@ def generate_sdsc(
 
         def _start_addr_data(tensor):
             if "lx" in tensor.allocation:
-                return {
-                    f"[{c}, 0, 0]": str(tensor.start_address)
-                    for c in range(sdsc_spec.num_cores)
-                }
-            return {
-                f"[{c}, 0, 0]": str(
-                    tensor.start_address
-                    + core_idx_to_slice_offset(
-                        tensor, core_id_to_wk_slice[str(c)], sdsc_spec.work_slices
-                    )
-                    * num_bytes(tensor.data_format)
+                return expand_core_fold_data(
+                    {
+                        f"[{core}, 0, 0]": str(tensor.start_address)
+                        for core in physical_core_ids
+                    }
                 )
-                for c in range(sdsc_spec.num_cores)
-            }
+            return expand_core_fold_data(
+                {
+                    f"[{core}, 0, 0]": str(
+                        tensor.start_address
+                        + core_idx_to_slice_offset(
+                            tensor,
+                            core_id_to_wk_slice[str(core)],
+                            sdsc_spec.work_slices,
+                        )
+                        * num_bytes(tensor.data_format)
+                    )
+                    for core in physical_core_ids
+                }
+            )
 
     return (
         {
@@ -791,24 +838,24 @@ def generate_sdsc(
                     "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
                     "data_": {"[0]": "0"},
                 },
-                "coreFoldProp_": {"factor_": sdsc_spec.num_cores, "label_": "core"},
+                "coreFoldProp_": {"factor_": core_fold_factor, "label_": "core"},
                 "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
                 "numCoresUsed_": sdsc_spec.num_cores,
-                "coreIdToDsc_": {str(c): 0 for c in range(sdsc_spec.num_cores)},
+                "coreIdToDsc_": {str(core): 0 for core in physical_core_ids},
                 "numWkSlicesPerDim_": {
                     str(dim): num_wk_slices
                     for dim, num_wk_slices in sdsc_spec.work_slices.items()
                 },
                 "coreIdToWkSlice_": core_id_to_wk_slice,
                 "coreIdToDscSchedule": {
-                    str(c): [[-1, 0, 0, 0]] for c in range(sdsc_spec.num_cores)
+                    str(core): [[-1, 0, 0, 0]] for core in physical_core_ids
                 },
                 "dscs_": [
                     {
                         sdsc_spec.opfunc: {
                             "numCoresUsed_": sdsc_spec.num_cores,
                             "numCoreletsUsed_": 1,
-                            "coreIdsUsed_": [c for c in range(sdsc_spec.num_cores)],
+                            "coreIdsUsed_": list(physical_core_ids),
                             "N_": {
                                 "name_": "n",
                                 **{
@@ -925,7 +972,7 @@ def generate_sdsc(
                                         ],
                                         "dim_prop_attr": [
                                             {
-                                                "factor_": sdsc_spec.num_cores,
+                                                "factor_": core_fold_factor,
                                                 "label_": "core",
                                             },
                                             {"factor_": 1, "label_": "corelet"},
@@ -937,12 +984,11 @@ def generate_sdsc(
                                         {
                                             "backGapCore_": {
                                                 str(dim): (
-                                                    # LX: per-core keys 0..num_cores-1
+                                                    # LX: one value per physical
+                                                    # core-fold slot.
                                                     {
                                                         str(c): str(gap)
-                                                        for c in range(
-                                                            sdsc_spec.num_cores
-                                                        )
+                                                        for c in range(core_fold_factor)
                                                     }
                                                     if "lx" in tensor.allocation
                                                     # HBM: -1 sentinel covers all cores
@@ -1029,7 +1075,7 @@ def generate_sdsc(
                             "constantInfo_": generate_constant_info(
                                 sdsc_spec.data_format,
                                 sdsc_spec.constants,
-                                sdsc_spec.num_cores,
+                                core_fold_factor,
                             ),
                             "computeOp_": [
                                 {

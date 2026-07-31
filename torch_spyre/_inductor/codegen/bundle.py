@@ -565,8 +565,7 @@ def _emit_specs(
                 ]
                 if not flat_strides:
                     continue
-                num_cores = _sdsc_num_cores(sdsc_json)
-                for c in range(num_cores):
+                for c in _sdsc_core_ids(sdsc_json):
                     base_sym_id = _get_tensor_core_sym_id(sdsc_json, tensor_idx, c)
                     if base_sym_id is None or base_sym_id in sym_id_to_operand:
                         continue
@@ -626,11 +625,15 @@ def _extract_symbol_ids(sdsc_json: dict) -> list[int]:
     return ids
 
 
-def _sdsc_num_cores(sdsc_json: dict) -> int:
-    """Extract num_cores from the SDSC JSON."""
+def _sdsc_core_ids(sdsc_json: dict) -> tuple[int, ...]:
+    """Extract the active physical core IDs from an SDSC JSON object."""
+
     for top_val in sdsc_json.values():
-        return top_val.get("numCoresUsed_", 1)
-    return 1
+        core_map = top_val.get("coreIdToDsc_", {})
+        if core_map:
+            return tuple(int(core) for core in core_map)
+        return tuple(range(top_val.get("numCoresUsed_", 1)))
+    return (0,)
 
 
 def _get_tensor_core_sym_id(sdsc_json: dict, tensor_idx: int, core: int) -> int | None:

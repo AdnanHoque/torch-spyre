@@ -28,8 +28,10 @@ from torch_spyre._inductor.lx_relayout import (
     LX_RELAYOUT_ATTR,
     LXRelayoutPlan,
     _destination_size_ratio,
+    _same_core_placement,
     make_lx_relayout_destination_name,
 )
+from torch_spyre._inductor.pass_utils import PerCoreView
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.scratchpad.allocator import (
     ScratchpadAllocator,
@@ -129,6 +131,17 @@ def test_coordinate_geometry_accepts_bounded_shuffle_geometry_only():
         {"0": {"0": 0}, "1": {"0": 0}},
         {"0": 1},
     )
+    broadcast = _destination_size_ratio(
+        {"0": {"0": 0}, "1": {"0": 1}},
+        {"0": 2},
+        {
+            "0": {"0": 0},
+            "1": {"0": 0},
+            "2": {"0": 1},
+            "3": {"0": 1},
+        },
+        {"0": 2},
+    )
     unsupported = _destination_size_ratio(
         {
             "0": {"0": 0, "1": 0},
@@ -143,7 +156,15 @@ def test_coordinate_geometry_accepts_bounded_shuffle_geometry_only():
 
     assert shuffle == 1
     assert all_gather == 2
+    assert broadcast == 1
     assert unsupported is None
+
+
+def test_equal_logical_view_on_different_core_counts_requires_relayout():
+    view = PerCoreView(work_slice_dims=((0, 8),), core_to_slot=())
+
+    assert _same_core_placement(view, 8, view, 8)
+    assert not _same_core_placement(view, 8, view, 32)
 
 
 def test_shuffle_corelet_fold_supports_nonstick_dimension():

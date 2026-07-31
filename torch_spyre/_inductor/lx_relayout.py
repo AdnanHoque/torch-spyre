@@ -134,8 +134,11 @@ def _destination_size_ratio(
         producer_is_partitioned
         and not consumer_is_partitioned
         and max_fanout > 1
-        and max_fanin > 1
     ):
+        # A destination may need either one complete producer slice
+        # (broadcast/multicast) or every producer slice (all-gather).  Both are
+        # exact uniform fanout geometries; the destination allocation grows
+        # only for the all-gather case.
         return max_fanin
     return None
 
@@ -188,11 +191,14 @@ def _core_id_to_device_slice(
     split_dims = {int(dim): int(split) for dim, split in view.work_slice_dims}
     result: dict[str, dict[str, int]] = {}
 
-    for core in range(core_count):
+    physical_core_ids = view.physical_core_ids or tuple(range(core_count))
+    if len(physical_core_ids) != core_count:
+        return None
+    for logical_core, physical_core in enumerate(physical_core_ids):
         per_core: dict[str, int] = {}
         for dim, split in split_dims.items():
             expr = sympy.sympify(expr_by_dim.get(dim, 0))
-            slot = sympy.simplify(expr.subs(core_id, core))
+            slot = sympy.simplify(expr.subs(core_id, logical_core))
             if getattr(slot, "free_symbols", None):
                 return None
             try:
@@ -202,13 +208,27 @@ def _core_id_to_device_slice(
             if slot_int < 0 or slot_int >= split:
                 return None
             per_core[str(dim)] = slot_int
-        result[str(core)] = per_core
+        result[str(physical_core)] = per_core
 
     return result
 
 
 def _work_slice_dims(view: PerCoreView) -> dict[str, int]:
     return {str(int(dim)): int(split) for dim, split in view.work_slice_dims}
+
+
+def _same_core_placement(
+    producer_view: PerCoreView,
+    producer_core_count: int,
+    consumer_view: PerCoreView,
+    consumer_core_count: int,
+) -> bool:
+    """Whether producer and consumer address the same bytes on the same cores."""
+
+    return (
+        producer_core_count == consumer_core_count
+        and producer_view == consumer_view
+    )
 
 
 def _dense_view(
@@ -282,11 +302,16 @@ def collect_lx_relayout_plans(
             )
             if consumer_has_partial or not consumer_representable:
                 continue
-            if producer_view == consumer_view:
-                continue
-
             producer_core_count = _op_num_cores(producer)
             consumer_core_count = _op_num_cores(consumer)
+            if _same_core_placement(
+                producer_view,
+                producer_core_count,
+                consumer_view,
+                consumer_core_count,
+            ):
+                continue
+
             producer_core_slices = _core_id_to_device_slice(
                 producer_view, producer_core_count
             )

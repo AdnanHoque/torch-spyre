@@ -16,11 +16,49 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from sympy import Symbol, Expr, Function
 from torch_spyre._C import DataFormats
 import torch
+
+
+PhysicalCoreOrder = Literal["work_div_inner_first"]
+WORK_DIV_INNER_FIRST: PhysicalCoreOrder = "work_div_inner_first"
+SUPPORTED_PHYSICAL_CORE_ORDERS: frozenset[str] = frozenset({WORK_DIV_INNER_FIRST})
+MAX_PHYSICAL_CORES = 32
+PhysicalCoreIds = tuple[int, ...]
+
+
+def validate_physical_core_ids(
+    physical_core_ids: Sequence[int] | None,
+    *,
+    expected_count: int | None = None,
+) -> PhysicalCoreIds | None:
+    """Validate an explicit logical-core to physical-core placement."""
+
+    if physical_core_ids is None:
+        return None
+    if isinstance(physical_core_ids, (str, bytes)):
+        raise ValueError("physical_core_ids must be a sequence of integer core IDs")
+    result = tuple(physical_core_ids)
+    if not result:
+        raise ValueError("physical_core_ids cannot be empty")
+    if any(not isinstance(core, int) or isinstance(core, bool) for core in result):
+        raise ValueError("physical_core_ids must contain only integer core IDs")
+    if any(core < 0 or core >= MAX_PHYSICAL_CORES for core in result):
+        raise ValueError(
+            f"physical_core_ids must be in [0, {MAX_PHYSICAL_CORES - 1}], "
+            f"got {result}"
+        )
+    if len(set(result)) != len(result):
+        raise ValueError(f"physical_core_ids must be unique, got {result}")
+    if expected_count is not None and len(result) != expected_count:
+        raise ValueError(
+            "physical_core_ids must contain one entry per logical core: "
+            f"expected {expected_count}, got {len(result)}"
+        )
+    return result
 
 
 class IndirectAccess(Function):
@@ -180,6 +218,15 @@ class OpSpec:
     dim_labels_override: list[str] | None = None
     layout_labels_override: list[str] | None = None
     debug_handle: DebugHandle | None = None
+    # Explicit, root-scoped physical core ordering. ``None`` preserves the
+    # production mapping byte-for-byte. Synthetic communication roots inherit
+    # this only from their matching consumer; it is never read from a global
+    # override.
+    physical_core_order: PhysicalCoreOrder | None = None
+    # Optional logical-core-index -> physical-core-ID placement. The backend
+    # already accepts sparse ``coreIdsUsed_``; this exposes that existing
+    # descriptor capability without changing the dense default.
+    physical_core_ids: PhysicalCoreIds | None = None
 
 
 @dataclasses.dataclass
