@@ -292,6 +292,7 @@ def _map_core_id_to_wk_slice_dims(
     core_id_to_device_slice: dict[str, dict[str, int]] | None,
     device_dim_to_sdsc_dim: dict[str, Symbol],
     dim_order: list[Symbol],
+    allocation_name: str | None = None,
 ) -> dict[str, dict[str, int]] | None:
     if core_id_to_device_slice is None:
         return None
@@ -335,6 +336,58 @@ def _map_core_id_to_wk_slice_dims(
                 # cohort on planner axis 4.  Singleton removal and SDSC
                 # normalization expose that same cohort as physical x axis 3.
                 resolved_device_dim = "3"
+            if (
+                _spyre_config.relayout_oracle_prefill_attention_permutation
+                and allocation_name
+                == "__spyre_lx_relayout_destination__:buf40"
+                and resolved_device_dim == "4"
+                and resolved_device_dim not in device_dim_to_sdsc_dim
+                and set(device_dim_to_sdsc_dim) == {"0", "1", "2", "3"}
+            ):
+                # P08 records the 8-head cohort on the original rank-5 axis 4.
+                # Singleton removal exposes that same coordinate as physical
+                # device axis 3 in the normalized shuffle tensor.
+                resolved_device_dim = "3"
+            if (
+                _spyre_config.relayout_oracle_prefill_mlp_normalization
+                and allocation_name
+                in ("buf50", "__spyre_lx_relayout_destination__:buf50")
+                and resolved_device_dim == "3"
+                and resolved_device_dim not in device_dim_to_sdsc_dim
+                and (
+                    (
+                        set(device_dim_to_sdsc_dim) == {"0", "1"}
+                        and [str(dim) for dim in dim_order] == ["mb", "x"]
+                    )
+                    or (
+                        set(device_dim_to_sdsc_dim) == {"1"}
+                        and [str(dim) for dim in dim_order] == ["mb"]
+                    )
+                )
+            ):
+                # The RMSNorm scalar replay records the token cohort on the
+                # planner's original axis 3.  Singleton removal leaves the
+                # emitted [1, 512, 64] tensor with that coordinate on physical
+                # device axis 1.
+                resolved_device_dim = "1"
+            if (
+                _spyre_config.work_div_oracle_granite_last_token_head
+                and allocation_name
+                in (
+                    "buf0",
+                    "__spyre_lx_relayout_destination__:buf0",
+                    "buf6",
+                    "__spyre_lx_relayout_destination__:buf6",
+                )
+                and resolved_device_dim == "1"
+                and resolved_device_dim not in device_dim_to_sdsc_dim
+                and set(device_dim_to_sdsc_dim) == {"0"}
+                and [str(dim) for dim in dim_order] == ["in"]
+            ):
+                # The sliced [1, 1, 4096] activation records its hidden
+                # partition on planner axis 1. Singleton removal exposes that
+                # same coordinate as the shuffle's sole SDSC ``in`` axis 0.
+                resolved_device_dim = "0"
             dim = device_dim_to_sdsc_dim.get(resolved_device_dim)
             if dim is None:
                 if int(slot) != 0:
@@ -353,6 +406,7 @@ def _map_core_id_to_wk_slice_dims(
 def _map_device_dim_splits(
     device_dim_splits: dict[str, int] | None,
     device_dim_to_sdsc_dim: dict[str, Symbol],
+    allocation_name: str | None = None,
 ) -> dict[Symbol, int]:
     if device_dim_splits is None:
         return {}
@@ -381,6 +435,39 @@ def _map_device_dim_splits(
             and set(device_dim_to_sdsc_dim) == {"0", "1", "2", "3"}
         ):
             resolved_device_dim = "3"
+        if (
+            _spyre_config.relayout_oracle_prefill_attention_permutation
+            and allocation_name
+            == "__spyre_lx_relayout_destination__:buf40"
+            and resolved_device_dim == "4"
+            and resolved_device_dim not in device_dim_to_sdsc_dim
+            and set(device_dim_to_sdsc_dim) == {"0", "1", "2", "3"}
+        ):
+            resolved_device_dim = "3"
+        if (
+            _spyre_config.relayout_oracle_prefill_mlp_normalization
+            and allocation_name
+            in ("buf50", "__spyre_lx_relayout_destination__:buf50")
+            and resolved_device_dim == "3"
+            and resolved_device_dim not in device_dim_to_sdsc_dim
+            and set(device_dim_to_sdsc_dim) in ({"0", "1"}, {"1"})
+            and str(device_dim_to_sdsc_dim.get("1")) == "mb"
+        ):
+            resolved_device_dim = "1"
+        if (
+            _spyre_config.work_div_oracle_granite_last_token_head
+            and allocation_name
+            in (
+                "buf0",
+                "__spyre_lx_relayout_destination__:buf0",
+                "buf6",
+                "__spyre_lx_relayout_destination__:buf6",
+            )
+            and resolved_device_dim == "1"
+            and resolved_device_dim not in device_dim_to_sdsc_dim
+            and set(device_dim_to_sdsc_dim) == {"0"}
+        ):
+            resolved_device_dim = "0"
         dim = device_dim_to_sdsc_dim.get(resolved_device_dim)
         if dim is None:
             if int(split) != 1:
@@ -704,10 +791,12 @@ def _create_sdsc_tensors(
                     arg.allocation_core_id_to_device_slice,
                     device_dim_to_sdsc_dim,
                     dim_order,
+                    arg.name,
                 ),
                 core_splits=_map_device_dim_splits(
                     arg.allocation_device_dim_splits,
                     device_dim_to_sdsc_dim,
+                    arg.name,
                 ),
             )
         )
@@ -860,21 +949,6 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         if op_spec.dim_labels_override is None
         else op_spec.dim_labels_override
     )
-    if len(dim_labels) < ndim:
-        # A dim_labels_override is captured before work division runs.  A later
-        # pass can add a band symbol to the iteration space (e.g. the P07 rope
-        # row split re-materialising its 8-way token split), which leaves the
-        # frozen override one label short.  Extend it with labels the override
-        # does not already use instead of indexing past the end.
-        dim_labels = list(dim_labels)
-        spare = [x for x in INPUT_DIM_LABELS if x not in dim_labels]
-        while len(dim_labels) < ndim and spare:
-            dim_labels.append(spare.pop(0))
-        if len(dim_labels) < ndim:
-            raise RuntimeError(
-                f"cannot label {ndim} iteration dims for op {op_spec.op!r}: "
-                f"override={op_spec.dim_labels_override!r}"
-            )
     symbol_mapping = {
         sym: Symbol(dim_labels[i]) for i, sym in enumerate(op_spec.iteration_space)
     }
@@ -1065,8 +1139,24 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         # force final compute emission to honor the same map.
         contiguous_dim = 1
     if (
-        _spyre_config.relayout_oracle_prefill_qk_query
-        and _spyre_config.relayout_oracle_prefill_qk_head_fast_emission
+        _spyre_config.relayout_oracle_prefill_qkv_inputs
+        and mapping_splits == (8, 4, 1)
+        and is_matmul
+        and tuple(int(sdsc_iteration_space[dim]) for dim in mapping_dims)
+        in ((512, 4096, 4096), (512, 1024, 4096))
+    ):
+        # P09's private S2 output replicates each 64-token band over a
+        # contiguous four-core cohort.  Keep Q/K/V output shards fastest in
+        # final SDSC emission so those four consumers interpret the same band.
+        contiguous_dim = 1
+    if (
+        (
+            _spyre_config.relayout_oracle_prefill_rope_input
+            or (
+                _spyre_config.relayout_oracle_prefill_qk_query
+                and _spyre_config.relayout_oracle_prefill_qk_head_fast_emission
+            )
+        )
         and not is_matmul
         and len(mapping_splits) >= 4
         and mapping_splits[:2] == (8, 4)
@@ -1081,7 +1171,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         # so pin the final SDSC mapping for this test-only replay.
         contiguous_dim = 1
     if (
-        _spyre_config.relayout_oracle_prefill_mlp_inputs
+        (
+            _spyre_config.relayout_oracle_prefill_mlp_inputs
+            or _spyre_config.relayout_oracle_prefill_mlp_normalization
+        )
         and not is_matmul
         and mapping_splits == (8, 4)
         and tuple(int(sdsc_iteration_space[dim]) for dim in mapping_dims)
@@ -1089,6 +1182,18 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     ):
         # RMSNorm's final multiply produces 1/4-hidden shards on each member of
         # a contiguous four-core mb cohort, exactly matching SenDNN's source.
+        contiguous_dim = 1
+    if (
+        _spyre_config.relayout_oracle_granite_p14
+        and not is_matmul
+        and mapping_splits == (8, 4)
+        and tuple(int(sdsc_iteration_space[dim]) for dim in mapping_dims)
+        == (512, 4096)
+    ):
+        # Keep the four hidden quarters adjacent inside each 64-token cohort
+        # so token 511 is physically owned by cores 28..31, matching SenDNN's
+        # P14 source map. Generic gather-dimension propagation is lost because
+        # this pointwise chain's oracle symbol is normalized before codegen.
         contiguous_dim = 1
     # TODO: Choose the mapping before LX planning and pass it through to codegen.
     core_id_to_work_slice = core_to_slice_mapping(

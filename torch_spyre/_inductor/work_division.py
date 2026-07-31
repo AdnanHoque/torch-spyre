@@ -752,9 +752,46 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
     is_output_projection = (
         config.relayout_oracle_prefill_output_projection and name == "buf44"
     )
+    is_attention_permutation_edge = (
+        config.relayout_oracle_prefill_attention_permutation
+        and name == "buf41"
+    )
     is_mlp_input_edge = (
         config.relayout_oracle_prefill_mlp_inputs
         and name in ("buf52", "buf53", "buf55")
+    )
+    is_mlp_down_projection = (
+        config.relayout_oracle_prefill_mlp_down_projection and name == "buf57"
+    )
+    is_mlp_normalization_edge = (
+        config.relayout_oracle_prefill_mlp_normalization
+        and name in ("buf46", "buf47", "buf48", "buf49", "buf50", "buf51", "buf52")
+    )
+    is_residual_add_edge = (
+        config.relayout_oracle_prefill_residual_add
+        and name
+        in (
+            config.relayout_oracle_prefill_residual_add_source,
+            config.relayout_oracle_prefill_residual_add_consumer,
+        )
+    )
+    is_granite_last_token_head = (
+        config.work_div_oracle_granite_last_token_head
+        and getattr(op.data, "reduction_type", None) == BATCH_MATMUL_OP
+    )
+    is_granite_p14_source = (
+        config.relayout_oracle_granite_p14 and name == "buf5"
+    )
+    is_granite_p14_consumer = (
+        config.relayout_oracle_granite_p14 and name == "buf6"
+    )
+    is_prefill_rope_input = (
+        config.relayout_oracle_prefill_rope_input
+        and name in ("buf12", "buf16")
+    )
+    is_prefill_qkv_input = (
+        config.relayout_oracle_prefill_qkv_inputs
+        and name in ("buf10", "buf11", "buf15", "buf29")
     )
     is_compact_gqa_edge = (
         config.relayout_oracle_compact_gqa
@@ -774,7 +811,16 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
     )
     if (
         not is_output_projection
+        and not is_attention_permutation_edge
         and not is_mlp_input_edge
+        and not is_mlp_down_projection
+        and not is_mlp_normalization_edge
+        and not is_residual_add_edge
+        and not is_granite_last_token_head
+        and not is_granite_p14_source
+        and not is_granite_p14_consumer
+        and not is_prefill_rope_input
+        and not is_prefill_qkv_input
         and not is_compact_gqa_edge
         and not is_prefill_qk_query_edge
         and not is_prefill_qk_head_owned
@@ -782,6 +828,11 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
     ):
         return {}
     shape = [str(size) for size in op.get_size()]
+    if is_attention_permutation_edge and shape in (
+        ["1", "8", "4", "512", "128"],
+        ["1", "512", "8", "4", "128"],
+    ):
+        return {"attention_head_cohort": 4, "token": 8}
     if (
         is_output_projection
         and shape in (["1", "512", "4096"], ["1", "512", "32", "128"])
@@ -792,6 +843,66 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
             return {"mb": 8, "out": 4}
         if name in ("buf53", "buf55") and shape == ["1", "512", "12800"]:
             return {"mb": 8, "out": 4}
+    if is_mlp_down_projection and shape == ["1", "512", "4096"]:
+        mb_split = config.relayout_oracle_prefill_mlp_down_projection_mb
+        out_split = config.relayout_oracle_prefill_mlp_down_projection_out
+        if mb_split * out_split != 32:
+            raise Unsupported(
+                "SenDNN MLP down-projection replay requires 32 total cores, "
+                f"got mb={mb_split}, out={out_split}"
+            )
+        return {"mb": mb_split, "out": out_split}
+    if is_mlp_normalization_edge:
+        if name in ("buf46", "buf47", "buf51", "buf52") and shape == [
+            "1",
+            "512",
+            "4096",
+        ]:
+            return {"mb": 8, "out": 4}
+        if name in ("buf48", "buf49", "buf50") and shape == ["1", "512", "1"]:
+            return {"mb": 8, "out": 1}
+    if is_residual_add_edge and shape in (
+        ["512", "4096"],
+        ["1", "512", "4096"],
+    ):
+        if name == config.relayout_oracle_prefill_residual_add_source:
+            return {"mb": 16, "out": 1}
+        return {"mb": 8, "out": 4}
+    if is_granite_last_token_head and shape in (
+        ["1", "1", "49280"],
+        ["1", "1", "50176"],
+    ):
+        # The parity path pads N from 770 to 784 64-element sticks so the
+        # SenDNN 28-owner geometry is exact.  Preserve the prior 22-owner
+        # unpadded shape as an explicit control.
+        return {"in": 1, "out": 28 if shape[-1] == "50176" else 22}
+    if is_granite_p14_source and shape == ["1", "512", "4096"]:
+        return {"mb": 8, "out": 4}
+    if is_granite_p14_consumer and shape in (
+        ["1", "1", "4096"],
+        ["1", "4096"],
+        ["4096"],
+    ):
+        return {"out": 32}
+    if is_prefill_rope_input:
+        expected_shapes = {
+            "buf12": ["1", "512", "32", "2", "2", "64"],
+            "buf16": ["1", "512", "8", "2", "2", "64"],
+        }
+        if shape == expected_shapes[name]:
+            return {"token": 8, "head_cohort": 4}
+    if is_prefill_qkv_input and shape == ["1", "512", "4096"]:
+        # P09 keeps the normalized activation in 16 token bands with adjacent
+        # replica pairs.  Its BMM consumers must number the four output cohorts
+        # inside each token band so their realized core map matches the
+        # contiguous four-core S2 cohorts emitted by the LX shuffle.
+        return {"mb": 16} if name == "buf10" else {"out": 4, "mb": 8}
+    if (
+        is_prefill_qkv_input
+        and name in ("buf15", "buf29")
+        and shape == ["1", "512", "1024"]
+    ):
+        return {"out": 4, "mb": 8}
     if is_compact_gqa_edge:
         if name in ("buf18", "buf66") and shape == ["1", "8", "1", "512", "128"]:
             return {"kv_head": 4, "token": 8}
@@ -802,9 +913,17 @@ def _oracle_work_div_hint_by_name(op: ComputedBuffer) -> dict[str, int]:
             "buf11": ["1", "512", "4096"],
             "buf12": ["1", "512", "32", "2", "2", "64"],
             "buf13": ["1", "512", "32", "2", "1", "64"],
-            "buf14": ["1", "8", "4", "512", "128"],
         }
-        if shape == expected_shapes[name]:
+        shape_matches = (
+            shape == expected_shapes.get(name)
+            or name == "buf14"
+            and shape
+            in (
+                ["1", "8", "4", "512", "128"],
+                ["1", "32", "512", "128"],
+            )
+        )
+        if shape_matches:
             return {"token": 8, "query_head_cohort": 4}
     if is_prefill_qk_head_owned and shape == ["1", "8", "4", "512", "512"]:
         return {"kv_head": 8, "query_group": 4}
@@ -840,6 +959,110 @@ def _resolve_work_div_hint(
         # Bind exact-graph oracle buffers directly to symbols instead of relying
         # on graph-propagated names, which are absent on these fused ops.
         symbols = list(it_space)
+        if (
+            config.relayout_oracle_prefill_attention_permutation
+            and op.get_name() == "buf41"
+        ):
+            head_sym = next(
+                sym for sym in symbols if concretize_expr(it_space[sym]) == 8
+            )
+            token_sym = next(
+                sym for sym in symbols if concretize_expr(it_space[sym]) == 512
+            )
+            # The P08 destination is token-major: head cohorts vary fastest.
+            # The producer stays on Torch's native token partition until its
+            # upstream attention schedule is also converted to SenDNN's grid.
+            op._spyre_oracle_gather_dim_symbol = head_sym  # type: ignore[attr-defined]
+            return {head_sym: 4, token_sym: 8}
+        if (
+            config.work_div_oracle_granite_last_token_head
+            and getattr(op.data, "reduction_type", None) == BATCH_MATMUL_OP
+            and [str(size) for size in op.get_size()]
+            in (["1", "1", "49280"], ["1", "1", "50176"])
+        ):
+            actual_extents = [concretize_expr(it_space[sym]) for sym in symbols]
+            padded = [str(size) for size in op.get_size()][-1] == "50176"
+            expected_extents = [784, 64] if padded else [770, 64]
+            if actual_extents != expected_extents:
+                raise Unsupported(
+                    "Granite last-token LM-head replay expected adjusted "
+                    "[output-sticks, reduction-sticks] extents "
+                    f"{expected_extents}, got "
+                    f"{actual_extents} on {op.get_name()}"
+                )
+            out_sym, reduction_sym = symbols
+            return {reduction_sym: 1, out_sym: 28 if padded else 22}
+        if (
+            config.relayout_oracle_prefill_mlp_normalization
+            and op.get_name()
+            in ("buf46", "buf47", "buf48", "buf49", "buf50", "buf51", "buf52")
+        ):
+            if op.get_name() in ("buf49", "buf50"):
+                if len(symbols) != 1:
+                    raise Unsupported(
+                        "SenDNN MLP-normalization scalar replay expected [mb] "
+                        f"iteration symbols, got {symbols} on {op.get_name()}"
+                    )
+                return {symbols[0]: 8}
+            if len(symbols) != 2:
+                raise Unsupported(
+                    "SenDNN MLP-normalization replay expected [mb, out] "
+                    f"iteration symbols, got {symbols} on {op.get_name()}"
+                )
+            mb_sym, out_sym = symbols
+            if op.get_name() in ("buf46", "buf47", "buf51", "buf52"):
+                # Keep each 64-token cohort split over four contiguous hidden
+                # owners.  P05 consumes buf47; buf51/buf52 retain the same map
+                # after the scalar multicast.
+                op._spyre_oracle_gather_dim_symbol = out_sym  # type: ignore[attr-defined]
+                return {mb_sym: 8, out_sym: 4}
+            # The reduction uses one owner per 64-token cohort.  Torch
+            # currently chooses cores 0..7; the relayout plan records that
+            # physical map explicitly.
+            return {mb_sym: 8, out_sym: 1}
+        if (
+            config.relayout_oracle_prefill_residual_add
+            and op.get_name()
+            in (
+                config.relayout_oracle_prefill_residual_add_source,
+                config.relayout_oracle_prefill_residual_add_consumer,
+            )
+            and [str(size) for size in op.get_size()]
+            in (["512", "4096"], ["1", "512", "4096"])
+        ):
+            if len(symbols) != 2:
+                raise Unsupported(
+                    "SenDNN P12 replay expected [mb, out] iteration symbols, "
+                    f"got {symbols} on {op.get_name()}"
+                )
+            mb_sym, out_sym = symbols
+            if op.get_name() == config.relayout_oracle_prefill_residual_add_source:
+                op._spyre_oracle_gather_dim_symbol = mb_sym  # type: ignore[attr-defined]
+                return {mb_sym: 16, out_sym: 1}
+            # Four hidden owners vary fastest inside every 64-token cohort.
+            op._spyre_oracle_gather_dim_symbol = out_sym  # type: ignore[attr-defined]
+            return {mb_sym: 8, out_sym: 4}
+        if (
+            config.relayout_oracle_prefill_rope_input
+            and op.get_name() in ("buf12", "buf16")
+        ):
+            expected_extents = {
+                "buf12": [512, 32, 2, 2, 1],
+                "buf16": [512, 8, 2, 2, 1],
+            }[op.get_name()]
+            actual_extents = [concretize_expr(it_space[sym]) for sym in symbols]
+            if actual_extents != expected_extents:
+                raise Unsupported(
+                    "SenDNN P07 replay expected Granite rotary iteration "
+                    f"extents {expected_extents}, got {actual_extents} on "
+                    f"{op.get_name()}"
+                )
+            token_sym, head_cohort_sym = symbols[:2]
+            # Four rotary head cohorts share each 64-token frequency band.
+            # Keep those consumers adjacent so the destination owner map is
+            # [0..3], [4..7], ... exactly as in SenDNN.
+            op._spyre_oracle_gather_dim_symbol = head_cohort_sym  # type: ignore[attr-defined]
+            return {token_sym: 8, head_cohort_sym: 4}
         if config.relayout_oracle_p06_ramp and op.get_name() in (
             config.relayout_oracle_p06_ramp_source,
             config.relayout_oracle_p06_ramp_consumer,
@@ -854,13 +1077,47 @@ def _resolve_work_div_hint(
                 op._spyre_oracle_gather_dim_symbol = head_cohort_sym  # type: ignore[attr-defined]
                 return {token_sym: 8, head_cohort_sym: 4}
             return {token_sym: 32}
+        if config.relayout_oracle_prefill_qkv_inputs and op.get_name() == "buf10":
+            actual_extents = [concretize_expr(it_space[sym]) for sym in symbols]
+            if actual_extents != [512, 64]:
+                raise Unsupported(
+                    "SenDNN P09 replay expected adjusted normalized-activation "
+                    f"extents [512, 64], got {actual_extents}"
+                )
+            return {symbols[0]: 16}
+        if (
+            config.relayout_oracle_prefill_qkv_inputs
+            and op.get_name() in ("buf11", "buf15", "buf29")
+        ):
+            if len(symbols) != 3:
+                raise Unsupported(
+                    "SenDNN P09 replay expected a rank-three Q/K/V BMM "
+                    f"iteration space, got {symbols} on {op.get_name()}"
+                )
+            mb_sym, out_sym = symbols[:2]
+            op._spyre_oracle_gather_dim_symbol = out_sym  # type: ignore[attr-defined]
+            # Output must vary fastest so each contiguous four-core cohort
+            # consumes one replicated 64-token S2 band.
+            return {out_sym: 4, mb_sym: 8}
         if config.relayout_oracle_prefill_qk_query and op.get_name() in (
             "buf11",
             "buf12",
             "buf13",
             "buf14",
         ) and op.get_name() in config.relayout_oracle_prefill_qk_query_buffers.split(","):
-            expected_ranks = {"buf11": 3, "buf12": 5, "buf13": 5, "buf14": 4}
+            shape = [str(size) for size in op.get_size()]
+            flattened_buf14 = op.get_name() == "buf14" and shape == [
+                "1",
+                "32",
+                "512",
+                "128",
+            ]
+            expected_ranks = {
+                "buf11": 3,
+                "buf12": 5,
+                "buf13": 5,
+                "buf14": 3 if flattened_buf14 else 4,
+            }
             if len(symbols) != expected_ranks[op.get_name()]:
                 raise Unsupported(
                     "SenDNN P06 replay expected the exact Granite query/rotary "
@@ -876,7 +1133,10 @@ def _resolve_work_div_hint(
                     sym for sym in symbols if concretize_expr(it_space[sym]) == 512
                 )
                 head_cohort_sym = next(
-                    sym for sym in symbols if concretize_expr(it_space[sym]) == 8
+                    sym
+                    for sym in symbols
+                    if concretize_expr(it_space[sym])
+                    == (32 if flattened_buf14 else 8)
                 )
             else:
                 token_sym, head_cohort_sym = symbols[:2]
@@ -925,6 +1185,46 @@ def _resolve_work_div_hint(
             # with output/head shards contiguous inside each token cohort.
             op._spyre_oracle_gather_dim_symbol = output_sym  # type: ignore[attr-defined]
             return {token_sym: 8, output_sym: 4}
+        if config.relayout_oracle_granite_p14 and op.get_name() in (
+            "buf5",
+            "buf6",
+        ):
+            if op.get_name() == "buf6":
+                if len(symbols) != 1:
+                    raise Unsupported(
+                        "SenDNN P14 last-token consumer expected one hidden "
+                        f"iteration symbol, got {symbols} on {op.get_name()}"
+                    )
+                # The slice/expand has already removed the token axis.  Its
+                # one remaining symbol is the 4096-element hidden dimension.
+                return {symbols[0]: 32}
+            if len(symbols) != 2:
+                raise Unsupported(
+                    "SenDNN P14 source expected [mb, out] iteration symbols, "
+                    f"got {symbols} on {op.get_name()}"
+                )
+            mb_sym, out_sym = symbols
+            # Hidden quarters vary fastest within each 64-token cohort.
+            op._spyre_oracle_gather_dim_symbol = out_sym  # type: ignore[attr-defined]
+            return {mb_sym: 8, out_sym: 4}
+        if (
+            config.relayout_oracle_prefill_mlp_down_projection
+            and op.get_name() == "buf57"
+        ):
+            if len(symbols) != 3:
+                raise Unsupported(
+                    "SenDNN MLP replay expected [mb, output, reduction] "
+                    f"iteration symbols, got {symbols} on {op.get_name()}"
+                )
+            mb_sym, out_sym = symbols[:2]
+            mb_split = config.relayout_oracle_prefill_mlp_down_projection_mb
+            out_split = config.relayout_oracle_prefill_mlp_down_projection_out
+            if mb_split * out_split != 32:
+                raise Unsupported(
+                    "SenDNN MLP down-projection replay requires 32 total cores, "
+                    f"got mb={mb_split}, out={out_split}"
+                )
+            return {mb_sym: mb_split, out_sym: out_split}
         expected_rank = 2 if op.get_name() == "buf52" else 3
         if len(symbols) != expected_rank:
             raise Unsupported(

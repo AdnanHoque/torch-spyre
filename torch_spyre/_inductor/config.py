@@ -47,6 +47,13 @@ lx_relayout_disabled_sources: str = os.environ.get(
     "SPYRE_LX_RELAYOUT_DISABLED_SOURCES", ""
 )
 
+# Optional comma-separated source->consumer pairs excluded from LX relayout
+# planning.  This is finer-grained than lx_relayout_disabled_sources for
+# shared intermediates whose individual consumer edges need isolated A/Bs.
+lx_relayout_disabled_edges: str = os.environ.get(
+    "SPYRE_LX_RELAYOUT_DISABLED_EDGES", ""
+)
+
 # Reject dense all-to-all candidates above this total producer size when set
 # to a non-negative byte count.  The default preserves existing behavior.
 lx_relayout_all_to_all_max_bytes: int = int(
@@ -60,11 +67,90 @@ relayout_oracle_prefill_output_projection: bool = (
     os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_OUTPUT_PROJ", "0") == "1"
 )
 
+# Replay SenDNN P08 at the final corrected fused-attention output boundary.
+# Torch represents the 8-KV-head x 4-query-group tensor as [8, 4, 512, 128];
+# the oracle changes the 4-head-cohort x 8-token-cohort core order without an
+# intervening HBM restickify.
+relayout_oracle_prefill_attention_permutation: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_ATTN_PERMUTATION", "0") == "1"
+)
+
+# Test-only SenDNN P09 replay. Keep the normalized activation on 16 token
+# owners, then gather pairs of 32-token fragments into eight 64-token slices
+# replicated across the four output-shard consumers of each Q/K/V BMM.
+relayout_oracle_prefill_qkv_inputs: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_QKV_INPUTS", "0") == "1"
+)
+
 # Replay the shared RMSNorm activation -> SwiGLU gate/up projections. SenDNN
 # uses an 8x4 (mb x hidden/output) producer layout, then a four-core grouped
 # all-gather into two 8x4 BMM consumers.
 relayout_oracle_prefill_mlp_inputs: bool = (
     os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_INPUTS", "0") == "1"
+)
+
+# Optional local follow-up to the MLP-input replay. Repartition the SwiGLU
+# product for the down projection without the baseline replicated HBM
+# restickify. The split knobs allow capacity-feasible topology experiments;
+# their product must remain 32 cores. This is gated independently for
+# numerical/performance A/B testing.
+relayout_oracle_prefill_mlp_down_projection: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_DOWN_PROJ", "0") == "1"
+)
+relayout_oracle_prefill_mlp_down_projection_mb: int = int(
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_DOWN_PROJ_MB", "32")
+)
+relayout_oracle_prefill_mlp_down_projection_out: int = int(
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_DOWN_PROJ_OUT", "1")
+)
+
+# Replay the non-attention Granite RMSNorm transport cluster.  P05 gathers
+# four hidden shards into each of eight token owners before the reduction;
+# the decomposed P10/P11 scalar chain is then multicast to the four-core
+# cohorts used by the final normalization multiply.  This remains an exact-
+# graph experiment rather than general work-division policy.
+relayout_oracle_prefill_mlp_normalization: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_MLP_NORM", "0") == "1"
+)
+
+# Replay Granite's post-attention residual-add transport (SenDNN P12).  The
+# multiplier output is divided into 16 token shards, with adjacent cores
+# computing replicas and the even core in each pair serving as the physical
+# LX owner.  The add consumes an 8-token x 4-hidden grid.  Source/consumer
+# names are configurable so a small value probe can exercise the same path.
+relayout_oracle_prefill_residual_add: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_RESIDUAL_ADD", "0") == "1"
+)
+relayout_oracle_prefill_residual_add_source: str = os.environ.get(
+    "SPYRE_RELAYOUT_ORACLE_PREFILL_RESIDUAL_ADD_SOURCE", "buf45"
+)
+relayout_oracle_prefill_residual_add_consumer: str = os.environ.get(
+    "SPYRE_RELAYOUT_ORACLE_PREFILL_RESIDUAL_ADD_CONSUMER", "buf46"
+)
+
+# Keep the Granite one-token LM head's reduction local to each output owner.
+# The default M=1 heuristic splits the 4096-element K reduction over 16 cores,
+# which changes FP16 accumulation order relative to the B1/S512 head.  This
+# exact-graph experiment leaves K unsplit.  The parity path pads 770 output
+# sticks to 784 and divides them over 28 cores (28 sticks/core), exactly
+# matching SenDNN.  The older unpadded 22-owner geometry remains accepted for
+# controlled A/Bs.
+work_div_oracle_granite_last_token_head: bool = (
+    os.environ.get("SPYRE_WORK_DIV_ORACLE_GRANITE_LAST_TOKEN_HEAD", "0") == "1"
+)
+
+# Replay SenDNN P14 in the fused final RMSNorm/last-token stage.  The final
+# normalization output uses eight 64-token cohorts by four hidden quarters;
+# only token 511 is then repartitioned into 32 128-element hidden shards.
+relayout_oracle_granite_p14: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_GRANITE_P14", "0") == "1"
+)
+
+# Test-only SenDNN P07 replay. Materialize Granite's shared RoPE frequency
+# input once as 16 token-owned LX fragments, then gather adjacent fragments
+# into eight 64-token bands replicated over four Q/K rotary consumer cohorts.
+relayout_oracle_prefill_rope_input: bool = (
+    os.environ.get("SPYRE_RELAYOUT_ORACLE_PREFILL_ROPE_INPUT", "0") == "1"
 )
 
 # Test-only SenDNN replay oracle that preserves Granite GQA K/V in compact

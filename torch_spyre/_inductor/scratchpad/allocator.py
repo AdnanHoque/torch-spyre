@@ -154,6 +154,7 @@ class ScratchpadAllocator:
         self._lx_relayout_alias_plans_by_source: dict[
             str, list[LXRelayoutPlan]
         ] = {}
+        self._p07_materialized_input_names: set[str] = set()
 
     def plan_allocation(self, graph: GraphLowering):
         """Run pre-passes, assign LX addresses to eligible buffers, then run post-passes.
@@ -171,6 +172,7 @@ class ScratchpadAllocator:
         """
         self.reject_reasons = {}
         self._run_passes(self.pre_optimization_passes, graph)
+        self._materialize_p07_rope_input_source(graph)
         buffers = self._prepare_buffers(graph)
         allocation = self._solve(buffers)
         self._post_solve(graph, allocation)
@@ -178,6 +180,74 @@ class ScratchpadAllocator:
         self._push_allocation(graph, allocation)
         self._log_lx_pinning(graph)
         self._run_passes(self.post_optimization_passes, graph)
+
+    def _materialize_p07_rope_input_source(self, graph: GraphLowering) -> None:
+        """Create the safe computed producer required by the P07 shuffle.
+
+        Granite's RoPE frequencies enter the fused graph as one shared input to
+        the Q and K rotary multiplies. LX relayout planning normally starts at a
+        computed buffer, while regular input pinning is inserted only after
+        planning. For the exact replay, insert that same pointwise clone before
+        planning, give it SenDNN's 16-token source division, and leave the graph
+        input itself in HBM. Both rotary consumers can then share one explicit
+        S1/S2 allocation pair without reading partially materialized storage.
+        """
+
+        self._p07_materialized_input_names = set()
+        if not config.relayout_oracle_prefill_rope_input:
+            return
+
+        buffer_users = get_buffer_users(graph)
+        saw_rope_shape = False
+        for input_name in graph.graph_input_names:
+            input_buffer = graph.get_buffer(input_name)
+            if [str(size) for size in input_buffer.get_size()] != [
+                "1",
+                "512",
+                "2",
+                "2",
+                "64",
+            ]:
+                continue
+            saw_rope_shape = True
+            consumers = buffer_users.get(input_name, [])
+            if {consumer.get_name() for consumer in consumers} != {
+                "buf12",
+                "buf16",
+            }:
+                continue
+
+            source = GraphEditor(graph).push_allocation_with_clone(
+                input_buffer,
+                0,
+                consumers,
+                input=True,
+            )
+            source_rw = op_read_writes(source)
+            write_dep = next(
+                dep for dep in source_rw.writes if dep.name == source.get_name()
+            )
+            source_it_space = iteration_space_from_op(source)
+            token_sym = next(
+                sym
+                for sym in source_it_space
+                if concretize_expr(source_it_space[sym]) == 512
+            )
+            source_splits, _ = splits_by_index_coeff(
+                {token_sym: 16},
+                write_dep.index,
+                write_dep.index,
+            )
+            source.op_it_space_splits = (source_splits, {})
+            source._spyre_oracle_p07_source = True  # type: ignore[attr-defined]
+            self._p07_materialized_input_names.add(input_name)
+            return
+
+        if saw_rope_shape:
+            raise Unsupported(
+                "SenDNN P07 replay found the Granite RoPE-shaped input but "
+                "not its exact buf12 and buf16 consumers"
+            )
 
     @staticmethod
     def _run_passes(
@@ -224,8 +294,24 @@ class ScratchpadAllocator:
                     and plan.collective_kind == canonical.collective_kind
                     and plan.destination_size_ratio
                     == canonical.destination_size_ratio
+                    and plan.destination_size_divisor
+                    == canonical.destination_size_divisor
                 )
             ]
+            if (
+                config.relayout_oracle_prefill_qkv_inputs
+                and source_name == "buf10"
+                and len(compatible) == 3
+            ):
+                # P09's three consumers are far apart in the fused attention
+                # schedule. A shared S2 spans the entire Q/K/V interval and
+                # costs 512 KiB throughout. Keep the exact shared S1, but give
+                # each consumer a short-lived S2 that may reuse one address.
+                compatible = [
+                    replace(plan, private_destination=True)
+                    for plan in compatible
+                ]
+                canonical = compatible[-1]
             self._lx_relayout_plans_by_source[source_name] = canonical
             self._lx_relayout_alias_plans_by_source[source_name] = compatible
         buffers = self._generate_buffers(graph, cache, timings, lifetimes)
@@ -292,7 +378,9 @@ class ScratchpadAllocator:
             return allocation
 
         complete_relayouts = list(self._iter_complete_lx_relayouts(allocation))
-        if len(complete_relayouts) == len(self._lx_relayout_plans_by_source):
+        if {
+            plan.source_name for plan, _ in complete_relayouts
+        } == set(self._lx_relayout_plans_by_source):
             return allocation
 
         complete_sources = {plan.source_name for plan, _ in complete_relayouts}
@@ -307,8 +395,12 @@ class ScratchpadAllocator:
             )
             removed_names = set(incomplete_sources)
             removed_names.update(
-                self._lx_relayout_plans_by_source[source_name].destination_name
+                alias_plan.destination_name
                 for source_name in incomplete_sources
+                for alias_plan in self._lx_relayout_alias_plans_by_source.get(
+                    source_name,
+                    [self._lx_relayout_plans_by_source[source_name]],
+                )
             )
             for buffer in allocation:
                 if buffer.name in removed_names:
@@ -334,7 +426,11 @@ class ScratchpadAllocator:
         # atomically rather than retaining a partially allocated pair.
         removed_names = set(self._lx_relayout_plans_by_source)
         removed_names.update(
-            plan.destination_name for plan in self._lx_relayout_plans_by_source.values()
+            alias_plan.destination_name
+            for source_name, plan in self._lx_relayout_plans_by_source.items()
+            for alias_plan in self._lx_relayout_alias_plans_by_source.get(
+                source_name, [plan]
+            )
         )
         remaining = [buffer for buffer in buffers if buffer.name not in removed_names]
         for buffer in remaining:
@@ -363,6 +459,25 @@ class ScratchpadAllocator:
         by_name = {buffer.name: buffer for buffer in allocation}
         for source_name, plan in self._lx_relayout_plans_by_source.items():
             source = by_name.get(source_name)
+            alias_plans = self._lx_relayout_alias_plans_by_source.get(
+                source_name, [plan]
+            )
+            if alias_plans and all(p.private_destination for p in alias_plans):
+                if source is None or source.address is None:
+                    continue
+                resolved = []
+                for alias_plan in alias_plans:
+                    destination = by_name.get(alias_plan.destination_name)
+                    if destination is None or destination.address is None:
+                        break
+                    if source.address < destination.address + destination.size and (
+                        destination.address < source.address + source.size
+                    ):
+                        break
+                    resolved.append((alias_plan, destination.address))
+                else:
+                    yield from resolved
+                continue
             destination = by_name.get(plan.destination_name)
             if (
                 source is None
@@ -412,6 +527,12 @@ class ScratchpadAllocator:
         """Commit relayout metadata only after all required LX storage exists."""
         clear_lx_relayout_metadata(graph)
         for plan, destination_address in self._iter_complete_lx_relayouts(allocation):
+            if plan.private_destination:
+                record_lx_relayout_plan(
+                    graph,
+                    replace(plan, destination_lx_address=destination_address),
+                )
+                continue
             for consumer_plan in self._lx_relayout_alias_plans_by_source.get(
                 plan.source_name, [plan]
             ):
@@ -543,7 +664,26 @@ class ScratchpadAllocator:
                 and name not in reinterpret_output_clone_allowlist
             ):
                 return "graph output is a ReinterpretView"
-        if buffer_not_read_in_full(graph, name):
+        p14_plan = self._lx_relayout_plans_by_source.get(name)
+        allow_granite_p14_partial_source = (
+            config.relayout_oracle_granite_p14
+            and name == "buf5"
+            and p14_plan is not None
+            and p14_plan.consumer_name == "buf6"
+            and p14_plan.collective_kind.value == "all_to_all"
+            and p14_plan.destination_size_ratio == 1
+            and p14_plan.destination_size_divisor == 512
+            and set(p14_plan.source_core_id_to_device_slice)
+            == {"28", "29", "30", "31"}
+            and set(p14_plan.destination_core_id_to_device_slice)
+            == {str(core) for core in range(32)}
+            and [str(size) for size in op.get_size()]
+            == ["1", "512", "4096"]
+        )
+        if (
+            buffer_not_read_in_full(graph, name)
+            and not allow_granite_p14_partial_source
+        ):
             return "partial/offset read"
         if division_is_fixed and ncores.get(name, -1) < 0:
             reason = ncores_reasons.get(name, "core div mismatch")
@@ -582,6 +722,8 @@ class ScratchpadAllocator:
         (``division_is_fixed``); the joint path defers the core division to the
         solver and passes neither.
         """
+        if name in self._p07_materialized_input_names:
+            return "materialized by the SenDNN P07 source clone"
         if not clone_at_graph_boundaries():
             return "graph input (no clone)"
         if self._read_count(uses) == 0:
@@ -911,25 +1053,34 @@ class ScratchpadAllocator:
         """Add post-shuffle views and their transfer steps to LX liveness."""
         by_name = {buffer.name: buffer for buffer in buffers}
         op_index = {op.get_name(): index for index, op in enumerate(graph.operations)}
-        entries: list[tuple[LifetimeBoundBuffer, LXRelayoutPlan, int]] = []
+        entries: list[tuple[LifetimeBoundBuffer, LXRelayoutPlan, list[int]]] = []
         invalid_sources: set[str] = set()
         for source_name, plan in self._lx_relayout_plans_by_source.items():
             source = by_name.get(source_name)
-            consumer_use = op_index.get(plan.consumer_name)
+            alias_plans = self._lx_relayout_alias_plans_by_source.get(
+                source_name, [plan]
+            )
+            consumer_uses = sorted(
+                {
+                    use
+                    for alias_plan in alias_plans
+                    if (use := op_index.get(alias_plan.consumer_name)) is not None
+                }
+            )
             if source is None or source.residency_reason is not None:
                 invalid_sources.add(source_name)
                 continue
             if (
-                consumer_use is None
-                or consumer_use not in source.uses
-                or not any(use < consumer_use for use in source.uses)
+                len(consumer_uses) != len(alias_plans)
+                or any(use not in source.uses for use in consumer_uses)
+                or not any(use < consumer_uses[0] for use in source.uses)
             ):
                 source.residency_reason = (
                     "core div mismatch: relayout transfer could not be scheduled"
                 )
                 invalid_sources.add(source_name)
                 continue
-            entries.append((source, plan, consumer_use))
+            entries.append((source, plan, consumer_uses))
 
         if invalid_sources:
             # Keep every declarative buffer and its residency reason. Only drop
@@ -945,7 +1096,13 @@ class ScratchpadAllocator:
         # that needs a SHUFFLE. Existing solvers then see S1 and S2 live together
         # during the transfer and keep their addresses disjoint without any
         # relayout-specific placement rules.
-        boundaries = sorted({consumer_use for _, _, consumer_use in entries})
+        boundaries = sorted(
+            {
+                consumer_use
+                for _, _, consumer_uses in entries
+                for consumer_use in consumer_uses
+            }
+        )
         transfer_time = {
             consumer_use: consumer_use + rank
             for rank, consumer_use in enumerate(boundaries)
@@ -953,11 +1110,12 @@ class ScratchpadAllocator:
         for buffer in buffers:
             buffer.uses = [use + bisect_right(boundaries, use) for use in buffer.uses]
 
-        for source, plan, original_consumer_use in entries:
-            consumer_use = original_consumer_use + bisect_right(
-                boundaries, original_consumer_use
-            )
-            shuffle_use = transfer_time[original_consumer_use]
+        for source, plan, original_consumer_uses in entries:
+            consumer_uses = [
+                use + bisect_right(boundaries, use)
+                for use in original_consumer_uses
+            ]
+            shuffle_uses = [transfer_time[use] for use in original_consumer_uses]
 
             # The backend may execute the final producer data movement and the
             # inserted SHUFFLE in one bundle. Keep any LX-resident producer
@@ -969,7 +1127,7 @@ class ScratchpadAllocator:
                     producer_input = by_name.get(dep.name)
                     if producer_input is not None:
                         producer_input.uses = sorted(
-                            {*producer_input.uses, shuffle_use}
+                            {*producer_input.uses, *shuffle_uses}
                         )
                         # The input now stays live past its original in-place
                         # handoff, so its storage cannot be reused there.
@@ -988,18 +1146,50 @@ class ScratchpadAllocator:
             #
             # Both views are accessed at the synthetic SHUFFLE step. S1 can be
             # released before consumer compute while S2 remains live through it.
-            source_uses = [use for use in source.uses if use != consumer_use]
-            source.uses = sorted({*source_uses, shuffle_use})
+            scaled_destination_size = source.size * plan.destination_size_ratio
+            if scaled_destination_size % plan.destination_size_divisor:
+                raise ValueError(
+                    "LX relayout destination size is not integral: "
+                    f"source={source.name} size={source.size} "
+                    f"ratio={plan.destination_size_ratio}/"
+                    f"{plan.destination_size_divisor}"
+                )
+            source_uses = [
+                use for use in source.uses if use not in set(consumer_uses)
+            ]
+            source.uses = sorted({*source_uses, *shuffle_uses})
             destination_size = round_up_to_alignment(
-                source.size * plan.destination_size_ratio,
+                scaled_destination_size // plan.destination_size_divisor,
                 _LX_ALLOCATION_GRANULARITY_BYTES,
             )
-            destination = LifetimeBoundBuffer(
-                plan.destination_name,
-                destination_size,
-                [shuffle_use, consumer_use],
-                first_use_is_read=False,
+            alias_plans = self._lx_relayout_alias_plans_by_source.get(
+                source.name, [plan]
             )
+            if alias_plans and all(p.private_destination for p in alias_plans):
+                destinations = [
+                    LifetimeBoundBuffer(
+                        alias_plan.destination_name,
+                        destination_size,
+                        [
+                            transfer_time[op_index[alias_plan.consumer_name]],
+                            op_index[alias_plan.consumer_name]
+                            + bisect_right(
+                                boundaries, op_index[alias_plan.consumer_name]
+                            ),
+                        ],
+                        first_use_is_read=False,
+                    )
+                    for alias_plan in alias_plans
+                ]
+            else:
+                destinations = [
+                    LifetimeBoundBuffer(
+                        plan.destination_name,
+                        destination_size,
+                        sorted({*shuffle_uses, *consumer_uses}),
+                        first_use_is_read=False,
+                    )
+                ]
             for child in buffers:
                 if source.name in child.in_place_parents:
                     # This relation was validated against S1's layout and size;
@@ -1012,8 +1202,10 @@ class ScratchpadAllocator:
                     ]
             # Keep the synthetic destination adjacent to its source for readable
             # plans. Placement order does not affect correctness because their
-            # lifetimes overlap at ``shuffle_use``.
-            buffers.insert(buffers.index(source), destination)
+            # lifetimes overlap at every synthetic shuffle use.
+            source_index = buffers.index(source)
+            for offset, destination in enumerate(destinations):
+                buffers.insert(source_index + offset, destination)
 
     def _log_lx_pinning(self, graph: GraphLowering) -> None:
         """Log the final LX pinning decision for every op in the graph."""

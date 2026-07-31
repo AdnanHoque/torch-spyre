@@ -76,14 +76,22 @@ logger = get_inductor_logger("spyre_kernel")
 
 def _current_node_lx_relayout_inputs(
     current_node,
+    consumer_node=None,
 ) -> dict[str, LXRelayoutPlan]:
-    return {
+    plans = {
         source_name: plan
         for scheduler_node in current_node.get_nodes()
         for source_name, plan in getattr(
             scheduler_node.node, LX_RELAYOUT_ATTR, {}
         ).items()
     }
+    if consumer_node is not None:
+        # Reduction scheduling can wrap the stamped ComputedBuffer in a node
+        # that no longer exposes custom attributes through get_nodes().  The
+        # output buffer is still the authoritative consumer and retains the
+        # allocator-updated destination address.
+        plans.update(getattr(consumer_node, LX_RELAYOUT_ATTR, {}))
+    return plans
 
 
 def _materialize_explicit_lx_shuffle(
@@ -104,7 +112,16 @@ def _materialize_explicit_lx_shuffle(
     }
     source_device_dim_splits = dict(plan.source_device_dim_splits)
     destination_device_dim_splits = dict(plan.destination_device_dim_splits)
-    participant_count = len(consumer_map)
+    participant_cores = {int(core) for core in producer_map} | {
+        int(core) for core in consumer_map
+    }
+    if not participant_cores:
+        return None
+    participant_count = max(participant_cores) + 1
+    if participant_cores != set(range(participant_count)):
+        # num_cores_override is a dense prefix.  Do not silently activate
+        # holes whose ownership is absent from both endpoint maps.
+        return None
     if "lx" not in source_arg.allocation or destination_address is None:
         return None
 
@@ -117,6 +134,39 @@ def _materialize_explicit_lx_shuffle(
         BATCH_MATMUL_OP,
         BATCH_MATMUL_FP8_OP,
     )
+    oracle_granite_p14_edge = (
+        _spyre_config.relayout_oracle_granite_p14
+        and not consumer_is_matmul
+        and plan.source_name == "buf5"
+        and plan.consumer_name == "buf6"
+        and plan.collective_kind is LXCollectiveKind.ALL_TO_ALL
+        and source_device_dim_splits == {"0": 1, "1": 4}
+        and destination_device_dim_splits == {"0": 1, "1": 32}
+        and plan.destination_size_divisor == 512
+    )
+    compact_v_planner_order = {
+        str(core): {"0": core // 4, "1": core % 4} for core in range(32)
+    }
+    if (
+        _spyre_config.relayout_oracle_compact_gqa
+        and consumer_is_matmul
+        and plan.collective_kind is LXCollectiveKind.ALL_GATHER
+        and plan.source_name == "buf29"
+        and list(source_arg.device_size) == [512, 16, 1, 64]
+        and source_device_dim_splits == {"0": 8, "1": 4}
+        and destination_device_dim_splits == {"0": 1, "1": 1}
+        and plan.destination_size_ratio == 32
+        and producer_map == compact_v_planner_order
+    ):
+        # PerCoreView records this logical 8x4 partition token-major, while
+        # the compact-V projection's emitted BMM fold assigns the eight token
+        # shards inside each output/head cohort.  Describe the physical S1
+        # owners to the shuffle so it fetches each shard from the core that
+        # actually produced it.
+        producer_map = {
+            str(core): {"0": core % 8, "1": core // 8}
+            for core in range(32)
+        }
     consumer_symbols = list(consumer_spec.iteration_space)
     consumer_labels = (
         MATMUL_DIM_LABELS[-len(consumer_symbols) :]
@@ -165,6 +215,22 @@ def _materialize_explicit_lx_shuffle(
                 for symbol in source_arg.device_coordinates[index].free_symbols
                 if symbol in symbol_to_label
             ]
+            if (
+                len(symbols) != 1
+                and split != 1
+                and _spyre_config.relayout_oracle_compact_gqa
+                and plan.source_name == "buf29"
+                and str(device_dim) == "1"
+            ):
+                # Compact V flattens [KV-head=8, head-dim=128] into the
+                # producer's 1024-element output axis. Normalized AV codegen
+                # exposes that coordinate as
+                # ``2 * kv_head + floor(head_dim / 64)``. SenDNN's four
+                # source cohorts divide KV heads (two per owner); the stick
+                # selector is local within a head and is not a split symbol.
+                kv_head_symbol = consumer_symbols[0]
+                if kv_head_symbol in symbols:
+                    symbols = [kv_head_symbol]
             if len(symbols) != 1:
                 if split == 1:
                     continue
@@ -180,16 +246,29 @@ def _materialize_explicit_lx_shuffle(
     if source_splits is None or destination_splits is None:
         return None
 
+    if (
+        oracle_granite_p14_edge
+        and source_arg.device_dtype != DataFormats.SEN169_FP16
+    ):
+        return None
+
     shuffle_iteration_space = {
         symbol: (extent, destination_splits.get(symbol, 1))
         for symbol, (extent, _) in shuffle_iteration_space.items()
     }
 
+    source_allocation = dict(source_arg.allocation)
+    if oracle_granite_p14_edge:
+        # The normalized plan selects token cohort 7 but describes it as a
+        # singleton fold. Fold token 511's per-core row offset into the LX
+        # base: local row 63 times 1024 fp16 hidden values.
+        source_allocation["lx"] += 63 * 1024 * 2
+
     source = replace(
         source_arg,
         is_input=True,
         name=plan.source_name,
-        allocation=dict(source_arg.allocation),
+        allocation=source_allocation,
         allocation_core_id_to_device_slice=producer_map,
         allocation_device_dim_splits=source_device_dim_splits,
     )
@@ -226,9 +305,124 @@ def _materialize_explicit_lx_shuffle(
             if consumer_spec.gather_dim in shuffle_iteration_space
             else None
         ),
-        replicas_contiguous=consumer_spec.gather_dim is not None,
+        replicas_contiguous=(
+            consumer_spec.gather_dim is not None
+            or (
+                _spyre_config.relayout_oracle_prefill_mlp_normalization
+                and plan.collective_kind is LXCollectiveKind.BROADCAST
+                and plan.source_name == "buf50"
+                and plan.consumer_name == "buf51"
+            )
+        ),
     )
     return shuffle, destination_input
+
+
+def _split_p07_rope_shuffle(shuffle: OpSpec) -> list[OpSpec]:
+    """Replay SenDNN P07 as two independent 128-KiB logical tensors.
+
+    Granite carries both rotary output rows in one physical
+    ``[1, 512, 2, 2, 64]`` input.  SenDNN emits one grouped gather per output
+    row (and per Q/K consumer), rather than one 256-KiB four-dimensional
+    gather.  Besides matching that topology, keeping the rows independent is
+    required by DeepTools' temporal element-arrangement contract.
+    """
+
+    if not _spyre_config.relayout_oracle_prefill_rope_input:
+        return [shuffle]
+    if shuffle.op != "shuffle" or len(shuffle.args) != 2:
+        return [shuffle]
+
+    source, destination = shuffle.args
+    source_shape = [str(size) for size in source.device_size]
+    if source_shape == ["512", "2", "2", "1", "1", "64"]:
+        # ``align_tensors`` has already moved the unit batch/head axes behind
+        # the two rotary axes.  This is the representation seen at explicit
+        # shuffle materialization time.
+        token_axis, row_axis = 0, 1
+    elif source_shape == ["1", "512", "2", "2", "64"]:
+        # Keep the helper usable on the unaligned logical layout as well.
+        token_axis, row_axis = 1, 2
+    else:
+        return [shuffle]
+
+    token_symbols = list(source.device_coordinates[token_axis].free_symbols)
+    row_symbols = list(source.device_coordinates[row_axis].free_symbols)
+    if len(token_symbols) != 1:
+        raise Unsupported("SenDNN P07 expected one token symbol")
+    if len(row_symbols) != 1:
+        raise Unsupported("SenDNN P07 expected one rotary output-row symbol")
+    token_symbol = token_symbols[0]
+    row_symbol = row_symbols[0]
+    token_extent = shuffle.iteration_space.get(token_symbol)
+    row_extent = shuffle.iteration_space.get(row_symbol)
+    if token_extent is None or str(token_extent[0]) != "512":
+        raise Unsupported("SenDNN P07 expected a 512-token shuffle axis")
+    if row_extent is None or str(row_extent[0]) != "2":
+        raise Unsupported(
+            "SenDNN P07 expected an unsplit two-row rotary output axis"
+        )
+
+    # The relayout plan records the logical source layout, where device axis 1
+    # is the token axis.  At materialization, ``align_tensors`` has temporarily
+    # moved that token axis to physical axis 0.  Rebind the work split to the
+    # token symbol before row splitting; otherwise the destination's 8-way
+    # token split is accidentally applied to the two-row rotary axis.
+    destination_splits = destination.allocation_device_dim_splits or {}
+    token_split = destination_splits.get("1")
+    if token_split != 8:
+        raise Unsupported(
+            f"SenDNN P07 expected eight destination token bands, got {token_split}"
+        )
+    corrected_iteration_space = dict(shuffle.iteration_space)
+    corrected_iteration_space[token_symbol] = (token_extent[0], token_split)
+    corrected_iteration_space[row_symbol] = (row_extent[0], 1)
+
+    symbols = list(corrected_iteration_space)
+    row_index = symbols.index(row_symbol)
+    labels = list(shuffle.dim_labels_override or [])
+    if len(labels) != len(symbols):
+        raise Unsupported("SenDNN P07 expected one label per shuffle axis")
+    layout_labels = list(shuffle.layout_labels_override or [])
+    if layout_labels and len(layout_labels) != len(symbols):
+        raise Unsupported("SenDNN P07 expected one layout label per shuffle axis")
+
+    result: list[OpSpec] = []
+    for row in range(2):
+        row_args = [
+            replace(
+                arg,
+                device_coordinates=[
+                    sympy.simplify(coord.subs(row_symbol, row))
+                    for coord in arg.device_coordinates
+                ],
+            )
+            for arg in (source, destination)
+        ]
+        result.append(
+            replace(
+                shuffle,
+                iteration_space={
+                    symbol: extent
+                    for symbol, extent in corrected_iteration_space.items()
+                    if symbol != row_symbol
+                },
+                args=row_args,
+                dim_labels_override=[
+                    label for index, label in enumerate(labels) if index != row_index
+                ],
+                layout_labels_override=(
+                    [
+                        label
+                        for index, label in enumerate(layout_labels)
+                        if index != row_index
+                    ]
+                    if layout_labels
+                    else None
+                ),
+            )
+        )
+    return result
 
 
 def _materialize_lx_relayout_inputs(
@@ -236,10 +430,11 @@ def _materialize_lx_relayout_inputs(
     args: list[TensorArg],
     tensor_args: Sequence[tuple[int, Any]],
     consumer_spec: OpSpec,
+    consumer_node=None,
 ) -> list[OpSpec]:
     """Materialize every planned consumer input before its compute row."""
 
-    plans = _current_node_lx_relayout_inputs(current_node)
+    plans = _current_node_lx_relayout_inputs(current_node, consumer_node)
     prefix_specs: list[OpSpec] = []
     destinations: dict[str, TensorArg] = {}
     for arg_index, tensor in tensor_args:
@@ -255,10 +450,17 @@ def _materialize_lx_relayout_inputs(
             )
             if materialized is None:
                 raise Unsupported(
-                    f"cannot materialize LX shuffle for {plan.source_name}"
+                    f"cannot materialize LX shuffle for {plan.source_name}; "
+                    f"source_allocation={args[arg_index].allocation}; "
+                    f"destination_lx_address={plan.destination_lx_address}; "
+                    f"source_device_dim_splits={plan.source_device_dim_splits}; "
+                    "destination_device_dim_splits="
+                    f"{plan.destination_device_dim_splits}; "
+                    f"source_device_coordinates={args[arg_index].device_coordinates}; "
+                    f"consumer_iteration_space={consumer_spec.iteration_space}"
                 )
             shuffle_spec, destination_arg = materialized
-            prefix_specs.append(shuffle_spec)
+            prefix_specs.extend(_split_p07_rope_shuffle(shuffle_spec))
             destinations[plan.source_name] = destination_arg
         args[arg_index] = destination_arg
     return prefix_specs
@@ -900,6 +1102,33 @@ class SpyreKernel(Kernel[CSEVariable]):
                 )
             )
 
+        oracle_residual_add_source = (
+            _spyre_config.relayout_oracle_prefill_residual_add
+            and ir_node.get_name()
+            == _spyre_config.relayout_oracle_prefill_residual_add_source
+            and [str(size) for size in ir_node.get_size()]
+            in (["512", "4096"], ["1", "512", "4096"])
+        )
+
+        oracle_p07_source = (
+            _spyre_config.relayout_oracle_prefill_rope_input
+            and getattr(ir_node, "_spyre_oracle_p07_source", False)
+            and [str(size) for size in ir_node.get_size()]
+            == ["1", "512", "2", "2", "64"]
+        )
+
+        oracle_qkv_input_source = (
+            _spyre_config.relayout_oracle_prefill_qkv_inputs
+            and ir_node.get_name() == "buf10"
+            and [str(size) for size in ir_node.get_size()]
+            == ["1", "512", "4096"]
+        )
+        oracle_grouped_source = (
+            oracle_residual_add_source
+            or oracle_p07_source
+            or oracle_qkv_input_source
+        )
+
         return OpSpec(
             op,
             is_reduction,
@@ -910,6 +1139,10 @@ class SpyreKernel(Kernel[CSEVariable]):
             symbolic_dim_bounds=symbolic_dim_bounds,
             debug_handle=debug_handle,
             gather_dim=get_gather_dim(ir_node),
+            # Materialize 16 logical token shards on adjacent replica pairs;
+            # the relayout plan selects each even replica as the source owner.
+            num_cores_override=32 if oracle_grouped_source else None,
+            replicas_contiguous=oracle_grouped_source,
         )
 
     def remove_kernel_local_buffers(self) -> None:
@@ -1022,6 +1255,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                     args,
                     tensor_args,
                     consumer_spec,
+                    buf,
                 )
             )
             self.op_specs.append(consumer_spec)
@@ -1063,6 +1297,15 @@ class SpyreKernel(Kernel[CSEVariable]):
                 op = IDENTITY_OP
             op_spec = self.create_op_spec(
                 op, False, args, op_info, self.indirect_var_names()
+            )
+            self.op_specs.extend(
+                _materialize_lx_relayout_inputs(
+                    self.current_node,
+                    args,
+                    [(len(args) - 2, value)],
+                    op_spec,
+                    buf,
+                )
             )
             self.op_specs.append(op_spec)
         else:
@@ -1122,6 +1365,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                     args,
                     [(0, x), (1, y)],
                     consumer_spec,
+                    buf,
                 )
             )
             self.op_specs.append(consumer_spec)
@@ -1136,7 +1380,17 @@ class SpyreKernel(Kernel[CSEVariable]):
                 self.create_tensor_arg(True, x.name, x),
                 self.create_tensor_arg(False, real_dst_name, dst),
             ]
-            self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
+            consumer_spec = self.create_op_spec(value.op, True, args, op_info)
+            self.op_specs.extend(
+                _materialize_lx_relayout_inputs(
+                    self.current_node,
+                    args,
+                    [(0, x)],
+                    consumer_spec,
+                    buf,
+                )
+            )
+            self.op_specs.append(consumer_spec)
 
     def wrap_op_specs_in_loop(self, count: sympy.Expr) -> None:
         """Replace the current op_specs list with a single LoopSpec of the given count."""
@@ -1393,10 +1647,52 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
             buf.writeline("),")
 
 
+def _repair_granite_p14_dim_labels_after_alignment(
+    op_spec: OpSpec,
+    original_symbols: Sequence[sympy.Symbol],
+) -> None:
+    """Label the singleton token dimension introduced by P14 alignment."""
+    if (
+        not _spyre_config.relayout_oracle_granite_p14
+        or op_spec.op != "shuffle"
+        or op_spec.dim_labels_override != [OUTPUT_DIM_LABELS[0]]
+        or len(original_symbols) != 1
+        or len(op_spec.iteration_space) != 2
+        or len(op_spec.args) != 2
+    ):
+        return
+    source, destination = op_spec.args
+    if (
+        source.name != "buf5"
+        or destination.name != "__spyre_lx_relayout_destination__:buf5"
+        or source.allocation_device_dim_splits != {"0": 1, "1": 4}
+        or destination.allocation_device_dim_splits != {"0": 1, "1": 32}
+        or list(source.device_size) != [512, 64, 64]
+        or len(source.device_coordinates) != 3
+    ):
+        return
+    added_symbols = [
+        symbol
+        for symbol in op_spec.iteration_space
+        if symbol not in original_symbols
+    ]
+    if len(added_symbols) != 1:
+        return
+    token_symbol = added_symbols[0]
+    if (
+        list(op_spec.iteration_space)[-1] != token_symbol
+        or op_spec.iteration_space[token_symbol] != (sympy.Integer(1), 1)
+        or sympy.simplify(source.device_coordinates[0] - token_symbol) != 511
+    ):
+        return
+    op_spec.dim_labels_override.append(INPUT_DIM_LABELS[0])
+
+
 def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     # Both parameters must be provided together for gather kernels — indirect_sizes
     # decomposes symbols in align_tensors; indirect_access_subs replaces them with IndirectAccess.
     it_space = op_spec.iteration_space
+    original_symbols = tuple(it_space)
 
     new_op_space_splits, new_tensors = align_tensors(
         it_space,
@@ -1418,3 +1714,5 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
             arg.device_coordinates = [
                 c.xreplace(indirect_access_subs) for c in arg.device_coordinates
             ]
+
+    _repair_granite_p14_dim_labels_after_alignment(op_spec, original_symbols)

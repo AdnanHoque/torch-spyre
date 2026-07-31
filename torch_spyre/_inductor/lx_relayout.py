@@ -31,7 +31,7 @@ from enum import StrEnum
 import sympy
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import ComputedBuffer, Operation, Pointwise
+from torch._inductor.ir import ComputedBuffer, Operation, Pointwise, Reduction
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.pass_utils import (
@@ -58,10 +58,14 @@ class LXCollectiveKind(StrEnum):
 class _LXRelayoutClassification:
     collective_kind: LXCollectiveKind
     destination_size_ratio: int
+    destination_size_divisor: int = 1
 
 
-def make_lx_relayout_destination_name(source_name: str) -> str:
-    return f"{LX_RELAYOUT_DESTINATION_PREFIX}:{source_name}"
+def make_lx_relayout_destination_name(
+    source_name: str, consumer_name: str = ""
+) -> str:
+    suffix = f":{consumer_name}" if consumer_name else ""
+    return f"{LX_RELAYOUT_DESTINATION_PREFIX}:{source_name}{suffix}"
 
 
 def is_lx_relayout_destination(name: str) -> bool:
@@ -80,11 +84,16 @@ class LXRelayoutPlan:
     destination_device_dim_splits: dict[str, int]
     collective_kind: LXCollectiveKind
     destination_size_ratio: int
+    destination_size_divisor: int = 1
     destination_lx_address: int | None = None
+    private_destination: bool = False
 
     @property
     def destination_name(self) -> str:
-        return make_lx_relayout_destination_name(self.source_name)
+        return make_lx_relayout_destination_name(
+            self.source_name,
+            self.consumer_name if self.private_destination else "",
+        )
 
 
 def _intervals_overlap(
@@ -100,6 +109,8 @@ def _classify_lx_relayout(
     producer_splits: dict[str, int],
     consumer_map: dict[str, dict[str, int]],
     consumer_splits: dict[str, int],
+    *,
+    allow_grouped_collectives: bool = False,
 ) -> _LXRelayoutClassification | None:
     """Classify exact, uniform geometry supported by the LX relayout path."""
 
@@ -153,7 +164,10 @@ def _classify_lx_relayout(
         transfer_count == 0
         or not covers_all_cores
         or not uniform
-        or not producer_cores.issubset(consumer_cores)
+        or (
+            not allow_grouped_collectives
+            and not producer_cores.issubset(consumer_cores)
+        )
     ):
         return None
 
@@ -177,6 +191,79 @@ def _classify_lx_relayout(
         and max_fanin == 1
     ):
         return _LXRelayoutClassification(LXCollectiveKind.BROADCAST, 1)
+
+    # P10/P11-style grouped multicast: every source slice has one owner and
+    # every consumer slice is a repeated copy of exactly one source slice.
+    # Keep this behind the exact-graph oracle until it has broader coverage.
+    if (
+        allow_grouped_collectives
+        and producer_is_partitioned
+        and not consumer_is_partitioned
+        and producer_slice_count == consumer_slice_count
+        and max_fanout > 1
+        and max_fanin == 1
+    ):
+        return _LXRelayoutClassification(LXCollectiveKind.BROADCAST, 1)
+
+    # P12-style sparse repartition: fewer, larger source pieces are split and
+    # reassembled into a denser destination partition.  This is neither a
+    # conventional gather nor a same-participant all-to-all, but it uses the
+    # same physical SHUFFLE lowering.  Record the exact rational S2:S1 size so
+    # the allocator can represent destinations smaller than their sources.
+    if (
+        allow_grouped_collectives
+        and not same_participants
+        and producer_is_partitioned
+        and consumer_is_partitioned
+        and max_fanout > 1
+        and max_fanin > 1
+    ):
+        common = math.gcd(len(producer_map), len(consumer_map))
+        return _LXRelayoutClassification(
+            LXCollectiveKind.ALL_TO_ALL,
+            len(producer_map) // common,
+            len(consumer_map) // common,
+        )
+
+    # P05-style reducing gather: a 32-core partition is coalesced into a
+    # smaller sparse set of complete destination pieces.  The shuffle still
+    # executes on the union of source and destination participants.
+    if (
+        allow_grouped_collectives
+        and not same_participants
+        and producer_is_partitioned
+        and consumer_is_partitioned
+        and max_fanout == 1
+        and max_fanin > 1
+    ):
+        return _LXRelayoutClassification(LXCollectiveKind.ALL_GATHER, max_fanin)
+
+    # P13-style subset all-gather: every producer owns one hidden shard while
+    # a smaller set of LM-head cores each consumes the complete vector.  The
+    # shuffle executes on the union of the 32 source cores and the destination
+    # subset, just like the sparse reducing gather above.
+    if (
+        allow_grouped_collectives
+        and not same_participants
+        and producer_is_partitioned
+        and not consumer_is_partitioned
+        and consumer_slice_count == 1
+        and max_fanout == len(consumer_map)
+        and max_fanin == len(producer_map)
+    ):
+        return _LXRelayoutClassification(LXCollectiveKind.ALL_GATHER, max_fanin)
+
+    # SenDNN P07/P09 gathers multiple independently owned source fragments into
+    # a larger destination slice and replicates that slice over a consumer
+    # cohort. The destination has fewer unique slices but more participants.
+    if (
+        producer_is_partitioned
+        and not consumer_is_partitioned
+        and len(producer_map) < len(consumer_map)
+        and max_fanout > 1
+        and max_fanin > 1
+    ):
+        return _LXRelayoutClassification(LXCollectiveKind.ALL_GATHER, max_fanin)
 
     if (
         same_participants
@@ -329,6 +416,12 @@ def collect_lx_relayout_plans(
         for value in config.lx_relayout_disabled_sources.split(",")
         if value.strip()
     }
+    disabled_edges = {
+        tuple(part.strip() for part in value.split("->", 1))
+        for value in config.lx_relayout_disabled_edges.split(",")
+        if "->" in value
+        and all(part.strip() for part in value.split("->", 1))
+    }
     read_counts: dict[str, int] = {}
     for op in graph.operations:
         for dep in op_read_writes(op).reads:
@@ -340,7 +433,22 @@ def collect_lx_relayout_plans(
         if not isinstance(consumer, ComputedBuffer):
             continue
         is_matmul_consumer = _is_matmul_op(consumer)
-        if not is_matmul_consumer and not isinstance(consumer.data, Pointwise):
+        oracle_attention_permutation_consumer = (
+            config.relayout_oracle_prefill_attention_permutation
+            and consumer.get_name() == "buf41"
+        )
+        oracle_mlp_norm_reduction = (
+            config.relayout_oracle_prefill_mlp_normalization
+            and consumer.get_name() == "buf48"
+            and isinstance(consumer.data, Reduction)
+            and [str(size) for size in consumer.get_size()] == ["1", "512", "1"]
+        )
+        if (
+            not is_matmul_consumer
+            and not isinstance(consumer.data, Pointwise)
+            and not oracle_mlp_norm_reduction
+            and not oracle_attention_permutation_consumer
+        ):
             continue
         reads = (
             dep for dep in op_read_writes(consumer).reads if isinstance(dep, MemoryDep)
@@ -348,15 +456,41 @@ def collect_lx_relayout_plans(
         for read_index, dep in enumerate(reads):
             if dep.name in disabled_sources:
                 continue
+            if oracle_attention_permutation_consumer and dep.name != "buf40":
+                continue
+            if (dep.name, consumer.get_name()) in disabled_edges:
+                continue
             read_count = read_counts.get(dep.name, 0)
             oracle_shared_mlp_input = (
                 config.relayout_oracle_prefill_mlp_inputs
                 and dep.name == "buf52"
                 and read_count == 2
             )
-            if read_count != 1 and not oracle_shared_mlp_input:
-                continue
+            oracle_shared_attention_output = (
+                oracle_attention_permutation_consumer
+                and dep.name == "buf40"
+                and read_count > 1
+            )
             producer = operations.get(dep.name)
+            oracle_shared_rope_input = (
+                config.relayout_oracle_prefill_rope_input
+                and isinstance(producer, ComputedBuffer)
+                and getattr(producer, "_spyre_oracle_p07_source", False)
+                and read_count == 2
+            )
+            oracle_shared_qkv_input = (
+                config.relayout_oracle_prefill_qkv_inputs
+                and dep.name == "buf10"
+                and read_count == 3
+            )
+            if (
+                read_count != 1
+                and not oracle_shared_mlp_input
+                and not oracle_shared_attention_output
+                and not oracle_shared_rope_input
+                and not oracle_shared_qkv_input
+            ):
+                continue
             if not isinstance(producer, ComputedBuffer) or producer is consumer:
                 continue
 
@@ -389,6 +523,112 @@ def collect_lx_relayout_plans(
             if producer_core_slices is None:
                 continue
 
+            oracle_residual_add_edge = (
+                config.relayout_oracle_prefill_residual_add
+                and dep.name
+                == config.relayout_oracle_prefill_residual_add_source
+                and consumer.get_name()
+                == config.relayout_oracle_prefill_residual_add_consumer
+                and [str(size) for size in producer.get_size()]
+                in (["512", "4096"], ["1", "512", "4096"])
+                and [str(size) for size in consumer.get_size()]
+                in (["512", "4096"], ["1", "512", "4096"])
+            )
+            oracle_granite_p14_edge = (
+                config.relayout_oracle_granite_p14
+                and dep.name == "buf5"
+                and consumer.get_name() == "buf6"
+                and [str(size) for size in producer.get_size()]
+                == ["1", "512", "4096"]
+                and [str(size) for size in consumer.get_size()]
+                in (["1", "1", "4096"], ["1", "4096"], ["4096"])
+            )
+            oracle_granite_head_gather_edge = (
+                config.work_div_oracle_granite_last_token_head
+                and (
+                    (
+                        dep.name == "buf0"
+                        and consumer.get_name() == "buf1"
+                    )
+                    or (
+                        config.relayout_oracle_granite_p14
+                        and dep.name == "buf6"
+                        and consumer.get_name() == "buf7"
+                    )
+                )
+                and [str(size) for size in producer.get_size()]
+                == ["1", "1", "4096"]
+                and [str(size) for size in consumer.get_size()]
+                in (["1", "1", "49280"], ["1", "1", "50176"])
+            )
+            if oracle_residual_add_edge:
+                # The source executes 16 logical token slices as adjacent
+                # physical replica pairs.  SenDNN names the even member of
+                # each pair as the authoritative P12 source owner.
+                if (
+                    producer_core_count != 16
+                    or producer_view.work_slice_dims != ((0, 16),)
+                    or set(producer_core_slices)
+                    != {str(core) for core in range(16)}
+                ):
+                    continue
+                producer_core_slices = {
+                    str(2 * int(core)): per_core
+                    for core, per_core in producer_core_slices.items()
+                }
+
+            oracle_rope_input_edge = (
+                oracle_shared_rope_input
+                and consumer.get_name() in ("buf12", "buf16")
+                and [str(size) for size in producer.get_size()]
+                == ["1", "512", "2", "2", "64"]
+            )
+            if oracle_rope_input_edge:
+                # The source clone computes 16 logical token slices as adjacent
+                # replica pairs. SenDNN names each pair's even core as the
+                # authoritative P07 owner.
+                if (
+                    producer_core_count != 16
+                    or len(producer_view.work_slice_dims) != 1
+                    or producer_view.work_slice_dims[0][1] != 16
+                    or set(producer_core_slices)
+                    != {str(core) for core in range(16)}
+                ):
+                    continue
+                producer_core_slices = {
+                    str(2 * int(core)): per_core
+                    for core, per_core in producer_core_slices.items()
+                }
+
+            oracle_qkv_input_edge = (
+                config.relayout_oracle_prefill_qkv_inputs
+                and dep.name == "buf10"
+                and consumer.get_name() in ("buf11", "buf15", "buf29")
+                and [str(size) for size in producer.get_size()]
+                == ["1", "512", "4096"]
+            )
+            if oracle_qkv_input_edge:
+                # The normalized activation executes 16 logical token slices
+                # as adjacent replica pairs. SenDNN names the even member of
+                # every pair as the authoritative P09 source owner.
+                if (
+                    producer_core_count == 16
+                    and producer_view.work_slice_dims == ((0, 16),)
+                    and set(producer_core_slices)
+                    == {str(core) for core in range(16)}
+                ):
+                    producer_core_slices = {
+                        str(2 * int(core)): per_core
+                        for core, per_core in producer_core_slices.items()
+                    }
+                elif not (
+                    producer_core_count == 32
+                    and producer_view.work_slice_dims == ((0, 32),)
+                    and set(producer_core_slices)
+                    == {str(core) for core in range(32)}
+                ):
+                    continue
+
             consumer_work_slice_dims = _work_slice_dims(consumer_view)
             consumer_core_slices = _core_id_to_device_slice(
                 consumer_view, consumer_core_count
@@ -397,6 +637,85 @@ def collect_lx_relayout_plans(
                 continue
 
             producer_work_slice_dims = _work_slice_dims(producer_view)
+            if oracle_granite_p14_edge:
+                expected_source_map = {
+                    str(core): {"0": core // 4, "1": core % 4}
+                    for core in range(32)
+                }
+                expected_destination_map_full_rank = {
+                    str(core): {"0": 0, "1": core} for core in range(32)
+                }
+                expected_destination_map_rank1 = {
+                    str(core): {"0": core} for core in range(32)
+                }
+                expected_destination_map_hidden_only = {
+                    str(core): {"1": core} for core in range(32)
+                }
+                destination_is_full_rank = (
+                    consumer_work_slice_dims == {"0": 1, "1": 32}
+                    and consumer_core_slices == expected_destination_map_full_rank
+                )
+                destination_is_rank1 = (
+                    consumer_work_slice_dims == {"0": 32}
+                    and consumer_core_slices == expected_destination_map_rank1
+                )
+                destination_is_hidden_only = (
+                    consumer_work_slice_dims == {"1": 32}
+                    and consumer_core_slices
+                    == expected_destination_map_hidden_only
+                )
+                if (
+                    producer_core_count != 32
+                    or consumer_core_count != 32
+                    or producer_work_slice_dims != {"0": 8, "1": 4}
+                    or producer_core_slices != expected_source_map
+                    or not (
+                        destination_is_full_rank
+                        or destination_is_rank1
+                        or destination_is_hidden_only
+                    )
+                ):
+                    continue
+                if destination_is_rank1 or destination_is_hidden_only:
+                    # The slice has removed the token axis from buf6's IR
+                    # shape. Reintroduce its singleton coordinate so the
+                    # source's [token, hidden] ownership and destination's
+                    # [hidden] ownership share one relayout coordinate space.
+                    consumer_core_slices = expected_destination_map_full_rank
+                    consumer_work_slice_dims = {"0": 1, "1": 32}
+                # Only the final 64-token cohort owns token 511. Normalize
+                # that selected cohort to one transfer-axis slot. Final
+                # pointwise emission retains the same token-major core order.
+                producer_core_slices = {
+                    core: {"0": 0, "1": per_core["1"]}
+                    for core, per_core in producer_core_slices.items()
+                    if per_core["0"] == 7
+                }
+                producer_work_slice_dims = {"0": 1, "1": 4}
+            if oracle_rope_input_edge:
+                # ``PerCoreView`` numbers the clone's non-trivial iteration
+                # axes, so token is axis 0 there.  The consumer TensorArg keeps
+                # Granite's leading singleton stick quotient and therefore
+                # exposes the same token coordinate as physical device axis 1.
+                # Bridge that exact view difference before emitting allocation
+                # metadata; leaving this as axis 0 incorrectly partitions the
+                # 64-wide stick and trips DeepTools fold validation.
+                if (
+                    producer_work_slice_dims != {"0": 16}
+                    or consumer_work_slice_dims != {"0": 8}
+                ):
+                    continue
+                producer_core_slices = {
+                    core: {"1": per_core["0"]}
+                    for core, per_core in producer_core_slices.items()
+                }
+                consumer_core_slices = {
+                    core: {"1": per_core["0"]}
+                    for core, per_core in consumer_core_slices.items()
+                }
+                producer_work_slice_dims = {"1": 16}
+                consumer_work_slice_dims = {"1": 8}
+
             relayout_dims = set(producer_work_slice_dims) | set(
                 consumer_work_slice_dims
             )
@@ -406,11 +725,38 @@ def collect_lx_relayout_plans(
             consumer_core_slices, consumer_work_slice_dims = _dense_view(
                 consumer_core_slices, consumer_work_slice_dims, relayout_dims
             )
-            classification = _classify_lx_relayout(
-                producer_core_slices,
-                producer_work_slice_dims,
-                consumer_core_slices,
-                consumer_work_slice_dims,
+            classification = (
+                _LXRelayoutClassification(
+                    LXCollectiveKind.ALL_TO_ALL,
+                    destination_size_ratio=1,
+                    destination_size_divisor=512,
+                )
+                if oracle_granite_p14_edge
+                else _classify_lx_relayout(
+                    producer_core_slices,
+                    producer_work_slice_dims,
+                    consumer_core_slices,
+                    consumer_work_slice_dims,
+                    allow_grouped_collectives=(
+                        (
+                            config.relayout_oracle_prefill_mlp_normalization
+                            and (
+                                (
+                                    dep.name == "buf47"
+                                    and consumer.get_name() == "buf48"
+                                )
+                                or (
+                                    dep.name == "buf50"
+                                    and consumer.get_name() == "buf51"
+                                )
+                            )
+                        )
+                        or oracle_granite_head_gather_edge
+                        or oracle_residual_add_edge
+                        or oracle_rope_input_edge
+                        or oracle_qkv_input_edge
+                    ),
+                )
             )
             if classification is None:
                 continue
@@ -448,6 +794,7 @@ def collect_lx_relayout_plans(
                     destination_device_dim_splits=consumer_work_slice_dims,
                     collective_kind=classification.collective_kind,
                     destination_size_ratio=classification.destination_size_ratio,
+                    destination_size_divisor=classification.destination_size_divisor,
                 )
             )
 
