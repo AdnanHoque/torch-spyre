@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize matched stock and Design A M64 SMC programs.
+"""Summarize matched stock and Design A SMC programs.
 
 The SMC file contains one program per core and execution unit.  Static loop
 bodies are delimited by ``MVLOOPCNT`` and an instruction carrying ``be=be``.
@@ -22,6 +22,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+from statistics import median
 from typing import Any
 
 
@@ -223,10 +224,20 @@ def summarize_arm(path: Path) -> dict[str, Any]:
     static_counts: Counter[str] = Counter()
     issue_counts: Counter[str] = Counter()
     l3_report: Counter[str] = Counter()
+    unit_core_issue_counts: dict[str, list[int]] = {}
     for (_, unit), instructions in sections.items():
         static_counts.update(instruction["opcode"] for instruction in instructions)
         tree = build_loop_tree(instructions)
-        add_issue_counts(tree, issue_counts)
+        section_issue_counts: Counter[str] = Counter()
+        add_issue_counts(tree, section_issue_counts)
+        issue_counts.update(section_issue_counts)
+        unit_core_issue_counts.setdefault(unit, []).append(
+            sum(
+                value
+                for key, value in section_issue_counts.items()
+                if not key.startswith("PT_")
+            )
+        )
         if unit == "l3lu":
             execute_l3_nodes(tree, gtr={}, report=l3_report)
 
@@ -263,6 +274,16 @@ def summarize_arm(path: Path) -> dict[str, Any]:
                 for key, value in issue_counts.items()
                 if not key.startswith("PT_")
             ),
+        },
+        "unit_issue_pressure": {
+            unit: {
+                "cores": len(values),
+                "minimum_per_core": min(values),
+                "median_per_core": median(values),
+                "maximum_per_core": max(values),
+                "sum_all_cores": sum(values),
+            }
+            for unit, values in sorted(unit_core_issue_counts.items())
         },
         "l3_loads": {
             "recipient_delivered_bytes": delivered_sticks * STICK_BYTES,
@@ -308,6 +329,16 @@ def shape_sort_key(label: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def maximum_l0_issue_count(arm: dict[str, Any]) -> int:
+    l0_units = [
+        value["maximum_per_core"]
+        for unit, value in arm["unit_issue_pressure"].items()
+        if unit.startswith("l0lu")
+    ]
+    require(l0_units, "arm has no L0 load-unit program")
+    return max(l0_units)
+
+
 def main() -> None:
     args = parse_args()
     root = args.study_root.resolve()
@@ -322,16 +353,60 @@ def main() -> None:
     )
     require(labels, f"no stock arms below {root}")
     comparisons = []
+    physical_m_values: set[int] = set()
     for label in labels:
         timing_path = root / f"{label}_timing_summary.json"
         timing = load_json(timing_path)
         require(timing["status"] == "pass", f"timing gate failed: {timing_path}")
+        physical_m_values.add(timing["shape"]["physical_m"])
         stock = summarize_arm(root / f"{label}_stock")
         design_a = summarize_arm(root / f"{label}_design_a")
+        expected_bundle_hashes: dict[str, str] = {}
+        for bundle in timing["artifacts"]["bundles"]:
+            directory_name = Path(bundle["directory"]).name
+            if "mm_transpose" in directory_name:
+                arm = "design_a"
+            elif "linear" in directory_name:
+                arm = "stock"
+            else:
+                raise RuntimeError(
+                    f"cannot classify timed bundle directory: {directory_name}"
+                )
+            require(arm not in expected_bundle_hashes, f"duplicate {arm} bundle")
+            expected_bundle_hashes[arm] = bundle["bundle_sha256"]
+        exact_timed_bundle_hashes = expected_bundle_hashes == {
+            "stock": stock["hashes"]["bundle_mlir_sha256"],
+            "design_a": design_a["hashes"]["bundle_mlir_sha256"],
+        }
+        require(exact_timed_bundle_hashes, f"bundle hash mismatch for {label}")
         stock_us = timing["timing"]["trace"]["incumbent"]["median_us"]
         design_a_us = timing["timing"]["trace"]["candidate"]["median_us"]
         unique_stock = stock["l3_loads"]["estimated_unique_hbm_response_bytes"]
         unique_design_a = design_a["l3_loads"]["estimated_unique_hbm_response_bytes"]
+        stock_l0_issues = maximum_l0_issue_count(stock)
+        design_a_l0_issues = maximum_l0_issue_count(design_a)
+        stock_service_cycles = timing["pt_service"]["arms"]["incumbent"][
+            "actual_cycles_at_core_frequency"
+        ]
+        design_a_service_cycles = timing["pt_service"]["arms"]["candidate"][
+            "actual_cycles_at_core_frequency"
+        ]
+        stock_work_slices = stock["descriptor"]["work_slices"]
+        design_a_work_slices = design_a["descriptor"]["work_slices"]
+        logical_work_divisions = {
+            "stock": {
+                "M": stock_work_slices["mb"],
+                "N": stock_work_slices["out"],
+                "K": stock_work_slices["in"],
+            },
+            # Design A presents the transposed problem to BMM; translate the
+            # descriptor coordinates back to the original C[M,N] problem.
+            "design_a": {
+                "M": design_a_work_slices["out"],
+                "N": design_a_work_slices["mb"],
+                "K": design_a_work_slices["in"],
+            },
+        }
         operand_minimum_bytes = (
             timing["shape"]["k"] * timing["shape"]["n"] * 2
             + timing["shape"]["physical_m"] * timing["shape"]["k"] * 2
@@ -348,8 +423,21 @@ def main() -> None:
                     * (stock_us - design_a_us)
                     / stock_us,
                     "trace_sha256": timing["timing"]["trace_sha256"],
+                    "service_cycles_at_core_frequency": {
+                        "stock": stock_service_cycles,
+                        "design_a": design_a_service_cycles,
+                    },
+                    "emitted_l0_issue_count_per_core": {
+                        "stock": stock_l0_issues,
+                        "design_a": design_a_l0_issues,
+                    },
+                    "service_cycles_minus_l0_issue_count_proxy": {
+                        "stock": stock_service_cycles - stock_l0_issues,
+                        "design_a": design_a_service_cycles - design_a_l0_issues,
+                    },
                 },
                 "gates": {
+                    "exact_timed_bundle_hashes": exact_timed_bundle_hashes,
                     "timing": timing["timing"]["trace"]["gate"],
                     "correctness": timing["correctness_gate"],
                     "structural": timing["structural_gate"],
@@ -359,6 +447,11 @@ def main() -> None:
                     == design_a["pt_and_sync"]["PT_COMPUTE_FMA_UNROLLED"],
                 },
                 "observations": {
+                    "logical_work_divisions": logical_work_divisions,
+                    "same_logical_work_division": (
+                        logical_work_divisions["stock"]
+                        == logical_work_divisions["design_a"]
+                    ),
                     "same_unique_hbm_response_bytes": unique_stock
                     == unique_design_a,
                     "operand_minimum_bytes": operand_minimum_bytes,
@@ -386,14 +479,26 @@ def main() -> None:
             }
         )
 
+    require(
+        len(physical_m_values) == 1,
+        f"study mixes physical M values: {sorted(physical_m_values)}",
+    )
+    physical_m = next(iter(physical_m_values))
     report = {
-        "schema": "activation_stationary_m64_smc_study_v1",
+        "schema": f"activation_stationary_m{physical_m}_smc_study_v1",
         "study_root": str(root),
         "method": {
             "timing": "existing matched Kineto cat==kernel ICCI brackets",
             "smc": "fresh DXP_DEBUG=1 recompilation of exact timed bundle and SDSC",
             "loop_expansion": (
                 "static MVLOOPCNT/be structure; each emitted unit entry assumed invoked once"
+            ),
+            "unit_issue_pressure": (
+                "loop-expanded emitted instruction issues grouped by unit and core"
+            ),
+            "service_residual_proxy": (
+                "device service cycles at the timing ledger's core frequency minus the "
+                "maximum emitted L0 load-unit issue count per core"
             ),
             "unique_hbm_estimate": (
                 "LDMU bytes plus LDGMU recipient bytes divided by current GTR sharers"

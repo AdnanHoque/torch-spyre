@@ -248,6 +248,70 @@ Durable evidence:
 - device SMC root: `/tmp/design_a_smc_m64_20260731_v2` on
   `adnan-cdx-spyre-dev-pf`.
 
+### What changes at M512: matched SMC study
+
+The same audit was repeated on the best accepted M512 schedule for each
+Granite linear shape. This is the regime where physical M contains eight real
+sticks rather than one padded decode stick, so both tensor-role mappings can
+divide useful M work among cores.
+
+Every pair passes the original correctness, one-BMM structural, Kineto-order,
+and equal compute-FMA gates. The logical grids translate Design A's transposed
+BMM coordinates back to the original `C[M,N]` problem.
+
+| M512 shape | Logical grid stock / A | Stock / A | Unique HBM stock / A | Recipient stock / A | Stock/A XRF loads | Stock/A LX syncs | Residual service proxy stock / A |
+|---|---|---:|---:|---:|---:|---:|---:|
+| K4096 N1024 | M8N4 / M8N4 | 1.1068x | 12 / 12 MiB | 80 / 80 MiB | 2.0x | 1.64x | 47,623 / 36,707 cycles |
+| K4096 N4096 | M4N8 / M4N8 | 0.8810x | 40 / 40 MiB | 192 / 192 MiB | 2.0x | 1.65x | 92,242 / 140,126 cycles |
+| K4096 N12800 | M4N8 / M2N16 | 0.9549x | 120 / 120 MiB | 560 / 520 MiB | 2.5x | 2.18x | 321,913 / 375,754 cycles |
+| K12800 N4096 | M8N4 / M4N8 | 1.1454x | 150 / 125 MiB | 1000 / 600 MiB | 4.0x | 1.65x | 521,140 / 351,028 cycles |
+
+Unlike M64, all eight M512 programs use `LDGMU` multicast for both operands
+and emit zero unicast load bytes. The sharer count follows the logical split:
+W is shared across M owners and A across N owners. Stock therefore already has
+the multicast capability that Design A needs. This traffic is L3/GTR fan-out
+of HBM responses; it is not an explicit `STCDPOpLx` core-to-core broadcast.
+
+The first two rows are especially clean fixed-grid controls. Both dataflows
+perform the same mathematical PT work, have the same maximum loop-expanded L0
+issue count, and move exactly the same HBM and recipient bytes. Design A still
+wins the narrow output by 9.65% and loses the square output by 13.51%. In both
+rows it halves XRF-load FMAs and reduces LX synchronization, so neither
+multicast volume nor those instruction counts explain the crossover.
+
+The residual-service column subtracts the maximum emitted per-core L0 issue
+count from device service expressed at the benchmark's 1.1 GHz clock. It
+localizes the difference to service not explained by the common L0 issue
+floor: Design A removes about 10.9K cycles for N1024 but adds about 47.9K for
+N4096 and 53.8K for N12800. This is a schedule-pressure proxy, not a hardware
+stall counter. It is consistent with the streamed-weight cadence becoming
+less favorable as N grows, but the SMC alone cannot assign those cycles to a
+specific hardware queue or dependency.
+
+The down projection is different. Design A changes the grid and cuts repeated
+activation response volume: estimated unique HBM bytes fall 150 -> 125 MiB,
+recipient delivery falls 1000 -> 600 MiB, and residual service falls by about
+170K cycles. That is the strongest mechanistic explanation for its measured
+12.69% latency reduction.
+
+The M512 decision is therefore shape-selective:
+
+- retain K4096 N1024 and K12800 N4096 as real conversion-free microkernel
+  wins;
+- leave K4096 N4096 and K4096 N12800 on stock;
+- do not add another broadcast primitive for Design A: the emitted programs
+  already multicast both operands;
+- if this path is revisited, measure hardware stalls or queue occupancy on the
+  same-grid K4096 N4096 crossover before changing the schedule. The current
+  evidence does not justify speculative compiler complexity.
+
+Durable evidence:
+
+- `smc_m512_results.json`: four timing/SMC pairs, logical-grid attribution,
+  per-unit issue pressure, GTR fan-out, and exact hashes;
+- device SMC root: `/tmp/design_a_smc_m512_20260731.fCyy0i` on
+  `adnan-cdx-spyre-dev-pf`.
+
 ### Large-M result
 
 The same conversion-free oracle was repeated at M4096 and M16384. The

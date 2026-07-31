@@ -2238,3 +2238,69 @@ device:
   SMC root: /tmp/design_a_smc_m64_20260731_v2
   hybrid run: /tmp/design-a-hybrid-m64k4096n12800-m4n8k1-20260731-v1
 ```
+
+## 2026-07-31: M512 Design A SMC diagnosis
+
+The M64 loop/GTR-aware audit was repeated for the exact best accepted M512
+stock and Design A bundles. All four comparisons retain their original
+correctness, one-BMM structure, trace-order, and equal compute-FMA gates.
+
+| M512 shape | Logical grid stock / A | Stock / A | Unique HBM stock / A | Recipient stock / A | Stock/A XRF loads | Stock/A LX syncs | Residual service proxy stock / A |
+|---|---|---:|---:|---:|---:|---:|---:|
+| K4096 N1024 | M8N4 / M8N4 | 1.1068x | 12 / 12 MiB | 80 / 80 MiB | 2.0x | 1.64x | 47,623 / 36,707 cycles |
+| K4096 N4096 | M4N8 / M4N8 | 0.8810x | 40 / 40 MiB | 192 / 192 MiB | 2.0x | 1.65x | 92,242 / 140,126 cycles |
+| K4096 N12800 | M4N8 / M2N16 | 0.9549x | 120 / 120 MiB | 560 / 520 MiB | 2.5x | 2.18x | 321,913 / 375,754 cycles |
+| K12800 N4096 | M8N4 / M4N8 | 1.1454x | 150 / 125 MiB | 1000 / 600 MiB | 4.0x | 1.65x | 521,140 / 351,028 cycles |
+
+At M512, stock and Design A both emit only `LDGMU` for loaded operands: no
+unicast recipient bytes appear in any arm. W fan-out follows M split and A
+fan-out follows N split. The stock implementation therefore already exercises
+the available L3/GTR multicast. This is HBM-response fan-out, not explicit
+LX-to-LX peer transport.
+
+The N1024 and N4096 pairs use the same logical grids and move identical bytes.
+Design A halves XRF-load FMAs and reduces LX synchronization in both, yet one
+wins by 9.65% and the other loses by 13.51%. The emitted L0 long-pole count is
+also identical. The difference appears in device service beyond that common
+issue floor: -10.9K cycles for Design A at N1024 versus +47.9K at N4096. The
+wide N12800 projection similarly adds 53.8K proxy cycles despite less
+recipient traffic.
+
+The residual is device service at the assumed 1.1 GHz core clock minus the
+maximum loop-expanded L0 issue count per core. It is deliberately labeled a
+proxy, not a hardware stall measurement. The supported inference is that the
+streamed-weight schedule develops shape-dependent service pressure not
+captured by multicast, XRF-load, or synchronization counts; SMC cannot name
+the hardware queue responsible.
+
+The K12800 -> N4096 down projection is the positive counterexample. Its tuned
+Design A grid cuts estimated unique response bytes 150 -> 125 MiB, recipient
+delivery 1000 -> 600 MiB, and unexplained service by about 170K cycles. That
+supports the measured 1.1454x speedup. Design A remains a selective
+microkernel, not a general replacement.
+
+### Decision and next gate
+
+Do not implement another broadcast feature for this route. M512 proves both
+arms already multicast both operands. Keep the N1024 and down-projection wins,
+route the square and wide-up projections to stock, and stop speculative
+schedule changes until hardware stall/queue evidence is available for the
+same-grid K4096 N4096 crossover.
+
+Durable artifacts:
+
+```text
+repository:
+  ring_compute_prototypes/activation_stationary_decode/analyze_smc.py
+  ring_compute_prototypes/activation_stationary_decode/smc_m512_results.json
+
+device:
+  pod: adnan-cdx-spyre-dev-pf
+  SMC root: /tmp/design_a_smc_m512_20260731.fCyy0i
+
+exact timed roots:
+  /tmp/design-a-compute-oracle-isolated-m512k4096n1024-m8n4k1-v1
+  /tmp/design-a-compute-oracle-m512k4096n4096-v1
+  /tmp/design-a-compute-oracle-isolated-m512k4096n12800-m2n16k1-v1
+  /tmp/design-a-compute-oracle-isolated-m512k12800n4096-m4n8k1-v1
+```
