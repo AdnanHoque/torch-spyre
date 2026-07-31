@@ -352,6 +352,46 @@ class TestNamedWorkDivisionHint(InductorTestCase):
             f"Expected both hint blocks to be consumed, got: {logs}",
         )
 
+    @config.patch(
+        {
+            "sencores": 8,
+            "lx_planning": True,
+            "lx_planner_relayout": True,
+            "allow_all_ops_in_lx_planning": True,
+        }
+    )
+    def test_lx_relayout_between_named_work_divisions_numeric(self):
+        """A planner-accepted ownership change executes and matches CPU."""
+
+        M, K, N = 128, 64, 256
+        x_cpu = torch.randn(M, K, dtype=torch.float16)
+        w_cpu = torch.randn(N, K, dtype=torch.float16)
+        x = x_cpu.to("spyre")
+        w = w_cpu.to("spyre")
+        _declare_tensor_dim("M", M)
+        _declare_tensor_dim("K", K)
+        _declare_tensor_dim("N", N)
+        _name_tensor_dims(x, ["M", "K"])
+        _name_tensor_dims(w, ["N", "K"])
+
+        def fn(x, w):
+            with spyre_hint(work_div={"M": 4, "N": 2}):
+                product = x @ w.T
+            with spyre_hint(work_div={"M": 2, "N": 4}):
+                return torch.relu(product)
+
+        actual, source_codes = run_and_get_code(
+            torch.compile(fn, options={"epilogue_fusion": False}, dynamic=False),
+            x,
+            w,
+        )
+        expected = fn(x_cpu, w_cpu)
+        torch.testing.assert_close(actual.cpu(), expected, atol=0.1, rtol=0.1)
+        self.assertTrue(
+            any("op='shuffle'" in source for source in source_codes),
+            "expected an emitted LX SHUFFLE between mismatched work divisions",
+        )
+
     @config.patch({"sencores": 8, "ignore_work_division_hints": True})
     def test_ignore_hints_flag_suppresses_hint(self):
         M, N = 128, 64

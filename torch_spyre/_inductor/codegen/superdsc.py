@@ -75,6 +75,8 @@ class SDSCArgs:
     is_index_tensor: bool = False
     related_value_tensor_idx: int = -1
     device_tile_advance_expr: Expr | None = None
+    allocation_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
+    core_splits: dict[Symbol, int] = dataclasses.field(default_factory=dict)
 
     def __str__(self) -> str:
         scales = ", ".join(f"{k}={v}" for k, v in self.scales.items())
@@ -280,6 +282,68 @@ def _get_device_dim_order(
             if sym not in dim_order:
                 dim_order.append(sym)
     return dim_order, stick_dim
+
+
+def _device_dim_to_sdsc_dim(
+    arg: TensorArg,
+    dim_order: list[Symbol],
+    stride_dim_order: list[Symbol],
+    mb_sym: Symbol | None,
+) -> dict[str, Symbol]:
+    result: dict[str, Symbol] = {}
+    for dim in dim_order:
+        if dim is mb_sym:
+            continue
+        stride_idx = stride_dim_order.index(dim)
+        device_dim = len(arg.device_coordinates) - stride_idx - 2
+        if device_dim >= 0:
+            result[str(device_dim)] = dim
+    return result
+
+
+def _map_core_id_to_wk_slice_dims(
+    core_id_to_device_slice: dict[str, dict[str, int]] | None,
+    device_dim_to_sdsc_dim: dict[str, Symbol],
+    dim_order: list[Symbol],
+) -> dict[str, dict[str, int]] | None:
+    if core_id_to_device_slice is None:
+        return None
+
+    layout_dim_labels = [str(dim) for dim in dim_order]
+    result: dict[str, dict[str, int]] = {}
+    for core, per_device_dim in core_id_to_device_slice.items():
+        per_dim = {dim: 0 for dim in layout_dim_labels}
+        for device_dim, slot in per_device_dim.items():
+            dim = device_dim_to_sdsc_dim.get(str(device_dim))
+            if dim is None:
+                if int(slot) != 0:
+                    raise ValueError(
+                        f"allocation uses unmapped device dimension {device_dim}"
+                    )
+                continue
+            per_dim[str(dim)] = int(slot)
+        result[str(core)] = per_dim
+    return result
+
+
+def _map_device_dim_splits(
+    device_dim_splits: dict[str, int] | None,
+    device_dim_to_sdsc_dim: dict[str, Symbol],
+) -> dict[Symbol, int]:
+    if device_dim_splits is None:
+        return {}
+
+    result: dict[Symbol, int] = {}
+    for device_dim, split in device_dim_splits.items():
+        dim = device_dim_to_sdsc_dim.get(str(device_dim))
+        if dim is None:
+            if int(split) != 1:
+                raise ValueError(
+                    f"allocation split uses unmapped device dimension {device_dim}"
+                )
+            continue
+        result[dim] = int(split)
+    return result
 
 
 def _get_layout_label(
@@ -636,6 +700,9 @@ def _create_sdsc_tensors(
         stride_dim_order = [
             d for d in dim_order if d not in reduced_dims
         ] + reduced_dims
+        device_dim_to_sdsc_dim = _device_dim_to_sdsc_dim(
+            arg, dim_order, stride_dim_order, mb_sym
+        )
 
         for dim in dim_order:
             stride_idx = stride_dim_order.index(dim)
@@ -727,8 +794,18 @@ def _create_sdsc_tensors(
             else:
                 max_dim_sizes[mb_sym] = -1
 
+        if (
+            arg.allocation_core_id_to_device_slice is not None
+            or arg.allocation_device_dim_splits is not None
+        ) and "lx" not in arg.allocation:
+            raise ValueError("explicit allocation distribution requires LX storage")
+
         effective_stick = [op_stick_dim if stick_dim is None else stick_dim]
-        layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
+        layout_labels = (
+            (MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS)
+            if op_spec.layout_labels_override is None
+            else op_spec.layout_labels_override
+        )
 
         # Special handling for FP8 matmul KERNEL tensor
         dtype_stick_size = arg.device_dtype.elems_per_stick()
@@ -800,6 +877,15 @@ def _create_sdsc_tensors(
                 is_index_tensor=is_idx_tensor,
                 related_value_tensor_idx=related_val_idx,
                 device_tile_advance_expr=arg.device_tile_advance_expr,
+                allocation_core_id_to_wk_slice=_map_core_id_to_wk_slice_dims(
+                    arg.allocation_core_id_to_device_slice,
+                    device_dim_to_sdsc_dim,
+                    dim_order,
+                ),
+                core_splits=_map_device_dim_splits(
+                    arg.allocation_device_dim_splits,
+                    device_dim_to_sdsc_dim,
+                ),
             )
         )
 
@@ -953,7 +1039,9 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     }
     has_indirect_access = bool(index_tensor_indices)
 
-    if is_pool:
+    if op_spec.dim_labels_override is not None:
+        dim_labels = op_spec.dim_labels_override
+    elif is_pool:
         dim_labels = _align_pool_dim_labels(op_spec.node_output_ranges, ndim)
     else:
         dim_labels = _get_op_dim_labels(ndim, is_matmul)
