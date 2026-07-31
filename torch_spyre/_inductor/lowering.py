@@ -14,6 +14,7 @@
 
 
 from contextlib import contextmanager
+import os
 from warnings import warn
 
 import sympy
@@ -368,7 +369,13 @@ def lower_scaled_mm(
         # [M, K] × [K, N] → [M, N]
         ranges = [mat1_size[0], mat2_size[1]]
         m, k, n = (int(mat1_size[0]), int(mat1_size[1]), int(mat2_size[1]))
-        use_fp8mb = m % 2 == 0
+        # Private DD2 experiment control: permit an even-M graph to retain the
+        # established QFP8CH/batchmatmulfp8 path. This is intentionally an
+        # environment-gated diagnostic, not a production layout policy.
+        force_channel_layout = (
+            os.getenv("TORCH_SPYRE_FP8_FORCE_CHANNEL_MATMUL", "0") == "1"
+        )
+        use_fp8mb = m % 2 == 0 and not force_channel_layout
         if use_fp8mb and (k % 64 != 0 or n % 64 != 0):
             raise Unsupported(
                 "DD2 batchmatmulfp8mb PoC requires M % 2 == 0, "

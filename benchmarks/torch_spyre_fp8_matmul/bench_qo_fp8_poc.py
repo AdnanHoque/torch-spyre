@@ -552,6 +552,11 @@ def main() -> None:
     args = parse_args()
     validate_args(args)
 
+    if args.activation_packing == "channel":
+        os.environ["TORCH_SPYRE_FP8_FORCE_CHANNEL_MATMUL"] = "1"
+    else:
+        os.environ.pop("TORCH_SPYRE_FP8_FORCE_CHANNEL_MATMUL", None)
+
     import torch_spyre
 
     if hasattr(torch_spyre, "_autoload"):
@@ -836,6 +841,7 @@ def main() -> None:
                 "SENCORES",
                 "SENCORELETS",
                 "DT_OPT",
+                "TORCH_SPYRE_FP8_FORCE_CHANNEL_MATMUL",
             )
         },
     }
