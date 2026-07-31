@@ -348,8 +348,10 @@ conversion and host transfer. The two frameworks use different frontends
 same-device bracket rather than one-process ABBA.
 
 The fresh Design A run still improves over its paired Torch-Spyre incumbent
-(`1216.0395 -> 1051.2275 us`, 13.55% lower) and closes about 78.5% of the
-incumbent-to-SenDNN latency gap. It does not surpass SenDNN. The remaining
+(`1216.0395 -> 1051.2275 us`, **1.1568x throughput**, or **13.55% lower
+latency**) and closes about 78.5% of the incumbent-to-SenDNN latency gap. In
+the usual throughput wording, Design A is **15.68% faster than stock** for this
+exact down-projection microbenchmark. It does not surpass SenDNN. The remaining
 target is approximately 38-45 us, depending on the Design A warmup protocol.
 
 Durable evidence:
@@ -360,6 +362,44 @@ Durable evidence:
   provenance, hashes, and explicit non-claims;
 - device root:
   `/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63`.
+
+#### Final emitted-program comparison
+
+The exact accepted Design A bundle and a fresh final SenDNN SDSC/InitPacket
+were decoded with loop expansion. Design A's packet counts reproduce its
+independent textual DXP SMC dump for every selected PT and L3 quantity. The
+analysis is emitted-program accounting, not a hardware instruction trace or
+cycle counter.
+
+| Final-program quantity | SenDNN | Design A | Interpretation |
+|---|---:|---:|---|
+| Mathematical PT FMA work | 419,430,400 | 419,430,400 | identical |
+| Estimated unique HBM response | 125 MiB | 125 MiB | identical |
+| L3 recipient delivery | 900 MiB | 600 MiB | A moves 33.3% less |
+| Loop-expanded PT issues | 117,361,536 | 112,645,632 | SenDNN has 4.19% more |
+| Maximum PT unit-entry issues | 238,761 | 221,404 | SenDNN has 7.84% more |
+| XRF-load FMA work | 13,107,200 | 1,638,400 | SenDNN has 8x more |
+| Other FMA work | 45,875,200 | 5,734,400 | SenDNN has 8x more |
+| `XRFACCESS` issues | 2,950,144 | 6,657,024 | A has 2.26x more |
+
+The static L0 program skeleton is also exactly equal. Consequently, the
+remaining SenDNN win is not explained by mathematical work, unique HBM bytes,
+recipient fan-out, aggregate PT issue volume, maximum PT entry length, or the
+L0 skeleton alone. The leading hypothesis is schedule realization: Design A
+uses many more explicit `XRFACCESS` instructions, while SenDNN expresses more
+XRF loading through an FMA-based sequence that may pipeline or overlap better.
+That is not yet a causal claim. Hardware active/stall counters or a controlled
+code-generation ablation are required to prove it.
+
+Durable evidence:
+
+- `analyze_final_initpacket.py`: non-strict InitPacket decoder and loop-aware
+  PT/L3 accounting. Mixed LX code/directory records are intentionally excluded
+  from dynamic claims;
+- `compare_sendnn_design_a_instructions.py`: exact-shape, bundle-hash,
+  correctness, SDSC, and packet-versus-SMC gates;
+- `sendnn_design_a_instruction_comparison.json`: selected counts, ratios,
+  hashes, supported interpretation, and explicit non-claims.
 
 ### Large-M result
 

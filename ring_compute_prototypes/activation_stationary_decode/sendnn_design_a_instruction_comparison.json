@@ -1,0 +1,122 @@
+{
+  "comparisons": {
+    "design_a_recipient_byte_reduction_percent": 33.333333333333336,
+    "design_a_xrfaccess_over_sendnn": 2.2565081568899688,
+    "same_compute_fma": true,
+    "same_estimated_unique_hbm_response": true,
+    "same_static_l0_program_skeleton": true,
+    "sendnn_max_pt_unit_entry_issues_over_design_a": 1.0783951509457823,
+    "sendnn_other_fma_over_design_a": 8.0,
+    "sendnn_pt_instruction_issues_over_design_a": 1.0418649522069352,
+    "sendnn_recipient_bytes_over_design_a": 1.5,
+    "sendnn_xrf_load_fma_over_design_a": 8.0
+  },
+  "dtype": "FP16",
+  "generated_at": "2026-07-31T16:59:49.420560+00:00",
+  "interpretation": {
+    "not_claimed": [
+      "hardware executed-instruction trace",
+      "hardware active or stall cycles",
+      "ring-link bytes or utilization",
+      "host or Granite end-to-end speedup"
+    ],
+    "remaining_hypothesis": "Design A emits 2.26x as many XRFACCESS issues while SenDNN expresses more XRF loading through FMA instructions. The instruction mix and its dependency/overlap realization are the leading explanation for the remaining gap, but causality requires hardware active/stall counters or a controlled code-generation ablation.",
+    "ruled_out_as_sufficient_explanation_for_sendnn_win": [
+      "mathematical PT FMA work",
+      "estimated unique HBM response bytes",
+      "L3 recipient delivery volume",
+      "aggregate loop-expanded PT instruction-issue count",
+      "maximum loop-expanded PT unit-entry issue count",
+      "static L0 program skeleton"
+    ]
+  },
+  "programs": {
+    "design_a": {
+      "l3": {
+        "estimated_unique_hbm_response_bytes": 131072000,
+        "recipient_bytes_per_unique_hbm_byte": 4.8,
+        "recipient_delivered_bytes": 629145600
+      },
+      "max_pt_unit_entry_issues": 221404,
+      "pt": {
+        "compute_fma_unrolled": 419430400,
+        "fma_instruction_issues": 105779200,
+        "loop_setup_issues": 102912,
+        "nop_issues": 102400,
+        "other_fma_unrolled": 5734400,
+        "xrf_load_fma_unrolled": 1638400,
+        "xrfaccess_issues": 6657024
+      },
+      "pt_instruction_issues": 112645632,
+      "work_division": {
+        "K": 1,
+        "M": 4,
+        "N": 8
+      }
+    },
+    "sendnn": {
+      "l3": {
+        "estimated_unique_hbm_response_bytes": 131072000,
+        "recipient_bytes_per_unique_hbm_byte": 7.2,
+        "recipient_delivered_bytes": 943718400
+      },
+      "max_pt_unit_entry_issues": 238761,
+      "pt": {
+        "compute_fma_unrolled": 419430400,
+        "fma_instruction_issues": 113664000,
+        "loop_setup_issues": 369152,
+        "nop_issues": 368640,
+        "other_fma_unrolled": 45875200,
+        "xrf_load_fma_unrolled": 13107200,
+        "xrfaccess_issues": 2950144
+      },
+      "pt_instruction_issues": 117361536,
+      "work_division": {
+        "K": 1,
+        "M": 8,
+        "N": 4
+      }
+    }
+  },
+  "run_root": "/tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63",
+  "schema": "sendnn_vs_design_a_final_instruction_comparison_v1",
+  "shape": {
+    "K": 12800,
+    "M": 512,
+    "N": 4096
+  },
+  "timing": {
+    "design_a_latency_reduction_percent_vs_torch_spyre_stock": 13.55317816567637,
+    "design_a_speedup_over_torch_spyre_stock": 1.1567805256236163,
+    "design_a_us": 1051.2275,
+    "sendnn_latency_reduction_percent_vs_design_a": 4.293837442418498,
+    "sendnn_speedup_over_design_a": 1.0448647958258186,
+    "sendnn_us": 1006.0895,
+    "torch_spyre_stock_us": 1216.0395
+  },
+  "validation": {
+    "all_gates": true,
+    "design_a_packet_reproduces_textual_smc": {
+      "compute_fma": true,
+      "fma_issues": true,
+      "ldgmu_requests": true,
+      "max_pt_issue_pressure": true,
+      "nop": true,
+      "other_fma": true,
+      "recipient_bytes": true,
+      "unique_hbm_bytes": true,
+      "xrf_load_fma": true,
+      "xrfaccess": true
+    },
+    "design_a_timed_bundle_sha256": "b1fc917a838c3b8d5cc95026e072290e141e34509d03f2f0746df71104b368ce",
+    "hashes": {
+      "accepted_comparison": "445742ed0e3e7d4fdd2253ce0df6e8f7cd567c0586d5cf6fe4a75400e0beb24f",
+      "design_a_program": "dabe21f217fe4b21905c2a7ecf9da43f57242334d38818233d82d2ece7196627",
+      "design_a_smc": "ae2d7642ebf484cf337c17f489650f549cb88b0e868e0b7bc4655475151540d6",
+      "design_a_timed_summary": "18fad235aefb12c92050f4d90ddb6fe4bb4a15e410b1c4b40732ac85d56e967c",
+      "sendnn_final_sdsc": "9a0ff9e101601df4edab485bc2364d3c91415574551922343715d871fe086032",
+      "sendnn_fresh_result": "cefd00bbb6e569253519672a3bb6548f79c59bba29ec0ca29ce247374590181d",
+      "sendnn_program": "636036ab3de307749ce59e8fe1caaf1ece2520e111c2f8caa7af973d6d10e28c"
+    }
+  }
+}

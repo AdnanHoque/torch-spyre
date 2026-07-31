@@ -2348,11 +2348,11 @@ Torch 2.11. Both ran serially on the same pod and current installed DD2
 DeepTools/Senlib stack.
 
 The paired fresh Torch-Spyre incumbent measured 1216.0395 us. Design A lowers
-that to 1051.2275 us (`1.1568x`) and closes about 78.5% of the latency distance
-from stock Torch-Spyre to SenDNN, but leaves roughly 45.1 us in the primary
-bracket. The next useful analysis is emitted SenDNN final-SDSC/SMC versus
-Design A SMC attribution for that residual; another work-division sweep is
-not justified by this result alone.
+that to 1051.2275 us (`1.1568x` throughput, or 13.55% lower latency) and closes
+about 78.5% of the latency distance from stock Torch-Spyre to SenDNN, but
+leaves roughly 45.1 us in the primary bracket. Equivalently, Design A is
+15.68% faster than stock on this exact conversion-free down-projection
+microbenchmark. This is not an E2E Granite claim.
 
 Durable artifacts:
 
@@ -2364,4 +2364,71 @@ repository:
 device:
   pod: adnan-cdx-spyre-dev-pf
   root: /tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63
+```
+
+## 2026-07-31: final SenDNN versus Design A instruction comparison
+
+The residual was analyzed from final emitted programs rather than an earlier
+text summary. SenDNN was freshly compiled with final SDSC capture enabled, and
+its exported `init.txt` was decoded against that final SDSC. The exact accepted
+Design A bundle was replayed with `DXP_DEBUG=1`; its bundle SHA-256 is
+`b1fc917a838c3b8d5cc95026e072290e141e34509d03f2f0746df71104b368ce`,
+which appears in the accepted timed summary.
+
+The final-packet decoder was first gated against Design A's independent
+textual SMC. Compute FMA, XRF-load FMA, other FMA, FMA issues, `XRFACCESS`,
+NOP, `LDGMU` requests, recipient bytes, estimated unique HBM bytes, and the
+maximum PT unit-entry issue count all match exactly. LX IBUFFs mix code with
+an embedded directory; those records are retained in static slot scope but
+excluded from loop-expanded LX claims.
+
+| Final-program quantity | SenDNN | Design A | SenDNN / A or result |
+|---|---:|---:|---:|
+| Mathematical PT FMA work | 419,430,400 | 419,430,400 | equal |
+| Estimated unique HBM response | 125 MiB | 125 MiB | equal |
+| L3 recipient delivery | 900 MiB | 600 MiB | 1.50x |
+| Loop-expanded PT instruction issues | 117,361,536 | 112,645,632 | 1.0419x |
+| Maximum PT unit-entry issues | 238,761 | 221,404 | 1.0784x |
+| XRF-load FMA work | 13,107,200 | 1,638,400 | 8.00x |
+| Other FMA work | 45,875,200 | 5,734,400 | 8.00x |
+| `XRFACCESS` issues | 2,950,144 | 6,657,024 | A/SenDNN 2.2565x |
+
+The static L0 opcode histograms are exactly equal. SenDNN is faster despite
+moving 50% more recipient bytes, issuing 4.19% more aggregate PT instructions,
+and having a 7.84% longer maximum PT entry. Those quantities are therefore
+not sufficient explanations for its win.
+
+The leading remaining hypothesis is the PT instruction form and dependency
+schedule. Design A emits 2.26x more explicit `XRFACCESS`; SenDNN performs 8x
+more FMA-based XRF loading. The SenDNN form may pipeline or overlap more
+effectively, but the emitted program cannot prove active cycles or stalls.
+The next high-value experiment is a controlled code-generation ablation that
+changes only this XRF-loading form, or hardware PT active/stall counters if
+available. Do not add another collective or run another work-division sweep
+to explain this residual.
+
+Supported conclusion:
+
+- Design A is 15.68% throughput-faster than the fresh paired Torch-Spyre stock
+  schedule for `M512 K12800 N4096`;
+- SenDNN remains 4.49% throughput-faster, or 4.29% lower latency, than Design A;
+- the remaining gap is schedule realization, not demonstrated excess
+  arithmetic, unique HBM response, recipient fan-out, or L0 program size;
+- no hardware ring-utilization or stall claim is made.
+
+Durable artifacts:
+
+```text
+repository:
+  ring_compute_prototypes/activation_stationary_decode/analyze_final_initpacket.py
+  ring_compute_prototypes/activation_stationary_decode/compare_sendnn_design_a_instructions.py
+  ring_compute_prototypes/activation_stationary_decode/sendnn_design_a_instruction_comparison.json
+
+device:
+  pod: adnan-cdx-spyre-dev-pf
+  root: /tmp/design_a_vs_sendnn_down_m512_20260731.xqyO63
+  SenDNN final SDSC: sendnn_instruction_v1/perfdsc/execute_itr0/sdsc/fp16_bmm.json
+  SenDNN final packet: sendnn_instruction_v1/decoded_program/initpacket.json
+  Design A exact SMC: design_a_instruction_v1/debug/sdsc_0/smc.txt
+  comparison: instruction_comparison.json
 ```
