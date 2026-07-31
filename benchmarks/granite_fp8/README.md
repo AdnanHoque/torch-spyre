@@ -7,10 +7,12 @@ integration experiment, not a production frontend.
 For each Spyre `FP8Linear` invocation, the bridge:
 
 1. flattens `[B,M,K]` to `[B*M,K]` before activation quantization;
-2. computes the TorchAO 0.11 dynamic per-row FP32 scale
-   `max(abs(row))/448`, clamped to FP32 epsilon;
+2. computes a DD2-native per-row FP16 scale `max(abs(row))/448`, with a
+   reciprocal-safe FP16 floor, then widens the compact scale to FP32 for the
+   public operator schema;
 3. calls `spyre.quantize_fp8_with_scale`, selecting QFP8MB for even prefill M;
-4. reuses the checkpoint's E4M3 `[N,K]` weight and `[N,1]` static scale;
+4. pre-packs every static checkpoint E4M3 `[N,K]` weight once into the DD2
+   QFP8WT `[K,N]` layout and materializes its `[1,N]` scale once;
 5. calls `aten._scaled_mm` with real scales, optional checkpoint bias,
    FP16 output, and `use_fast_accum=True`; and
 6. restores the original leading activation dimensions.
@@ -62,6 +64,25 @@ The smoke is deliberately prefill-only: one layer, batch 1, M=512, one output
 token. It omits `--default_dtype fp16`, because the checkpoint already carries
 FP8 weights, and uses `--cast_bf16_to_fp16` only for the remaining BF16 tensors.
 It does not run the 40-layer model or claim end-to-end performance.
+
+The bridge's FP16 qparam derivation is an explicit integration compromise, not
+an exact TorchAO claim. `bench_activation_scale.py` validates that an FP16
+row-max reduction followed by compact `[M,1]` FP32 division produces the exact
+TorchAO scale values without converting the full `[M,K]` tensor. That exact
+combined quantize-plus-matmul path remains diagnostic until it passes the
+end-to-end numerical gate.
+
+Set `TORCH_SPYRE_FP8_FUSE_FIRST_SCALE_EPILOGUE=1` only for the private epilogue
+experiment. It emits FP8 matmul followed by the first SFP scale operation in
+one SDSC and removes the intervening HBM allocation. This late-codegen probe is
+not the production implementation; production fusion must happen before
+liveness and LX/HBM allocation.
+
+After the one-layer gate passes, set `ANTONI_LAYER_LIMIT=0` and use a new
+`STUDY_ROOT` to run the same M=512 prompt through all 40 layers. This is the
+full-model prefill gate. A generation run with two or more output tokens also
+exercises the separate M=1 decode path and must wait for the QFP8CH compiler
+failure to be resolved.
 
 Acceptance requires emitted evidence of QFP8MB, FP8 matmul, both real scale
 applications, and no `spyre.to_dtype_cpu` activation conversion. Decode M=1

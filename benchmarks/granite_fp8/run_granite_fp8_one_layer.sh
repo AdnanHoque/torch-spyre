@@ -61,7 +61,7 @@ export TORCHINDUCTOR_CACHE_DIR="$run_root/cache"
 export DTCOMPILER_EXPORT_DIR="$run_root/export"
 export DEEPRT_EXPORT_DIR="$run_root/export"
 export ANTONI_PROFILE_DIR="$run_root/trace_warm"
-export ANTONI_LAYER_LIMIT=1
+export ANTONI_LAYER_LIMIT=${ANTONI_LAYER_LIMIT:-1}
 export DUMP_SPYRE_CODE=1
 unset TORCH_SPYRE_DOWNCAST_WARN || true
 

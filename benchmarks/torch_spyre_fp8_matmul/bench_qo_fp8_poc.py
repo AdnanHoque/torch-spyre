@@ -101,6 +101,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--derive-activation-scale",
+        action="store_true",
+        help=(
+            "derive the real FP32 per-row E4M3 activation scale inside the "
+            "timed graph and use it for both packing and scaled-mm recovery"
+        ),
+    )
+    parser.add_argument(
         "--activation-packing",
         choices=("auto", "channel", "minibatch"),
         default="auto",
@@ -130,6 +138,12 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--prepack-weight is only valid for FP8 variants")
     if args.prepack_activation and args.variant == "fp16":
         raise ValueError("--prepack-activation is only valid for FP8 variants")
+    if args.derive_activation_scale and args.variant not in SCALED_VARIANTS:
+        raise ValueError("--derive-activation-scale requires a scaled FP8 variant")
+    if args.derive_activation_scale and args.prepack_activation:
+        raise ValueError(
+            "--derive-activation-scale cannot be combined with --prepack-activation"
+        )
     if args.variant == "fp16" and args.activation_packing != "auto":
         raise ValueError("--activation-packing is only valid for FP8 variants")
     if args.activation_packing == "minibatch" and (args.m % 2 != 0 or args.k % 64 != 0):
@@ -331,13 +345,17 @@ def quantize_activation_fp8(
 ) -> torch.Tensor:
     """Quantize activation while allowing an explicit physical-layout control."""
 
+    # qfp8ch/qfp8mb consume FP16 values. Keep normalization on that native
+    # data path by narrowing only the compact per-row scale, rather than
+    # promoting the full MxK activation to FP32.
+    packing_scale = quant_scale_a.to(activation.dtype)
     if activation_packing == "auto":
         return torch.ops.spyre.quantize_fp8_with_scale(
             activation,
-            quant_scale_a,
+            packing_scale,
         )
 
-    inv_scale = torch.reciprocal(quant_scale_a)
+    inv_scale = torch.reciprocal(packing_scale)
     scaled = activation * inv_scale
     clamped = torch.ops.spyre.clamp(scaled, -448.0, 448.0)
     if activation_packing == "channel":
@@ -347,6 +365,20 @@ def quantize_activation_fp8(
     raise AssertionError(f"unknown activation packing: {activation_packing}")
 
 
+def dynamic_fp8_row_scale(activation: torch.Tensor) -> torch.Tensor:
+    """Match TorchAO's symmetric dynamic per-row E4M3 scale."""
+
+    # The source activation is FP16, so abs/max merely selects one of those
+    # already representable values. Reduce in FP16 and convert only the M row
+    # maxima, avoiding an MxK FP16->FP32 conversion without changing the result.
+    max_abs = torch.amax(torch.abs(activation), dim=1, keepdim=True)
+    scale = max_abs.to(torch.float32) / float(torch.finfo(torch.float8_e4m3fn).max)
+    eps = torch.finfo(torch.float32).eps
+    # max(scale, eps), expressed with FP32 operations that the DD2 data path
+    # supports without constructing a second, incompatible tensor layout.
+    return torch.relu(scale - eps) + eps
+
+
 def make_benchmark_fn(
     variant: str,
     work_division: dict[str, int] | None,
@@ -354,6 +386,7 @@ def make_benchmark_fn(
     prepack_activation: bool,
     activation_packing: str,
     use_fast_accum: bool,
+    derive_activation_scale: bool,
 ) -> Callable[..., torch.Tensor]:
     if variant == "fp16":
 
@@ -381,12 +414,17 @@ def make_benchmark_fn(
             output_scale_a: torch.Tensor,
             output_scale_b: torch.Tensor,
         ) -> torch.Tensor:
+            effective_scale_a = (
+                dynamic_fp8_row_scale(activation)
+                if derive_activation_scale
+                else quant_scale_a
+            )
             activation_fp8 = (
                 activation
                 if prepack_activation
                 else quantize_activation_fp8(
                     activation,
-                    quant_scale_a,
+                    effective_scale_a,
                     activation_packing,
                 )
             )
@@ -402,7 +440,11 @@ def make_benchmark_fn(
                     scaled_mm(
                         activation_fp8,
                         weight_fp8,
-                        output_scale_a,
+                        (
+                            effective_scale_a
+                            if derive_activation_scale
+                            else output_scale_a
+                        ),
                         output_scale_b,
                         use_fast_accum,
                     )
@@ -423,12 +465,17 @@ def make_benchmark_fn(
         output_scale_a: torch.Tensor,
         output_scale_b: torch.Tensor,
     ) -> torch.Tensor:
+        effective_scale_a = (
+            dynamic_fp8_row_scale(activation)
+            if derive_activation_scale
+            else quant_scale_a
+        )
         activation_fp8 = (
             activation
             if prepack_activation
             else quantize_activation_fp8(
                 activation,
-                quant_scale_a,
+                effective_scale_a,
                 activation_packing,
             )
         )
@@ -441,7 +488,7 @@ def make_benchmark_fn(
             scaled_mm(
                 activation_fp8,
                 weight_fp8,
-                output_scale_a,
+                effective_scale_a if derive_activation_scale else output_scale_a,
                 output_scale_b,
                 use_fast_accum,
             )
@@ -467,10 +514,15 @@ def cpu_reference(
     quant_scale_b: torch.Tensor,
     output_scale_a: torch.Tensor,
     output_scale_b: torch.Tensor,
+    derive_activation_scale: bool,
 ) -> torch.Tensor:
+    if derive_activation_scale:
+        quant_scale_a = dynamic_fp8_row_scale(activation_fp16)
+        output_scale_a = quant_scale_a
     if variant in FP8_VARIANTS:
+        packing_scale_a = quant_scale_a.to(activation_fp16.dtype)
         activation = (
-            (activation_fp16 / quant_scale_a)
+            (activation_fp16 * torch.reciprocal(packing_scale_a))
             .clamp(-448.0, 448.0)
             .to(torch.float8_e4m3fn)
             .to(torch.float32)
@@ -487,10 +539,10 @@ def cpu_reference(
 
     result = torch.matmul(activation, weight).to(torch.float16)
     if variant in SCALED_VARIANTS:
-        result = result.to(torch.float32)
-        result = result * output_scale_a
-        result = result * output_scale_b
-        result = result.to(torch.float16)
+        # DD2 applies row and column scales as two FP16 batchnormfwd passes.
+        # Mirror those conversion and rounding points in the CPU oracle.
+        result = result * output_scale_a.to(torch.float16)
+        result = result * output_scale_b.to(torch.float16)
     return result
 
 
@@ -811,6 +863,7 @@ def main() -> None:
         args.prepack_activation,
         args.activation_packing,
         args.fast_accum,
+        args.derive_activation_scale,
     )
     compiled = torch.compile(
         fn,
@@ -851,6 +904,7 @@ def main() -> None:
         quant_scale_b_host,
         output_scale_a_host,
         output_scale_b_host,
+        args.derive_activation_scale,
     )
     cpu_reference_ms = (time.perf_counter_ns() - reference_start_ns) / 1.0e6
     correctness = correctness_metrics(args.variant, actual, reference)
@@ -914,7 +968,11 @@ def main() -> None:
                 args.variant in FP8_VARIANTS and not args.prepack_weight
             ),
             "prepacked_weight_input": args.prepack_weight,
-            "quantization_scale_derivation": "excluded; unit FP16 scalars supplied",
+            "quantization_scale_derivation": (
+                "included; FP16 row max(abs(x)), then compact FP32 scale / 448"
+                if args.derive_activation_scale
+                else "excluded; unit FP16 scalars supplied"
+            ),
             "raw_scaled_mm_output_dtype": "torch.float16",
             "output_scale_application": (
                 "aten._scaled_mm contract: compact FP32 scales -> FP16, then "
