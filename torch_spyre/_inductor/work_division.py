@@ -330,6 +330,49 @@ def _is_qfp8wt_tensor(td: TensorDep) -> bool:
     )
 
 
+def _physical_output_split_is_legal(
+    logical_elements: int,
+    split: int,
+    physical_group_elements: int,
+) -> bool:
+    """Whether every output slice starts on a physical storage-group boundary.
+
+    A QFP8WT stick contains the documented logical ``[K:2, N:64]`` factors,
+    but Torch-Spyre stores that 128-element compound stick as one indivisible
+    terminal device group.  A logical N split can therefore divide the 64-wide
+    output-stick count and still be impossible to express as a QFP8WT base
+    address.  This is the exact case for Granite gate/up N=12800 with N split 8:
+    200 FP16 output sticks divide by 8, while 100 physical FP8 weight groups do
+    not.  Codegen would otherwise gcd-clamp the requested split after planning.
+    """
+    if min(logical_elements, split, physical_group_elements) < 1:
+        return False
+    physical_groups = (
+        logical_elements + physical_group_elements - 1
+    ) // physical_group_elements
+    return physical_groups % split == 0
+
+
+def _qfp8wt_n_split_is_legal(
+    n_elements: int,
+    n_split: int,
+    n_dim: Symbol,
+    input_tds: list[TensorDep],
+) -> bool:
+    """Check the RHS QFP8WT storage boundary for a candidate N split."""
+    for td in input_tds:
+        if not _is_qfp8wt_tensor(td):
+            continue
+        if not any(n_dim in coord.free_symbols for coord in td.device_coords):
+            continue
+        physical_group_elements = int(td.layout.device_layout.device_size[-1])
+        if not _physical_output_split_is_legal(
+            n_elements, n_split, physical_group_elements
+        ):
+            return False
+    return True
+
+
 def _compound_stick_granularities(td: TensorDep) -> dict[Symbol, int]:
     """Return logical atomic sizes encoded by one compound FP8 stick."""
     ea = td.layout.device_layout.element_arrangement
@@ -1209,6 +1252,121 @@ def work_distribution_pass(
     warn_if_per_core_overflow(all_tds, it_space, splits, op.get_name(), symbol_meta)
 
 
+def _is_fp8_scale_op(op: ComputedBuffer) -> bool:
+    """Return whether ``op`` is the specialized scaled-matmul scale pass.
+
+    Keep this check local to the custom op.  General pointwise operators may
+    legitimately want a different division from their producer, so producer
+    continuity must not silently become the default work-distribution policy.
+    """
+    origins = getattr(op.data, "origins", ())
+    return any(
+        str(getattr(origin, "target", "")) == "spyre.apply_fp8_scale.default"
+        for origin in origins
+    )
+
+
+def _map_producer_output_splits(
+    producer_output_splits: dict[Expr, int],
+    consumer_read_index: Expr,
+    consumer_it_space: dict[Symbol, Expr],
+) -> dict[Symbol, int] | None:
+    """Map a producer's coefficient-keyed output division onto a consumer read.
+
+    ``op_it_space_splits`` deliberately keys output dimensions by their flat
+    tensor-index coefficient so a split survives scheduler variable renaming.
+    The consumer's read of that tensor supplies the inverse mapping here.
+    Return ``None`` rather than inheriting a partial division: losing one axis
+    would change ownership and defeat the purpose of this optimization.
+    """
+    mapped: dict[Symbol, int] = {}
+    matched_coeffs: set[Expr] = set()
+    for symbol in consumer_it_space:
+        coeff = consumer_read_index.coeff(symbol)
+        if coeff in producer_output_splits:
+            mapped[symbol] = producer_output_splits[coeff]
+            matched_coeffs.add(coeff)
+
+    if matched_coeffs != set(producer_output_splits):
+        return None
+    return mapped
+
+
+def _inherit_fp8_scale_work_division(
+    graph: GraphLowering,
+    op: ComputedBuffer,
+    args: list[SchedNodeArg],
+    max_cores: int,
+) -> bool:
+    """Keep a scaled-matmul scale pass on its full-size producer's core grid.
+
+    The FP8 matmul cost model partitions the MxN output deliberately.  Applying
+    a row or column scale is elementwise over that same MxN tensor; assigning a
+    new grid makes cores exchange ownership between the reduction and each
+    scale pass.  Inherit only from a same-shaped computed input and re-check all
+    local legality conditions before committing the split.
+    """
+    if not _is_fp8_scale_op(op):
+        return False
+    if not config.ignore_work_division_hints and _has_work_div_hint(op):
+        return False
+
+    op_size = list(op.get_size())
+    it_space = iteration_space_from_op(op)
+    _, output_td = collect_tensor_deps(op, args)
+
+    for arg in args:
+        producer = graph.get_buffer(arg.dep.name)
+        if not isinstance(producer, ComputedBuffer):
+            continue
+        if list(producer.get_size()) != op_size:
+            continue
+        producer_coeff_splits = getattr(producer, "op_it_space_splits", None)
+        if not producer_coeff_splits:
+            continue
+
+        producer_output_splits, producer_reduction_splits = producer_coeff_splits
+        if not producer_output_splits:
+            continue
+        # A scale pass has no reduction axis and therefore cannot preserve a
+        # producer K split.  DD2 compound FP8 matmul forbids K splitting, but
+        # make that required invariant explicit instead of dropping it.
+        if producer_reduction_splits:
+            continue
+        inherited = _map_producer_output_splits(
+            producer_output_splits, arg.dep.index, it_space
+        )
+        if inherited is None:
+            continue
+
+        # Unmentioned consumer dimensions stay unsplit.
+        splits = {symbol: inherited.get(symbol, 1) for symbol in it_space}
+        cores = math.prod(splits.values())
+        if cores <= 1 or cores > max_cores:
+            continue
+
+        # Reuse the canonical candidate enumerator so stick-count divisibility,
+        # coordinate masks, reduction constraints, and address-span legality
+        # stay in one place.  Logical divisibility alone is not sufficient.
+        legal_candidates = enumerate_work_division_candidates(op, max_cores)
+        if splits not in legal_candidates:
+            continue
+
+        apply_splits(op, splits, output_td)
+        logger.debug(
+            "fp8_scale_continuity work_division %s: producer=%s cores=%s "
+            "splits=%s op_it_space_splits=%s",
+            op.get_name(),
+            producer.get_name(),
+            cores,
+            splits,
+            op.op_it_space_splits,
+        )
+        return True
+
+    return False
+
+
 _PT_ROWS = 8  # PT block rows per corelet
 
 
@@ -1567,6 +1725,8 @@ def _cost_model_matmul_planner(
         b_prod = math.prod(b_combo)
         for mm in m_divs:
             for nn in n_divs:
+                if not _qfp8wt_n_split_is_legal(N_e, nn, n_dim, input_tds):
+                    continue
                 for kk in k_divs:
                     if b_prod * mm * nn * kk > max_cores:
                         continue
@@ -1726,6 +1886,8 @@ def work_distribution(
         rw = op_read_writes(op)
         args = _apply_input_layout_overrides(op, get_mem_deps_from_rw(rw))
         if isinstance(op.data, Pointwise):
+            if _inherit_fp8_scale_work_division(graph, op, args, max_cores):
+                continue
             divide_pointwise_op(op, args, max_cores, work_distribution_pass)
         elif isinstance(op.data, Reduction):
             divide_reduction_op(op, args, max_cores, work_distribution_pass)

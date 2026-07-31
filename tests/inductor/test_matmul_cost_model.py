@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import pytest
+import sympy
 
 import torch_spyre._inductor.work_division as work_division
 
@@ -63,3 +64,41 @@ def test_fp8_cost_profile_models_fma8_and_mixed_precision_bytes():
 
     assert fp8.peak_macs_us_core == 2 * fp16.peak_macs_us_core
     assert (fp8.lhs_bytes, fp8.rhs_bytes, fp8.output_bytes) == (1, 1, 2)
+
+
+def test_fp8_scale_maps_both_producer_output_splits_by_tensor_coefficient():
+    m, n = sympy.symbols("m n", integer=True)
+    producer_splits = {sympy.Integer(4096): 4, sympy.Integer(1): 8}
+
+    assert work_division._map_producer_output_splits(
+        producer_splits,
+        m * 4096 + n,
+        {m: sympy.Integer(512), n: sympy.Integer(4096)},
+    ) == {m: 4, n: 8}
+
+
+def test_fp8_scale_rejects_partial_producer_split_mapping():
+    m = sympy.symbols("m", integer=True)
+    producer_splits = {sympy.Integer(4096): 4, sympy.Integer(1): 8}
+
+    assert (
+        work_division._map_producer_output_splits(
+            producer_splits,
+            m * 4096,
+            {m: sympy.Integer(512)},
+        )
+        is None
+    )
+
+
+def test_qfp8wt_physical_output_group_rejects_gate_up_n8_split():
+    # N=12800 has 200 FP16 output sticks but only 100 physical 128-element
+    # QFP8WT storage groups.  N split 8 looks legal from the output alone and
+    # is not legal for the stationary FP8 weight; N split 4 is legal for both.
+    assert not work_division._physical_output_split_is_legal(12800, 8, 128)
+    assert work_division._physical_output_split_is_legal(12800, 4, 128)
+
+
+@pytest.mark.parametrize(("n", "split"), [(1024, 4), (4096, 8), (12800, 25)])
+def test_qfp8wt_physical_output_group_accepts_granite_splits(n, split):
+    assert work_division._physical_output_split_is_legal(n, split, 128)

@@ -345,6 +345,54 @@ def _get_op_dim_labels(ndim: int, is_matmul: bool) -> list[str]:
         return INPUT_DIM_LABELS[: ndim - 1] + OUTPUT_DIM_LABELS[:1]
 
 
+def _matmul_symbol_mapping(op_spec: OpSpec) -> dict | None:
+    """Infer M/N/K labels for a two-dimensional matmul from tensor use.
+
+    Fusion can reorder the reduction iteration dictionary.  Positional labels
+    are therefore unsafe for a matmul followed by a view or slice: an N split
+    can otherwise be serialized as an M split (and is impossible for decode
+    M=1).  For the three-symbol linear-layer form, identify K as the symbol
+    shared by both inputs but absent from the output, N as the remaining RHS
+    output symbol absent from the LHS, and M as the final symbol.
+
+    Return ``None`` when roles are ambiguous so higher-rank/broadcast matmuls
+    retain the established positional mapping.
+    """
+    symbols = set(op_spec.iteration_space)
+    if len(symbols) != 3 or len(op_spec.args) < 3:
+        return None
+
+    def used_symbols(arg: TensorArg) -> set:
+        return (
+            set().union(
+                *(
+                    getattr(coord, "free_symbols", set())
+                    for coord in arg.device_coordinates
+                )
+            )
+            & symbols
+        )
+
+    lhs_symbols = used_symbols(op_spec.args[0])
+    rhs_symbols = used_symbols(op_spec.args[1])
+    output_symbols = used_symbols(op_spec.args[-1])
+
+    k_symbols = (lhs_symbols & rhs_symbols) - output_symbols
+    n_symbols = (rhs_symbols & output_symbols) - lhs_symbols
+    remaining = symbols - k_symbols - n_symbols
+    if len(k_symbols) != 1 or len(n_symbols) != 1 or len(remaining) != 1:
+        return None
+
+    (m_sym,) = remaining
+    (n_sym,) = n_symbols
+    (k_sym,) = k_symbols
+    return {
+        m_sym: Symbol("mb"),
+        n_sym: Symbol("out"),
+        k_sym: Symbol("in"),
+    }
+
+
 def _get_data_format(op, device_dtype):
     """
     NOTE: This is NOT a data conversion.
@@ -760,9 +808,11 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     has_indirect_access = bool(index_tensor_indices)
 
     dim_labels = _get_op_dim_labels(ndim, is_matmul)
-    symbol_mapping = {
-        sym: Symbol(dim_labels[i]) for i, sym in enumerate(op_spec.iteration_space)
-    }
+    symbol_mapping = _matmul_symbol_mapping(op_spec) if is_matmul else None
+    if symbol_mapping is None:
+        symbol_mapping = {
+            sym: Symbol(dim_labels[i]) for i, sym in enumerate(op_spec.iteration_space)
+        }
     logger.debug(
         "symbol mapping: %s",
         ", ".join(f"{k} -> {v}" for k, v in symbol_mapping.items()),
@@ -805,10 +855,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     # virtual mb=1 row when the op's tensor has only the stick dim.
     mb_sym: Symbol | None = None
     if (
-        (
-            DtypeOpTable.is_dtype_op(op_spec.op)
-            or op_spec.op in ("qfp8ch", "qfp8mb")
-        )
+        (DtypeOpTable.is_dtype_op(op_spec.op) or op_spec.op in ("qfp8ch", "qfp8mb"))
         and op_spec.op != IDENTITY_OP
         and op_stick_dim is not None
         and all(d is op_stick_dim for d in op_dim_order)

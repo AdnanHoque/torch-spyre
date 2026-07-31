@@ -35,7 +35,11 @@ from torch_spyre._inductor.codegen.compute_ops import (
     _tensor_has_symbolic_split,
     gen_compound_fp8_coord_info_value,
 )
-from torch_spyre._inductor.codegen.superdsc import _resolve_sdsc_size, compile_op_spec
+from torch_spyre._inductor.codegen.superdsc import (
+    _matmul_symbol_mapping,
+    _resolve_sdsc_size,
+    compile_op_spec,
+)
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.work_division import (
     _collect_symbol_metadata,
@@ -43,6 +47,50 @@ from torch_spyre._inductor.work_division import (
     _valid_divisor_basis,
     adjust_it_space_for_sticks,
 )
+
+
+def test_matmul_symbol_mapping_uses_tensor_roles_after_slice_reorders_dims():
+    n, k, m = sympy.symbols("n k m", integer=True)
+
+    def tensor_arg(coords, size, *, is_input):
+        return TensorArg(
+            is_input=is_input,
+            arg_index=0 if is_input else -1,
+            device_dtype=(
+                DataFormats.SEN143_FP8 if is_input else DataFormats.SEN169_FP16
+            ),
+            device_size=size,
+            device_coordinates=coords,
+            allocation={"hbm_pool": 0},
+        )
+
+    op_spec = OpSpec(
+        op="batchmatmulfp8",
+        is_reduction=True,
+        # A fused slice can reorder this dictionary to N, K, M.
+        iteration_space={n: (1024, 8), k: (128, 1), m: (1, 1)},
+        op_info={},
+        symbolic_dim_bounds={},
+        args=[
+            tensor_arg(
+                [k // 128, 0, m, sympy.Mod(k, 128)], [1, 1, 2, 128], is_input=True
+            ),
+            # A size-one broadcast coordinate can mention M on the RHS.
+            tensor_arg(
+                [m, n // 128, k, sympy.Mod(n, 128)], [1, 8, 128, 128], is_input=True
+            ),
+            tensor_arg(
+                [0, m, n // 64, sympy.Mod(n, 64)], [1, 1, 16, 64], is_input=False
+            ),
+        ],
+    )
+
+    mapping = _matmul_symbol_mapping(op_spec)
+    assert mapping == {
+        m: sympy.Symbol("mb"),
+        n: sympy.Symbol("out"),
+        k: sympy.Symbol("in"),
+    }
 
 
 class TestSpyreConfig(InductorTestCase):
