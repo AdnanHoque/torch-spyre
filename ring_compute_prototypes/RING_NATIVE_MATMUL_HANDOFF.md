@@ -1613,3 +1613,93 @@ Granite integration:
 Because the paid implementation already wins by 2.36x to 4.12x in isolation,
 producer-native LX is an optimization opportunity, not a prerequisite for
 proving Design A.
+
+## 2026-07-31: Granite E2E integration result
+
+The first full 40-layer Granite runs materially revise the conclusion above.
+The isolated projection win is real, but it does not survive the current
+fused decoder-layer schedule.
+
+### Exact tested source and rollout control
+
+```text
+Torch-Spyre revision:
+  2c1ab140d23f7e200ef45ef26b057229cb393727
+
+selector:
+  SPYRE_MATMUL_DATAFLOW=activation_stationary
+
+validated scope:
+  SPYRE_ACTIVATION_STATIONARY_SHAPES=12800x4096
+```
+
+Revision `2c1ab140` adds a comma-separated exact `KxN` rollout allowlist. It
+does not change either matmul implementation or work division. An empty
+allowlist preserves the original all-eligible behavior. The focused
+decomposition and computed-pad device suite passes:
+
+```text
+16 passed in 8.23s
+```
+
+### Down-projection-only completion and correctness
+
+Restricting Design A to the Granite MLP down projection
+`M1 K12800 N4096` completed prefill and all three decode calls for the full
+40-layer B1/S512 model. The same-revision stock and candidate decoded output
+artifacts are byte-identical:
+
+```text
+SHA-256:
+  29e7f26fed11c801d98f5a04ea00afe62f91471d9404372c66815dbf16df7888
+```
+
+One-generation Kineto device timing was:
+
+| Device phase | Same-revision stock | Down-only Design A | Candidate change |
+|---|---:|---:|---:|
+| Prefill | 378.098 ms | 375.609 ms | -0.66% |
+| Decode average | 161.825 ms | 226.120 ms | +39.73% |
+
+Both traces contain exactly four phases and 40 decoder layers per phase.
+Steady decode remains one fused device kernel per layer; its representative
+duration increases from about `3.93-3.96 ms` to `5.49-5.50 ms`. Therefore the
+regression is inside the compiled fused layer, not extra host launches.
+
+This is a one-generation completion measurement, not a promoted stable
+latency. Its magnitude is nevertheless too large to dismiss as timing noise.
+The accepted isolated `4.1164x` down-projection result is insufficient to
+predict fused-layer E2E performance.
+
+### All-eligible compiler blocker
+
+With an empty allowlist, prefill completes and produces token `203`. The first
+decode compile then fails:
+
+```text
+DtException: out_reuse_dim.size() == 1
+file /project_src/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+line 803
+```
+
+The failing fused bundle contains the two `K4096 -> N12800` gate/up linears
+and the `K12800 -> N4096` down linear. The same revision with
+`weight_stationary` completes, isolating the failure to the new dataflow.
+
+### Decision
+
+Design A is now a correct isolated microkernel and a correct down-only Granite
+experiment, but not an E2E optimization. Do not spend a five-run timing budget
+to "prove" a speedup before explaining the fused-layer regression. The next
+high-value diagnostic is to compare the stock and down-only emitted decoder
+schedule around the BMM, restickify, and output-reuse boundary. Any fix must
+preserve the intended PT tensor-role change; inserting an HBM materialization
+only to make the graph compile is not an acceptable performance solution.
+
+The exact three-arm E2E launcher, analyzer, evidence, and commands live in:
+
+```text
+https://github.ibm.com/Adnan-Hoque1/spyre-granite-e2e-bench
+branch adnan/sendnn-granite-antoni-repro-20260725
+runbook runbooks/activation_stationary_design_a_e2e.md
+```

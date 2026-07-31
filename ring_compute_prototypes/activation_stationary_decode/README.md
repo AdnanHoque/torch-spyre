@@ -131,3 +131,18 @@ program time. Do not compare the profiled Python wall timings.
 
 The accepted isolated results and pinned artifacts are recorded in
 `../RING_NATIVE_MATMUL_HANDOFF.md`. They are not Granite E2E claims.
+
+The first E2E-safe scope is now the MLP down projection:
+
+```bash
+export SPYRE_MATMUL_DATAFLOW=activation_stationary
+export SPYRE_ACTIVATION_STATIONARY_SHAPES=12800x4096
+```
+
+At exact revision `2c1ab140d23f7e200ef45ef26b057229cb393727`, that scope
+completed the full 40-layer B1/S512 generation and matched the stock decoded
+output byte-for-byte. Its one-generation device trace was about 39.73% slower
+on average decode, however. An empty shape allowlist selects every eligible
+linear and currently fails first-decode compilation in Deeptools output reuse.
+See the dated E2E section in `../RING_NATIVE_MATMUL_HANDOFF.md`; do not present
+the isolated 2.36x-4.12x timings as Granite E2E speedups.
