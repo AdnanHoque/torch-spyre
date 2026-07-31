@@ -177,6 +177,77 @@ Full precision results and trace hashes are in:
 - `compute_oracle_m512_results.json`.
 - `compute_oracle_work_division_results.json`.
 
+### Why M64 decode gains are modest: matched SMC study
+
+The within-core premise of Design A is valid: make the small activation the
+XRF-stationary tensor and stream the large weight through the PT West input.
+The chip-level premise is more restrictive. Multicasting a weight shard is
+useful only when several cores compute distinct M rows using that same shard.
+
+Fresh `DXP_DEBUG=1` recompilation of the exact timed M64 bundles exposes the
+actual L3 programs:
+
+- stock uses `LDGMU` for both operands. Its M split lets four cores share each
+  weight shard, while its N split lets four or eight cores share activation;
+- Design A uses `LDMU` for disjoint W shards and `LDGMU` for A. A is shared by
+  32 cores without K splitting and by 16 cores for the winning K2 schedule;
+- the loop-expanded PT compute-FMA count is identical in every matched pair.
+
+`Recipient bytes` below sum bytes delivered to all L3 requestors. They are not
+hop-weighted ring-link bytes. `Unique HBM` divides each multicast request by
+the active GTR sharer count, recovering the estimated memory response volume.
+
+| M64 shape | Stock / Design A | Unique HBM stock / A | Recipient stock / A | Stock/A XRF loads | Stock/A LX syncs |
+|---|---:|---:|---:|---:|---:|
+| K4096 N1024 | 1.0480x | 8.5 / 8.5 MiB | 34 / 16 MiB | 4.0x | 4.87x |
+| K4096 N4096 | 1.0380x | 32.5 / 32.5 MiB | 132 / 48 MiB | 4.0x | 5.98x |
+| K4096 N12800 | 0.9525x | 102.5 / 100.5 MiB | 420 / 116 MiB | 25.0x | 8.79x |
+| K12800 N4096 | 1.0491x | 101.5625 / 101.5625 MiB | 412.5 / 150 MiB | 4.0x | 7.50x |
+
+This explains the ceiling. Design A greatly reduces replication after HBM and
+reduces block-load/synchronization work, but it does not reduce the mandatory
+weight bytes from DRAM. Three rows improve only 3.7%-4.7%. The wide projection
+is the decisive contrast: Design A reads 2 MiB fewer unique HBM bytes, delivers
+3.62x fewer recipient bytes, performs 25x fewer XRF-load FMAs, and still loses
+4.98%. Its PT pointer-control count also rises to 827,904 `XRFACCESS` issues
+versus stock's 512,512. Without hardware stall counters, the exact split
+between independent-unicast service and PT control is not measured, but ring
+replication and XRF block loading are demonstrably not that row's critical
+path.
+
+A direct hybrid test tried transposed `M4 N8 K1`: retain stationary A while
+restoring four-way multicast of W. It fails structurally:
+
+```text
+work_division_hint: buf0 dim d1 size=1 is not evenly divisible by split=4
+```
+
+For Design A, physical M64 is the output/stick axis and contains exactly one
+stick, so it cannot be divided among four cores. Adding sub-stick replication
+would duplicate the same work; for B1 decode, 63 of the physical rows are
+padding rather than independent useful tokens. This is not a compiler feature
+worth adding for this algorithm.
+
+The resulting decision is:
+
+- keep the measured shape-selective M64 wins as microkernel evidence, with an
+  E2E ceiling of roughly 1.0%-1.4% before integration costs;
+- do not expect a large B1 decode win from Design A alone;
+- revisit activation-stationary execution for genuinely batched decode or
+  prefill, where multiple useful M sticks allow cores to share W. The M512
+  `M4 N8 K1` down-projection result (1.1454x) is consistent with this condition;
+- for B1 decode, pursue a different source of reuse, such as fusing projections
+  around their shared activation or batching independent tokens, rather than
+  replicating one M stick.
+
+Durable evidence:
+
+- `analyze_smc.py`: loop/GTR-aware SMC accounting;
+- `smc_m64_results.json`: four matched timing and SMC pairs with hashes;
+- `smc_m64_hybrid_probe.json`: the exact hybrid feasibility result;
+- device SMC root: `/tmp/design_a_smc_m64_20260731_v2` on
+  `adnan-cdx-spyre-dev-pf`.
+
 ### Large-M result
 
 The same conversion-free oracle was repeated at M4096 and M16384. The

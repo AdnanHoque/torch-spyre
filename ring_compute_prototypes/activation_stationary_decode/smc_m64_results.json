@@ -1,0 +1,811 @@
+{
+  "all_gates": true,
+  "comparisons": [
+    {
+      "design_a": {
+        "descriptor": {
+          "core_stage": {
+            "in_": 2048,
+            "mb_": 64,
+            "out_": 64
+          },
+          "logical_bmm": {
+            "in_": 4096,
+            "mb_": 1024,
+            "out_": 64
+          },
+          "num_cores": 32,
+          "work_slices": {
+            "in": 2,
+            "mb": 16,
+            "out": 1
+          }
+        },
+        "directory": "/tmp/design_a_smc_m64_20260731_v2/k4096_n1024_design_a",
+        "hashes": {
+          "bundle_mlir_sha256": "672bf0b7c729e31311d7a740e6dd73ea495737280268c4b848b6a5b6a819befd",
+          "post_dxp_sdsc_sha256": "a01b19e14c2b5f13120d8fffe226fa600c077bde110526fe1cfce3ea2ab7e6bf",
+          "sdsc_sha256": "92b03d0ac571620b84ac7285ba65ad67d7db964da85fba52a817bad648f58c22",
+          "smc_sha256": "9dd9b2cf441ccd865efd522d285545ca22d0b51c5d6ed05aeca4237d793c4c63"
+        },
+        "l3_loads": {
+          "estimated_unique_hbm_response_bytes": 8912896,
+          "loop_expanded": {
+            "ESTIMATED_UNIQUE_HBM_STICKS": 69632,
+            "L3_ADDEARIMM": 1024,
+            "L3_ADDLARIMM": 1152,
+            "L3_GTRIMM": 128,
+            "L3_LARIMM": 128,
+            "L3_LARREGCOPY": 1024,
+            "L3_LDGMU": 2048,
+            "L3_LDGMU_DELIVERED_STICKS": 65536,
+            "L3_LDGMU_REQUESTS": 2048,
+            "L3_LDMU": 2048,
+            "L3_LDMU_DELIVERED_STICKS": 65536,
+            "L3_LDMU_REQUESTS": 2048,
+            "L3_MODLARREG": 1024,
+            "L3_MVLOOPCNT": 288,
+            "L3_RETURN": 32,
+            "L3_SUBLARIMM": 128,
+            "L3_SYNC": 128,
+            "LDGM_SHARERS_16_DELIVERED_STICKS": 65536,
+            "LDGM_SHARERS_16_REQUESTS": 2048
+          },
+          "multicast_recipient_bytes": 8388608,
+          "recipient_bytes_per_unique_hbm_byte": 1.8823529411764706,
+          "recipient_delivered_bytes": 16777216,
+          "unicast_recipient_bytes": 8388608
+        },
+        "pt_and_sync": {
+          "L0_SYNC": 64,
+          "L3_SYNC": 144,
+          "LX_SYNC": 240,
+          "PE_SYNC": 0,
+          "PTOP_NOP": 5120,
+          "PTOP_XRFACCESS": 17920,
+          "PT_COMPUTE_FMA_UNROLLED": 4194304,
+          "PT_OTHER_FMA_UNROLLED": 229376,
+          "PT_XRF_LOAD_FMA_UNROLLED": 65536,
+          "SFP_SYNC": 0
+        },
+        "selected_loop_expanded_opcodes": {
+          "L3_GTRIMM": 128,
+          "L3_LDGMU": 2048,
+          "L3_LDMU": 2048,
+          "LX_LDSTI": 25344,
+          "LX_LDSTU": 10240,
+          "PTOP_FMA": 1092608,
+          "PTOP_RETURN": 448
+        },
+        "smc_scope": {
+          "cores": 32,
+          "loop_expanded_instruction_issues": 1940272,
+          "static_live_instructions": 9248,
+          "unit_sections": 512
+        }
+      },
+      "gates": {
+        "correctness": true,
+        "same_compute_fma_work": true,
+        "structural": true,
+        "timing": true
+      },
+      "label": "k4096_n1024",
+      "observations": {
+        "design_a_unique_hbm_excess_bytes": 0,
+        "operand_minimum_bytes": 8912896,
+        "same_unique_hbm_response_bytes": true,
+        "stock_unique_hbm_excess_bytes": 0
+      },
+      "ratios": {
+        "stock_over_design_a_lx_sync": 4.866666666666666,
+        "stock_over_design_a_recipient_delivered_bytes": 2.125,
+        "stock_over_design_a_unique_hbm_response_bytes": 1.0,
+        "stock_over_design_a_xrf_load_fma": 4.0
+      },
+      "shape": {
+        "k": 4096,
+        "logical_m": 64,
+        "n": 1024,
+        "physical_m": 64
+      },
+      "stock": {
+        "descriptor": {
+          "core_stage": {
+            "in_": 2048,
+            "mb_": 16,
+            "out_": 256
+          },
+          "logical_bmm": {
+            "in_": 4096,
+            "mb_": 64,
+            "out_": 1024
+          },
+          "num_cores": 32,
+          "work_slices": {
+            "in": 2,
+            "mb": 4,
+            "out": 4
+          }
+        },
+        "directory": "/tmp/design_a_smc_m64_20260731_v2/k4096_n1024_stock",
+        "hashes": {
+          "bundle_mlir_sha256": "f1843d22195b7b7e5b56cff5bc03b0780f86047b60cf13209bf19cba38c31589",
+          "post_dxp_sdsc_sha256": "13786d861317ada20bd0702a8e9b64bb8938ed348d34444bffc8bdfe560332e9",
+          "sdsc_sha256": "831a6473c72ebd9f48ee7d3f5b66891db58e10cb4a69d7de95f351e2cd6542f0",
+          "smc_sha256": "15ebb7956bba445269d4e8f39eb13b2fa39dbc0c31294a3c09c99de46cf53100"
+        },
+        "l3_loads": {
+          "estimated_unique_hbm_response_bytes": 8912896,
+          "loop_expanded": {
+            "ESTIMATED_UNIQUE_HBM_STICKS": 69632,
+            "L3_ADDEARIMM": 2304,
+            "L3_ADDLARIMM": 2048,
+            "L3_EARREGCOPY": 256,
+            "L3_GTRIMM": 512,
+            "L3_LARIMM": 512,
+            "L3_LARREGCOPY": 2048,
+            "L3_LDGMU": 9216,
+            "L3_LDGMU_DELIVERED_STICKS": 278528,
+            "L3_LDGMU_REQUESTS": 9216,
+            "L3_MODLARREG": 2048,
+            "L3_MVLOOPCNT": 1568,
+            "L3_RETURN": 32,
+            "L3_SUBLARIMM": 512,
+            "L3_SYNC": 256,
+            "LDGM_SHARERS_4_DELIVERED_STICKS": 278528,
+            "LDGM_SHARERS_4_REQUESTS": 9216
+          },
+          "multicast_recipient_bytes": 35651584,
+          "recipient_bytes_per_unique_hbm_byte": 4.0,
+          "recipient_delivered_bytes": 35651584,
+          "unicast_recipient_bytes": 0
+        },
+        "pt_and_sync": {
+          "L0_SYNC": 64,
+          "L3_SYNC": 272,
+          "LX_SYNC": 1168,
+          "PE_SYNC": 0,
+          "PTOP_NOP": 8192,
+          "PTOP_XRFACCESS": 41472,
+          "PT_COMPUTE_FMA_UNROLLED": 4194304,
+          "PT_OTHER_FMA_UNROLLED": 917504,
+          "PT_XRF_LOAD_FMA_UNROLLED": 262144,
+          "SFP_SYNC": 0
+        },
+        "selected_loop_expanded_opcodes": {
+          "L3_GTRIMM": 512,
+          "L3_LDGMU": 9216,
+          "L3_LDMU": 0,
+          "LX_LDSTI": 63232,
+          "LX_LDSTU": 0,
+          "PTOP_FMA": 1224704,
+          "PTOP_RETURN": 3552
+        },
+        "smc_scope": {
+          "cores": 32,
+          "loop_expanded_instruction_issues": 2356720,
+          "static_live_instructions": 23952,
+          "unit_sections": 512
+        }
+      },
+      "timing": {
+        "design_a_latency_reduction_percent": 4.583630116077934,
+        "design_a_median_us": 60.951499999999996,
+        "stock_median_us": 63.8795,
+        "stock_over_design_a": 1.0480381943020272,
+        "trace_sha256": "d05177d897337106012e0e18e519fb56bd59ec72039b74d2789f5de1d9c53bf1"
+      }
+    },
+    {
+      "design_a": {
+        "descriptor": {
+          "core_stage": {
+            "in_": 4096,
+            "mb_": 128,
+            "out_": 64
+          },
+          "logical_bmm": {
+            "in_": 4096,
+            "mb_": 4096,
+            "out_": 64
+          },
+          "num_cores": 32,
+          "work_slices": {
+            "in": 1,
+            "mb": 32,
+            "out": 1
+          }
+        },
+        "directory": "/tmp/design_a_smc_m64_20260731_v2/k4096_n4096_design_a",
+        "hashes": {
+          "bundle_mlir_sha256": "a607cacefae5f1e58f6e59f3e824998fcd94d0748174f4909c7ef5a787f515f5",
+          "post_dxp_sdsc_sha256": "6abc8a760c1bb50a48199bd55da7a9e68d41e52e1b1f72420c90dc02d758a441",
+          "sdsc_sha256": "225bb8d2d3fdb18f37a2beef225dc0be05af05c01995357969cf58baed1c19f0",
+          "smc_sha256": "1e46b9264ea1f8dfdea28c41c63b9a391dca9e60f88d826135f19bdbd5153418"
+        },
+        "l3_loads": {
+          "estimated_unique_hbm_response_bytes": 34078720,
+          "loop_expanded": {
+            "ESTIMATED_UNIQUE_HBM_STICKS": 266240,
+            "L3_ADDEARIMM": 2048,
+            "L3_ADDLARIMM": 2048,
+            "L3_GTRIMM": 512,
+            "L3_LARIMM": 512,
+            "L3_LARREGCOPY": 2048,
+            "L3_LDGMU": 4096,
+            "L3_LDGMU_DELIVERED_STICKS": 131072,
+            "L3_LDGMU_REQUESTS": 4096,
+            "L3_LDMU": 8192,
+            "L3_LDMU_DELIVERED_STICKS": 262144,
+            "L3_LDMU_REQUESTS": 8192,
+            "L3_MODLARREG": 2048,
+            "L3_MVLOOPCNT": 1056,
+            "L3_RETURN": 96,
+            "L3_SUBLARIMM": 1024,
+            "L3_SYNC": 512,
+            "LDGM_SHARERS_32_DELIVERED_STICKS": 131072,
+            "LDGM_SHARERS_32_REQUESTS": 4096
+          },
+          "multicast_recipient_bytes": 16777216,
+          "recipient_bytes_per_unique_hbm_byte": 1.476923076923077,
+          "recipient_delivered_bytes": 50331648,
+          "unicast_recipient_bytes": 33554432
+        },
+        "pt_and_sync": {
+          "L0_SYNC": 128,
+          "L3_SYNC": 544,
+          "LX_SYNC": 3008,
+          "PE_SYNC": 0,
+          "PTOP_NOP": 25600,
+          "PTOP_XRFACCESS": 140288,
+          "PT_COMPUTE_FMA_UNROLLED": 16777216,
+          "PT_OTHER_FMA_UNROLLED": 917504,
+          "PT_XRF_LOAD_FMA_UNROLLED": 262144,
+          "SFP_SYNC": 0
+        },
+        "selected_loop_expanded_opcodes": {
+          "L3_GTRIMM": 512,
+          "L3_LDGMU": 4096,
+          "L3_LDMU": 8192,
+          "LX_LDSTI": 46080,
+          "LX_LDSTU": 66560,
+          "PTOP_FMA": 4370432,
+          "PTOP_RETURN": 4928
+        },
+        "smc_scope": {
+          "cores": 32,
+          "loop_expanded_instruction_issues": 7800928,
+          "static_live_instructions": 36352,
+          "unit_sections": 960
+        }
+      },
+      "gates": {
+        "correctness": true,
+        "same_compute_fma_work": true,
+        "structural": true,
+        "timing": true
+      },
+      "label": "k4096_n4096",
+      "observations": {
+        "design_a_unique_hbm_excess_bytes": 0,
+        "operand_minimum_bytes": 34078720,
+        "same_unique_hbm_response_bytes": true,
+        "stock_unique_hbm_excess_bytes": 0
+      },
+      "ratios": {
+        "stock_over_design_a_lx_sync": 5.9787234042553195,
+        "stock_over_design_a_recipient_delivered_bytes": 2.75,
+        "stock_over_design_a_unique_hbm_response_bytes": 1.0,
+        "stock_over_design_a_xrf_load_fma": 4.0
+      },
+      "shape": {
+        "k": 4096,
+        "logical_m": 64,
+        "n": 4096,
+        "physical_m": 64
+      },
+      "stock": {
+        "descriptor": {
+          "core_stage": {
+            "in_": 4096,
+            "mb_": 16,
+            "out_": 512
+          },
+          "logical_bmm": {
+            "in_": 4096,
+            "mb_": 64,
+            "out_": 4096
+          },
+          "num_cores": 32,
+          "work_slices": {
+            "in": 1,
+            "mb": 4,
+            "out": 8
+          }
+        },
+        "directory": "/tmp/design_a_smc_m64_20260731_v2/k4096_n4096_stock",
+        "hashes": {
+          "bundle_mlir_sha256": "48af49c971c28f20baeca36c58c99f41fdf460879c1b67b17541dccb79b629ce",
+          "post_dxp_sdsc_sha256": "02fb1450e9cfcd7690563988669e4b00a9ed3170a9da0a4b816efaa395670dcb",
+          "sdsc_sha256": "1e12026bf106896dc0026681c06d6557f36b32eef644c0bcd7cea74f2116c6d8",
+          "smc_sha256": "e3800b3bba18aa00f22588dae607ec2e5c0bebd259520db0deec45d4931deb3b"
+        },
+        "l3_loads": {
+          "estimated_unique_hbm_response_bytes": 34078720,
+          "loop_expanded": {
+            "ESTIMATED_UNIQUE_HBM_STICKS": 266240,
+            "L3_ADDEARIMM": 10240,
+            "L3_ADDLARIMM": 8192,
+            "L3_EARREGCOPY": 1024,
+            "L3_GTRIMM": 2048,
+            "L3_LARIMM": 1024,
+            "L3_LARREGCOPY": 8192,
+            "L3_LDGMU": 34816,
+            "L3_LDGMU_DELIVERED_STICKS": 1081344,
+            "L3_LDGMU_REQUESTS": 34816,
+            "L3_MODLARREG": 8192,
+            "L3_MVLOOPCNT": 1056,
+            "L3_RETURN": 96,
+            "L3_SUBLARIMM": 2048,
+            "L3_SYNC": 1024,
+            "LDGM_SHARERS_4_DELIVERED_STICKS": 1048576,
+            "LDGM_SHARERS_4_REQUESTS": 32768,
+            "LDGM_SHARERS_8_DELIVERED_STICKS": 32768,
+            "LDGM_SHARERS_8_REQUESTS": 2048
+          },
+          "multicast_recipient_bytes": 138412032,
+          "recipient_bytes_per_unique_hbm_byte": 4.061538461538461,
+          "recipient_delivered_bytes": 138412032,
+          "unicast_recipient_bytes": 0
+        },
+        "pt_and_sync": {
+          "L0_SYNC": 128,
+          "L3_SYNC": 1056,
+          "LX_SYNC": 17984,
+          "PE_SYNC": 0,
+          "PTOP_NOP": 0,
+          "PTOP_XRFACCESS": 328704,
+          "PT_COMPUTE_FMA_UNROLLED": 16777216,
+          "PT_OTHER_FMA_UNROLLED": 3670016,
+          "PT_XRF_LOAD_FMA_UNROLLED": 1048576,
+          "SFP_SYNC": 0
+        },
+        "selected_loop_expanded_opcodes": {
+          "L3_GTRIMM": 2048,
+          "L3_LDGMU": 34816,
+          "L3_LDMU": 0,
+          "LX_LDSTI": 316672,
+          "LX_LDSTU": 32256,
+          "PTOP_FMA": 4784128,
+          "PTOP_RETURN": 3328
+        },
+        "smc_scope": {
+          "cores": 32,
+          "loop_expanded_instruction_issues": 8817472,
+          "static_live_instructions": 54016,
+          "unit_sections": 960
+        }
+      },
+      "timing": {
+        "design_a_latency_reduction_percent": 3.6571135778441755,
+        "design_a_median_us": 223.7525,
+        "stock_median_us": 232.24599999999998,
+        "stock_over_design_a": 1.0379593524094701,
+        "trace_sha256": "6aecd60beb9bd27bd04119cb3fab58566e1a377e385f28f6da3b5e504be683ae"
+      }
+    },
+    {
+      "design_a": {
+        "descriptor": {
+          "core_stage": {
+            "in_": 4096,
+            "mb_": 400,
+            "out_": 64
+          },
+          "logical_bmm": {
+            "in_": 4096,
+            "mb_": 12800,
+            "out_": 64
+          },
+          "num_cores": 32,
+          "work_slices": {
+            "in": 1,
+            "mb": 32,
+            "out": 1
+          }
+        },
+        "directory": "/tmp/design_a_smc_m64_20260731_v2/k4096_n12800_design_a",
+        "hashes": {
+          "bundle_mlir_sha256": "5dce020e581b4bf3e89a3ee75f30c5c8e135d5aa3e6169e5b8707f954feeb5ac",
+          "post_dxp_sdsc_sha256": "babafc248555106b8bc08f6f6bea4c57fdb792c517ad4376b0f8660cddc94967",
+          "sdsc_sha256": "3ef7859409673997cfcb21280d104b809769d10d02e4041219388a0d3c441d38",
+          "smc_sha256": "f238b96d290060a4a68d66c1fa00d52dba39f2a5c7672815f19f9e9d8eee2afd"
+        },
+        "l3_loads": {
+          "estimated_unique_hbm_response_bytes": 105381888,
+          "loop_expanded": {
+            "ESTIMATED_UNIQUE_HBM_STICKS": 823296,
+            "L3_ADDEARIMM": 2048,
+            "L3_ADDLARIMM": 2048,
+            "L3_GTRIMM": 1024,
+            "L3_LARIMM": 1024,
+            "L3_LARREGCOPY": 2048,
+            "L3_LDGMU": 4096,
+            "L3_LDGMU_DELIVERED_STICKS": 131072,
+            "L3_LDGMU_REQUESTS": 4096,
+            "L3_LDMU": 26624,
+            "L3_LDMU_DELIVERED_STICKS": 819200,
+            "L3_LDMU_REQUESTS": 26624,
+            "L3_MODLARREG": 2048,
+            "L3_MVLOOPCNT": 1056,
+            "L3_RETURN": 128,
+            "L3_SUBLARIMM": 2048,
+            "L3_SYNC": 1024,
+            "LDGM_SHARERS_32_DELIVERED_STICKS": 131072,
+            "LDGM_SHARERS_32_REQUESTS": 4096
+          },
+          "multicast_recipient_bytes": 16777216,
+          "recipient_bytes_per_unique_hbm_byte": 1.154228855721393,
+          "recipient_delivered_bytes": 121634816,
+          "unicast_recipient_bytes": 104857600
+        },
+        "pt_and_sync": {
+          "L0_SYNC": 64,
+          "L3_SYNC": 1056,
+          "LX_SYNC": 3040,
+          "PE_SYNC": 0,
+          "PTOP_NOP": 8192,
+          "PTOP_XRFACCESS": 827904,
+          "PT_COMPUTE_FMA_UNROLLED": 52428800,
+          "PT_OTHER_FMA_UNROLLED": 458752,
+          "PT_XRF_LOAD_FMA_UNROLLED": 131072,
+          "SFP_SYNC": 0
+        },
+        "selected_loop_expanded_opcodes": {
+          "L3_GTRIMM": 1024,
+          "L3_LDGMU": 4096,
+          "L3_LDMU": 26624,
+          "LX_LDSTI": 297600,
+          "LX_LDSTU": 214016,
+          "PTOP_FMA": 13180928,
+          "PTOP_RETURN": 2048
+        },
+        "smc_scope": {
+          "cores": 32,
+          "loop_expanded_instruction_issues": 23809312,
+          "static_live_instructions": 14848,
+          "unit_sections": 512
+        }
+      },
+      "gates": {
+        "correctness": true,
+        "same_compute_fma_work": true,
+        "structural": true,
+        "timing": true
+      },
+      "label": "k4096_n12800",
+      "observations": {
+        "design_a_unique_hbm_excess_bytes": 0,
+        "operand_minimum_bytes": 105381888,
+        "same_unique_hbm_response_bytes": false,
+        "stock_unique_hbm_excess_bytes": 2097152
+      },
+      "ratios": {
+        "stock_over_design_a_lx_sync": 8.789473684210526,
+        "stock_over_design_a_recipient_delivered_bytes": 3.6206896551724137,
+        "stock_over_design_a_unique_hbm_response_bytes": 1.0199004975124377,
+        "stock_over_design_a_xrf_load_fma": 25.0
+      },
+      "shape": {
+        "k": 4096,
+        "logical_m": 64,
+        "n": 12800,
+        "physical_m": 64
+      },
+      "stock": {
+        "descriptor": {
+          "core_stage": {
+            "in_": 4096,
+            "mb_": 16,
+            "out_": 1600
+          },
+          "logical_bmm": {
+            "in_": 4096,
+            "mb_": 64,
+            "out_": 12800
+          },
+          "num_cores": 32,
+          "work_slices": {
+            "in": 1,
+            "mb": 4,
+            "out": 8
+          }
+        },
+        "directory": "/tmp/design_a_smc_m64_20260731_v2/k4096_n12800_stock",
+        "hashes": {
+          "bundle_mlir_sha256": "f539c670f9a6387c6f02ae5d4d1c02db487b5ccec6399b002886152581a12918",
+          "post_dxp_sdsc_sha256": "f670a95a9f790ef5f435bbf5cba4edcd4e94ab771f084946fc9a1bf46cdd90ea",
+          "sdsc_sha256": "bc4c58deb59f14aa335469b59665fe560b2529c7640f3c84e7f5332151e28e15",
+          "smc_sha256": "92c10bcb5b70c25d0948736b305f24b4a5632f4a1bb7030480dc7175593ed7ec"
+        },
+        "l3_loads": {
+          "estimated_unique_hbm_response_bytes": 107479040,
+          "loop_expanded": {
+            "ESTIMATED_UNIQUE_HBM_STICKS": 839680,
+            "L3_ADDEARIMM": 25680,
+            "L3_ADDLARIMM": 12400,
+            "L3_EARIMM": 160,
+            "L3_GTRIMM": 5120,
+            "L3_JCMP": 31,
+            "L3_LARIMM": 2480,
+            "L3_LARREGCOPY": 12400,
+            "L3_LDGMU": 112640,
+            "L3_LDGMU_DELIVERED_STICKS": 3440640,
+            "L3_LDGMU_REQUESTS": 112640,
+            "L3_MODLARREG": 12400,
+            "L3_MVLOOPCNT": 2672,
+            "L3_RETURN": 64,
+            "L3_SUBLARIMM": 5120,
+            "L3_SYNC": 2560,
+            "LDGM_SHARERS_4_DELIVERED_STICKS": 3276800,
+            "LDGM_SHARERS_4_REQUESTS": 102400,
+            "LDGM_SHARERS_8_DELIVERED_STICKS": 163840,
+            "LDGM_SHARERS_8_REQUESTS": 10240
+          },
+          "multicast_recipient_bytes": 440401920,
+          "recipient_bytes_per_unique_hbm_byte": 4.097560975609756,
+          "recipient_delivered_bytes": 440401920,
+          "unicast_recipient_bytes": 0
+        },
+        "pt_and_sync": {
+          "L0_SYNC": 64,
+          "L3_SYNC": 2720,
+          "LX_SYNC": 26720,
+          "PE_SYNC": 0,
+          "PTOP_NOP": 102400,
+          "PTOP_XRFACCESS": 512512,
+          "PT_COMPUTE_FMA_UNROLLED": 52428800,
+          "PT_OTHER_FMA_UNROLLED": 11468800,
+          "PT_XRF_LOAD_FMA_UNROLLED": 3276800,
+          "SFP_SYNC": 0
+        },
+        "selected_loop_expanded_opcodes": {
+          "L3_GTRIMM": 5120,
+          "L3_LDGMU": 112640,
+          "L3_LDMU": 0,
+          "LX_LDSTI": 912000,
+          "LX_LDSTU": 0,
+          "PTOP_FMA": 15308800,
+          "PTOP_RETURN": 3552
+        },
+        "smc_scope": {
+          "cores": 32,
+          "loop_expanded_instruction_issues": 29665727,
+          "static_live_instructions": 25021,
+          "unit_sections": 512
+        }
+      },
+      "timing": {
+        "design_a_latency_reduction_percent": -4.984498675877376,
+        "design_a_median_us": 747.866,
+        "stock_median_us": 712.3585,
+        "stock_over_design_a": 0.9525215747206051,
+        "trace_sha256": "fd90a1f8f2631c2e4062667e709acaff043ac06968cdef5c4a7fbb133c0bbb34"
+      }
+    },
+    {
+      "design_a": {
+        "descriptor": {
+          "core_stage": {
+            "in_": 12800,
+            "mb_": 128,
+            "out_": 64
+          },
+          "logical_bmm": {
+            "in_": 12800,
+            "mb_": 4096,
+            "out_": 64
+          },
+          "num_cores": 32,
+          "work_slices": {
+            "in": 1,
+            "mb": 32,
+            "out": 1
+          }
+        },
+        "directory": "/tmp/design_a_smc_m64_20260731_v2/k12800_n4096_design_a",
+        "hashes": {
+          "bundle_mlir_sha256": "a607cacefae5f1e58f6e59f3e824998fcd94d0748174f4909c7ef5a787f515f5",
+          "post_dxp_sdsc_sha256": "27789da1b2271c88b853a452157156f540288bf6c05400289377ab90d19bd235",
+          "sdsc_sha256": "00e023200595de6775b04cd5d59cc5582881467df11b00081df3f421701875c5",
+          "smc_sha256": "ab0951ab10f677dc344ddde29886c9851e29a5c0aa9fa788fe214ce0ef623121"
+        },
+        "l3_loads": {
+          "estimated_unique_hbm_response_bytes": 106496000,
+          "loop_expanded": {
+            "ESTIMATED_UNIQUE_HBM_STICKS": 832000,
+            "L3_ADDEARIMM": 6400,
+            "L3_ADDLARIMM": 6400,
+            "L3_GTRIMM": 1280,
+            "L3_LARIMM": 1280,
+            "L3_LARREGCOPY": 6400,
+            "L3_LDGMU": 12800,
+            "L3_LDGMU_DELIVERED_STICKS": 409600,
+            "L3_LDGMU_REQUESTS": 12800,
+            "L3_LDMU": 25600,
+            "L3_LDMU_DELIVERED_STICKS": 819200,
+            "L3_LDMU_REQUESTS": 25600,
+            "L3_MODLARREG": 6400,
+            "L3_MVLOOPCNT": 1312,
+            "L3_RETURN": 96,
+            "L3_SUBLARIMM": 2560,
+            "L3_SYNC": 1280,
+            "LDGM_SHARERS_32_DELIVERED_STICKS": 409600,
+            "LDGM_SHARERS_32_REQUESTS": 12800
+          },
+          "multicast_recipient_bytes": 52428800,
+          "recipient_bytes_per_unique_hbm_byte": 1.476923076923077,
+          "recipient_delivered_bytes": 157286400,
+          "unicast_recipient_bytes": 104857600
+        },
+        "pt_and_sync": {
+          "L0_SYNC": 128,
+          "L3_SYNC": 1312,
+          "LX_SYNC": 7616,
+          "PE_SYNC": 0,
+          "PTOP_NOP": 23040,
+          "PTOP_XRFACCESS": 349184,
+          "PT_COMPUTE_FMA_UNROLLED": 52428800,
+          "PT_OTHER_FMA_UNROLLED": 2867200,
+          "PT_XRF_LOAD_FMA_UNROLLED": 819200,
+          "SFP_SYNC": 0
+        },
+        "selected_loop_expanded_opcodes": {
+          "L3_GTRIMM": 1280,
+          "L3_LDGMU": 12800,
+          "L3_LDMU": 25600,
+          "LX_LDSTI": 119808,
+          "LX_LDSTU": 207360,
+          "PTOP_FMA": 13657600,
+          "PTOP_RETURN": 9600
+        },
+        "smc_scope": {
+          "cores": 32,
+          "loop_expanded_instruction_issues": 24038048,
+          "static_live_instructions": 53248,
+          "unit_sections": 960
+        }
+      },
+      "gates": {
+        "correctness": true,
+        "same_compute_fma_work": true,
+        "structural": true,
+        "timing": true
+      },
+      "label": "k12800_n4096",
+      "observations": {
+        "design_a_unique_hbm_excess_bytes": 0,
+        "operand_minimum_bytes": 106496000,
+        "same_unique_hbm_response_bytes": true,
+        "stock_unique_hbm_excess_bytes": 0
+      },
+      "ratios": {
+        "stock_over_design_a_lx_sync": 7.504201680672269,
+        "stock_over_design_a_recipient_delivered_bytes": 2.75,
+        "stock_over_design_a_unique_hbm_response_bytes": 1.0,
+        "stock_over_design_a_xrf_load_fma": 4.0
+      },
+      "shape": {
+        "k": 12800,
+        "logical_m": 64,
+        "n": 4096,
+        "physical_m": 64
+      },
+      "stock": {
+        "descriptor": {
+          "core_stage": {
+            "in_": 12800,
+            "mb_": 16,
+            "out_": 512
+          },
+          "logical_bmm": {
+            "in_": 12800,
+            "mb_": 64,
+            "out_": 4096
+          },
+          "num_cores": 32,
+          "work_slices": {
+            "in": 1,
+            "mb": 4,
+            "out": 8
+          }
+        },
+        "directory": "/tmp/design_a_smc_m64_20260731_v2/k12800_n4096_stock",
+        "hashes": {
+          "bundle_mlir_sha256": "701b207d9ddc4656affd14a0ccdc1f65a53548b4e2456b567c99e7bc9d81eed2",
+          "post_dxp_sdsc_sha256": "3567c3cb83ed02e6675d69a8b76f340a0a17fdccc61fe9c70a108cbdcbd37839",
+          "sdsc_sha256": "8460724700488b02aaf66055866e093bd642c908d1953042ac8b6d5f13b984b6",
+          "smc_sha256": "dfbd620134e5823d606786837b5cc5e814a769832c733d986e576cb999303a43"
+        },
+        "l3_loads": {
+          "estimated_unique_hbm_response_bytes": 106496000,
+          "loop_expanded": {
+            "ESTIMATED_UNIQUE_HBM_STICKS": 832000,
+            "L3_ADDEARIMM": 31900,
+            "L3_ADDLARIMM": 24800,
+            "L3_EARREGCOPY": 3200,
+            "L3_GTRIMM": 6400,
+            "L3_JCMP": 31,
+            "L3_LARIMM": 3100,
+            "L3_LARREGCOPY": 24800,
+            "L3_LDGMU": 108800,
+            "L3_LDGMU_DELIVERED_STICKS": 3379200,
+            "L3_LDGMU_REQUESTS": 108800,
+            "L3_MODLARREG": 24800,
+            "L3_MVLOOPCNT": 3132,
+            "L3_RETURN": 64,
+            "L3_SUBLARIMM": 6400,
+            "L3_SYNC": 3200,
+            "LDGM_SHARERS_4_DELIVERED_STICKS": 3276800,
+            "LDGM_SHARERS_4_REQUESTS": 102400,
+            "LDGM_SHARERS_8_DELIVERED_STICKS": 102400,
+            "LDGM_SHARERS_8_REQUESTS": 6400
+          },
+          "multicast_recipient_bytes": 432537600,
+          "recipient_bytes_per_unique_hbm_byte": 4.061538461538461,
+          "recipient_delivered_bytes": 432537600,
+          "unicast_recipient_bytes": 0
+        },
+        "pt_and_sync": {
+          "L0_SYNC": 128,
+          "L3_SYNC": 3232,
+          "LX_SYNC": 57152,
+          "PE_SYNC": 0,
+          "PTOP_NOP": 0,
+          "PTOP_XRFACCESS": 1025024,
+          "PT_COMPUTE_FMA_UNROLLED": 52428800,
+          "PT_OTHER_FMA_UNROLLED": 11468800,
+          "PT_XRF_LOAD_FMA_UNROLLED": 3276800,
+          "SFP_SYNC": 0
+        },
+        "selected_loop_expanded_opcodes": {
+          "L3_GTRIMM": 6400,
+          "L3_LDGMU": 108800,
+          "L3_LDMU": 0,
+          "LX_LDSTI": 1280704,
+          "LX_LDSTU": 101888,
+          "PTOP_FMA": 14950400,
+          "PTOP_RETURN": 3328
+        },
+        "smc_scope": {
+          "cores": 32,
+          "loop_expanded_instruction_issues": 27184627,
+          "static_live_instructions": 57116,
+          "unit_sections": 960
+        }
+      },
+      "timing": {
+        "design_a_latency_reduction_percent": 4.680341123140221,
+        "design_a_median_us": 686.445,
+        "stock_median_us": 720.1505,
+        "stock_over_design_a": 1.049101530348389,
+        "trace_sha256": "5d4aada65c08cbb706f90901e3a9962d693be7d998900a84e5a11fd03fd7cb5d"
+      }
+    }
+  ],
+  "method": {
+    "loop_expansion": "static MVLOOPCNT/be structure; each emitted unit entry assumed invoked once",
+    "not_claimed": [
+      "hardware PT-active cycles",
+      "hardware stall cycles",
+      "ring-link utilization counters",
+      "Granite end-to-end speedup"
+    ],
+    "smc": "fresh DXP_DEBUG=1 recompilation of exact timed bundle and SDSC",
+    "timing": "existing matched Kineto cat==kernel ICCI brackets",
+    "unique_hbm_estimate": "LDMU bytes plus LDGMU recipient bytes divided by current GTR sharers"
+  },
+  "schema": "activation_stationary_m64_smc_study_v1",
+  "study_root": "/tmp/design_a_smc_m64_20260731_v2"
+}

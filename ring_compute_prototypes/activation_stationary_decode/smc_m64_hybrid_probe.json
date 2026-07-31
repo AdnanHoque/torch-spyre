@@ -1,0 +1,32 @@
+{
+  "schema": "activation_stationary_m64_hybrid_multicast_probe_v1",
+  "date": "2026-07-31",
+  "device": "adnan-cdx-spyre-dev-pf",
+  "run_directory": "/tmp/design-a-hybrid-m64k4096n12800-m4n8k1-20260731-v1",
+  "shape": {
+    "m": 64,
+    "k": 4096,
+    "n": 12800,
+    "dtype": "float16"
+  },
+  "candidate_work_division": {
+    "M": 4,
+    "N": 8,
+    "K": 1
+  },
+  "purpose": "Keep A stationary while restoring four-way multicast of each W shard.",
+  "status": "compile_rejected",
+  "error": "work_division_hint: buf0 dim d1 size=1 is not evenly divisible by split=4",
+  "interpretation": "The transposed Design A output axis is physical M64, which is one stick. It cannot be partitioned four ways. Replicating that stick would duplicate padded decode work rather than assign distinct useful rows.",
+  "provenance": {
+    "torch_spyre_head": "2c1ab140d23f7e200ef45ef26b057229cb393727",
+    "torch_spyre_tracked_diff_sha256": "05d776a9398d0259365b0bccc31597c233055205192671b62aa797849c269b09",
+    "benchmark_sha256": "bd6d56a68f34cd899bdf6d0ce8a9e8c1254eb45045fcd8108d1b5351143d60d8",
+    "torch_version": "2.11.0+aiu.kineto.1.1.2"
+  },
+  "not_claimed": [
+    "candidate correctness",
+    "candidate timing",
+    "compiler defect"
+  ]
+}

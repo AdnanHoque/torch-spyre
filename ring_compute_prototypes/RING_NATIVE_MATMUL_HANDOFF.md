@@ -2160,3 +2160,81 @@ The benchmark source SHA-256 for the explicit-incumbent-grid extension is:
 ```text
 c417e0bb3941ca2b66cba316fd178b56c910c92b519809623f260213fce16142
 ```
+
+## 2026-07-31: M64 Design A SMC diagnosis
+
+The modest decode-oracle gains are now explained at the emitted-program
+level. Exact timed stock and Design A bundles for all four M64 Granite linear
+shapes were recompiled with `DXP_DEBUG=1`. A loop-aware SMC audit decodes
+`GTRIMM` sharer counts and distinguishes recipient-delivered L3 bytes from
+estimated unique HBM response bytes.
+
+| M64 shape | Stock / A | Unique HBM stock / A | Recipient stock / A | Stock/A XRF loads | Stock/A LX syncs |
+|---|---:|---:|---:|---:|---:|
+| K4096 N1024 | 1.0480x | 8.5 / 8.5 MiB | 34 / 16 MiB | 4.0x | 4.87x |
+| K4096 N4096 | 1.0380x | 32.5 / 32.5 MiB | 132 / 48 MiB | 4.0x | 5.98x |
+| K4096 N12800 | 0.9525x | 102.5 / 100.5 MiB | 420 / 116 MiB | 25.0x | 8.79x |
+| K12800 N4096 | 1.0491x | 101.5625 / 101.5625 MiB | 412.5 / 150 MiB | 4.0x | 7.50x |
+
+Every comparison passes its original correctness, one-BMM structural, exact
+Kineto-order, and equal PT compute-FMA gates. The SMC dataflow difference is:
+
+```text
+stock:
+  W: LDGMU, normally 4 sharers from the M split
+  A: LDGMU, normally 8 sharers from the N split
+
+Design A:
+  W: LDMU, disjoint unicast shards
+  A: LDGMU, 32 sharers (16 for the winning K2 schedule)
+```
+
+Thus Design A reduces post-HBM replication, block loading, and synchronization
+but normally leaves mandatory DRAM response bytes unchanged. The K4096 N12800
+loser is the critical contrast: it has fewer bytes and far less block-load
+work yet runs 4.98% slower. Its `XRFACCESS` count rises to 827,904 versus
+stock's 512,512, and it replaces shared weight requests with independent
+unicast streams. No hardware stall counter was collected, so the relative
+contribution of those two costs remains an inference; the audit does prove
+that multicast replication and XRF loads are not the limiting work in that
+cell.
+
+The direct follow-up attempted Design A `M4 N8 K1` to restore four-way W
+multicast. Compilation correctly rejects it:
+
+```text
+work_division_hint: buf0 dim d1 size=1 is not evenly divisible by split=4
+```
+
+After tensor-role reversal, physical M64 is the PT output/stick axis and is one
+stick. It cannot be divided among four cores. A compiler feature that merely
+replicated that stick would duplicate padded work; for B1 decode there is only
+one useful row. Do not implement sub-stick replication for this route.
+
+### Stop/reassess call
+
+Design A is a valid shape-selective microkernel, not a large B1 decode
+algorithm. Its zero-conversion M64 contribution projects to only 1.0%-1.4% of
+the decoder layer, and current E2E conversion work overwhelms that. Keep the
+M64 evidence, but move further activation-stationary work to workloads with
+multiple useful M sticks. The 1.1454x M512 down-projection result is consistent
+with that requirement.
+
+For single-token decode, a larger gain must create reuse elsewhere: batch
+independent tokens, fuse projections around the shared activation, or devise a
+different cross-layer schedule. It cannot come from multicasting disjoint W
+rows in this matmul.
+
+Durable artifacts:
+
+```text
+repository:
+  ring_compute_prototypes/activation_stationary_decode/analyze_smc.py
+  ring_compute_prototypes/activation_stationary_decode/smc_m64_results.json
+  ring_compute_prototypes/activation_stationary_decode/smc_m64_hybrid_probe.json
+
+device:
+  pod: adnan-cdx-spyre-dev-pf
+  SMC root: /tmp/design_a_smc_m64_20260731_v2
+  hybrid run: /tmp/design-a-hybrid-m64k4096n12800-m4n8k1-20260731-v1
+```
