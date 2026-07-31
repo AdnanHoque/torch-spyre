@@ -2073,3 +2073,90 @@ The best demonstrated E2E setting is the incumbent `weight_stationary`
 dataflow. The next Design A work is not more work-division tuning; it is
 producer-/consumer-native A/C layout integration that removes the residual
 fused relayouts, followed by a new one-generation screen.
+
+## 2026-07-31: large-M Design A oracle
+
+### Question and measurement contract
+
+The conversion-free, one-BMM oracle was repeated at M4096 and M16384 over all
+four Granite linear shapes. Each arm received native A/W/C layouts, compiled
+to exactly one `batchmatmul` root, passed CPU-reference and cross-arm
+correctness, and was timed from Kineto `cat == "kernel"` events in ICCI order.
+
+The benchmark now accepts explicit incumbent as well as candidate M/N/K
+splits. This is necessary because comparing Design A only with stock-auto
+confounds tensor-role advantage with an incumbent planner miss.
+
+### Result against stock auto
+
+Automatic planning initially looked extremely favorable:
+
+| Shape | Stock auto | Design A auto | Stock / Design A |
+|---|---:|---:|---:|
+| M16384 K4096 N12800 | 54.318 ms | 35.883 ms | 1.5138x |
+| M16384 K12800 N4096 | 97.873 ms | 53.736 ms | 1.8214x |
+
+The first row pools three fully passing 10-block traces, 60 events per arm.
+The second pools two fully passing traces, 40 events per arm. Additional
+repeats reproduced the medians but contained one zero-duration Kineto record
+and are excluded.
+
+These are not the final algorithmic comparisons.
+
+### Result against the best measured incumbent grid
+
+| Shape | Best stock | Design A | Stock / Design A |
+|---|---:|---:|---:|
+| M4096 K4096 N1024 | 599.467 us | 662.134 us | 0.9054x |
+| M4096 K4096 N4096 | 2754.214 us | 2758.189 us | 0.9986x |
+| M4096 K4096 N12800 | 8513.031 us | 7611.254 us | **1.1185x** |
+| M4096 K12800 N4096 | 8702.179 us | 8717.557 us | 0.9982x |
+| M16384 K4096 N1024 | 2418.206 us | 2759.663 us | 0.8763x |
+| M16384 K4096 N4096 | 11142.393 us | 11358.352 us | 0.9810x |
+| M16384 K4096 N12800 | 34115.084 us | 36000.008 us | 0.9476x |
+| M16384 K12800 N4096 | 51215.819 us | 54194.767 us | 0.9450x |
+
+Only M4096 K4096 N12800 survives the tuned-incumbent comparison. Its
+`M4 N8 K1` stock schedule versus automatic Design A reduces latency by 10.59%.
+At M16384, tuned stock wins every shape.
+
+### What the controls prove
+
+For M16384 K4096 N12800, Design A has a genuine same-grid tensor-role
+advantage on stock-auto's `M16 N2 K1` grid:
+
+```text
+stock:    53.700 ms
+Design A: 45.596 ms
+ratio:     1.1777x
+```
+
+However, stock `M4 N8 K1` reaches 34.115 ms and beats Design A auto at
+36.000 ms. The 1.51x headline was primarily a stock planner miss.
+
+For M16384 K12800 N4096, stock cannot use K1 because its per-core activation
+span is 400 MB, above the 256 MB hardware limit. Design A makes a no-K-split
+grid feasible, but the best tested stock K2 grid, `M4 N4 K2`, still reaches
+51.216 ms versus Design A's 54.195 ms. Avoiding reduction is not sufficient
+when the resulting PT schedule is less efficient.
+
+### Decision
+
+Large M is not Design A's general winning regime. The algorithm exposes
+interesting tensor-role/decomposition interactions, but stock work-division
+tuning erases both large M16384 headline gains. Preserve the single M4096
+K4096 N12800 result as a real conversion-free candidate; do not broaden
+Design A to large M generally.
+
+The durable ledger is:
+
+```text
+ring_compute_prototypes/activation_stationary_decode/
+  large_m_compute_oracle_results.json
+```
+
+The benchmark source SHA-256 for the explicit-incumbent-grid extension is:
+
+```text
+c417e0bb3941ca2b66cba316fd178b56c910c92b519809623f260213fce16142
+```

@@ -148,7 +148,9 @@ Work division must be co-designed with the reversed tensor roles. Use
 `--candidate-m-split`, `--candidate-n-split`, and `--candidate-k-split` for an
 explicit 32-core candidate. `--candidate-core-order auto` is the default and
 keeps placement out of the work-division ablation; `row_major` is a separate
-experiment.
+experiment. Use `--incumbent-m-split`, `--incumbent-n-split`, and
+`--incumbent-k-split` to test an explicit stock control in the same matched
+process. Both triples must multiply to 32.
 
 The best measured schedules are:
 
@@ -174,6 +176,33 @@ Full precision results and trace hashes are in:
 - `compute_oracle_m64_results.json`;
 - `compute_oracle_m512_results.json`.
 - `compute_oracle_work_division_results.json`.
+
+### Large-M result
+
+The same conversion-free oracle was repeated at M4096 and M16384. The
+automatic stock planner initially made Design A look as much as 1.82x faster,
+so the incumbent was then swept over nearby legal 32-core grids. Against the
+best measured incumbent setting, Design A wins only one row:
+
+| Shape | Best stock | Design A | Stock / Design A |
+|---|---:|---:|---:|
+| M4096 K4096 N1024 | 599.467 us | 662.134 us | 0.9054x |
+| M4096 K4096 N4096 | 2754.214 us | 2758.189 us | 0.9986x |
+| M4096 K4096 N12800 | 8513.031 us | 7611.254 us | **1.1185x** |
+| M4096 K12800 N4096 | 8702.179 us | 8717.557 us | 0.9982x |
+| M16384 K4096 N1024 | 2418.206 us | 2759.663 us | 0.8763x |
+| M16384 K4096 N4096 | 11142.393 us | 11358.352 us | 0.9810x |
+| M16384 K4096 N12800 | 34115.084 us | 36000.008 us | 0.9476x |
+| M16384 K12800 N4096 | 51215.819 us | 54194.767 us | 0.9450x |
+
+The surviving M4096 wide-output cell is 10.59% lower latency. At M16384,
+tuned stock is faster in every row. The provisional stock-auto ratios of
+1.5138x and 1.8214x for the two largest cells were real matched measurements,
+but they were planner/decomposition misses rather than wins over the
+incumbent's best measured settings.
+
+Exact grids, trace hashes, repeated-trace aggregation, and infeasible-grid
+controls are in `large_m_compute_oracle_results.json`.
 
 ## Granite E2E
 

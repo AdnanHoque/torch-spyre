@@ -57,6 +57,9 @@ def parse_args() -> argparse.Namespace:
         choices=("n32", "auto"),
         default="n32",
     )
+    parser.add_argument("--incumbent-m-split", type=int, default=0)
+    parser.add_argument("--incumbent-n-split", type=int, default=0)
+    parser.add_argument("--incumbent-k-split", type=int, default=0)
     parser.add_argument("--candidate-m-split", type=int, default=0)
     parser.add_argument("--candidate-n-split", type=int, default=0)
     parser.add_argument("--candidate-k-split", type=int, default=0)
@@ -328,29 +331,41 @@ def main() -> None:
             args.candidate_source == "manual",
             "compute-only oracle directly expresses both BMM schedules",
         )
-    candidate_splits = (
-        args.candidate_m_split,
-        args.candidate_n_split,
-        args.candidate_k_split,
-    )
-    if any(candidate_splits):
+    def explicit_work_division(
+        role: str, splits: tuple[int, int, int]
+    ) -> dict[str, int] | None:
+        if not any(splits):
+            return None
         require(
             args.boundary == "compute-only",
-            "explicit candidate splits are supported by the compute-only oracle",
+            f"explicit {role} splits are supported by the compute-only oracle",
         )
         require(
-            all(split > 0 for split in candidate_splits),
-            "candidate M/N/K splits must all be positive",
+            all(split > 0 for split in splits),
+            f"{role} M/N/K splits must all be positive",
         )
         require(
-            math.prod(candidate_splits) == args.cores,
-            "candidate M/N/K split product must equal the core count",
+            math.prod(splits) == args.cores,
+            f"{role} M/N/K split product must equal the core count",
         )
-        candidate_work_div = dict(
-            zip(("M", "N", "K"), candidate_splits, strict=True)
+        return dict(zip(("M", "N", "K"), splits, strict=True))
+
+    incumbent_work_div = explicit_work_division(
+        "incumbent",
+        (
+            args.incumbent_m_split,
+            args.incumbent_n_split,
+            args.incumbent_k_split,
+        ),
+    )
+    candidate_work_div = explicit_work_division(
+        "candidate",
+        (
+            args.candidate_m_split,
+            args.candidate_n_split,
+            args.candidate_k_split,
         )
-    else:
-        candidate_work_div = None
+    )
 
     run_dir = args.run_dir.resolve()
     require(not run_dir.exists(), f"run directory exists: {run_dir}")
@@ -448,6 +463,9 @@ def main() -> None:
 
     class Incumbent(torch.nn.Module):
         def forward(self, activation: Any, weight: Any) -> Any:
+            if incumbent_work_div is not None:
+                with spyre_hint(work_div=incumbent_work_div):
+                    return functional.linear(activation, weight)
             if args.work_division == "n32":
                 with spyre_hint(core_order="row_major"):
                     with spyre_hint(work_div={"N": args.cores}):
@@ -684,6 +702,7 @@ def main() -> None:
         "candidate_source": args.candidate_source,
         "boundary": args.boundary,
         "work_division": args.work_division,
+        "incumbent_work_division": incumbent_work_div or "auto",
         "candidate_work_division": candidate_work_div or "auto",
         "candidate_core_order": args.candidate_core_order,
         "weight_layout": args.weight_layout,

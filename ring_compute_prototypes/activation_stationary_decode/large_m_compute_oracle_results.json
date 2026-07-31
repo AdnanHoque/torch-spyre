@@ -1,0 +1,211 @@
+{
+  "schema": "activation_stationary_large_m_compute_oracle_v1",
+  "date": "2026-07-31",
+  "scope": {
+    "device": "adnan-cdx-spyre-dev-pf",
+    "torch_spyre_revision": "b5d2d4650691deb0e9516678096e8efb023f8405",
+    "torch_version": "2.11.0+aiu.kineto.1.1.2",
+    "extension_sha256": "1f4d328fbce73cb2e96b819437e4aebb7b760b6f8cbe361782a8ce1526f22db1",
+    "dtype": "fp16",
+    "cores": 32,
+    "boundary": "compute_only_native_A_W_C",
+    "roots_per_arm": [
+      "batchmatmul"
+    ],
+    "timing": "Kineto cat==kernel ICCI",
+    "correctness": "CPU reference plus exact cross-arm shape and finite/allclose gates"
+  },
+  "interpretation": {
+    "ratio": "best_measured_stock_median_us / design_a_median_us",
+    "ratio_above_one": "Design A is faster",
+    "decision": "Design A wins only M4096 K4096 N12800. Tuned stock wins every M16384 row.",
+    "important_non_claim": "The large stock-auto ratios are planner/decomposition misses, not Design A speedups against the best measured incumbent."
+  },
+  "best_measured_incumbent_comparison": [
+    {
+      "m": 4096,
+      "k": 4096,
+      "n": 1024,
+      "stock_work_division": {
+        "M": 4,
+        "N": 8,
+        "K": 1
+      },
+      "stock_median_us": 599.467,
+      "design_a_median_us": 662.134,
+      "stock_over_design_a": 0.9053560155497226,
+      "status": "pass",
+      "trace_sha256": "cb55e8afe8c7f6e00a0c9439c4aedf259b238f4187a147eb8a8c6f9dab1ce282"
+    },
+    {
+      "m": 4096,
+      "k": 4096,
+      "n": 4096,
+      "stock_work_division": "auto_M4_N8_K1",
+      "stock_median_us": 2754.214,
+      "design_a_median_us": 2758.1885,
+      "stock_over_design_a": 0.9985590179931502,
+      "status": "pass",
+      "trace_sha256": "3362f5bbe90ca74d5b2267135624de8a8da65bfaf0e4129c4fc4333764362e12"
+    },
+    {
+      "m": 4096,
+      "k": 4096,
+      "n": 12800,
+      "stock_work_division": "auto_M4_N8_K1",
+      "design_a_work_division": "auto_M8_N4_K1",
+      "stock_median_us": 8513.030999999999,
+      "design_a_median_us": 7611.253500000001,
+      "stock_over_design_a": 1.118479498810544,
+      "design_a_latency_reduction_percent": 10.592904025703265,
+      "status": "pass",
+      "trace_sha256": "53182f5ede37a971afd27aacf4b7d7455ee8df1d518cf9f22a955793471c4555"
+    },
+    {
+      "m": 4096,
+      "k": 12800,
+      "n": 4096,
+      "stock_work_division": "auto_M8_N4_K1",
+      "stock_median_us": 8702.1785,
+      "design_a_median_us": 8717.5565,
+      "stock_over_design_a": 0.9982359735781465,
+      "status": "pass_pooled_three_10_block_traces",
+      "trace_sha256": [
+        "b7c04ddfcad91f30a44cace7110aa34d264e2ad8c166e46522c5cbaa21d364d5",
+        "18bfd2716447fab7b72b3d9180b26da105f8d86bbde3d68b0a59db28a4e48ba6",
+        "b3221db9075e357a1acff456dd734bec73f97a20ceb66c56fd8f0c38e6d5015c"
+      ]
+    },
+    {
+      "m": 16384,
+      "k": 4096,
+      "n": 1024,
+      "stock_work_division": {
+        "M": 4,
+        "N": 8,
+        "K": 1
+      },
+      "stock_median_us": 2418.2055,
+      "design_a_median_us": 2759.6625000000004,
+      "stock_over_design_a": 0.8762685654495793,
+      "status": "pass",
+      "trace_sha256": "f5f1a95d93bd82951ce1c1014485179efbec79d8c0fbcfbd51e2675967ad1cc9"
+    },
+    {
+      "m": 16384,
+      "k": 4096,
+      "n": 4096,
+      "stock_work_division": "auto_M4_N8_K1",
+      "stock_median_us": 11142.393,
+      "design_a_median_us": 11358.3515,
+      "stock_over_design_a": 0.9809868095735547,
+      "status": "pass",
+      "trace_sha256": "e3a2df8b166c77f44da3e0e82dba4a82370ee3034a236cffbcbad4338ee3b25e"
+    },
+    {
+      "m": 16384,
+      "k": 4096,
+      "n": 12800,
+      "stock_work_division": {
+        "M": 4,
+        "N": 8,
+        "K": 1
+      },
+      "stock_median_us": 34115.0835,
+      "design_a_median_us": 36000.008499999996,
+      "stock_over_design_a": 0.9476409845847676,
+      "status": "pass",
+      "trace_sha256": "9beea677a10476f3add55bb30be468da21a76523d0cfd73b104cd4c11c4021cd"
+    },
+    {
+      "m": 16384,
+      "k": 12800,
+      "n": 4096,
+      "stock_work_division": {
+        "M": 4,
+        "N": 4,
+        "K": 2
+      },
+      "stock_median_us": 51215.819,
+      "design_a_median_us": 54194.7665,
+      "stock_over_design_a": 0.9450325614005552,
+      "status": "pass",
+      "trace_sha256": "f68c967bf7507a1b3839166af31f41346c601f4f8b3631f46733e28547af3688"
+    }
+  ],
+  "stock_auto_comparison": [
+    {
+      "m": 16384,
+      "k": 4096,
+      "n": 12800,
+      "pooled_stock_median_us": 54318.1705,
+      "pooled_design_a_median_us": 35882.827000000005,
+      "stock_auto_over_design_a": 1.51376508043806,
+      "accepted_repeats": 3,
+      "samples_per_arm": 60,
+      "trace_sha256": [
+        "063732fa8779ed5bfbbcd91a2b0aaf40d45ccbd73d71d4083db998b4ffa55ae8",
+        "da6c92db6a565556197f598ba099ad3b7988b95fa4ce0314e42df0f663a0128e",
+        "973c14f8b3076b02310e6a9a9588b5b88e301f277a6d437c8667feef618f73c3"
+      ]
+    },
+    {
+      "m": 16384,
+      "k": 12800,
+      "n": 4096,
+      "pooled_stock_median_us": 97872.8475,
+      "pooled_design_a_median_us": 53735.5665,
+      "stock_auto_over_design_a": 1.8213792814485357,
+      "accepted_repeats": 2,
+      "samples_per_arm": 40,
+      "trace_sha256": [
+        "2ef39ec79f120d9ff4471f585e77349513f64816d5a43c191ee0f2d6b021522b",
+        "5255f0a54ee2276a5a9eeade99f02bc6949bf402e8dda3bdd95e6e00580f5b2c"
+      ]
+    }
+  ],
+  "mechanism_controls": {
+    "m16384_k4096_n12800_stock_grid": {
+      "grid": {
+        "M": 16,
+        "N": 2,
+        "K": 1
+      },
+      "stock_median_us": 53699.6835,
+      "design_a_median_us": 45596.1175,
+      "stock_over_design_a": 1.1777249126529248,
+      "interpretation": "Design A has a genuine same-grid tensor-role advantage, but tuned stock M4 N8 is faster than Design A auto."
+    },
+    "m16384_k12800_n4096_stock_grid": {
+      "grid": {
+        "M": 16,
+        "N": 1,
+        "K": 2
+      },
+      "stock_median_us": 97912.99650000001,
+      "design_a_median_us": 112198.9315,
+      "stock_over_design_a": 0.872673163558603,
+      "interpretation": "Design A loses on the stock grid. Its stock-auto headline requires a different no-K-split decomposition."
+    },
+    "stock_on_design_a_down_grid": {
+      "grid": {
+        "M": 2,
+        "N": 16,
+        "K": 1
+      },
+      "status": "compile_failed",
+      "reason": "400 MB per-core tensor span exceeds the 256 MB hardware limit"
+    },
+    "best_legal_stock_down_grid": {
+      "grid": {
+        "M": 4,
+        "N": 4,
+        "K": 2
+      },
+      "status": "pass",
+      "stock_median_us": 51215.819,
+      "design_a_median_us": 54194.7665,
+      "stock_over_design_a": 0.9450325614005552
+    }
+  }
+}
