@@ -14,6 +14,7 @@
 
 
 import dataclasses
+import math
 
 from torch_spyre._C import encode_constant, DataFormats
 from torch_spyre._inductor.errors import Unsupported
@@ -302,14 +303,17 @@ def gen_compound_fp8_coord_info_value(
     logical dimension contains:
 
     * one outer group fold (K/64 or M/2), then
-    * every physical within-stick fold in layout order.
+    * the physical within-stick folds that belong to that logical dimension,
+      in layout order.
 
-    A fold belonging to another logical dimension has alpha zero. A repeated
-    fold of this dimension has alpha equal to the product of its later factors.
-    This yields, for example:
+    A repeated fold of this dimension has alpha equal to the product of its
+    later factors. Physical factors belonging to another logical dimension are
+    omitted rather than serialized as zero-alpha folds. DeepTools distributes
+    each logical coordinate independently and requires every fold in that
+    coordinate to advance it. This matches SenDNN's DD2 encoding, for example:
 
-      K -> alphas [64, 8, 0, 1], cardinalities [K/64, 8, 2, 8]
-      M -> alphas [ 2, 0, 1, 0], cardinalities [M/2,  8, 2, 8]
+      K -> alphas [64, 8, 1], cardinalities [K/64, 8, 8]
+      M -> alphas [ 2, 1],    cardinalities [M/2, 2]
 
     The same rule gives QFP8WT ``[K:2, N:64]`` without a shape-specific table.
     """
@@ -319,10 +323,12 @@ def gen_compound_fp8_coord_info_value(
             "compound FP8 coordinate generation requires matching non-empty "
             f"stick labels/sizes, got {stick_dim_order=} {stick_size=}"
         )
-    atomic_size = 1
-    for stick_dim, factor in zip(stick_dim_order, stick_size):
-        if stick_dim == dim:
-            atomic_size *= factor
+    matching_factors = [
+        factor
+        for stick_dim, factor in zip(stick_dim_order, stick_size)
+        if stick_dim == dim
+    ]
+    atomic_size = math.prod(matching_factors)
     if atomic_size == 1 or size % atomic_size != 0:
         raise Unsupported(
             "compound FP8 coordinate generation requires a whole number of "
@@ -331,16 +337,8 @@ def gen_compound_fp8_coord_info_value(
 
     element_alphas = [atomic_size]
     element_cardinalities = [size // atomic_size]
-    for i, (stick_dim, factor) in enumerate(zip(stick_dim_order, stick_size)):
-        if stick_dim == dim:
-            alpha = 1
-            for later_dim, later_factor in zip(
-                stick_dim_order[i + 1 :], stick_size[i + 1 :]
-            ):
-                if later_dim == dim:
-                    alpha *= later_factor
-        else:
-            alpha = 0
+    for i, factor in enumerate(matching_factors):
+        alpha = math.prod(matching_factors[i + 1 :])
         element_alphas.append(alpha)
         element_cardinalities.append(factor)
 

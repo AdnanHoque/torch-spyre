@@ -33,6 +33,7 @@ from torch_spyre._inductor.codegen.compute_ops import (
     _per_core_symbolic_dim_info,
     _symbolic_split_info,
     _tensor_has_symbolic_split,
+    gen_compound_fp8_coord_info_value,
 )
 from torch_spyre._inductor.codegen.superdsc import _resolve_sdsc_size, compile_op_spec
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
@@ -309,6 +310,79 @@ class TestSymbolKindDimension(InductorTestCase):
 
     def test_pool_is_not_dimension(self):
         self.assertFalse(SymbolKind.pool().is_dimension)
+
+
+class TestCompoundFp8Coordinates(InductorTestCase):
+    @staticmethod
+    def _alphas_and_cardinalities(coord):
+        functions = coord["folds"]["dim_prop_func"][3:]
+        attributes = coord["folds"]["dim_prop_attr"][3:]
+        return (
+            [entry["Affine"]["alpha_"] for entry in functions],
+            [entry["factor_"] for entry in attributes],
+        )
+
+    def test_qfp8mb_omits_other_dimension_folds(self):
+        k = sympy.Symbol("in")
+        m = sympy.Symbol("mb")
+        stick_dims = [k, m, k]
+        stick_sizes = [8, 2, 8]
+
+        k_coord = gen_compound_fp8_coord_info_value(
+            size=4096,
+            nsplits=1,
+            dim=k,
+            stick_dim_order=stick_dims,
+            stick_size=stick_sizes,
+        )
+        m_coord = gen_compound_fp8_coord_info_value(
+            size=64,
+            nsplits=8,
+            dim=m,
+            stick_dim_order=stick_dims,
+            stick_size=stick_sizes,
+        )
+
+        self.assertEqual(k_coord["elemArr"], 3)
+        self.assertEqual(
+            self._alphas_and_cardinalities(k_coord),
+            ([64, 8, 1], [64, 8, 8]),
+        )
+        self.assertEqual(m_coord["elemArr"], 2)
+        self.assertEqual(
+            self._alphas_and_cardinalities(m_coord),
+            ([2, 1], [32, 2]),
+        )
+
+    def test_qfp8wt_coordinates_are_dimension_local(self):
+        k = sympy.Symbol("in")
+        n = sympy.Symbol("out")
+        stick_dims = [k, n]
+        stick_sizes = [2, 64]
+
+        k_coord = gen_compound_fp8_coord_info_value(
+            size=4096,
+            nsplits=1,
+            dim=k,
+            stick_dim_order=stick_dims,
+            stick_size=stick_sizes,
+        )
+        n_coord = gen_compound_fp8_coord_info_value(
+            size=1024,
+            nsplits=4,
+            dim=n,
+            stick_dim_order=stick_dims,
+            stick_size=stick_sizes,
+        )
+
+        self.assertEqual(
+            self._alphas_and_cardinalities(k_coord),
+            ([2, 1], [2048, 2]),
+        )
+        self.assertEqual(
+            self._alphas_and_cardinalities(n_coord),
+            ([64, 1], [16, 64]),
+        )
 
 
 class TestPerCoreSymbolicDimInfo(InductorTestCase):
