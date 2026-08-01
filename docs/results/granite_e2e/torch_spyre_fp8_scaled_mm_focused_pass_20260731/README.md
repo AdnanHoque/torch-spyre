@@ -1,5 +1,12 @@
 # Torch-Spyre DD2 FP8 scaled-matmul focused pass
 
+> **Superseded epilogue result:** later testing with non-unit per-row scales
+> found the late first-scale epilogue probe numerically incorrect. It rewrote
+> the scale address after work division without redistributing each row-scale
+> block to the four N owners that consume it. The historical timings below are
+> retained as diagnostic data only; commit `1a110ac` is removed by the follow-up
+> Q/O LX/qscale PoC.
+
 ## Outcome
 
 This branch moves Torch-Spyre from a raw FP8 reduction experiment to a

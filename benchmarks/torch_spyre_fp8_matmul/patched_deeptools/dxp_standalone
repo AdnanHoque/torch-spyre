@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run a source-built DeepTools DXP without polluting torch-spyre's process-wide
+# library path.  Put this directory first on PATH; async_compile invokes
+# `dxp_standalone` by name and this wrapper gives only that subprocess the
+# matching DeepTools/LLVM libraries.
+set -euo pipefail
+
+: "${TORCH_SPYRE_PATCHED_DEEPTOOLS_BUILD:?set the patched DeepTools build directory}"
+: "${TORCH_SPYRE_PATCHED_DEEPTOOLS_SOURCE:?set the patched DeepTools source directory}"
+: "${TORCH_SPYRE_PATCHED_LLVM_BUILD:?set the LLVM build directory used by DeepTools}"
+: "${RUNTIME_INSTALL_DIR:=/opt/ibm/spyre/runtime}"
+
+build=${TORCH_SPYRE_PATCHED_DEEPTOOLS_BUILD}
+export DEEPTOOLS_PATH=${TORCH_SPYRE_PATCHED_DEEPTOOLS_SOURCE}
+export LD_LIBRARY_PATH="${RUNTIME_INSTALL_DIR}/lib:${build}/dxp:${build}/dsc:${build}/dcg:${build}/dcg/dcg_be:${build}/dcg/dcg_fe:${build}/dcc/lib:${build}/dsc-based-utils:${build}/spyrecode-host-functions:${TORCH_SPYRE_PATCHED_LLVM_BUILD}/lib:${LD_LIBRARY_PATH:-}"
+
+exec "${build}/dxp/dxp_standalone" "$@"

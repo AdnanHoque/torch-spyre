@@ -72,11 +72,11 @@ TorchAO scale values without converting the full `[M,K]` tensor. That exact
 combined quantize-plus-matmul path remains diagnostic until it passes the
 end-to-end numerical gate.
 
-Set `TORCH_SPYRE_FP8_FUSE_FIRST_SCALE_EPILOGUE=1` only for the private epilogue
-experiment. It emits FP8 matmul followed by the first SFP scale operation in
-one SDSC and removes the intervening HBM allocation. This late-codegen probe is
-not the production implementation; production fusion must happen before
-liveness and LX/HBM allocation.
+The former `TORCH_SPYRE_FP8_FUSE_FIRST_SCALE_EPILOGUE` late-codegen probe has
+been removed. Non-unit per-row scales exposed an ownership mismatch: changing
+the BMM operand address did not distribute each scale block to every N owner.
+The validated DD2 path keeps both scale applications as separate programs and
+keeps their large intermediates in LX.
 
 After the one-layer gate passes, set `ANTONI_LAYER_LIMIT=0` and use a new
 `STUDY_ROOT` to run the same M=512 prompt through all 40 layers. This is the
