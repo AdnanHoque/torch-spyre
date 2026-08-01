@@ -224,6 +224,97 @@ def _materialize_explicit_lx_shuffle(
     return shuffle, destination_input
 
 
+def _bind_lx_matmul_operand_broadcast(
+    source_arg: TensorArg,
+    consumer_spec: OpSpec,
+    plan: LXRelayoutPlan,
+    operand_index: int,
+) -> TensorArg | None:
+    """Bind one sparse LX producer view to a backend matmul broadcast."""
+
+    producer_map = plan.source_core_id_to_device_slice
+    consumer_map = plan.destination_core_id_to_device_slice
+    if (
+        "lx" not in source_arg.allocation
+        or operand_index not in (0, 1)
+        or plan.destination_size_ratio != 1
+        or not producer_map
+        or not consumer_map
+    ):
+        return None
+
+    source_splits = plan.source_device_dim_splits
+    consumer_splits = plan.destination_device_dim_splits
+    dims = set(source_splits) | set(consumer_splits)
+
+    def overlaps(source: dict[str, int], destination: dict[str, int]) -> bool:
+        return all(
+            int(source.get(dim, 0)) * int(consumer_splits.get(dim, 1))
+            < (int(destination.get(dim, 0)) + 1) * int(source_splits.get(dim, 1))
+            and int(destination.get(dim, 0)) * int(source_splits.get(dim, 1))
+            < (int(source.get(dim, 0)) + 1) * int(consumer_splits.get(dim, 1))
+            for dim in dims
+        )
+
+    transfer_count = sum(
+        overlaps(source, destination)
+        for source in producer_map.values()
+        for destination in consumer_map.values()
+    )
+    if transfer_count == 0:
+        return None
+    if transfer_count != len(consumer_map):
+        return None
+
+    element_bytes = {
+        DataFormats.SEN143_FP8: 1,
+        DataFormats.SEN152_FP8: 1,
+        DataFormats.SEN169_FP16: 2,
+        DataFormats.IEEE_FP32: 4,
+    }.get(source_arg.device_dtype, 0)
+    try:
+        estimated_tensor_bytes = math.prod(int(size) for size in source_arg.device_size)
+        estimated_tensor_bytes *= element_bytes
+    except (TypeError, ValueError):
+        estimated_tensor_bytes = 0
+
+    classifications = list(consumer_spec.op_info.get("lx_relayout_classifications", []))
+    classifications.append(
+        {
+            "source_name": plan.source_name,
+            "producer_name": plan.source_name,
+            "consumer_name": plan.consumer_name,
+            "kind": "matmul_operand_broadcast",
+            "producer_core_count": len(producer_map),
+            "consumer_core_count": len(consumer_map),
+            "producer_core_id_to_device_slice": producer_map,
+            "producer_work_slice_dims": source_splits,
+            "consumer_work_slice_dims": consumer_splits,
+            "consumer_tensor_work_slice_dims": consumer_splits,
+            "consumer_core_id_to_device_slice": consumer_map,
+            "read_index": operand_index,
+            "operand_index": operand_index,
+            "consumer_operand_ds_type": ("INPUT" if operand_index == 0 else "KERNEL"),
+            "realized": False,
+            "communication_class": "all_gather",
+            "communication_pattern": "all_gather_replicate",
+            "transfer_count": transfer_count,
+            "requires_staged_realization": True,
+            "requires_layout_conversion": False,
+            "estimated_tensor_bytes": estimated_tensor_bytes,
+        }
+    )
+    consumer_spec.op_info["lx_relayout_classifications"] = classifications
+    return replace(
+        source_arg,
+        is_input=True,
+        name=plan.source_name,
+        allocation=dict(source_arg.allocation),
+        allocation_core_id_to_device_slice=producer_map,
+        allocation_device_dim_splits=dict(source_splits),
+    )
+
+
 def _materialize_lx_relayout_inputs(
     current_node,
     args: list[TensorArg],
@@ -237,6 +328,17 @@ def _materialize_lx_relayout_inputs(
     for arg_index, tensor in tensor_args:
         plan = plans.get(tensor.name)
         if not isinstance(plan, LXRelayoutPlan):
+            continue
+        if _spyre_config.lx_matmul_operand_broadcast and consumer_spec.op in (
+            BATCH_MATMUL_OP,
+            BATCH_MATMUL_FP8_OP,
+        ):
+            materialized_arg = _bind_lx_matmul_operand_broadcast(
+                args[arg_index], consumer_spec, plan, arg_index
+            )
+            if materialized_arg is None:
+                raise Unsupported(f"cannot bind LX matmul operand {plan.source_name}")
+            args[arg_index] = materialized_arg
             continue
         materialized = _materialize_explicit_lx_shuffle(
             args[arg_index],
@@ -1310,9 +1412,7 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                         f"physical_core_order={op_spec.physical_core_order!r},"
                     )
                 if op_spec.physical_core_ids is not None:
-                    buf.writeline(
-                        f"physical_core_ids={op_spec.physical_core_ids!r},"
-                    )
+                    buf.writeline(f"physical_core_ids={op_spec.physical_core_ids!r},")
                 if op_spec.debug_handle is not None:
                     # Source-to-kernel provenance must survive the OpSpec ->
                     # generated-source -> exec round-trip. DebugHandle/SourceLoc

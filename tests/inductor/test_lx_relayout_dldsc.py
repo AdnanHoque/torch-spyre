@@ -46,6 +46,7 @@ from torch_spyre._inductor.scratchpad.plan_solver import (
     LifetimeBoundBuffer,
 )
 from torch_spyre._inductor.spyre_kernel import (
+    _bind_lx_matmul_operand_broadcast,
     _materialize_explicit_lx_shuffle,
     simplify_op_spec,
 )
@@ -359,6 +360,106 @@ def test_all_gather_emits_standard_shuffle_fold_geometry():
     shuffle_spec.args[0].allocation = {"hbm": 0}
     with pytest.raises(ValueError, match="requires LX storage"):
         compile_op_spec(0, shuffle_spec, [])
+
+
+def test_matmul_broadcast_preserves_sparse_source_ownership():
+    x = Symbol("x")
+    producer_map = {
+        str(core): {"0": cohort} for cohort, core in enumerate((0, 8, 16, 24))
+    }
+    consumer_map = {str(core): {"0": core // 8} for core in range(32)}
+    plan = LXRelayoutPlan(
+        source_name="buf_a",
+        consumer_name="consumer",
+        source_core_id_to_device_slice=producer_map,
+        destination_core_id_to_device_slice=consumer_map,
+        source_device_dim_splits={"0": 4},
+        destination_device_dim_splits={"0": 4},
+        destination_size_ratio=1,
+        destination_lx_address=0x44000,
+    )
+    source_arg = TensorArg(
+        is_input=True,
+        arg_index=-1,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[4, 64],
+        device_coordinates=[floor(x / 64), Mod(x, 64)],
+        allocation={"lx": 0x24000},
+        name="buf_a",
+    )
+    consumer = OpSpec(
+        op=BATCH_MATMUL_OP,
+        is_reduction=True,
+        iteration_space={x: (Integer(256), 4)},
+        args=[source_arg],
+        op_info={},
+    )
+
+    result = _bind_lx_matmul_operand_broadcast(source_arg, consumer, plan, 0)
+
+    assert result is not None
+    assert result.allocation == {"lx": 0x24000}
+    assert result.allocation_core_id_to_device_slice == producer_map
+    assert result.allocation_device_dim_splits == {"0": 4}
+    classifications = consumer.op_info["lx_relayout_classifications"]
+    assert classifications == [
+        {
+            "source_name": "buf_a",
+            "producer_name": "buf_a",
+            "consumer_name": "consumer",
+            "kind": "matmul_operand_broadcast",
+            "producer_core_count": 4,
+            "consumer_core_count": 32,
+            "producer_core_id_to_device_slice": producer_map,
+            "producer_work_slice_dims": {"0": 4},
+            "consumer_work_slice_dims": {"0": 4},
+            "consumer_tensor_work_slice_dims": {"0": 4},
+            "consumer_core_id_to_device_slice": consumer_map,
+            "read_index": 0,
+            "operand_index": 0,
+            "consumer_operand_ds_type": "INPUT",
+            "realized": False,
+            "communication_class": "all_gather",
+            "communication_pattern": "all_gather_replicate",
+            "transfer_count": 32,
+            "requires_staged_realization": True,
+            "requires_layout_conversion": False,
+            "estimated_tensor_bytes": 512,
+        }
+    ]
+
+
+def test_matmul_broadcast_rejects_expanding_all_gather():
+    x = Symbol("x")
+    plan = LXRelayoutPlan(
+        source_name="buf_a",
+        consumer_name="consumer",
+        source_core_id_to_device_slice={"0": {"0": 0}, "1": {"0": 1}},
+        destination_core_id_to_device_slice={"0": {}, "1": {}},
+        source_device_dim_splits={"0": 2},
+        destination_device_dim_splits={},
+        destination_size_ratio=2,
+        destination_lx_address=0x44000,
+    )
+    source_arg = TensorArg(
+        is_input=True,
+        arg_index=-1,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[2, 64],
+        device_coordinates=[floor(x / 64), Mod(x, 64)],
+        allocation={"lx": 0x24000},
+        name="buf_a",
+    )
+    consumer = OpSpec(
+        op=BATCH_MATMUL_OP,
+        is_reduction=True,
+        iteration_space={x: (Integer(128), 2)},
+        args=[source_arg],
+        op_info={},
+    )
+
+    assert _bind_lx_matmul_operand_broadcast(source_arg, consumer, plan, 0) is None
+    assert "lx_relayout_classifications" not in consumer.op_info
 
 
 def test_one_to_one_geometry_emits_standard_shuffle():

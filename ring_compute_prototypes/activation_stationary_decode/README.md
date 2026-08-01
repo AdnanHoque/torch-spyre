@@ -486,3 +486,31 @@ their microbenchmark deltas project to about 1.00%-1.43% steady-decode gain,
 1.89% prefill gain, and 1.37%-1.61% speedup over the measured
 one-prefill/three-decode bracket. This projection is the integration target,
 not a measured E2E result.
+
+## 2026-08-01: fixed-grid XRF-loading ablation
+
+The remaining SenDNN-versus-Design-A hypothesis was tested without changing
+the BMM work division, tensor layout, instruction count, or binary length. For
+the accepted `M512 K12800 N4096` Design A bundle, the wrapper in
+`xrf_wrap_dxp_wrapper.py` patches all eight PT programs to keep the 16 loaded
+XRF entries live across the compute loop:
+
+```text
+init:      0x00100028 -> 0x00103428
+final FMA: 0x12FE8383 -> 0x92FE8383
+reset:     0x80001028 -> 0x00001028
+```
+
+Fresh matched Kineto medians were:
+
+| Arm | Design A | Paired incumbent |
+|---|---:|---:|
+| Unpatched control | 1065.7155 us | 1220.496 us |
+| XRF-wrap patch | 1064.0945 us | 1219.352 us |
+
+The raw Design A change is only `0.1523%`; normalizing both runs by their
+paired incumbent leaves about `0.0585%`. This is noise-scale and rejects the
+hypothesis that explicit XRF reset bookkeeping explains the remaining gap.
+Do not add a native XRF-wrap lowering or selector for this mechanism. The
+high-value work moves to eliminating inter-op HBM traffic with LX-to-LX
+producer/consumer fusion.

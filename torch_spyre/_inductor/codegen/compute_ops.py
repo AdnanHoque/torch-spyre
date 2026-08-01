@@ -850,6 +850,13 @@ def generate_sdsc(
                 "coreIdToDscSchedule": {
                     str(core): [[-1, 0, 0, 0]] for core in physical_core_ids
                 },
+                **(
+                    {
+                        "lxRelayoutClassifications_": sdsc_spec.lx_relayout_classifications
+                    }
+                    if sdsc_spec.lx_relayout_classifications
+                    else {}
+                ),
                 "dscs_": [
                     {
                         sdsc_spec.opfunc: {

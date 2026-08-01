@@ -1,0 +1,136 @@
+{
+  "schema": "lx_stationary_weight_matmul_device_results_v1",
+  "date": "2026-08-01",
+  "device_pod": "a6-quantization/adnan-cdx-spyre-dev-pf",
+  "torch_spyre_head": "2c1ab140d23f7e200ef45ef26b057229cb393727",
+  "deeptools_head": "a4930be14b6e7d01f7447b7692a79a20487c09c3",
+  "deeptools_diff_sha256": "12d37dfbe5c115092cb46ab9a9eb132245436d3d0284abbd4d18bf6e2fbebd65",
+  "dxp_standalone_sha256": "fb15c38f2207449eaa725aed62d8e365954f1aa0f4a95286d5dd90b9cdad28be",
+  "protocol": {
+    "dtype": "FP16",
+    "work_division": "M4 N8 K1 for both routes",
+    "lx_route": "four producer shards on cores 0,8,16,24; STCDPOpLx grouped 8-way fan-out into the existing BMM INPUT allocation",
+    "hbm_control": "identical graph and work division with the producer edge spilled to and reloaded from HBM",
+    "timing": "Kineto cat=kernel device events matched to the exact bundle token",
+    "accepted_gates": [
+      "CPU reference correctness",
+      "one producer and one BMM root in one bundle",
+      "no standalone shuffle or restickify",
+      "realized backend plan with four groups and replication factor eight",
+      "one matched device event per measured invocation"
+    ]
+  },
+  "repeated_m64_k2048_n4096": {
+    "warmups_per_run": 10,
+    "events_per_run": 30,
+    "runs": [
+      {
+        "route": "hbm",
+        "run_dir": "/tmp/lx_stationary_w_accept_20260801_hbm_a",
+        "median_us": 235.292,
+        "mean_us": 235.6274,
+        "min_us": 231.854,
+        "max_us": 241.078,
+        "bundle_sha256": "9e64580e5abaa624513a0350d4546c52fe3b451d550be058b523686e63670ab1"
+      },
+      {
+        "route": "lx",
+        "run_dir": "/tmp/lx_stationary_w_accept_20260801_lx_a",
+        "median_us": 151.035,
+        "mean_us": 150.3459,
+        "min_us": 142.543,
+        "max_us": 154.675,
+        "bundle_sha256": "cd24bdf421bdd29cc2bb9b208d0e74b1f3b8634f619c66dfe6712d82d99215fd"
+      },
+      {
+        "route": "lx",
+        "run_dir": "/tmp/lx_stationary_w_accept_20260801_lx_b",
+        "median_us": 150.423,
+        "mean_us": 149.62246666666667,
+        "min_us": 142.614,
+        "max_us": 154.04,
+        "bundle_sha256": "cd24bdf421bdd29cc2bb9b208d0e74b1f3b8634f619c66dfe6712d82d99215fd"
+      },
+      {
+        "route": "hbm",
+        "run_dir": "/tmp/lx_stationary_w_accept_20260801_hbm_b",
+        "median_us": 235.148,
+        "mean_us": 235.1979,
+        "min_us": 230.879,
+        "max_us": 238.337,
+        "bundle_sha256": "9e64580e5abaa624513a0350d4546c52fe3b451d550be058b523686e63670ab1"
+      }
+    ],
+    "mean_of_run_medians_us": {
+      "hbm": 235.22,
+      "lx": 150.729
+    },
+    "hbm_over_lx_speedup": 1.560549,
+    "lx_latency_reduction_percent": 35.92
+  },
+  "batched_decode_m_sweep_k2048_n4096": {
+    "warmups": 3,
+    "events": 10,
+    "rows": [
+      {
+        "m": 128,
+        "hbm_median_us": 353.5735,
+        "lx_median_us": 178.5265,
+        "hbm_over_lx_speedup": 1.98051,
+        "lx_latency_reduction_percent": 49.508
+      },
+      {
+        "m": 256,
+        "hbm_median_us": 414.896,
+        "lx_median_us": 237.132,
+        "hbm_over_lx_speedup": 1.749642,
+        "lx_latency_reduction_percent": 42.8454
+      },
+      {
+        "m": 512,
+        "hbm_median_us": 804.3255,
+        "lx_median_us": 436.912,
+        "hbm_over_lx_speedup": 1.840932,
+        "lx_latency_reduction_percent": 45.6797
+      }
+    ]
+  },
+  "concatenated_projection_sweep_m64_k2048": {
+    "warmups": 3,
+    "events": 10,
+    "rows": [
+      {
+        "projection_count": 2,
+        "total_n": 8192,
+        "hbm_median_us": 448.2005,
+        "lx_median_us": 255.426,
+        "hbm_over_lx_speedup": 1.754718,
+        "lx_latency_reduction_percent": 43.0108,
+        "two_single_lx_events_over_fused_lx": 1.180217
+      },
+      {
+        "projection_count": 3,
+        "total_n": 12288,
+        "hbm_median_us": 661.917,
+        "lx_median_us": 383.5345,
+        "hbm_over_lx_speedup": 1.725834,
+        "lx_latency_reduction_percent": 42.057,
+        "three_single_lx_events_over_fused_lx": 1.179
+      }
+    ],
+    "comparison_note": "The repeated-single comparison sums the two or three M64 N4096 bundle medians; it is not a directly timed multi-root graph."
+  },
+  "backend_plan_invariants": {
+    "physical_lowering_status": "lowered_resident_input_fetch",
+    "group_count": 4,
+    "replication_factor": 8,
+    "logical_transfer_count": 32,
+    "consumer_operand_ds_type": "INPUT"
+  },
+  "nonclaims": [
+    "This is a same-grid communication ablation, not a comparison against the incumbent standalone matmul selector.",
+    "The route materializes each producer shard in the BMM's already-reserved LX input allocation before DL compute; it does not yet stream subtiles directly into PT.",
+    "No hardware ring-utilization counter was captured, so realized ring utilization is not claimed.",
+    "The wider-N projection comparison is a concatenated-weight prototype, not yet an E2E fused QKV or MLP implementation."
+  ]
+}

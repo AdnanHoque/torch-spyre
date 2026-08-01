@@ -122,6 +122,9 @@ class SDSCSpec:
         default_factory=dict
     )
     indirect_access_indices: list[int] = dataclasses.field(default_factory=list)
+    lx_relayout_classifications: list[dict[str, Any]] = dataclasses.field(
+        default_factory=list
+    )
     debug_handle: DebugHandle | None = None
     physical_core_ids: PhysicalCoreIds | None = None
 
@@ -1072,6 +1075,11 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
             coordinate_masking=coordinate_masking,
             symbolic_dims=symbolic_dims,
             indirect_access_indices=indirect_access_indices,
+            lx_relayout_classifications=(
+                list(op_spec.op_info.get("lx_relayout_classifications", []))
+                if op_spec.op_info
+                else []
+            ),
             debug_handle=op_spec.debug_handle,
             physical_core_ids=physical_core_ids,
         ),

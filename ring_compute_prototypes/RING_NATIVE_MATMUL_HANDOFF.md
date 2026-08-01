@@ -2432,3 +2432,185 @@ device:
   Design A exact SMC: design_a_instruction_v1/debug/sdsc_0/smc.txt
   comparison: instruction_comparison.json
 ```
+
+## 2026-08-01: focused pass 1-4 — fixed-grid LX-fed matmul
+
+### Research question and control
+
+This pass asked whether the existing core-to-core substrate can remove the HBM
+round trip between an activation producer and a stationary-weight matmul. It
+does not claim a win from work-division tuning: every communication comparison
+uses the same `M4 N8 K1` BMM, the same pointwise producer, and the same HBM W.
+
+The acceptance boundary is stricter than frontend token equality:
+
+- CPU-reference correctness at compile and measurement time;
+- four producer shards physically owned by cores `0,8,16,24`;
+- one producer and one BMM root in one compiled bundle;
+- BMM INPUT in LX and W in HBM;
+- no standalone shuffle or restickify root;
+- a realized backend plan with four groups, eight consumers per group, and 32
+  logical transfers;
+- exactly one matched Kineto `cat==kernel` event per invocation.
+
+### 1. Fixed-grid XRF-loading ablation
+
+The exact-length DXP wrapper
+`activation_stationary_decode/xrf_wrap_dxp_wrapper.py` patched all eight PT
+programs of the accepted `M512 K12800 N4096` Design A bundle. XRF is 64 entries
+deep and this program loads only 16, so the experiment isolates the wrap/reset
+mechanism without a capacity confound.
+
+| Arm | Design A median | Paired incumbent |
+|---|---:|---:|
+| Control | 1065.7155 us | 1220.496 us |
+| XRF wrap | 1064.0945 us | 1219.352 us |
+
+The raw candidate change is `0.1523%`; paired-incumbent normalization leaves
+about `0.0585%`. This rejects the XRF-reset-overhead hypothesis at the present
+noise floor.
+
+### 2. Native Design A selector decision
+
+The promotion gate was intentionally conditional on step 1. Because the XRF
+ablation did not close a meaningful fraction of the SenDNN gap, no native
+XRF-wrap lowering or selector was added. Implementing it would add a second
+schedule path without demonstrated value.
+
+### 3. LX-resident activation delivery and fused consumption
+
+The successful dataflow is:
+
+```text
+four M-cohort producers
+  -> retain A shards in LX on cores 0,8,16,24
+  -> grouped STCDPOpLx fan-out, one source to eight N owners per cohort
+  -> write the BMM's already-reserved LX INPUT allocation
+  -> execute the M4 N8 K1 stationary-W BMM in the same device bundle
+```
+
+Torch-Spyre now has one opt-in binding,
+`lx_matmul_operand_broadcast`. It preserves the sparse producer allocation on
+the BMM operand and serializes the existing `matmul_operand_broadcast`
+contract. DeepTools already had the movement planner and resident IFN
+materializer, but accepted only a matmul `KERNEL` operand and exposed the
+resident path only through an unsafe diagnostic name. The tracked
+`lx_stationary_weight_matmul/deeptools_input_operand.patch`:
+
+- accepts `INPUT` or `KERNEL`;
+- exposes `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_RESIDENT_IFN=1`;
+- emits an honest `lowered_resident_input_fetch` plan artifact.
+
+The generic mixed-HBM kernel-neighbor route was also tested. It compiled and
+timed at 134.206 us, but returned an effectively zero output because its
+diagnostic bypass does not form a correct mixed schedule. That number is
+rejected and must not be quoted as performance. The resident IFN path is the
+correct implementation: it passed all gates without enabling
+`DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC`.
+
+Repeated HBM-LX-LX-HBM timing for `M64 K2048 N4096`:
+
+| Route | Run medians | Mean of medians |
+|---|---:|---:|
+| HBM spill/reload | 235.292, 235.148 us | 235.220 us |
+| LX-fed resident IFN | 151.035, 150.423 us | 150.729 us |
+
+The fixed-grid communication speedup is **1.5605x**, or **35.92% lower
+latency**. This is a causal producer-edge result, not yet an incumbent
+standalone-matmul comparison.
+
+### 4. Batched decode and fused projection probes
+
+All rows below passed correctness, structure, backend-plan, and trace gates.
+They use 3 warmups and 10 device events per route, so they are regime probes
+rather than the repeated 30-event acceptance bracket above.
+
+| Shape | HBM control | LX-fed | HBM / LX |
+|---|---:|---:|---:|
+| M128 K2048 N4096 | 353.5735 us | 178.5265 us | **1.9805x** |
+| M256 K2048 N4096 | 414.896 us | 237.132 us | **1.7496x** |
+| M512 K2048 N4096 | 804.3255 us | 436.912 us | **1.8409x** |
+| M64 K2048 N8192 | 448.2005 us | 255.426 us | **1.7547x** |
+| M64 K2048 N12288 | 661.917 us | 383.5345 us | **1.7258x** |
+
+The N8192/N12288 rows concatenate two/three N4096 weight projections and pay
+one activation fan-out. Relative to summing two/three accepted single-N4096 LX
+bundle medians, the concatenated programs are `1.1802x` and `1.1790x` faster.
+This is a useful fusion signal, but it is not a directly timed multi-root QKV
+or MLP graph.
+
+### Supported conclusion and next gate
+
+The compiler substrate is genuinely useful: reusing STCDP input fetch to keep
+an inter-op activation edge on chip produces a large and repeatable same-grid
+gain. The pass stops before speculative dual-ring or chunk-streaming work.
+
+What is not yet established:
+
+- comparison against the incumbent best standalone matmul selector;
+- E2E fused projection benefit after producer/consumer layout constraints;
+- overlap of activation fan-out with HBM W service or PT compute;
+- SFP-plus-RIU dual-fabric utilization;
+- hardware ring utilization from counters.
+
+The shortest next experiment is a real fused two-/three-projection graph using
+this edge, with a same-graph HBM control and the incumbent best implementation.
+Only if that wins should the backend grow chunked IFN consumption to overlap
+communication with W service/PT compute.
+
+### Durable artifacts and exact state
+
+```text
+Mac worktree:
+  /private/tmp/torch-spyre-gqa-sparse.5STuN0
+  starting head: 3a44285a561e7c7fd07627b9dc54e34a4b7d37d3
+  remote target: https://github.com/AdnanHoque/torch-spyre.git
+  branch target: ah/communication-cost-model
+
+Repository artifacts:
+  ring_compute_prototypes/activation_stationary_decode/xrf_wrap_dxp_wrapper.py
+  ring_compute_prototypes/lx_stationary_weight_matmul/probe.py
+  ring_compute_prototypes/lx_stationary_weight_matmul/device_results.json
+  ring_compute_prototypes/lx_stationary_weight_matmul/deeptools_input_operand.patch
+  ring_compute_prototypes/lx_stationary_weight_matmul/README.md
+
+Authoritative device pod for this pass:
+  a6-quantization/adnan-cdx-spyre-dev-pf
+  Torch source:
+    /home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/latest_cost_model_granite_block_20260724_202708/antoni_exact_repro_20260724/torch-spyre-design-a-2c1ab140
+  Torch head:
+    2c1ab140d23f7e200ef45ef26b057229cb393727
+  DeepTools source:
+    /home/adnan-cdx/codex-isolated/lx_stationary_matmul_deeptools_20260801
+  DeepTools head:
+    a4930be14b6e7d01f7447b7692a79a20487c09c3
+  DeepTools diff SHA-256:
+    12d37dfbe5c115092cb46ab9a9eb132245436d3d0284abbd4d18bf6e2fbebd65
+  DXP SHA-256:
+    fb15c38f2207449eaa725aed62d8e365954f1aa0f4a95286d5dd90b9cdad28be
+
+Other available pods, unchanged by this pass:
+  a6-quantization/adnan-clc-spyre-dev-pf
+  a6-quantization/adnan-spyre-current-pf
+  a6-quantization/adnan-spyre-dev-pf
+
+Accepted M64 roots:
+  /tmp/lx_stationary_w_accept_20260801_hbm_a
+  /tmp/lx_stationary_w_accept_20260801_lx_a
+  /tmp/lx_stationary_w_accept_20260801_lx_b
+  /tmp/lx_stationary_w_accept_20260801_hbm_b
+
+Regime roots:
+  /tmp/lx_stationary_w_sweep_20260801_m{128,256,512}_{hbm,lx}
+  /tmp/lx_stationary_w_projection_20260801_n{8192,12288}_{hbm,lx}
+```
+
+Validation completed:
+
+```text
+Torch-Spyre targeted test: 10 passed
+DeepTools util_unit_test, including LayoutAllgatherRestickify: passed
+DeepTools dxp_standalone build: passed
+Ruff format/check on changed Python: passed
+Final-code M64 smoke: all gates passed at 151.511 us; accepted bundle hash unchanged
+```

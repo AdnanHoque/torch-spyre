@@ -1,0 +1,71 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index ba327ea0d..6c261054a 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -188,3 +188,4 @@ static void emitMatmulOperandBroadcastPlanArtifact(
+     bool kernelNeighborLowered = false,
+-    bool gatherRestickifyLowered = false) {
++    bool gatherRestickifyLowered = false,
++    bool residentInputFetchLowered = false) {
+   auto plan = hook.plan;
+@@ -196,2 +197,5 @@ static void emitMatmulOperandBroadcastPlanArtifact(
+     plan.realizationStrategy = "gather_then_restickify";
++  } else if (residentInputFetchLowered) {
++    plan.realized = true;
++    plan.realizationStrategy = "loop_scoped_input_fetch";
+   }
+@@ -237,2 +241,12 @@ static void emitMatmulOperandBroadcastPlanArtifact(
+         "insufficient";
++  } else if (residentInputFetchLowered) {
++    context["realized"] = "true";
++    context["physical_lowering_status"] =
++        "lowered_resident_input_fetch";
++    context["realization"] =
++        "emitted STCDPOpLx grouped fan-out into the existing consumer LX "
++        "operand allocation immediately before the matmul DL schedule step";
++    context["fallback_policy"] =
++        "refuse the route unless the frontend has reserved a resident LX "
++        "operand allocation";
+   } else {
+@@ -1236,4 +1250,5 @@ static bool markMatmulOperandBroadcastKernelNeighbor(
+     DesignSpaceConfig& dldsc, LabeledDsInfo& lds, std::string* reason) {
+-  if (lds.dsType_ != DsTypes::KERNEL) {
+-    *reason = "matmul_operand_broadcast kernel-neighbor path requires KERNEL LDS";
++  if (lds.dsType_ != DsTypes::INPUT && lds.dsType_ != DsTypes::KERNEL) {
++    *reason =
++        "matmul_operand_broadcast kernel-neighbor path requires INPUT or KERNEL LDS";
+     return false;
+@@ -1580,2 +1595,21 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       }
++      if (std::getenv(
++              "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_RESIDENT_IFN") != nullptr) {
++        std::string materializationReason;
++        if (!attachMatmulOperandBroadcastInputFetch(
++                sdsc, lds, matmulBroadcastHook, &materializationReason)) {
++          emitMatmulOperandBroadcastPlanArtifact(sdsc, lds, ps,
++                                                 matmulBroadcastHook);
++          DT_CHECK_MSG(
++              false,
++              "matmul_operand_broadcast resident IFN materialization failed: " +
++                  materializationReason);
++        }
++        emitMatmulOperandBroadcastPlanArtifact(
++            sdsc, lds, ps, matmulBroadcastHook,
++            /*kernelNeighborLowered=*/false,
++            /*gatherRestickifyLowered=*/false,
++            /*residentInputFetchLowered=*/true);
++        continue;
++      }
+       if (std::getenv("DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST") ==
+diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
+index aee8800ef..db064c81f 100644
+--- a/util/LayoutAllgatherRestickify.cpp
++++ b/util/LayoutAllgatherRestickify.cpp
+@@ -787,5 +787,5 @@ synthesizeMatmulOperandBroadcastMovementPlan(const std::string &jsonString) {
+                                  : "KERNEL";
+-  if (dsType != "KERNEL") {
++  if (dsType != "INPUT" && dsType != "KERNEL") {
+     return matmulMovementFail(
+-        "consumer_operand_ds_type must be KERNEL for matmul operand broadcast");
++        "consumer_operand_ds_type must be INPUT or KERNEL for matmul operand broadcast");
+   }
