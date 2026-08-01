@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
 import pytest
 import sympy
 
@@ -127,6 +130,66 @@ def _best_granite_fp8_split(
     return m_split, n_split
 
 
+def _run_fp8_work_division_override(
+    m: int,
+    k: int,
+    n: int,
+    *,
+    m_split: int,
+    n_split: int,
+) -> dict[sympy.Symbol, int]:
+    """Exercise the compiler planner with DD2 compound-FP8 tensor metadata."""
+    m_dim, n_dim, k_dim = sympy.symbols("m n k", integer=True)
+
+    def tensor_dep(device_coords, element_arrangement=None, physical_group=1):
+        device_layout = SimpleNamespace(device_size=(physical_group,))
+        if element_arrangement is not None:
+            device_layout.element_arrangement = element_arrangement
+        return SimpleNamespace(
+            dep=SimpleNamespace(index=m_dim * n + n_dim),
+            device_coords=device_coords,
+            layout=SimpleNamespace(device_layout=device_layout),
+        )
+
+    lhs = tensor_dep(
+        [m_dim, k_dim, k_dim],
+        work_division.ElementArrangement.QFP8MB,
+        physical_group=128,
+    )
+    rhs = tensor_dep(
+        [k_dim, n_dim, n_dim],
+        work_division.ElementArrangement.QFP8WT,
+        physical_group=128,
+    )
+    output = tensor_dep([m_dim, n_dim, n_dim])
+
+    reduction = MagicMock(spec=work_division.Reduction)
+    reduction.reduction_type = work_division.BATCH_MATMUL_FP8MB_OP
+    op = SimpleNamespace(data=reduction, get_name=lambda: "fp8_matmul")
+
+    initial_splits = {m_dim: 4, n_dim: 8, k_dim: 1}
+    with work_division.config.patch(
+        {
+            "fp8_lx_poc_m_split": m_split,
+            "fp8_lx_poc_n_split": n_split,
+        }
+    ):
+        return work_division._cost_model_matmul_planner(
+            op,
+            initial_splits,
+            {
+                m_dim: sympy.Integer(m // 2),
+                n_dim: sympy.Integer(n // 64),
+                k_dim: sympy.Integer(k // 128),
+            },
+            output,
+            {m_dim: 2, n_dim: 64, k_dim: 128},
+            dict(initial_splits),
+            32,
+            [lhs, rhs],
+        )
+
+
 @pytest.mark.parametrize(("projection", "m", "k", "n", "expected"), GRANITE_TP1_CASES)
 def test_fp8_granite_cost_choice_is_physically_legal(projection, m, k, n, expected):
     del projection
@@ -137,6 +200,33 @@ def test_fp8_granite_cost_choice_is_physically_legal(projection, m, k, n, expect
     assert (m // m_split) % (2 if m % 2 == 0 else 1) == 0
     assert (n // n_split) % 64 == 0
     assert work_division._physical_output_split_is_legal(n, n_split, 128)
+
+
+def test_fp8_work_division_override_forces_legal_qo_grid():
+    result = _run_fp8_work_division_override(
+        512,
+        4096,
+        4096,
+        m_split=8,
+        n_split=4,
+    )
+    m_dim, n_dim, k_dim = sympy.symbols("m n k", integer=True)
+
+    assert result == {m_dim: 8, n_dim: 4, k_dim: 1}
+
+
+def test_fp8_work_division_override_rejects_split_through_weight_group():
+    with pytest.raises(
+        work_division.Unsupported,
+        match="N split 8 cuts a QFP8WT physical group",
+    ):
+        _run_fp8_work_division_override(
+            512,
+            4096,
+            12800,
+            m_split=4,
+            n_split=8,
+        )
 
 
 @pytest.mark.parametrize(("projection", "m", "k", "n", "expected"), GRANITE_TP1_CASES)

@@ -715,8 +715,12 @@ def split_multi_ops(graph: GraphLowering):
     env = {}
     for tbs in gl.name_to_users.values():
         for tb in tbs:
-            if tb.data.origins:
-                fx_node = next(iter(tb.data.origins))
+            # Newer Inductor versions may place a realized InputBuffer in
+            # name_to_users directly instead of wrapping every entry in a
+            # TensorBox.  Both forms carry origins on the underlying IR node.
+            ir_node = getattr(tb, "data", tb)
+            if ir_node.origins:
+                fx_node = next(iter(ir_node.origins))
                 env[fx_node] = tb
     gl.env.update(env)
 

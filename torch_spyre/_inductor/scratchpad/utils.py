@@ -58,6 +58,11 @@ OP_OUTPUT_GOOD_FOR_LX_REUSE = frozenset(
         "mm",
         "bmm",
         "batched_matmul",
+        # The public scaled-mm decomposition realizes its FP8 reduction as a
+        # standalone FP16 intermediate.  Keeping that output in LX is what
+        # removes the otherwise mandatory HBM roundtrip before scale_a.
+        "_scaled_mm",
+        "fp8_matmul_raw",
         "apply_fp8_scale",
         "div",
         "realdiv",

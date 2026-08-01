@@ -1409,11 +1409,97 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
             buf.writeline("),")
 
 
+def _remap_explicit_allocation_device_dims(
+    arg: TensorArg, old_coordinates: list[sympy.Expr]
+) -> None:
+    """Keep LX ownership metadata aligned when tensor rank is normalized.
+
+    ``align_tensors`` can remove unit physical dimensions. Explicit LX
+    ownership is keyed by the pre-normalization device-dimension index, so
+    every non-unit ownership dimension must follow its coordinate expression
+    to the corresponding normalized dimension.
+    """
+
+    owner_map = arg.allocation_core_id_to_device_slice
+    dim_splits = arg.allocation_device_dim_splits
+    if owner_map is None and dim_splits is None:
+        return
+
+    referenced_dims = set(dim_splits or {})
+    if owner_map is not None:
+        for slices in owner_map.values():
+            referenced_dims.update(slices)
+
+    def expressions_match(left, right) -> bool:
+        if left == right:
+            return True
+        try:
+            return sympy.simplify(left - right) == 0
+        except (TypeError, ValueError):
+            return False
+
+    remap: dict[str, str | None] = {}
+    for old_dim_key in referenced_dims:
+        old_dim = int(old_dim_key)
+        if old_dim < 0 or old_dim >= len(old_coordinates):
+            raise ValueError(
+                "explicit allocation references out-of-range device dimension "
+                f"{old_dim_key} for tensor {arg.name}"
+            )
+        matches = [
+            str(new_dim)
+            for new_dim, coordinate in enumerate(arg.device_coordinates)
+            if expressions_match(old_coordinates[old_dim], coordinate)
+        ]
+        split = (dim_splits or {}).get(old_dim_key, 1)
+        has_distinct_owner = owner_map is not None and any(
+            slices.get(old_dim_key, 0) != 0 for slices in owner_map.values()
+        )
+        is_non_unit_ownership = split != 1 or has_distinct_owner
+        if len(matches) != 1:
+            if is_non_unit_ownership:
+                raise ValueError(
+                    "cannot uniquely remap explicit allocation device dimension "
+                    f"{old_dim_key} with coordinate {old_coordinates[old_dim]} "
+                    f"for tensor {arg.name}; normalized coordinates are "
+                    f"{arg.device_coordinates}"
+                )
+            # A removed unit ownership dimension carries no placement
+            # information and can be omitted safely.
+            remap[old_dim_key] = None
+        else:
+            remap[old_dim_key] = matches[0]
+
+    def remap_dim_values(values: dict[str, int]) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for old_dim_key, value in values.items():
+            new_dim_key = remap[old_dim_key]
+            if new_dim_key is None:
+                continue
+            previous = result.get(new_dim_key)
+            if previous is not None and previous != value:
+                raise ValueError(
+                    "explicit allocation dimensions collapse to conflicting "
+                    f"values for normalized device dimension {new_dim_key} "
+                    f"of tensor {arg.name}"
+                )
+            result[new_dim_key] = value
+        return result
+
+    if owner_map is not None:
+        arg.allocation_core_id_to_device_slice = {
+            core_id: remap_dim_values(slices) for core_id, slices in owner_map.items()
+        }
+    if dim_splits is not None:
+        arg.allocation_device_dim_splits = remap_dim_values(dim_splits)
+
+
 def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     # Both parameters must be provided together for gather kernels — indirect_sizes
     # decomposes symbols in align_tensors; indirect_access_subs replaces them with IndirectAccess.
     it_space = op_spec.iteration_space
 
+    old_coordinates = [list(arg.device_coordinates) for arg in op_spec.args]
     new_op_space_splits, new_tensors = align_tensors(
         it_space,
         [
@@ -1424,9 +1510,10 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     )
     op_spec.iteration_space = new_op_space_splits
 
-    for arg, t in zip(op_spec.args, new_tensors):
+    for arg, t, arg_old_coordinates in zip(op_spec.args, new_tensors, old_coordinates):
         arg.device_size = t["size"]
         arg.device_coordinates = t["coordinates"]
+        _remap_explicit_allocation_device_dims(arg, arg_old_coordinates)
 
         # Apply indirect_access_subs after align_tensors, so that indirect symbols
         # are decomposed as regular variables before substitution.

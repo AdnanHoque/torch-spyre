@@ -511,6 +511,20 @@ class TestCloneAtGraphBoundaries(
                 any(u["location"] == "LX" for u in mem_usages_with_lx.values()),
                 "Expected at least one LX-allocated buffer after input cloning",
             )
+            clones = [
+                usage
+                for usage in mem_usages_with_lx.values()
+                if usage["origin_target"] is torch.ops.aten.clone
+            ]
+            self.assertTrue(clones, "Expected the allocator-inserted aten.clone")
+            self.assertTrue(
+                all(usage["inner_origins_match"] for usage in clones),
+                "Allocator clone Pointwise origins must match its ComputedBuffer",
+            )
+            self.assertTrue(
+                all(usage["inner_origin_node_matches"] for usage in clones),
+                "Allocator clone Pointwise origin_node must match its ComputedBuffer",
+            )
             # Clone is an exact copy; LX planning must not change the numerical result.
             self.assertTrue(
                 torch.equal(result_no_lx, result_with_lx),
@@ -705,9 +719,17 @@ class TestCloneAtGraphBoundaries(
                 layout = buffer.get_layout()
                 device_layout = layout.device_layout
                 allocation = getattr(layout, "allocation", {})
+                origin_node = getattr(buffer, "origin_node", None)
                 mem_usages[buf_name] = {
                     "location": "LX" if "lx" in allocation else "HBM",
                     "size": math.prod(device_layout.device_size[:-1]) * 128,
+                    "origin_target": getattr(origin_node, "target", None),
+                    "inner_origins_match": getattr(buffer.data, "origins", None)
+                    == buffer.origins,
+                    "inner_origin_node_matches": getattr(
+                        buffer.data, "origin_node", None
+                    )
+                    is origin_node,
                 }
 
         with self.pre_scheduling_iterating_pass(visitor):

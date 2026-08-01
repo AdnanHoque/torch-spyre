@@ -186,6 +186,72 @@ def test_relayout_emits_owner_maps_and_one_shuffle_per_source():
     assert args[0].name == args[1].name == plan.destination_name
 
 
+def test_relayout_owner_dims_follow_removed_leading_unit_dim():
+    m, n = Symbol("m"), Symbol("n")
+    plan = LXRelayoutPlan(
+        source_name="compact_scale",
+        consumer_name="batchnorm",
+        source_core_id_to_device_slice={str(core): {"2": core} for core in range(32)},
+        destination_core_id_to_device_slice={
+            str(core): {"2": core % 8} for core in range(32)
+        },
+        source_device_dim_splits={"2": 32},
+        destination_device_dim_splits={"2": 8},
+        shuffle_iteration_symbols=(m, n),
+        device_dim_to_iteration_symbol={"2": m},
+        destination_size_ratio=1,
+        source_lx_address=0x24000,
+        destination_lx_address=0x44000,
+    )
+    source_arg = TensorArg(
+        is_input=True,
+        arg_index=-1,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[1, 1, 512, 64],
+        device_coordinates=[Integer(0), Integer(0), m, Integer(0)],
+        allocation={"lx": plan.source_lx_address},
+        name=plan.source_name,
+    )
+    consumer_spec = OpSpec(
+        op="batchnormfwd",
+        is_reduction=False,
+        iteration_space={m: (Integer(512), 8), n: (Integer(4096), 4)},
+        args=[source_arg],
+        op_info={},
+    )
+
+    shuffle_spec, _ = _materialize_explicit_lx_shuffle(source_arg, consumer_spec, plan)
+    assert shuffle_spec.args[0].allocation_device_dim_splits == {"2": 32}
+    assert shuffle_spec.args[1].allocation_device_dim_splits == {"2": 8}
+
+    simplify_op_spec(shuffle_spec)
+
+    for arg, split in zip(shuffle_spec.args, (32, 8)):
+        assert arg.device_size == [1, 512, 64]
+        assert arg.device_coordinates == [Integer(0), m, Integer(0)]
+        assert arg.allocation_device_dim_splits == {"1": split}
+        assert all(
+            set(slices) == {"1"}
+            for slices in arg.allocation_core_id_to_device_slice.values()
+        )
+
+    sdsc, *_ = compile_op_spec(0, shuffle_spec, [])
+    root = next(iter(sdsc.values()))
+    shuffle_dsc = next(iter(root["dscs_"][0].values()))
+    allocations = [
+        row for row in shuffle_dsc["scheduleTree_"] if row["nodeType_"] == "allocate"
+    ]
+    producer_map = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
+    consumer_map = allocations[1]["coordinates_"]["coreIdToWkSlice_"]
+    assert (producer_map["0"]["mb"], producer_map["31"]["mb"]) == (0, 31)
+    assert (
+        consumer_map["0"]["mb"],
+        consumer_map["7"]["mb"],
+        consumer_map["8"]["mb"],
+        consumer_map["31"]["mb"],
+    ) == (0, 7, 0, 7)
+
+
 def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
     class _Pointwise:
         pass
@@ -194,7 +260,9 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
         def __init__(self, name):
             self.name = name
             self.data = _Pointwise()
-            self.layout = SimpleNamespace(device_layout=object())
+            self.layout = SimpleNamespace(
+                device_layout=object(), dtype=SimpleNamespace(itemsize=2)
+            )
 
         def get_name(self):
             return self.name
@@ -215,6 +283,8 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
     consumer_view = PerCoreView(((1, 2),), ((1, 1 - core_id),))
 
     monkeypatch.setattr(lx_relayout_module.config, "lx_planner_relayout", True)
+    monkeypatch.setattr(lx_relayout_module.config, "lx_relayout_min_source_bytes", 0)
+    monkeypatch.setattr(lx_relayout_module.config, "lx_relayout_max_source_bytes", 0)
     monkeypatch.setattr(lx_relayout_module, "ComputedBuffer", _ComputedBuffer)
     monkeypatch.setattr(lx_relayout_module, "Pointwise", _Pointwise)
     monkeypatch.setattr(
@@ -248,6 +318,16 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
         ("shared", "consumer_a"),
         ("shared", "consumer_b"),
     }
+
+    monkeypatch.setattr(lx_relayout_module.config, "lx_relayout_min_source_bytes", 257)
+    assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
+    monkeypatch.setattr(lx_relayout_module.config, "lx_relayout_min_source_bytes", 256)
+    assert len(lx_relayout_module.collect_lx_relayout_plans(graph)) == 2
+    monkeypatch.setattr(lx_relayout_module.config, "lx_relayout_min_source_bytes", 0)
+    monkeypatch.setattr(lx_relayout_module.config, "lx_relayout_max_source_bytes", 255)
+    assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
+    monkeypatch.setattr(lx_relayout_module.config, "lx_relayout_max_source_bytes", 256)
+    assert len(lx_relayout_module.collect_lx_relayout_plans(graph)) == 2
 
     indirect_read = MemoryDep("indices", Symbol("indirect0"), (x, y), (2, 64))
     read_writes["consumer_a"].reads.append(indirect_read)
@@ -304,10 +384,9 @@ def test_data_op_materializes_planned_relayout(monkeypatch):
     monkeypatch.setattr(
         spyre_kernel_module,
         "_materialize_lx_relayout_inputs",
-        lambda current_node, args, tensor_args, spec: calls.append(
-            (current_node, args, tensor_args, spec)
-        )
-        or ["shuffle"],
+        lambda current_node, args, tensor_args, spec: (
+            calls.append((current_node, args, tensor_args, spec)) or ["shuffle"]
+        ),
     )
 
     kernel = object.__new__(SpyreKernel)

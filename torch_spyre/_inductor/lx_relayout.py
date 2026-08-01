@@ -162,6 +162,15 @@ def _single_write_dep(op: ComputedBuffer, buf_name: str) -> MemoryDep | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def _source_logical_bytes(producer: ComputedBuffer, write_dep: MemoryDep) -> int | None:
+    """Return a static source size for the private relayout cost probe."""
+
+    try:
+        return int(write_dep.get_numel()) * int(producer.layout.dtype.itemsize)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def _operations_by_name(graph: GraphLowering) -> dict[str, Operation]:
     """Index the current graph, including operations inserted by graph editing."""
 
@@ -419,6 +428,16 @@ def collect_lx_relayout_plans(
         write_dep = _single_write_dep(producer, source_name)
         if write_dep is None:
             continue
+        min_source_bytes = config.lx_relayout_min_source_bytes
+        max_source_bytes = config.lx_relayout_max_source_bytes
+        if min_source_bytes or max_source_bytes:
+            source_bytes = _source_logical_bytes(producer, write_dep)
+            if source_bytes is None:
+                continue
+            if min_source_bytes and source_bytes < min_source_bytes:
+                continue
+            if max_source_bytes and source_bytes > max_source_bytes:
+                continue
 
         producer_view, producer_has_partial, producer_representable = (
             _per_core_view_on_buf(producer, write_dep, source_name, cache)

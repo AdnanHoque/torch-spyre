@@ -32,10 +32,27 @@ allow_all_ops_in_lx_planning: bool = False
 # Opt-in extension to LX planning: materialize compatible producer and
 # consumer per-core views as an explicit S1 -> SHUFFLE -> S2 sequence in LX.
 lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
+# Private relayout-profitability probe: a standalone 32-core SHUFFLE has fixed
+# scheduling cost, so tiny scale vectors should not automatically get their
+# own copy program. Zero preserves the normal relayout policy.
+lx_relayout_min_source_bytes: int = int(
+    os.environ.get("TORCH_SPYRE_LX_RELAYOUT_MIN_SOURCE_BYTES", "0")
+)
+# Private upper bound for the same probe. A zero upper bound is disabled. The
+# paired bounds let the experiment retain medium activation handoffs while
+# rejecting both tiny fixed-cost copies and oversized all-core transfers.
+lx_relayout_max_source_bytes: int = int(
+    os.environ.get("TORCH_SPYRE_LX_RELAYOUT_MAX_SOURCE_BYTES", "0")
+)
 
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
+
+# Private DD2 experiment: override only the FP8 matmul cost-model decision
+# after tensor roles have identified M and N. Zero keeps normal planning.
+fp8_lx_poc_m_split: int = int(os.getenv("TORCH_SPYRE_FP8_LX_POC_M_SPLIT", "0"))
+fp8_lx_poc_n_split: int = int(os.getenv("TORCH_SPYRE_FP8_LX_POC_N_SPLIT", "0"))
 
 # Symbolic-dim knobs consumed by compute_granularity in pass_utils.py.
 # The pointwise work-division PR (#2499) wires that helper into the

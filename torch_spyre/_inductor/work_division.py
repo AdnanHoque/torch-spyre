@@ -1642,7 +1642,11 @@ def _cost_model_matmul_planner(
         return splits
     if op.data.reduction_type not in MATMUL_REDUCTION_OPS:
         return splits
-    if committed_splits:
+    force_fp8_lx_grid = op.data.reduction_type in (
+        BATCH_MATMUL_FP8_OP,
+        BATCH_MATMUL_FP8MB_OP,
+    ) and (config.fp8_lx_poc_m_split or config.fp8_lx_poc_n_split)
+    if committed_splits and not force_fp8_lx_grid:
         return splits
 
     # Classify the output coord dims from the output's own terminal stick
@@ -1718,6 +1722,47 @@ def _cost_model_matmul_planner(
         if op.data.reduction_type in (BATCH_MATMUL_FP8_OP, BATCH_MATMUL_FP8MB_OP)
         else _DL16_MATMUL_COST_PROFILE
     )
+
+    if force_fp8_lx_grid:
+        m_split = config.fp8_lx_poc_m_split
+        n_split = config.fp8_lx_poc_n_split
+        if min(m_split, n_split) < 1:
+            raise Unsupported(
+                "TORCH_SPYRE_FP8_LX_POC_M_SPLIT and "
+                "TORCH_SPYRE_FP8_LX_POC_N_SPLIT must both be positive"
+            )
+        if batch_dims:
+            raise Unsupported(
+                "the private FP8/LX work-division override currently supports "
+                "only a 2D shared-weight matmul"
+            )
+        if m_split not in m_divs or n_split not in n_divs:
+            raise Unsupported(
+                f"FP8/LX PoC grid {m_split}x{n_split} does not divide "
+                f"M={M_e}, N={N_e} at the DD2 stick granularity"
+            )
+        if m_split * n_split > max_cores:
+            raise Unsupported(
+                f"FP8/LX PoC grid {m_split}x{n_split} uses more than "
+                f"SENCORES={max_cores}"
+            )
+        if not _qfp8wt_n_split_is_legal(N_e, n_split, n_dim, input_tds):
+            raise Unsupported(
+                f"FP8/LX PoC N split {n_split} cuts a QFP8WT physical group"
+            )
+
+        forced = dict(splits)
+        forced[m_dim] = m_split
+        forced[n_dim] = n_split
+        forced[k_dim] = 1
+        logger.info(
+            "fp8_lx_poc work_division %s: overriding span split %s with M=%s N=%s K=1",
+            op.get_name(),
+            committed_splits,
+            m_split,
+            n_split,
+        )
+        return forced
 
     best = None
     best_cost = float("inf")

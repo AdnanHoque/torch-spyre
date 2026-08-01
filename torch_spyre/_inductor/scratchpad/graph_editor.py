@@ -169,6 +169,13 @@ class GraphEditor:
         )
         new_com_buf.origins.add(new_fx_node)
         new_com_buf.origin_node = new_fx_node
+        # Layout propagation classifies pointwise bodies by their FX origins.
+        # Torch 2.11's raw clone lowering leaves those inner origins empty even
+        # though this newly realized ComputedBuffer has the correct clone
+        # origin. Keep both IR layers consistent so a repeated layout pass
+        # retains clone-specific row-major/restickify semantics.
+        new_com_buf.data._post_init_setattr("origins", new_com_buf.origins)
+        new_com_buf.data._post_init_setattr("origin_node", new_fx_node)
         # Copy loop-group metadata so the clone stays in the same coarse-tile
         # group as its neighbours and doesn't split a contiguous run.
         # For input clones the original buffer is an InputBuffer (no metadata),
