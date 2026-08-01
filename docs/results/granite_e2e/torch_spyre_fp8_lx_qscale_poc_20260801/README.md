@@ -180,6 +180,21 @@ torch:              2.11.0+aiu.kineto.1.1.2
 DXP LX fraction:    0.2
 ```
 
+Published private branches:
+
+```text
+Torch implementation: ah/fp8-lx-relayout-poc @ 680e4cb
+DeepTools patch:   adnan/fp8-lx-relayout-poc-patch @ e856fae07
+DeepTools tested:  3b5d123a11e43c69177fa9a86172bf4b0fcf54a1
+DeepTools base:    a74a581a85315ea8860250b831996a3a65745a67
+```
+
+The user fork's DeepTools `master` is 608 commits behind the tested base. An
+exact branch push would require importing 164 unrelated LFS objects, including
+1p5 artifacts, so the fork branch intentionally carries an apply-ready patch
+instead. The patch was verified with `git apply --check` against the exact base
+above.
+
 ## Next steps
 
 1. Replace the private fixed grid and byte window with a precision-aware cost
