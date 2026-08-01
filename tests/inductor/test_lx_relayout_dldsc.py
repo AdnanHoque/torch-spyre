@@ -16,10 +16,12 @@ from types import SimpleNamespace
 
 from sympy import Integer, Mod, Symbol, floor
 from torch._inductor.dependencies import MemoryDep
+from torch._inductor.virtualized import V
 
 import torch_spyre._inductor.lx_relayout as lx_relayout_module
 import torch_spyre._inductor.scratchpad.allocator as allocator_module
 import torch_spyre._inductor.scheduler as scheduler_module
+import torch_spyre._inductor.spyre_kernel as spyre_kernel_module
 
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
@@ -39,6 +41,8 @@ from torch_spyre._inductor.scratchpad.firstfit_bestfit_solver import (
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
 from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
 from torch_spyre._inductor.spyre_kernel import (
+    SpyreKernel,
+    TensorAccess,
     _materialize_explicit_lx_shuffle,
     _materialize_lx_relayout_inputs,
     simplify_op_spec,
@@ -221,6 +225,11 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
         ("shared", "consumer_b"),
     }
 
+    indirect_read = MemoryDep("indices", Symbol("indirect0"), (x, y), (2, 64))
+    read_writes["consumer_a"].reads.append(indirect_read)
+    assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
+    read_writes["consumer_a"].reads.remove(indirect_read)
+
     monkeypatch.setattr(
         lx_relayout_module,
         "try_device_coordinates",
@@ -252,6 +261,53 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
         lx_relayout_module, "try_device_coordinates", lambda *_: valid_coordinates
     )
     assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
+
+
+def test_data_op_materializes_planned_relayout(monkeypatch):
+    class _FixedLayout:
+        allocation = {"lx": 0x1000}
+        device_layout = SimpleNamespace(device_size=(1,))
+        size = (1,)
+
+    layout = _FixedLayout()
+    source = TensorAccess("source", Integer(0), layout)
+    input_arg = SimpleNamespace(name="source", device_coordinates=[Integer(0)])
+    output_arg = SimpleNamespace(name="output", device_coordinates=[Integer(0)])
+    consumer_spec = SimpleNamespace(args=[input_arg, output_arg])
+    calls = []
+
+    monkeypatch.setattr(spyre_kernel_module, "FixedTiledLayout", _FixedLayout)
+    monkeypatch.setattr(
+        spyre_kernel_module,
+        "_materialize_lx_relayout_inputs",
+        lambda current_node, args, tensor_args, spec: calls.append(
+            (current_node, args, tensor_args, spec)
+        )
+        or ["shuffle"],
+    )
+
+    kernel = object.__new__(SpyreKernel)
+    kernel.args = SimpleNamespace(output=lambda _: None)
+    kernel.op_specs = []
+    kernel.indirect_vars = {}
+    kernel.current_node = object()
+    kernel.create_tensor_arg = lambda is_input, *_args, **_kwargs: (
+        input_arg if is_input else output_arg
+    )
+    kernel.create_op_spec = lambda *_args, **_kwargs: consumer_spec
+
+    graph = SimpleNamespace(
+        scheduler=SimpleNamespace(mutation_real_name={}),
+        removed_buffers=set(),
+        get_buffer=lambda _: SimpleNamespace(get_layout=lambda: layout),
+        sizevars=SimpleNamespace(precomputed_replacements={}),
+    )
+    with V.set_graph_handler(graph):
+        SpyreKernel.store(kernel, "output", Integer(0), source)
+
+    assert kernel.op_specs == ["shuffle", consumer_spec]
+    assert len(calls) == 1
+    assert calls[0][2] == [(0, source)]
 
 
 def test_scheduler_checks_owner_map_and_rebinds_final_symbols(monkeypatch):
