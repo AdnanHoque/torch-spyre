@@ -393,10 +393,13 @@ def collect_lx_relayout_plans(
 
     operations = _operations_by_name(graph)
     reads_by_source: dict[str, list[tuple[Operation, MemoryDep, int]]] = {}
+    indirect_consumers: set[str] = set()
     for consumer in graph.operations:
         memory_reads = [
             dep for dep in op_read_writes(consumer).reads if isinstance(dep, MemoryDep)
         ]
+        if any(dep.is_indirect() for dep in memory_reads):
+            indirect_consumers.add(consumer.get_name())
         for read_index, dep in enumerate(memory_reads):
             reads_by_source.setdefault(dep.name, []).append((consumer, dep, read_index))
     plans: list[LXRelayoutPlan] = []
@@ -427,6 +430,14 @@ def collect_lx_relayout_plans(
         source_is_covered = True
         for consumer, dep, read_index in read_edges:
             if not isinstance(consumer, ComputedBuffer) or producer is consumer:
+                source_is_covered = False
+                break
+            # Indirect indices are separate TensorArgs in codegen and cannot be
+            # rebound to a relayout destination without also rewriting the
+            # gather/scatter index contract.  Keep the whole consumer on its
+            # normal fallback path instead of stamping a plan that codegen
+            # cannot faithfully materialize.
+            if consumer.get_name() in indirect_consumers:
                 source_is_covered = False
                 break
             consumer_view, consumer_has_partial, consumer_representable = (

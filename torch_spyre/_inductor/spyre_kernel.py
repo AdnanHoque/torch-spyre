@@ -1272,6 +1272,14 @@ class SpyreKernel(Kernel[CSEVariable]):
             op_spec = self.create_op_spec(
                 op, False, args, op_info, op_indirect_var_names
             )
+            self.op_specs.extend(
+                _materialize_lx_relayout_inputs(
+                    self.current_node,
+                    args,
+                    [(len(args) - 2, value)],
+                    op_spec,
+                )
+            )
             self.op_specs.append(op_spec)
         else:
             raise Unsupported(f"store value of unexpected type {type(value)}")
