@@ -238,6 +238,40 @@ def test_expanding_geometry_is_allocated_atomically_or_falls_back():
     assert not hasattr(graph.operations[3], LX_RELAYOUT_ATTR)
 
 
+def test_resident_matmul_broadcast_aliases_destination_to_source():
+    graph = _DummyGraph("producer", "consumer")
+    producer_map = {
+        str(core): {"0": cohort} for cohort, core in enumerate((0, 8, 16, 24))
+    }
+    consumer_map = {str(core): {"0": core // 8} for core in range(32)}
+    plan = LXRelayoutPlan(
+        source_name="buf_a",
+        consumer_name="consumer",
+        source_core_id_to_device_slice=producer_map,
+        destination_core_id_to_device_slice=consumer_map,
+        source_device_dim_splits={"0": 4},
+        destination_device_dim_splits={"0": 4},
+        destination_size_ratio=1,
+        destination_aliases_source=True,
+    )
+    source = LifetimeBoundBuffer("buf_a", size=1024 * 1024, uses=[0, 1])
+    allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
+    allocator._lx_relayout_plans_by_source = {"buf_a": plan}
+    buffers = [source]
+
+    allocator._append_lx_relayout_destinations(graph, buffers)
+
+    assert [buffer.name for buffer in buffers] == ["buf_a"]
+    assert source.uses == [0, 1, 2]
+    allocation = allocator._plan_layout_with_atomic_relayouts(
+        GreedyLayoutSolver(1536 * 1024), buffers
+    )
+    assert allocation[0].address is not None
+    allocator._record_successful_lx_relayouts(graph, allocation)
+    recorded = getattr(graph.operations[1], LX_RELAYOUT_ATTR)["buf_a"]
+    assert recorded.destination_lx_address == allocation[0].address
+
+
 def test_core_division_conversion_preserves_graph_boundaries():
     graph = _DummyGraph(graph_input_names=("input",), graph_output_names=("output",))
     buffers = [

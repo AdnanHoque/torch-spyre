@@ -253,10 +253,14 @@ class ScratchpadAllocator:
     def _iter_complete_lx_relayouts(
         self, allocation: Sequence[LifetimeBoundBuffer]
     ) -> Iterator[tuple[LXRelayoutPlan, int]]:
-        """Yield relayouts whose source and destination are allocated disjointly."""
+        """Yield relayouts with complete source and destination storage."""
         by_name = {buffer.name: buffer for buffer in allocation}
         for source_name, plan in self._lx_relayout_plans_by_source.items():
             source = by_name.get(source_name)
+            if plan.destination_aliases_source:
+                if source is not None and source.address is not None:
+                    yield plan, source.address
+                continue
             destination = by_name.get(plan.destination_name)
             if (
                 source is None
@@ -635,6 +639,12 @@ class ScratchpadAllocator:
             # Both views are accessed at the synthetic SHUFFLE step. S1 can be
             # released before consumer compute while S2 remains live through it.
             source_uses = [use for use in source.uses if use != consumer_use]
+            if plan.destination_aliases_source:
+                # The resident input-fetch writes replicas into S1's address.
+                # Keep S1 live through both transfer and consumer compute; no
+                # disjoint synthetic S2 storage is required.
+                source.uses = sorted({*source_uses, shuffle_use, consumer_use})
+                continue
             source.uses = sorted({*source_uses, shuffle_use})
             destination_size = round_up_to_alignment(
                 source.size * plan.destination_size_ratio, 128

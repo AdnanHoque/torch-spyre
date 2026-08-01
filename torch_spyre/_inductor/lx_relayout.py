@@ -61,6 +61,7 @@ class LXRelayoutPlan:
     source_device_dim_splits: dict[str, int]
     destination_device_dim_splits: dict[str, int]
     destination_size_ratio: int
+    destination_aliases_source: bool = False
     destination_lx_address: int | None = None
 
     @property
@@ -130,11 +131,7 @@ def _destination_size_ratio(
         and max_fanin <= 1
     ):
         return 1
-    if (
-        producer_is_partitioned
-        and not consumer_is_partitioned
-        and max_fanout > 1
-    ):
+    if producer_is_partitioned and not consumer_is_partitioned and max_fanout > 1:
         # A destination may need either one complete producer slice
         # (broadcast/multicast) or every producer slice (all-gather).  Both are
         # exact uniform fanout geometries; the destination allocation grows
@@ -225,10 +222,7 @@ def _same_core_placement(
 ) -> bool:
     """Whether producer and consumer address the same bytes on the same cores."""
 
-    return (
-        producer_core_count == consumer_core_count
-        and producer_view == consumer_view
-    )
+    return producer_core_count == consumer_core_count and producer_view == consumer_view
 
 
 def _dense_view(
@@ -344,6 +338,22 @@ def collect_lx_relayout_plans(
             if destination_size_ratio is None:
                 continue
 
+            # Resident matmul broadcast writes each remote replica at the same
+            # LX address as its sparse source.  The source-owning cores already
+            # contain the exact destination slice, so a second full-size S2
+            # allocation is unnecessary when those local coordinates agree.
+            # Keep generic shuffles/all-gathers disjoint: only the opt-in
+            # matmul path has this backend contract.
+            destination_aliases_source = (
+                config.lx_matmul_operand_broadcast
+                and is_matmul_consumer
+                and destination_size_ratio == 1
+                and all(
+                    consumer_core_slices.get(core) == source_slice
+                    for core, source_slice in producer_core_slices.items()
+                )
+            )
+
             if is_matmul_consumer and (
                 not _matmul_operand_source_good_for_lx_relayout(operations, producer)
                 or read_index not in (0, 1)
@@ -358,12 +368,13 @@ def collect_lx_relayout_plans(
                 source_device_dim_splits=producer_work_slice_dims,
                 destination_device_dim_splits=consumer_work_slice_dims,
                 destination_size_ratio=destination_size_ratio,
+                destination_aliases_source=destination_aliases_source,
             )
             planned.setdefault(plan.source_name, []).append(plan)
 
-    # V1 deliberately materializes one consumer view per source. Sharing one
-    # S2 allocation across independently scheduled consumers requires a wider
-    # lifetime and scheduling contract.
+    # Independently scheduled consumers still require separate transfer
+    # lifetimes. Keep this path single-consumer until that wider contract shows
+    # a device win.
     return [
         plans[0]
         for source_name, plans in planned.items()

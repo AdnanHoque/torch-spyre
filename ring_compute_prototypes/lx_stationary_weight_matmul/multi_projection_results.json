@@ -1,0 +1,160 @@
+{
+  "schema": "lx_stationary_weight_matmul_multi_projection_v1",
+  "date": "2026-08-01",
+  "device": "a6-quantization/adnan-cdx-spyre-dev-pf",
+  "torch_spyre_base_head": "2c1ab140d23f7e200ef45ef26b057229cb393727",
+  "deeptools_head": "a4930be14b6e7d01f7447b7692a79a20487c09c3",
+  "protocol": {
+    "warmups": 10,
+    "device_events": 30,
+    "timing": "Kineto cat==kernel duration",
+    "event_gate": "exactly one matched bundle event per invocation",
+    "common_gates": [
+      "CPU-reference correctness at compile and measurement time",
+      "one producer and expected BMM roots in one bundle",
+      "no standalone shuffle or restickify",
+      "realized backend resident-input-fetch plan for LX rows"
+    ]
+  },
+  "rows": [
+    {
+      "label": "P2 synthetic",
+      "shape": {"m": 64, "k": 2048, "projection_widths": [4096, 4096]},
+      "device_median_us": {
+        "fused_lx_fixed": 255.9275,
+        "fused_hbm_fixed": 449.6435,
+        "fused_hbm_auto": 429.4255,
+        "separate_hbm_auto": 437.9515
+      },
+      "speedup": {
+        "same_grid_communication": 1.756917,
+        "over_best_fused_hbm": 1.677919,
+        "over_separate_hbm": 1.711233,
+        "fusion_only_hbm": 1.019854
+      },
+      "bundle_sha256": {
+        "fused_lx_fixed": "c2472746318baff72d2621ba73874628a9b895315b9106aa44d267c4e80ce7bf",
+        "fused_hbm_fixed": "a7318a40d4c98bde62998351173f91bfc4c01504d6bebbf6e8043adbd9f5f703",
+        "fused_hbm_auto": "fe31a6a3057810ead74b21198fe1a6dce30c3e6377d7fd4d74d8d89966abc535",
+        "separate_hbm_auto": "078108fb9cc1b94dbb437f798b9b85214bb13d996f14a79023e36c8707048598"
+      }
+    },
+    {
+      "label": "Granite QKV decode",
+      "shape": {"m": 64, "k": 4096, "projection_widths": [4096, 1024, 1024]},
+      "device_median_us": {
+        "fused_lx_fixed": 398.6985,
+        "fused_hbm_fixed": 664.317,
+        "fused_hbm_auto": 652.978,
+        "separate_hbm_auto": 836.789
+      },
+      "speedup": {
+        "same_grid_communication": 1.666214,
+        "over_best_fused_hbm": 1.637774,
+        "over_separate_hbm": 2.098801,
+        "fusion_only_hbm": 1.281496
+      },
+      "bundle_sha256": {
+        "fused_lx_fixed": "e575c64239808a37c2f2d7ec580b33e30a5de6c540991bedfb2baeccdcf5be76",
+        "fused_hbm_fixed": "4c4fbd53e0991cc385340825a250e30e94f74e97478cfd612ef13778d15f69d9",
+        "fused_hbm_auto": "977f3092a04d7c4d8e4020b8d6d3662961cb056f0363754a30c0151e77d3f616",
+        "separate_hbm_auto": "7990343dda4652b69d6f452fb0e29f0fdf4f760966eede18062ed628c7ed260a"
+      }
+    },
+    {
+      "label": "Granite gate/up decode",
+      "shape": {"m": 64, "k": 4096, "projection_widths": [12800, 12800]},
+      "device_median_us": {
+        "fused_lx_fixed": 1609.6935,
+        "fused_hbm_fixed": 2647.806,
+        "fused_hbm_auto": 2549.586,
+        "separate_hbm_auto": 3797.929
+      },
+      "speedup": {
+        "same_grid_communication": 1.644913,
+        "over_best_fused_hbm": 1.583895,
+        "over_separate_hbm": 2.359411,
+        "fusion_only_hbm": 1.489626
+      },
+      "bundle_sha256": {
+        "fused_lx_fixed": "50a0cbf2c93e7b931c5df45373b5a95063fe2654d668c0b8eec941728d7be667",
+        "fused_hbm_fixed": "c361d2b208e7341f515b3d692beda76ddd981c3240f0afa55fd5978f5d606319",
+        "fused_hbm_auto": "a4a0b0fddb8feb64bda47f673e92e054fe111310c5b4777a438e0a9336aef3a0",
+        "separate_hbm_auto": "ca20ed1ae58178c13b57d1a39329f753834da4676445060afeb9898498155cd2"
+      }
+    },
+    {
+      "label": "Granite QKV M512",
+      "shape": {"m": 512, "k": 4096, "projection_widths": [4096, 1024, 1024]},
+      "device_median_us": {
+        "fused_lx_fixed": 729.745,
+        "fused_hbm_fixed": 2247.1245,
+        "fused_hbm_auto": 1959.398,
+        "separate_hbm_auto": 2738.2085
+      },
+      "speedup": {
+        "same_grid_communication": 3.079328,
+        "over_best_fused_hbm": 2.685045,
+        "over_separate_hbm": 3.752281,
+        "fusion_only_hbm": 1.397474
+      },
+      "bundle_sha256": {
+        "fused_lx_fixed": "e575c64239808a37c2f2d7ec580b33e30a5de6c540991bedfb2baeccdcf5be76",
+        "fused_hbm_fixed": "4c4fbd53e0991cc385340825a250e30e94f74e97478cfd612ef13778d15f69d9",
+        "fused_hbm_auto": "5a4c923d4c7ff48065dc87f16c47a11cf9045dfeb68db3f907fd7a31323d3721",
+        "separate_hbm_auto": "634f1b541bed5f744a8ab5510b65ac6844da28c1d5674d9923dd1f7ebc7d6c22"
+      }
+    },
+    {
+      "label": "Granite gate/up M512",
+      "shape": {"m": 512, "k": 4096, "projection_widths": [12800, 12800]},
+      "device_median_us": {
+        "fused_lx_fixed": 2145.0875,
+        "fused_hbm_fixed": 12360.7805,
+        "fused_hbm_auto": 7274.988,
+        "separate_hbm_auto": 12978.1095
+      },
+      "speedup": {
+        "same_grid_communication": 5.762367,
+        "over_best_fused_hbm": 3.391464,
+        "over_separate_hbm": 6.050154,
+        "fusion_only_hbm": 1.783936
+      },
+      "bundle_sha256": {
+        "fused_lx_fixed": "50a0cbf2c93e7b931c5df45373b5a95063fe2654d668c0b8eec941728d7be667",
+        "fused_hbm_fixed": "c361d2b208e7341f515b3d692beda76ddd981c3240f0afa55fd5978f5d606319",
+        "fused_hbm_auto": "5fc23414cda535de69685db87c26c2065457ec8c0df75ea73695c49d1e9977d3",
+        "separate_hbm_auto": "bd3a98f2085f45be83608d913aa6479871ec988225e91f73da56bf7bce7eb58e"
+      }
+    }
+  ],
+  "compute_oracle_proxy": {
+    "definition": "sum of previously accepted conversion-free per-projection medians; cross-run diagnostic, not a simultaneous-device lower bound",
+    "qkv_m64": {"sum_us": 360.005, "candidate_overhead_percent": 10.7480},
+    "gateup_m64": {"sum_us": 1424.717, "candidate_overhead_percent": 12.9834},
+    "qkv_m512": {"sum_us": 527.9235, "candidate_overhead_percent": 38.2293},
+    "gateup_m512": {"sum_us": 2074.758, "candidate_overhead_percent": 3.3898}
+  },
+  "rejected_experiments": [
+    {
+      "candidate": "auto-grid LX",
+      "result": "structurally lowered but numerically incorrect at M64 because the resident route does not support the default strided physical consumer ordering",
+      "retained": false
+    },
+    {
+      "candidate": "multi-consumer resident activation",
+      "result": "correct prototype measured 1009.1675 us for three Q/K/V BMMs and 991.9125 us for Q plus fused-KV at M512, both slower than the 729.745 us single fused BMM",
+      "retained": false
+    },
+    {
+      "candidate": "chunked input fetch",
+      "result": "not implemented: M512 gate/up is already within 3.3898% of the per-projection compute-oracle proxy, so the available overlap headroom does not justify a second schedule path",
+      "retained": false
+    }
+  ],
+  "device_run_roots": {
+    "m64_final_code": "/tmp/lx_multi_projection_final_code_m64_20260801_*",
+    "qkv_m512": "/tmp/lx_multi_projection_accept_qkv_m512_alias_20260801_*",
+    "gateup_m512": "/tmp/lx_multi_projection_accept_gateup_m512_alias_20260801_*"
+  }
+}

@@ -28,6 +28,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--m", type=int, default=64)
     parser.add_argument("--k", type=int, default=2048)
     parser.add_argument("--n", type=int, default=4096)
+    parser.add_argument(
+        "--projection-widths",
+        help="comma-separated logical projection widths; defaults to --n",
+    )
+    parser.add_argument(
+        "--projection-schedule",
+        choices=("fused", "separate"),
+        default="fused",
+    )
+    parser.add_argument("--grid", choices=("fixed", "auto"), default="fixed")
     parser.add_argument("--m-split", type=int, default=4)
     parser.add_argument("--n-split", type=int, default=8)
     parser.add_argument("--warmups", type=int, default=10)
@@ -129,6 +139,21 @@ def correctness(actual: Any, expected: Any) -> dict[str, Any]:
     }
 
 
+def output_correctness(actual: Any, expected: Any) -> dict[str, Any]:
+    actuals = actual if isinstance(actual, (tuple, list)) else (actual,)
+    expecteds = expected if isinstance(expected, (tuple, list)) else (expected,)
+    rows = [correctness(lhs, rhs) for lhs, rhs in zip(actuals, expecteds)]
+    return {
+        "output_count_exact": len(actuals) == len(expecteds),
+        "outputs": rows,
+        "allclose": len(actuals) == len(expecteds)
+        and all(
+            row["shape_exact"] and row["finite"] and row["allclose_rtol_5e2_atol_2_5e1"]
+            for row in rows
+        ),
+    }
+
+
 def trace_report(path: Path, bundle_token: str, runs: int) -> dict[str, Any]:
     events = json.loads(path.read_text()).get("traceEvents", [])
     kernels = [
@@ -165,6 +190,13 @@ def trace_report(path: Path, bundle_token: str, runs: int) -> dict[str, Any]:
 
 def main() -> None:
     args = parse_args()
+    projection_widths = (
+        tuple(int(value) for value in args.projection_widths.split(","))
+        if args.projection_widths
+        else (args.n,)
+    )
+    require(projection_widths, "at least one projection width is required")
+    require(all(width > 0 for width in projection_widths), "widths must be positive")
     require(args.m % args.m_split == 0, "M must divide evenly by M split")
     require(args.m_split * args.n_split == 32, "probe uses all 32 cores")
     require(not args.run_dir.exists(), f"run directory exists: {args.run_dir}")
@@ -313,29 +345,52 @@ def main() -> None:
         )
         * 0.125
     )
-    weight_cpu = (
-        torch.randn((args.k, args.n), dtype=torch.float16, generator=generator) * 0.125
+    logical_weight_cpus = tuple(
+        torch.randn((args.k, width), dtype=torch.float16, generator=generator) * 0.125
+        for width in projection_widths
     )
     scale = 0.5
-    expected = torch.matmul(activation_cpu * scale, weight_cpu)
+    expected_parts = tuple(
+        torch.matmul(activation_cpu * scale, weight) for weight in logical_weight_cpus
+    )
+    if args.projection_schedule == "fused":
+        weight_cpus = (torch.cat(logical_weight_cpus, dim=-1),)
+        expected = expected_parts[0] if len(expected_parts) == 1 else expected_parts
+        n_dim_names = ("N",)
+    else:
+        weight_cpus = logical_weight_cpus
+        expected = expected_parts
+        n_dim_names = tuple(f"N{index}" for index in range(len(weight_cpus)))
     device = torch.device("spyre")
     activation = activation_cpu.to(device)
-    weight = weight_cpu.to(device)
+    weights = tuple(weight.to(device) for weight in weight_cpus)
 
-    consumer_work_div = {"cohort": args.m_split, "N": args.n_split}
+    consumer_work_divs = tuple(
+        {"cohort": args.m_split, dim_name: args.n_split} for dim_name in n_dim_names
+    )
     source_work_div = {"cohort": args.m_split}
     source_core_ids = tuple(shard * args.n_split for shard in range(args.m_split))
 
     class Graph(torch.nn.Module):
-        def forward(self, a: Any, w: Any) -> Any:
+        def forward(self, a: Any, *graph_weights: Any) -> Any:
             with spyre_hint(
                 work_div=source_work_div,
                 physical_core_ids=list(source_core_ids),
             ):
                 a_lx = a * scale
-            with spyre_hint(physical_core_order="work_div_inner_first"):
-                with spyre_hint(work_div=consumer_work_div):
-                    return torch.matmul(a_lx, w)
+
+            outputs = []
+            for index, graph_weight in enumerate(graph_weights):
+                if args.grid == "fixed":
+                    with spyre_hint(physical_core_order="work_div_inner_first"):
+                        with spyre_hint(work_div=consumer_work_divs[index]):
+                            output = torch.matmul(a_lx, graph_weight)
+                else:
+                    output = torch.matmul(a_lx, graph_weight)
+                outputs.append(output)
+            if args.projection_schedule == "fused" and len(projection_widths) > 1:
+                return torch.split(outputs[0], projection_widths, dim=-1)
+            return outputs[0] if len(outputs) == 1 else tuple(outputs)
 
     reset_named_dims()
     _reset_counter()
@@ -343,11 +398,13 @@ def main() -> None:
         ("cohort", args.m_split),
         ("M", args.m // args.m_split),
         ("K", args.k),
-        ("N", args.n),
     ):
         declare_tensor_dim(name, size)
+    for name, weight in zip(n_dim_names, weight_cpus):
+        declare_tensor_dim(name, weight.shape[-1])
     name_tensor_dims(activation, ["cohort", "M", "K"])
-    name_tensor_dims(weight, ["K", "N"])
+    for weight, dim_name in zip(weights, n_dim_names):
+        name_tensor_dims(weight, ["K", dim_name])
     patch = {
         "sencores": 32,
         "lx_planning": True,
@@ -361,16 +418,16 @@ def main() -> None:
                 Graph().to(device), fullgraph=True
             )
         with torch.no_grad(), spyre_config.patch(patch):
-            compile_output = compiled(activation, weight)
+            compile_output = compiled(activation, *weights)
             torch.spyre.synchronize()
     finally:
         reset_named_dims()
         _reset_counter()
 
-    compile_correctness = correctness(compile_output, expected)
+    compile_correctness = output_correctness(compile_output, expected)
     for _ in range(args.warmups):
         with torch.no_grad(), spyre_config.patch(patch):
-            compiled(activation, weight)
+            compiled(activation, *weights)
         torch.spyre.synchronize()
 
     profiler = create_profiler(
@@ -382,64 +439,79 @@ def main() -> None:
     for _ in range(args.runs):
         started = time.perf_counter_ns()
         with torch.no_grad(), spyre_config.patch(patch):
-            measured = compiled(activation, weight)
+            measured = compiled(activation, *weights)
         torch.spyre.synchronize()
         walls_us.append((time.perf_counter_ns() - started) / 1000.0)
         profiler.step()
     profiler.stop()
     require(measured is not None, "no measured output")
-    measured_correctness = correctness(measured, expected)
+    measured_correctness = output_correctness(measured, expected)
 
     artifacts = artifact_report(cache, args.run_dir / "backend_plans")
     shuffles = [row for row in artifacts["roots"] if "shuffle" in row["op"]]
     bmms = [row for row in artifacts["roots"] if "batchmatmul" in row["op"]]
     producers = [row for row in artifacts["roots"] if row["op"] == "mul"]
-    bmm = bmms[0] if len(bmms) == 1 else None
     producer = producers[0] if len(producers) == 1 else None
-    broadcast_contracts = (
-        [
-            row
-            for row in bmm["lx_relayout_classifications"]
-            if row.get("kind") == "matmul_operand_broadcast"
-        ]
-        if bmm is not None
-        else []
-    )
+    expected_bmm_count = len(weights)
+    broadcast_contracts = [
+        contract
+        for bmm in bmms
+        for contract in bmm["lx_relayout_classifications"]
+        if contract.get("kind") == "matmul_operand_broadcast"
+    ]
     backend_plans = [
         row
         for row in artifacts["backend_plans"]
         if row.get("artifact_kind") == "matmul_operand_broadcast_backend_plan"
     ]
+    expected_grid = args.grid == "fixed"
     common_gates = {
         "one_producer": producer is not None,
-        "one_bmm": bmm is not None,
+        "expected_bmm_count": len(bmms) == expected_bmm_count,
         "producer_on_cohort_roots": producer is not None
         and producer["physical_core_ids"] == list(source_core_ids),
-        "bmm_uses_expected_grid": bmm is not None
-        and bmm["work_slices"].get("x") == args.m_split
-        and bmm["work_slices"].get("out") == args.n_split
-        and bmm["work_slices"].get("in") == 1
-        and bmm["work_slices"].get("mb") == 1,
+        "bmms_use_expected_grid": (not expected_grid)
+        or all(
+            bmm["work_slices"].get("x") == args.m_split
+            and bmm["work_slices"].get("out") == args.n_split
+            and bmm["work_slices"].get("in") == 1
+            and bmm["work_slices"].get("mb") == 1
+            for bmm in bmms
+        ),
+        "auto_grid_uses_all_cores": expected_grid
+        or all(bmm["num_cores"] == 32 for bmm in bmms),
     }
     if args.route == "lx":
         route_gates = {
             "no_standalone_shuffle": not shuffles,
-            "one_frontend_broadcast_contract": len(broadcast_contracts) == 1,
-            "broadcast_targets_input_operand": len(broadcast_contracts) == 1
-            and broadcast_contracts[0].get("consumer_operand_ds_type") == "INPUT"
-            and broadcast_contracts[0].get("operand_index") == 0,
-            "one_realized_backend_broadcast": len(backend_plans) == 1
-            and backend_plans[0].get("realized") is True
-            and backend_plans[0].get("physical_lowering_status")
-            == "lowered_resident_input_fetch",
-            "backend_grouped_fanout_exact": len(backend_plans) == 1
-            and int(backend_plans[0].get("group_count", 0)) == args.m_split
-            and int(backend_plans[0].get("replication_factor", 0)) == args.n_split
-            and int(backend_plans[0].get("logical_transfer_count", 0)) == 32,
-            "bmm_consumes_lx_activation": bmm is not None
-            and bmm["allocation_components"][0] == "lx",
-            "bmm_reads_weight_from_hbm": bmm is not None
-            and bmm["allocation_components"][1] == "hbm",
+            "frontend_broadcast_per_bmm": len(broadcast_contracts)
+            == expected_bmm_count,
+            "broadcasts_target_input_operand": all(
+                contract.get("consumer_operand_ds_type") == "INPUT"
+                and contract.get("operand_index") == 0
+                for contract in broadcast_contracts
+            ),
+            "realized_backend_broadcast_per_bmm": len(backend_plans)
+            == expected_bmm_count
+            and all(
+                plan.get("realized") is True
+                and plan.get("physical_lowering_status")
+                == "lowered_resident_input_fetch"
+                for plan in backend_plans
+            ),
+            "backend_grouped_fanout_exact": len(backend_plans) == expected_bmm_count
+            and all(
+                int(plan.get("group_count", 0)) == args.m_split
+                and int(plan.get("replication_factor", 0)) == args.n_split
+                and int(plan.get("logical_transfer_count", 0)) == 32
+                for plan in backend_plans
+            ),
+            "bmms_consume_lx_activation": all(
+                bmm["allocation_components"][0] == "lx" for bmm in bmms
+            ),
+            "bmms_read_weight_from_hbm": all(
+                bmm["allocation_components"][1] == "hbm" for bmm in bmms
+            ),
             "no_restickify": not any(
                 "restickify" in row["op"] for row in artifacts["roots"]
             ),
@@ -449,29 +521,45 @@ def main() -> None:
             "no_shuffle": not shuffles,
             "no_lx_broadcast_contract": not broadcast_contracts,
             "no_backend_broadcast": not backend_plans,
-            "bmm_reads_activation_from_hbm": bmm is not None
-            and bmm["allocation_components"][0] == "hbm",
-            "bmm_reads_weight_from_hbm": bmm is not None
-            and bmm["allocation_components"][1] == "hbm",
+            "bmms_read_activation_from_hbm": all(
+                bmm["allocation_components"][0] == "hbm" for bmm in bmms
+            ),
+            "bmms_read_weight_from_hbm": all(
+                bmm["allocation_components"][1] == "hbm" for bmm in bmms
+            ),
         }
     structural_gates = {**common_gates, **route_gates}
     structural_gate = all(structural_gates.values())
-    correctness_gate = all(
-        row["shape_exact"] and row["finite"] and row["allclose_rtol_5e2_atol_2_5e1"]
-        for row in (compile_correctness, measured_correctness)
+    correctness_gate = (
+        compile_correctness["allclose"] and measured_correctness["allclose"]
     )
     traces = sorted(glob.glob(str(trace_dir / "*.pt.trace.json")))
     require(len(traces) == 1, f"expected one trace, found {traces}")
     trace = trace_report(Path(traces[0]), artifacts["bundle_token"], args.runs)
     report = {
-        "schema": "lx_stationary_weight_matmul_probe_v2",
+        "schema": "lx_stationary_weight_matmul_probe_v3",
         "route": args.route,
-        "shape": {"m": args.m, "k": args.k, "n": args.n},
+        "shape": {
+            "m": args.m,
+            "k": args.k,
+            "projection_widths": list(projection_widths),
+            "total_n": sum(projection_widths),
+        },
+        "projection_schedule": args.projection_schedule,
+        "projection_bmm_count": expected_bmm_count,
+        "logical_output_count": len(projection_widths),
+        "grid": args.grid,
         "source_work_div": source_work_div,
         "source_core_ids": list(source_core_ids),
-        "consumer_work_div": consumer_work_div,
+        "consumer_work_divs": (
+            list(consumer_work_divs) if args.grid == "fixed" else None
+        ),
         "dataflow": {
-            "activation": "producer output remains LX resident",
+            "activation": (
+                "producer output remains LX resident"
+                if args.route == "lx"
+                else "producer output spills to HBM before the BMM"
+            ),
             "route": (
                 "cohort-root STCDP LX-to-LX grouped fan-out"
                 if args.route == "lx"
@@ -510,6 +598,9 @@ def main() -> None:
         json.dumps(
             {
                 "route": args.route,
+                "projection_schedule": args.projection_schedule,
+                "projection_widths": list(projection_widths),
+                "grid": args.grid,
                 "correctness_gate": correctness_gate,
                 "structural_gate": structural_gate,
                 "trace_gate": trace["gate"],

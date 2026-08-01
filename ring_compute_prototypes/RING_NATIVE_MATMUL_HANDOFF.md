@@ -2614,3 +2614,118 @@ DeepTools dxp_standalone build: passed
 Ruff format/check on changed Python: passed
 Final-code M64 smoke: all gates passed at 151.511 us; accepted bundle hash unchanged
 ```
+
+## 2026-08-01: focused pass 5 — fused projections and LX-capacity closure
+
+### Question and exact controls
+
+This pass directly timed multi-projection graphs instead of estimating them by
+adding independent bundle medians. The fused candidate concatenates projection
+weights, runs one stationary-W BMM, and returns the original logical outputs as
+zero-copy views. The controls use the same pointwise activation producer:
+
+1. fused, fixed `M4 N8 K1`, activation spilled through HBM;
+2. fused, automatic incumbent work division, activation through HBM;
+3. separate automatic incumbent BMMs, activation through HBM;
+4. fused, fixed `M4 N8 K1`, activation retained and fanned out in LX.
+
+Thus fixed HBM versus fixed LX is the causal communication ablation; best HBM
+versus fixed LX is the total algorithm comparison. Each accepted row has 10
+warmups, 30 Kineto `cat == "kernel"` events, one bundle event per invocation,
+CPU-reference correctness at compile and measurement time, exact BMM count,
+and no shuffle/restickify root.
+
+| Shape | Fused LX fixed | Fused HBM fixed | Fused HBM auto | Separate HBM auto |
+|---|---:|---:|---:|---:|
+| M64 K2048 P2 4096/4096 | 255.9275 us | 449.6435 us | 429.4255 us | 437.9515 us |
+| M64 K4096 QKV 4096/1024/1024 | 398.6985 us | 664.317 us | 652.978 us | 836.789 us |
+| M64 K4096 gate/up 12800/12800 | 1609.6935 us | 2647.806 us | 2549.586 us | 3797.929 us |
+| M512 K4096 QKV 4096/1024/1024 | 729.745 us | 2247.1245 us | 1959.398 us | 2738.2085 us |
+| M512 K4096 gate/up 12800/12800 | 2145.0875 us | 12360.7805 us | 7274.988 us | 12978.1095 us |
+
+| Shape | Same-grid communication | Versus best fused HBM | Versus separate HBM |
+|---|---:|---:|---:|
+| P2 M64 | **1.7569x** | **1.6779x** | **1.7112x** |
+| QKV M64 | **1.6662x** | **1.6378x** | **2.0988x** |
+| Gate/up M64 | **1.6449x** | **1.5839x** | **2.3594x** |
+| QKV M512 | **3.0793x** | **2.6850x** | **3.7523x** |
+| Gate/up M512 | **5.7624x** | **3.3915x** | **6.0502x** |
+
+The widening/fusion contribution is independently visible: separate-HBM over
+fused-HBM is `1.2815x` for M64 QKV, `1.4896x` for M64 gate/up, `1.3975x` for
+M512 QKV, and `1.7839x` for M512 gate/up. The larger remaining factor is the
+LX-to-LX producer edge.
+
+### Capacity bug and lean compiler fix
+
+M512 first returned correct HBM fallback at 2234.179 us but failed the
+structural gate. Each of four producer shards is 1 MiB. The generic relayout
+allocator required disjoint S1 and S2 storage during transfer, exceeding the
+1.984 MiB usable LX even before other allocations.
+
+That storage rule is unnecessary for resident matmul broadcast. Each source
+owner is also a destination for exactly its own slice, remote destinations use
+the same LX address, and the BMM reads rather than mutates A. The new
+`destination_aliases_source` contract is set only when:
+
+- `lx_matmul_operand_broadcast` is enabled;
+- the consumer is a matmul;
+- S2:S1 size ratio is exactly one; and
+- every physical source owner has the same source and destination coordinate.
+
+The allocator then keeps S1 live through transfer and BMM and records S1's
+address as S2. Generic permutation, expanding all-gather, and non-owner-aligned
+routes retain disjoint allocation. Eleven targeted compiler tests pass. M64 P2
+remained 255.0815 us in the post-change regime smoke, while M512 QKV became a
+realized, correct LX path at 731.7665 us before the accepted 729.745 us repeat.
+
+### Rejected follow-ups and stop call
+
+Auto-grid LX lowered structurally at M64 but failed correctness: its default
+physical order makes x/cohort owners strided, which the current resident
+backend route does not support. Its 285.283 us event is rejected.
+
+A temporary exact-geometry multi-consumer planner was implemented and tested,
+then removed after device evidence:
+
+| M512 candidate | Median | Versus fused LX 729.745 us |
+|---|---:|---:|
+| separate Q/K/V, three resident IFNs | 1009.1675 us | 1.3829x slower |
+| Q plus fused-KV, two resident IFNs | 991.9125 us | 1.3593x slower |
+
+It was also correct for equal-width P2 at 284.103 us but lost to the fused
+255.9275 us program. The compiler complexity therefore did not survive the
+performance gate.
+
+The previous conversion-free per-projection medians provide a diagnostic—not
+a simultaneous-device oracle. Fused LX is 10.75% above that sum for M64 QKV,
+12.98% for M64 gate/up, 38.23% for M512 QKV, and only 3.39% for M512 gate/up.
+The M512 gate/up result is effectively at the known compute schedule, so
+chunked IFN cannot plausibly pay for a second schedule path. The QKV residual
+comes from heterogeneous wide-BMM scheduling; repeated resident handoffs made
+it worse, not better.
+
+Stop here on microkernel machinery. The retained implementation is one fused
+BMM plus one owner-aligned resident LX fan-out and S1/S2 address alias. The next
+high-value gate is graph/model integration with producer-native A and
+consumer-native projection views, followed by E2E timing. Do not add dual-ring
+or chunk-streaming claims without new final-program evidence.
+
+### Durable artifacts
+
+```text
+Probe:
+  ring_compute_prototypes/lx_stationary_weight_matmul/probe.py
+Results and hashes:
+  ring_compute_prototypes/lx_stationary_weight_matmul/multi_projection_results.json
+Authoritative pod:
+  a6-quantization/adnan-cdx-spyre-dev-pf
+Final-code M64 roots:
+  /tmp/lx_multi_projection_final_code_m64_20260801_*
+Accepted M512 QKV roots:
+  /tmp/lx_multi_projection_accept_qkv_m512_alias_20260801_*
+Accepted M512 gate/up roots:
+  /tmp/lx_multi_projection_accept_gateup_m512_alias_20260801_*
+Rejected multi-consumer roots:
+  /tmp/lx_multi_consumer_{p2_smoke,qkv_m512_probe,q_kv_m512_probe}_20260801
+```

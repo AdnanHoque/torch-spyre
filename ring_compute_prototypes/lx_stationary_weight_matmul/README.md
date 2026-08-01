@@ -68,6 +68,51 @@ is about `1.18x` faster than summing two or three accepted single-projection LX
 bundle medians. That is an amortization signal, not yet a directly timed
 multi-root QKV/MLP integration.
 
+### Direct fused-projection result
+
+The probe now emits production-like logical output tuples. The fused arm
+concatenates W, executes one BMM, and returns Q/K/V or gate/up as zero-copy
+views; the separate arm emits one BMM per projection. Every row below uses 10
+warmups and 30 matched device events and passes correctness, structure, backend
+plan, and trace gates.
+
+| Shape | Fused LX | Best fused HBM | Separate HBM | LX / best fused | LX / separate |
+|---|---:|---:|---:|---:|---:|
+| M64 K2048 P2 4096/4096 | 255.9275 us | 429.4255 us | 437.9515 us | **1.6779x** | **1.7112x** |
+| M64 K4096 QKV 4096/1024/1024 | 398.6985 us | 652.978 us | 836.789 us | **1.6378x** | **2.0988x** |
+| M64 K4096 gate/up 12800/12800 | 1609.6935 us | 2549.586 us | 3797.929 us | **1.5839x** | **2.3594x** |
+| M512 K4096 QKV 4096/1024/1024 | 729.745 us | 1959.398 us | 2738.2085 us | **2.6850x** | **3.7523x** |
+| M512 K4096 gate/up 12800/12800 | 2145.0875 us | 7274.988 us | 12978.1095 us | **3.3915x** | **6.0502x** |
+
+`Best fused HBM` is the automatic-grid incumbent dataflow. The same-grid HBM
+controls are also retained in `multi_projection_results.json`; their LX
+speedups range from `1.6449x` to `5.7624x`, proving that the gain is not from a
+different work division.
+
+M512 initially fell back because the allocator reserved disjoint 1 MiB S1 and
+S2 buffers against a 1.984 MiB usable LX. Resident matmul fan-out does not need
+that copy: every source owner already contains its destination bytes, and
+remote replicas use the same address. The allocator now aliases S2 to S1 only
+for size-preserving matmul broadcasts whose source-owner and destination-owner
+coordinates are identical. Generic shuffles and expanding all-gathers remain
+disjoint. This unlocks M512 without changing M64 timing.
+
+The final stop decision is evidence-based:
+
+- auto-grid LX is rejected because its strided physical consumer order is
+  numerically incorrect on the current resident backend route;
+- a temporary multi-consumer implementation was correct but slower: 1009.1675
+  us for three Q/K/V BMMs and 991.9125 us for Q plus fused-KV, versus 729.745 us
+  for one fused BMM, so it was removed;
+- M512 gate/up is only 3.3898% above the sum of prior conversion-free
+  per-projection compute-oracle medians, leaving too little credible benefit
+  for a chunked-IFN schedule path.
+
+The remaining QKV gap is primarily heterogeneous BMM schedule efficiency, not
+ring transfer. It should be revisited only with a single-fan-out, mixed-grid
+consumer contract or stronger PT scheduling evidence—not by adding another
+copy or restickify.
+
 ## Reproduction
 
 The accepted device stack used:
@@ -93,7 +138,8 @@ export DEEPTOOLS_MATMUL_OPERAND_BROADCAST_RESIDENT_IFN=1
 export DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR="$RUN_DIR/backend_plans"
 
 python ring_compute_prototypes/lx_stationary_weight_matmul/probe.py \
-  --run-dir "$RUN_DIR" --route lx --m 64 --k 2048 --n 4096 \
+  --run-dir "$RUN_DIR" --route lx --m 64 --k 4096 \
+  --projection-widths 4096,1024,1024 --projection-schedule fused --grid fixed \
   --warmups 10 --runs 30 --expected-torch-head "$TORCH_SPYRE_HEAD"
 ```
 
@@ -102,8 +148,8 @@ matched control.
 
 ## Decision
 
-The substrate is worth keeping: the fixed-grid ablation demonstrates a large,
-repeatable gain from eliminating the producer-edge HBM round trip. The next
-gate is not another work-division sweep. Integrate this edge into a real fused
-projection graph and compare against the incumbent best end to end; then test
-whether chunked input fetch can overlap fan-out with W service/PT compute.
+The fused LX projection algorithm and destination-alias substrate are worth
+keeping. They deliver large same-grid and best-control wins across decode and
+M512. Do not add multi-consumer or chunk-streaming machinery on the current
+evidence. The next gate is model integration with producer-native activation
+layout and consumer-native Q/K/V or gate/up views, followed by E2E timing.
