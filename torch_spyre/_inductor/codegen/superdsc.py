@@ -538,10 +538,6 @@ def _create_sdsc_tensors(
     for i, arg in enumerate(op_spec.args):
         is_fp8_mm_kernel_arg = arg.element_arrangement == ElementArrangement.QFP8WT
         is_fp8mb_arg = arg.element_arrangement == ElementArrangement.QFP8MB
-        is_epilogue_aux = (
-            op_spec.op_info.get("fp8_batchnorm_epilogue", False)
-            and 2 <= i < len(op_spec.args) - 1
-        )
 
         # Step 1: Determine dimension order and stick dimension.
         # Index tensors use their pre-computed layout (their coords have no IndirectAccess).
@@ -558,11 +554,7 @@ def _create_sdsc_tensors(
         reduced_dims: list = []
 
         # Step 2: Handle reduced dimensions — skip for index tensors.
-        if (
-            (use_op_dims or is_epilogue_aux)
-            and dim_order != dims
-            and not _is_topk(op_spec.op)
-        ):
+        if use_op_dims and dim_order != dims and not _is_topk(op_spec.op):
             if not (has_indirect_access and i in index_tensor_indices):
                 reduced_dims = [
                     d for d in op_dim_order if d not in dim_order and d is not mb_sym
@@ -657,9 +649,7 @@ def _create_sdsc_tensors(
             raise ValueError("explicit allocation distribution requires LX storage")
 
         effective_stick = [op_stick_dim if stick_dim is None else stick_dim]
-        layout_labels = (
-            MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
-        )
+        layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
         if op_spec.layout_labels_override is not None:
             layout_labels = op_spec.layout_labels_override
         # Special handling for DD2 compound FP8 sticks.
@@ -762,6 +752,13 @@ def _get_op_func(op: str, is_reduction: bool, output_scales: dict) -> str:
     ):
         return op + "nonstick"
     return op
+
+
+# Generic reductions expose their output as an input accumulator to DeepTools
+# (for example, ``mean`` binds ``[input, output] -> [output]``).  These
+# specialized reductions own their partial accumulation inside the DDL program,
+# so the output must remain output-only in the emitted SuperDSC contract.
+_REDUCTIONS_WITH_INTERNAL_ACCUMULATION = frozenset({"quantscalepertokenfp8"})
 
 
 def _concretize_for_sdsc(expr: Expr) -> int:
@@ -950,11 +947,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         for sym, (_, wk_slice) in op_spec.iteration_space.items()
     }
 
-    ref_arg = (
-        op_spec.args[-1]
-        if op_spec.op_info.get("fp8_batchnorm_epilogue", False)
-        else _ref_arg(op_spec)
-    )
+    ref_arg = _ref_arg(op_spec)
     op_dim_order, op_stick_dim = _get_device_dim_order(ref_arg, symbol_mapping)
 
     # On-device type-conversion ops (DL16TOFP32/FP32TODL16, not identity)
@@ -1062,7 +1055,15 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     if coordinate_masking:
         constants["samv-maskvalue"] = _get_mask_value(op_spec.op)
 
-    num_inputs = len(args[:-1]) if is_matmul or not op_spec.is_reduction else len(args)
+    num_inputs = (
+        len(args[:-1])
+        if (
+            is_matmul
+            or not op_spec.is_reduction
+            or op_spec.op in _REDUCTIONS_WITH_INTERNAL_ACCUMULATION
+        )
+        else len(args)
+    )
 
     if _is_topk(op_spec.op):
         num_inputs = 1  # topk has exactly 1 input tensor and 1 output tensor
@@ -1142,7 +1143,7 @@ def compile_op_spec(
         [symbol_mapping[s] for s in level if s in symbol_mapping]
         for level in reversed(op_spec.tiled_symbols)
     ]
-    compiled = generate_sdsc(
+    return generate_sdsc(
         idx,
         sdsc_spec,
         symbols,
@@ -1150,32 +1151,3 @@ def compile_op_spec(
         tiled_symbols=tiled_symbols_per_level,
         use_symbols=use_symbols,
     )
-    if op_spec.op_info.get("fp8_batchnorm_epilogue", False):
-        sdsc_json = compiled[0]
-        top_level = next(iter(sdsc_json.values()))
-        dsc = next(iter(top_level["dscs_"][0].values()))
-        if len(dsc["labeledDs_"]) != 5 or len(dsc["computeOp_"]) != 1:
-            raise RuntimeError(
-                "private FP8 batchnorm epilogue expected exactly five tensors "
-                "and one generated BMM compute op"
-            )
-
-        output = "Tensor4-idx4"
-        bmm_compute = dsc["computeOp_"][0]
-        bmm_compute["inputLabeledDs"] = ["Tensor0-idx0", "Tensor1-idx1"]
-        bmm_compute["outputLabeledDs"] = [output]
-        dsc["computeOp_"] = [
-            bmm_compute,
-            {
-                "exUnit": "sfp",
-                "opFuncName": "batchnormfwd",
-                "attributes_": {
-                    "dataFormat_": "SEN169_FP16",
-                    "fidelity_": "regular",
-                },
-                "location": "Inner",
-                "inputLabeledDs": [output, "Tensor2-idx2", "Tensor3-idx3"],
-                "outputLabeledDs": [output],
-            },
-        ]
-    return compiled

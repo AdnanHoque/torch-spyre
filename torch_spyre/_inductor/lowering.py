@@ -1487,6 +1487,33 @@ def lower_qfp8mb(x):
     return pw
 
 
+@register_spyre_lowering(torch.ops.spyre.quant_scale_per_token_fp8)
+def lower_quant_scale_per_token_fp8(x, multiplier, clip_min, clip_max):
+    """Lower DD2's fused per-row FP8 scale reduction."""
+
+    kwargs = lowering._make_reduction_inner(
+        x,
+        axis=[-1],
+        keepdims=True,
+        dtype=x.get_dtype(),
+        override_return_dtype=None,
+    )
+    result = SpyreReduction.create(
+        reduction_type="quantscalepertokenfp8",
+        input_node=x,
+        op_info={
+            "constants": {
+                "mulConst": multiplier,
+                "clipMin": clip_min,
+                "clipMax": clip_max,
+            }
+        },
+        **kwargs,
+    )
+    result.realize()
+    return result
+
+
 @register_spyre_lowering(torch.ops.spyre.qfp8wt)
 def lower_qfp8wt(x):
     """

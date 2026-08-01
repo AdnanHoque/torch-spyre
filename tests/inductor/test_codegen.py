@@ -545,6 +545,50 @@ class TestSdscJsonSymbolicDimSmoke(InductorTestCase):
             self.assertEqual(sym_info, {"mb": {"maxSize_": 512, "granularity_": 64}})
 
 
+class TestSpecializedReductionOperandContract(InductorTestCase):
+    def test_quant_scale_per_token_owns_its_accumulator(self):
+        """Do not expose the reduced output as a DDL input accumulator."""
+
+        mb, out = sympy.symbols("mb out", integer=True)
+        input_arg = TensorArg(
+            is_input=True,
+            arg_index=0,
+            device_dtype=DataFormats.SEN169_FP16,
+            device_size=[4, 64, 64],
+            device_coordinates=[out // 64, mb, sympy.Mod(out, 64)],
+            allocation={"hbm": 0x400000000},
+        )
+        output_arg = TensorArg(
+            is_input=False,
+            arg_index=1,
+            device_dtype=DataFormats.SEN169_FP16,
+            device_size=[1, 64, 64],
+            device_coordinates=[sympy.S.Zero, mb, sympy.S.Zero],
+            allocation={"hbm": 0x500000000},
+        )
+        op_spec = OpSpec(
+            op="quantscalepertokenfp8",
+            is_reduction=True,
+            iteration_space={mb: (64, 32), out: (256, 1)},
+            args=[input_arg, output_arg],
+            op_info={
+                "constants": {
+                    "mulConst": 1.0 / 448.0,
+                    "clipMin": torch.finfo(torch.float32).eps,
+                    "clipMax": float(torch.finfo(torch.float16).max),
+                }
+            },
+        )
+
+        sdsc_json, _, _, _ = compile_op_spec(idx=0, op_spec=op_spec, symbols=[])
+        top = next(iter(sdsc_json.values()))
+        dsc = next(iter(top["dscs_"][0].values()))
+        compute = dsc["computeOp_"][0]
+
+        self.assertEqual(compute["inputLabeledDs"], ["Tensor0-idx0"])
+        self.assertEqual(compute["outputLabeledDs"], ["Tensor1-idx1"])
+
+
 class TestSymbolKindKernelDerivedSymbolic(InductorTestCase):
     """Unit tests for the kernel_derived_symbolic variant of SymbolKind, added
     for per-core symbolic start addresses.

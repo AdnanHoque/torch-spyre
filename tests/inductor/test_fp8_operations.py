@@ -37,6 +37,37 @@ FP8_E4M3_MAX_SPACING = 32.0
 class TestFP8Operations:
     """Test suite for FP8 quantization operations not covered in test_inductor_ops.py."""
 
+    def test_quant_scale_per_token_fp8(self):
+        """Fused DD2 row absmax/scale/clamp matches its FP16 reference."""
+
+        x = cached_randn((64, 256), scale=4.0, dtype=torch.float16)
+        multiplier = 1.0 / float(torch.finfo(torch.float8_e4m3fn).max)
+        clip_min = torch.finfo(torch.float32).eps
+        clip_max = float(torch.finfo(torch.float16).max)
+
+        def spyre_fn(x):
+            return torch.ops.spyre.quant_scale_per_token_fp8(
+                x, multiplier, clip_min, clip_max
+            )
+
+        def pytorch_fn(x):
+            return (
+                x.abs()
+                .amax(dim=-1, keepdim=True)
+                .to(torch.float32)
+                .mul(multiplier)
+                .clamp(clip_min, clip_max)
+                .to(torch.float16)
+            )
+
+        compare_with_pytorch(
+            spyre_fn,
+            pytorch_fn,
+            x,
+            atol=torch.finfo(torch.float16).eps,
+            rtol=0.0,
+        )
+
     def test_qfp8ch_basic_conversion(self):
         """Test basic FP16→FP8 format conversion with qfp8ch.
 

@@ -665,6 +665,38 @@ def _(input: torch.Tensor) -> torch.Tensor:
     return torch.empty(input.size(), dtype=torch.float8_e4m3fn, device=input.device)
 
 
+@torch.library.custom_op(
+    "spyre::quant_scale_per_token_fp8", mutates_args=(), device_types="spyre"
+)
+def quant_scale_per_token_fp8(
+    input: torch.Tensor,
+    multiplier: float,
+    clip_min: float,
+    clip_max: float,
+) -> torch.Tensor:
+    """DD2 fused per-row absmax, scale, and clamp reduction."""
+    pass
+
+
+@quant_scale_per_token_fp8.register_fake
+def _(
+    input: torch.Tensor,
+    multiplier: float,
+    clip_min: float,
+    clip_max: float,
+) -> torch.Tensor:
+    if input.dim() != 2:
+        raise RuntimeError(
+            "spyre::quant_scale_per_token_fp8 requires a 2D [M, K] tensor, "
+            f"got {input.dim()}D"
+        )
+    if input.dtype != torch.float16:
+        raise RuntimeError(
+            f"spyre::quant_scale_per_token_fp8 requires FP16 input, got {input.dtype}"
+        )
+    return torch.empty((input.shape[0], 1), dtype=torch.float16, device=input.device)
+
+
 @torch.library.custom_op("spyre::fp8_matmul_raw", mutates_args=(), device_types="spyre")
 def fp8_matmul_raw(
     mat1: torch.Tensor,
