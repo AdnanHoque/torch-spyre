@@ -100,6 +100,11 @@ _SCALE_DERIVATION_TARGETS = _TRANSPARENT_ACTIVATION_TARGETS | {
     "aten.reciprocal.default",
     "aten.zeros_like.default",
     "spyre.clamp.default",
+    # The optimized DD2 path replaces the generic abs/max/divide/clamp slice
+    # with this pure one-input reduction.  Treat it as the same kind of scale
+    # derivation node so repeated Q/K/V consumers can share the specialized
+    # result as well as the downstream normalized/packed activation.
+    "spyre.quant_scale_per_token_fp8.default",
 }
 
 

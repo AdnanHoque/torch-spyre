@@ -185,6 +185,38 @@ def test_relayout_emits_owner_maps_and_one_shuffle_per_source():
     assert len(prefix) == 1
     assert args[0].name == args[1].name == plan.destination_name
 
+    shared_destinations: set[str] = set()
+    first_args = [source_arg]
+    first_prefix = _materialize_lx_relayout_inputs(
+        current_node,
+        first_args,
+        [(0, source_arg)],
+        consumer_spec,
+        shared_destinations,
+    )
+    follower_plan = replace(
+        plan,
+        consumer_name="second_consumer",
+        destination_group_name=plan.consumer_name,
+    )
+    follower_node = SimpleNamespace(
+        **{LX_RELAYOUT_ATTR: {follower_plan.source_name: follower_plan}}
+    )
+    follower_current_node = SimpleNamespace(
+        get_nodes=lambda: [SimpleNamespace(node=follower_node)]
+    )
+    follower_args = [source_arg]
+    follower_prefix = _materialize_lx_relayout_inputs(
+        follower_current_node,
+        follower_args,
+        [(0, source_arg)],
+        consumer_spec,
+        shared_destinations,
+    )
+    assert len(first_prefix) == 1
+    assert follower_prefix == []
+    assert first_args[0].name == follower_args[0].name == plan.destination_name
+
 
 def test_relayout_owner_dims_follow_removed_leading_unit_dim():
     m, n = Symbol("m"), Symbol("n")
@@ -318,6 +350,8 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
         ("shared", "consumer_a"),
         ("shared", "consumer_b"),
     }
+    shared_plans = lx_relayout_module.collect_lx_relayout_plans(graph)
+    assert len({plan.destination_name for plan in shared_plans}) == 1
 
     monkeypatch.setattr(lx_relayout_module.config, "lx_relayout_min_source_bytes", 257)
     assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
@@ -384,8 +418,9 @@ def test_data_op_materializes_planned_relayout(monkeypatch):
     monkeypatch.setattr(
         spyre_kernel_module,
         "_materialize_lx_relayout_inputs",
-        lambda current_node, args, tensor_args, spec: (
-            calls.append((current_node, args, tensor_args, spec)) or ["shuffle"]
+        lambda current_node, args, tensor_args, spec, materialized: (
+            calls.append((current_node, args, tensor_args, spec, materialized))
+            or ["shuffle"]
         ),
     )
 
@@ -394,6 +429,7 @@ def test_data_op_materializes_planned_relayout(monkeypatch):
     kernel.op_specs = []
     kernel.indirect_vars = {}
     kernel.current_node = object()
+    kernel._materialized_lx_relayout_destinations = set()
     kernel.create_tensor_arg = lambda is_input, *_args, **_kwargs: (
         input_arg if is_input else output_arg
     )
@@ -411,6 +447,7 @@ def test_data_op_materializes_planned_relayout(monkeypatch):
     assert kernel.op_specs == ["shuffle", consumer_spec]
     assert len(calls) == 1
     assert calls[0][2] == [(0, source)]
+    assert calls[0][4] is kernel._materialized_lx_relayout_destinations
 
 
 def test_scheduler_checks_owner_map_and_rebinds_final_symbols(monkeypatch):
@@ -545,7 +582,10 @@ def test_relayout_lifetimes_cover_inputs_and_multiple_consumers(monkeypatch):
         "producer_input", "buf_k", "consumer_a", "independent", "consumer_b"
     )
     plan_a = _dense_plan("buf_k", "consumer_a")
-    plan_b = _dense_plan("buf_k", "consumer_b")
+    plan_b = replace(
+        _dense_plan("buf_k", "consumer_b"),
+        destination_group_name="consumer_a",
+    )
     producer_input = LifetimeBoundBuffer("producer_input", size=128, uses=[0, 1])
     source = LifetimeBoundBuffer("buf_k", size=128, uses=[1, 2, 4])
     input_child = LifetimeBoundBuffer(
@@ -568,12 +608,43 @@ def test_relayout_lifetimes_cover_inputs_and_multiple_consumers(monkeypatch):
 
     allocator._append_lx_relayout_destinations(graph, buffers)
     by_name = {buffer.name: buffer for buffer in buffers}
-    assert source.uses == [1, 2, 5]
-    assert by_name[plan_a.destination_name].uses == [2, 3]
-    assert by_name[plan_b.destination_name].uses == [5, 6]
-    assert producer_input.uses == [0, 1, 2, 5]
+    assert source.uses == [1, 2]
+    assert plan_a.destination_name == plan_b.destination_name
+    assert by_name[plan_a.destination_name].uses == [2, 3, 5]
+    assert producer_input.uses == [0, 1, 2]
     assert input_child.in_place_parents == []
     assert source_child.in_place_parents == []
+
+
+def test_qfp8mb_lifetime_oracle_releases_dead_pack_input(monkeypatch):
+    graph = _DummyGraph("producer_input", "buf_k", "consumer")
+    plan = _dense_plan("buf_k", "consumer")
+    producer_input = LifetimeBoundBuffer("producer_input", size=512, uses=[0, 1])
+    source = LifetimeBoundBuffer("buf_k", size=256, uses=[1, 2])
+    input_child = LifetimeBoundBuffer(
+        "input_child", size=128, uses=[1, 2], in_place_parents=["producer_input"]
+    )
+    buffers = [producer_input, source, input_child]
+    allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
+    allocator._lx_relayout_plans_by_edge = {plan.edge_key: plan}
+    monkeypatch.setattr(
+        allocator_module,
+        "op_read_writes",
+        lambda _: SimpleNamespace(reads=[SimpleNamespace(name="producer_input")]),
+    )
+    monkeypatch.setattr(
+        allocator_module.config, "fp8_lx_poc_release_qfp8mb_input", True
+    )
+    monkeypatch.setattr(allocator, "_get_op_name", lambda _: "qfp8mb")
+
+    allocator._append_lx_relayout_destinations(graph, buffers)
+
+    assert producer_input.uses == [0, 1]
+    assert input_child.in_place_parents == ["producer_input"]
+    destination = next(
+        buffer for buffer in buffers if buffer.name == plan.destination_name
+    )
+    assert destination.uses == [2, 3]
 
 
 def test_partial_allocation_fallback_is_atomic_per_source():

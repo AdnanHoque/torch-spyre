@@ -951,11 +951,27 @@ class ScratchpadAllocator:
         if not entries:
             return
 
-        # Insert one synthetic lifetime step immediately before each consumer
-        # that needs a SHUFFLE. Existing solvers then see S1 and S2 live together
-        # during the transfer and keep their addresses disjoint without any
-        # relayout-specific placement rules.
-        boundaries = sorted({consumer_use for _, _, consumer_use in entries})
+        # Equivalent consumer ownership maps share one S2 allocation and one
+        # transfer.  Keep that destination live from the first consumer's
+        # shuffle through the final consumer instead of materializing an
+        # identical view before every use.
+        entries_by_destination: dict[
+            str, list[tuple[LifetimeBoundBuffer, LXRelayoutPlan, int]]
+        ] = {}
+        for entry in entries:
+            entries_by_destination.setdefault(entry[1].destination_name, []).append(
+                entry
+            )
+
+        # Insert one synthetic lifetime step immediately before the first
+        # consumer of each destination. Existing solvers then see S1 and S2
+        # live together during the transfer and keep their addresses disjoint.
+        boundaries = sorted(
+            {
+                min(consumer_use for _, _, consumer_use in group)
+                for group in entries_by_destination.values()
+            }
+        )
         transfer_time = {
             consumer_use: consumer_use + rank
             for rank, consumer_use in enumerate(boundaries)
@@ -963,18 +979,26 @@ class ScratchpadAllocator:
         for buffer in buffers:
             buffer.uses = [use + bisect_right(boundaries, use) for use in buffer.uses]
 
-        for source, plan, original_consumer_use in entries:
-            consumer_use = original_consumer_use + bisect_right(
-                boundaries, original_consumer_use
-            )
-            shuffle_use = transfer_time[original_consumer_use]
+        for group in entries_by_destination.values():
+            source, plan, _ = group[0]
+            original_consumer_uses = [entry[2] for entry in group]
+            first_consumer_use = min(original_consumer_uses)
+            consumer_uses = [
+                use + bisect_right(boundaries, use) for use in original_consumer_uses
+            ]
+            shuffle_use = transfer_time[first_consumer_use]
 
             # The backend may execute the final producer data movement and the
             # inserted SHUFFLE in one bundle. Keep any LX-resident producer
             # inputs live through the transfer boundary so S2 cannot reuse
             # their storage before S1 is fully materialized.
             producer = graph.try_get_buffer(source.name)
-            if producer is not None:
+            release_qfp8mb_input = (
+                producer is not None
+                and config.fp8_lx_poc_release_qfp8mb_input
+                and self._get_op_name(producer) == "qfp8mb"
+            )
+            if producer is not None and not release_qfp8mb_input:
                 for dep in op_read_writes(producer).reads:
                     producer_input = by_name.get(dep.name)
                     if producer_input is not None:
@@ -998,7 +1022,8 @@ class ScratchpadAllocator:
             #
             # Both views are accessed at the synthetic SHUFFLE step. S1 can be
             # released before consumer compute while S2 remains live through it.
-            source_uses = [use for use in source.uses if use != consumer_use]
+            consumer_use_set = set(consumer_uses)
+            source_uses = [use for use in source.uses if use not in consumer_use_set]
             source.uses = sorted({*source_uses, shuffle_use})
             destination_size = round_up_to_alignment(
                 source.size * plan.destination_size_ratio,
@@ -1007,7 +1032,7 @@ class ScratchpadAllocator:
             destination = LifetimeBoundBuffer(
                 plan.destination_name,
                 destination_size,
-                [shuffle_use, consumer_use],
+                sorted({shuffle_use, *consumer_uses}),
                 first_use_is_read=False,
             )
             for child in buffers:

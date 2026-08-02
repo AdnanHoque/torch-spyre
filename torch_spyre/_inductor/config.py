@@ -53,6 +53,13 @@ sencores: int = int(os.getenv("SENCORES", "32"))
 # after tensor roles have identified M and N. Zero keeps normal planning.
 fp8_lx_poc_m_split: int = int(os.getenv("TORCH_SPYRE_FP8_LX_POC_M_SPLIT", "0"))
 fp8_lx_poc_n_split: int = int(os.getenv("TORCH_SPYRE_FP8_LX_POC_N_SPLIT", "0"))
+# Private DD2 lifetime oracle: qfp8mb's FP16 input is dead after the pack row,
+# so permit a following explicit LX shuffle destination to reuse that storage.
+# Keep this opt-in until final emitted schedules establish that the backend
+# never overlaps the pack read with the subsequent shuffle write.
+fp8_lx_poc_release_qfp8mb_input: bool = (
+    os.environ.get("TORCH_SPYRE_FP8_LX_POC_RELEASE_QFP8MB_INPUT", "0") == "1"
+)
 
 # Symbolic-dim knobs consumed by compute_granularity in pass_utils.py.
 # The pointwise work-division PR (#2499) wires that helper into the

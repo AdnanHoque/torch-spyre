@@ -67,12 +67,19 @@ class LXRelayoutPlan:
     shuffle_iteration_symbols: tuple[sympy.Symbol, ...]
     device_dim_to_iteration_symbol: dict[str, sympy.Symbol]
     destination_size_ratio: int
+    # Consumers with identical destination ownership can read one materialized
+    # S2 view.  The first consumer name is a stable group identifier; plans
+    # created outside the grouping pass retain their own consumer name.
+    destination_group_name: str | None = None
     source_lx_address: int | None = None
     destination_lx_address: int | None = None
 
     @property
     def destination_name(self) -> str:
-        return make_lx_relayout_destination_name(self.source_name, self.consumer_name)
+        return make_lx_relayout_destination_name(
+            self.source_name,
+            self.destination_group_name or self.consumer_name,
+        )
 
     @property
     def edge_key(self) -> tuple[str, str]:
@@ -565,7 +572,40 @@ def collect_lx_relayout_plans(
             source_plans[plan.edge_key] = plan
 
         if source_is_covered:
-            plans.extend(source_plans.values())
+            # One packed activation commonly feeds Q/K/V matmuls with the same
+            # work division.  Their source and destination ownership maps are
+            # byte-for-byte identical, so a second S1->S2 shuffle would only
+            # duplicate data already resident in LX.  Give equivalent plans a
+            # common destination identity; allocation/codegen will keep that
+            # view live and materialize it once.
+            destination_groups: list[LXRelayoutPlan] = []
+            for plan in source_plans.values():
+                group = next(
+                    (
+                        candidate
+                        for candidate in destination_groups
+                        if candidate.source_core_id_to_device_slice
+                        == plan.source_core_id_to_device_slice
+                        and candidate.destination_core_id_to_device_slice
+                        == plan.destination_core_id_to_device_slice
+                        and candidate.source_device_dim_splits
+                        == plan.source_device_dim_splits
+                        and candidate.destination_device_dim_splits
+                        == plan.destination_device_dim_splits
+                        and candidate.destination_size_ratio
+                        == plan.destination_size_ratio
+                    ),
+                    None,
+                )
+                if group is None:
+                    group = plan
+                    destination_groups.append(plan)
+                plans.append(
+                    dataclasses.replace(
+                        plan,
+                        destination_group_name=group.consumer_name,
+                    )
+                )
 
     return plans
 

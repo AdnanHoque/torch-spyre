@@ -51,9 +51,7 @@ def _emit_dynamic_quantization(
     abs_max = graph.call_function(
         torch.ops.aten.maximum.default, args=(abs_min, positive)
     )
-    scale = graph.call_function(
-        torch.ops.aten.div.Scalar, args=(abs_max, 448.0)
-    )
+    scale = graph.call_function(torch.ops.aten.div.Scalar, args=(abs_max, 448.0))
     scale = graph.call_function(
         torch.ops.aten.clamp.default,
         args=(scale, torch.finfo(torch.float32).tiny, None),
@@ -76,7 +74,26 @@ def _emit_dynamic_quantization(
 
 
 def _target_counts(graph: Graph) -> Counter:
-    return Counter(str(node.target) for node in graph.nodes if node.op == "call_function")
+    return Counter(
+        str(node.target) for node in graph.nodes if node.op == "call_function"
+    )
+
+
+def _emit_specialized_dynamic_quantization(graph: Graph, activation):
+    scale = graph.call_function(
+        torch.ops.spyre.quant_scale_per_token_fp8.default,
+        args=(activation, 1.0 / 448.0, torch.finfo(torch.float32).eps, 65504.0),
+    )
+    inverse = graph.call_function(torch.ops.aten.reciprocal.default, args=(scale,))
+    normalized = graph.call_function(
+        torch.ops.aten.mul.Tensor, args=(activation, inverse)
+    )
+    clamped = graph.call_function(
+        torch.ops.spyre.clamp.default,
+        args=(normalized, -448.0, 448.0),
+    )
+    quantized = graph.call_function(torch.ops.spyre.qfp8mb.default, args=(clamped,))
+    return quantized, scale
 
 
 def test_reuses_shared_granite_activation_quantization():
@@ -102,6 +119,29 @@ def test_reuses_shared_granite_activation_quantization():
     output = next(node for node in graph.nodes if node.op == "output").args[0]
     assert output[0] is output[2] is output[4]
     assert output[1] is output[3] is output[5]
+
+
+def test_reuses_specialized_dd2_activation_quantization():
+    graph = Graph()
+    activation = graph.placeholder("activation")
+    k, k_scale = _emit_specialized_dynamic_quantization(graph, activation)
+    v, v_scale = _emit_specialized_dynamic_quantization(graph, activation)
+    graph.output((k, k_scale, v, v_scale))
+
+    before = _target_counts(graph)
+    assert before["spyre.quant_scale_per_token_fp8.default"] == 2
+    assert before["spyre.qfp8mb.default"] == 2
+
+    merged = reuse_fp8_activation_quantization(graph)
+
+    after = _target_counts(graph)
+    assert merged > 0
+    assert after["spyre.quant_scale_per_token_fp8.default"] == 1
+    assert after["spyre.qfp8mb.default"] == 1
+
+    output = next(node for node in graph.nodes if node.op == "output").args[0]
+    assert output[0] is output[2]
+    assert output[1] is output[3]
 
 
 def test_does_not_merge_different_activation_sources():

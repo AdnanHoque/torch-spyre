@@ -214,24 +214,45 @@ def _materialize_lx_relayout_inputs(
     args: list[TensorArg],
     tensor_args: Sequence[tuple[int, Any]],
     consumer_spec: OpSpec,
+    materialized_destinations: set[str] | None = None,
 ) -> list[OpSpec]:
     """Materialize every planned consumer input before its compute row."""
 
     plans = _current_node_lx_relayout_inputs(current_node)
     prefix_specs: list[OpSpec] = []
     destinations: dict[str, TensorArg] = {}
+    if materialized_destinations is None:
+        materialized_destinations = set()
     for arg_index, tensor in tensor_args:
         plan = plans.get(tensor.name)
         if plan is None:
             continue
         destination_arg = destinations.get(plan.source_name)
-        if destination_arg is None:
+        if (
+            destination_arg is None
+            and plan.destination_name not in materialized_destinations
+        ):
             shuffle_spec, destination_arg = _materialize_explicit_lx_shuffle(
                 args[arg_index],
                 consumer_spec,
                 plan,
             )
             prefix_specs.append(shuffle_spec)
+            materialized_destinations.add(plan.destination_name)
+            destinations[plan.source_name] = destination_arg
+        elif destination_arg is None:
+            assert plan.destination_lx_address is not None, (
+                "shared LX relayout destination has no allocation for "
+                f"{plan.source_name}"
+            )
+            destination_arg = replace(
+                args[arg_index],
+                is_input=True,
+                name=plan.destination_name,
+                allocation={"lx": plan.destination_lx_address},
+                allocation_core_id_to_device_slice=None,
+                allocation_device_dim_splits=None,
+            )
             destinations[plan.source_name] = destination_arg
         args[arg_index] = destination_arg
     return prefix_specs
@@ -674,6 +695,7 @@ class SpyreKernel(Kernel[CSEVariable]):
         self.indirect_vars: dict[sympy.Symbol, TensorAccess] = {}
         self.indirect_sizes: dict[sympy.Symbol, int] = {}
         self._indirect_var_count: int = 0
+        self._materialized_lx_relayout_destinations: set[str] = set()
 
     def indirect_var_names(self) -> "frozenset[str] | None":
         if not self.indirect_vars:
@@ -1022,6 +1044,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                     args,
                     tensor_args,
                     consumer_spec,
+                    self._materialized_lx_relayout_destinations,
                 )
             )
             self.op_specs.append(consumer_spec)
@@ -1070,6 +1093,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                     args,
                     [(len(args) - 2, value)],
                     op_spec,
+                    self._materialized_lx_relayout_destinations,
                 )
             )
             self.op_specs.append(op_spec)
@@ -1134,6 +1158,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                     args,
                     [(0, x), (1, y)],
                     consumer_spec,
+                    self._materialized_lx_relayout_destinations,
                 )
             )
             self.op_specs.append(consumer_spec)

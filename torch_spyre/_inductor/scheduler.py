@@ -559,6 +559,13 @@ class SuperDSCScheduling(BaseScheduling):
             return
 
         kernel = SpyreKernel()
+        # A shared relayout destination can feed consumers that scheduling
+        # places in different generated kernels. Track materialization across
+        # the whole graph so the first runtime consumer emits the shuffle and
+        # later kernels bind the already-live LX view without copying it again.
+        kernel._materialized_lx_relayout_destinations = V.graph.__dict__.setdefault(
+            "_materialized_lx_relayout_destinations", set()
+        )
         all_schedule_nodes: list[SchedulerNode] = []
         with kernel:
             self._codegen_into_kernel(nodes, kernel, all_schedule_nodes)
@@ -594,6 +601,9 @@ class SuperDSCScheduling(BaseScheduling):
             return
 
         kernel = SpyreKernel()
+        kernel._materialized_lx_relayout_destinations = V.graph.__dict__.setdefault(
+            "_materialized_lx_relayout_destinations", set()
+        )
         all_schedule_nodes: list[SchedulerNode] = []
         with kernel:
             self._codegen_into_kernel(inner_nodes, kernel, all_schedule_nodes)
