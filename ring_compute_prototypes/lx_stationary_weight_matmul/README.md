@@ -89,6 +89,56 @@ controls are also retained in `multi_projection_results.json`; their LX
 speedups range from `1.6449x` to `5.7624x`, proving that the gain is not from a
 different work division.
 
+### Matched explicit-materialization comparison
+
+To separate Torch-level QKV fusion, generic LX materialization, and direct BMM
+consumption, the M64 Granite QKV case was rerun with the graph, fused BMM,
+`M4 N8 K1` work division, core maps, inputs, and device held fixed. The only LX
+difference was:
+
+- explicit: `mul -> shuffle -> batchmatmul`, with disjoint LX S1/S2;
+- attached: `mul -> batchmatmul`, with the grouped fan-out writing the BMM's
+  existing LX input allocation.
+
+Two 30-event blocks were run in opposite order. A fused-HBM control was also
+compiled once with each DeepTools build to measure backend-version bias.
+
+| M64 K4096 QKV route | Block 1 | Block 2 | Pooled 60-event median |
+|---|---:|---:|---:|
+| Fused HBM, materialization compiler | 663.2485 us | - | - |
+| Fused HBM, attached compiler | 663.062 us | - | - |
+| Explicit LX materialization | 398.7085 us | 395.3605 us | 397.558 us |
+| Attached LX fan-out | 397.582 us | 398.3875 us | 397.825 us |
+
+The HBM controls differ by only `0.0281%`. The LX result changes sign between
+blocks; the pooled explicit/attached ratio is `0.99933`, a `0.067%` difference.
+There is therefore no measurable device-latency advantage from attachment at
+this shape. Both LX routes are about `1.67x` faster than their own fused-HBM
+control.
+
+This answers the Torch-layer-fusion question precisely: one fused QKV matmul
+alone is the roughly 663 us HBM row. The roughly 398 us result requires the
+LX-to-LX producer handoff. Direct attachment is still a cleaner substrate—it
+removes the standalone shuffle root and redundant S2 abstraction—but it does
+not contribute a separately measurable speedup over correct explicit LX
+materialization here.
+
+Final emitted SMC confirms why. A `DXP_DEBUG` replay of copies of the accepted
+bundles shows exactly four `L3_STGU` and 28 `L3_LDGU` instructions in each
+program: one sender and seven remote consumers for each source cohort rooted
+at cores `0,8,16,24`. The explicit form places those instructions in a
+standalone shuffle SMC; the attached form places the same fan-out inside the
+BMM SMC and emits no shuffle root. Thus this is emitted-transport evidence,
+not merely a planner or graph-structure inference. Exact SMC paths and hashes
+are recorded in `explicit_vs_attached_results.json`.
+
+These new rows use direct AIUPTI compute-execute start/end timestamps because
+the selected runtime extension did not expose the Kineto PrivateUse1 activity
+bridge in this session. AIUPTI is the underlying device timestamp source. All
+six runs passed numerical correctness, exact structural gates, zero dropped
+activity records, and exactly 30 matched device events. Raw samples, hashes,
+and paths are in `explicit_vs_attached_results.json`.
+
 M512 initially fell back because the allocator reserved disjoint 1 MiB S1 and
 S2 buffers against a 1.984 MiB usable LX. Resident matmul fan-out does not need
 that copy: every source owner already contains its destination bytes, and
@@ -140,11 +190,15 @@ export DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR="$RUN_DIR/backend_plans"
 python ring_compute_prototypes/lx_stationary_weight_matmul/probe.py \
   --run-dir "$RUN_DIR" --route lx --m 64 --k 4096 \
   --projection-widths 4096,1024,1024 --projection-schedule fused --grid fixed \
-  --warmups 10 --runs 30 --expected-torch-head "$TORCH_SPYRE_HEAD"
+  --warmups 10 --runs 30 --timing-source aiupti \
+  --expected-torch-head "$TORCH_SPYRE_HEAD"
 ```
 
 Use `--route hbm` without the two `MATMUL_OPERAND_BROADCAST` variables for the
-matched control.
+matched HBM control. Use `--route lx_explicit` with the reviewed materialization
+DeepTools build for the generic S1-to-S2 LX control. When a copied DXP runtime
+needs private shared libraries, put `dxp_private_runtime_wrapper.sh` first on
+`PATH` and set `DXP_PRIVATE_RUNTIME` to that runtime directory.
 
 ## Decision
 

@@ -2,15 +2,21 @@
 """Correctness, structure, and timing probe for LX-fed stationary-W matmul.
 
 The producer and matmul use the same M partition, but the matmul additionally
-splits N.  With the LX relayout planner enabled, each producer-resident A shard
-is broadcast to the N owners and consumed by the BMM in the same bundle.  The
-control uses the identical graph and work division with that planner disabled.
+splits N. Three matched routes hold the Torch graph and work division fixed:
+
+lx
+    Bind the planned grouped fan-out directly to the BMM input allocation.
+lx_explicit
+    Materialize the same plan as a generic S1 -> SHUFFLE -> S2 prefix.
+hbm
+    Disable relayout planning so the producer edge spills through HBM.
 """
 
 from __future__ import annotations
 
 import argparse
 import copy
+import ctypes
 import glob
 import hashlib
 import json
@@ -24,7 +30,9 @@ from typing import Any, Callable
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", type=Path, required=True)
-    parser.add_argument("--route", choices=("lx", "hbm"), required=True)
+    parser.add_argument(
+        "--route", choices=("lx", "lx_explicit", "hbm"), required=True
+    )
     parser.add_argument("--m", type=int, default=64)
     parser.add_argument("--k", type=int, default=2048)
     parser.add_argument("--n", type=int, default=4096)
@@ -42,6 +50,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--n-split", type=int, default=8)
     parser.add_argument("--warmups", type=int, default=10)
     parser.add_argument("--runs", type=int, default=30)
+    parser.add_argument(
+        "--timing-source", choices=("kineto", "aiupti"), default="kineto"
+    )
     parser.add_argument("--seed", type=int, default=20260801)
     parser.add_argument("--expected-torch-head")
     parser.add_argument("--debug-plans", action="store_true")
@@ -51,6 +62,214 @@ def parse_args() -> argparse.Namespace:
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise RuntimeError(message)
+
+
+class _AiuptiActivity(ctypes.Structure):
+    _fields_ = [("activity_kind", ctypes.c_uint8)]
+
+
+class _AiuptiActivityCompute(ctypes.Structure):
+    _fields_ = [
+        ("activity_kind", ctypes.c_uint8),
+        ("operation_kind", ctypes.c_uint8),
+        ("device_id", ctypes.c_uint32),
+        ("context_id", ctypes.c_uint32),
+        ("stream_id", ctypes.c_uint32),
+        ("correlation_id", ctypes.c_uint32),
+        ("start", ctypes.c_uint64),
+        ("end", ctypes.c_uint64),
+        ("queued", ctypes.c_uint64),
+        ("submitted", ctypes.c_uint64),
+        ("local_memory_total", ctypes.c_size_t),
+        ("name", ctypes.c_char * 128),
+        ("cycles_ts1", ctypes.c_uint64),
+        ("cycles_ts2", ctypes.c_uint64),
+        ("cycles_ts3", ctypes.c_uint64),
+        ("cycles_ts4", ctypes.c_uint64),
+        ("cycles_ts5", ctypes.c_uint64),
+    ]
+
+
+class AiuptiComputeCollector:
+    """Collect raw AIUPTI compute activities without a Kineto bridge."""
+
+    _success = 0
+    _compute_kind = 1
+    _execute_kind = 2
+    _buffer_bytes = 1 << 20
+
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
+        self.callback_errors: list[str] = []
+        self.buffers: list[Any] = []
+        self.dropped = 0
+        self.lib = ctypes.CDLL("libaiupti.so", mode=ctypes.RTLD_GLOBAL)
+        request_type = ctypes.CFUNCTYPE(
+            None,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_size_t),
+        )
+        complete_type = ctypes.CFUNCTYPE(
+            None,
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+        )
+
+        @request_type
+        def request(
+            buffer: Any, size: Any, max_num_records: Any
+        ) -> None:
+            allocation = ctypes.create_string_buffer(self._buffer_bytes)
+            self.buffers.append(allocation)
+            buffer[0] = ctypes.cast(allocation, ctypes.POINTER(ctypes.c_uint8))
+            size[0] = self._buffer_bytes
+            max_num_records[0] = 0
+
+        @complete_type
+        def complete(buffer: Any, _size: int, valid_size: int) -> None:
+            try:
+                while True:
+                    record = ctypes.POINTER(_AiuptiActivity)()
+                    result = self.get_next_record(
+                        buffer, valid_size, ctypes.byref(record)
+                    )
+                    if result != self._success:
+                        break
+                    if not record:
+                        self.callback_errors.append("AIUPTI returned a null record")
+                        break
+                    if record.contents.activity_kind != self._compute_kind:
+                        continue
+                    compute = ctypes.cast(
+                        record, ctypes.POINTER(_AiuptiActivityCompute)
+                    ).contents
+                    self.records.append(
+                        {
+                            "operation_kind": int(compute.operation_kind),
+                            "device_id": int(compute.device_id),
+                            "context_id": int(compute.context_id),
+                            "stream_id": int(compute.stream_id),
+                            "correlation_id": int(compute.correlation_id),
+                            "start_ns": int(compute.start),
+                            "end_ns": int(compute.end),
+                            "queued_ns": int(compute.queued),
+                            "submitted_ns": int(compute.submitted),
+                            "name": bytes(compute.name)
+                            .split(b"\0", 1)[0]
+                            .decode(errors="replace"),
+                        }
+                    )
+            except BaseException as error:  # callbacks cannot propagate safely
+                self.callback_errors.append(repr(error))
+
+        self.request_callback = request
+        self.complete_callback = complete
+        self.register_callbacks = getattr(
+            self.lib,
+            "_Z31aiuptiActivityRegisterCallbacksPFvPPhPmS1_EPFvS_mmE",
+        )
+        self.enable = getattr(
+            self.lib, "_Z20aiuptiActivityEnable19AIUpti_ActivityKind"
+        )
+        self.disable = getattr(
+            self.lib, "_Z21aiuptiActivityDisable19AIUpti_ActivityKind"
+        )
+        self.flush = getattr(self.lib, "_Z24aiuptiFlushAllActivitiesv")
+        self.get_next_record = getattr(
+            self.lib, "_Z27aiuptiActivityGetNextRecordPhmPP15AIUpti_Activity"
+        )
+        self.get_dropped = getattr(
+            self.lib, "_Z34aiuptiActivityGetNumDroppedRecordsPm"
+        )
+        self.register_callbacks.argtypes = [request_type, complete_type]
+        self.enable.argtypes = [ctypes.c_int]
+        self.disable.argtypes = [ctypes.c_int]
+        self.get_next_record.argtypes = [
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(_AiuptiActivity)),
+        ]
+        self.get_dropped.argtypes = [ctypes.POINTER(ctypes.c_size_t)]
+        for function in (
+            self.register_callbacks,
+            self.enable,
+            self.disable,
+            self.flush,
+            self.get_next_record,
+            self.get_dropped,
+        ):
+            function.restype = ctypes.c_int
+
+    def start(self) -> None:
+        require(
+            self.register_callbacks(
+                self.request_callback, self.complete_callback
+            )
+            == self._success,
+            "failed to register AIUPTI callbacks",
+        )
+        require(
+            self.enable(self._compute_kind) == self._success,
+            "failed to enable AIUPTI compute activities",
+        )
+
+    def stop(self) -> None:
+        require(self.flush() == self._success, "failed to flush AIUPTI activities")
+        require(
+            self.disable(self._compute_kind) == self._success,
+            "failed to disable AIUPTI compute activities",
+        )
+        dropped = ctypes.c_size_t()
+        require(
+            self.get_dropped(ctypes.byref(dropped)) == self._success,
+            "failed to query dropped AIUPTI records",
+        )
+        self.dropped = int(dropped.value)
+
+
+def aiupti_report(
+    collector: AiuptiComputeCollector, bundle_token: str, runs: int
+) -> dict[str, Any]:
+    executed = [
+        record
+        for record in collector.records
+        if record["operation_kind"] == collector._execute_kind
+        and record["end_ns"] > record["start_ns"]
+    ]
+    matched = [record for record in executed if bundle_token in record["name"]]
+    durations = [
+        (record["end_ns"] - record["start_ns"]) / 1000.0 for record in matched
+    ]
+    gate = (
+        not collector.callback_errors
+        and collector.dropped == 0
+        and len(executed) == runs
+        and len(matched) == runs
+        and len(durations) == runs
+    )
+    return {
+        "source": "AIUPTI compute-execute activity",
+        "gate": gate,
+        "kernel_event_count": len(executed),
+        "matched_event_count": len(matched),
+        "kernel_names": sorted({record["name"] for record in executed}),
+        "dropped_record_count": collector.dropped,
+        "callback_errors": collector.callback_errors,
+        "raw_compute_records": collector.records,
+        "device_us": (
+            {
+                "median": statistics.median(durations),
+                "mean": statistics.fmean(durations),
+                "min": min(durations),
+                "max": max(durations),
+                "samples": durations,
+            }
+            if durations
+            else None
+        ),
+    }
 
 
 def allocation_components(spec: dict[str, Any]) -> list[str]:
@@ -209,6 +428,7 @@ def main() -> None:
 
     import torch
     import torch_spyre
+    from torch._inductor import config as inductor_config
 
     try:
         from core.profiler import create_profiler
@@ -224,6 +444,7 @@ def main() -> None:
         ) -> Any:
             return profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1],
+                record_shapes=True,
                 profile_memory=profile_memory,
                 with_stack=with_stack,
                 on_trace_ready=torch_module.profiler.tensorboard_trace_handler(
@@ -405,21 +626,25 @@ def main() -> None:
     name_tensor_dims(activation, ["cohort", "M", "K"])
     for weight, dim_name in zip(weights, n_dim_names):
         name_tensor_dims(weight, ["K", dim_name])
+    uses_lx_relayout = args.route in {"lx", "lx_explicit"}
+    uses_attached_broadcast = args.route == "lx"
     patch = {
         "sencores": 32,
         "lx_planning": True,
-        "lx_planner_relayout": args.route == "lx",
-        "lx_matmul_operand_broadcast": args.route == "lx",
+        "lx_planner_relayout": uses_lx_relayout,
+        "lx_matmul_operand_broadcast": uses_attached_broadcast,
         "matmul_dataflow": "weight_stationary",
     }
     try:
-        with spyre_config.patch(patch):
+        with inductor_config.patch(
+            {"profiler_mark_wrapper_call": True}
+        ), spyre_config.patch(patch):
             compiled: Callable[..., Any] = torch.compile(
                 Graph().to(device), fullgraph=True
             )
-        with torch.no_grad(), spyre_config.patch(patch):
-            compile_output = compiled(activation, *weights)
-            torch.spyre.synchronize()
+            with torch.no_grad():
+                compile_output = compiled(activation, *weights)
+                torch.spyre.synchronize()
     finally:
         reset_named_dims()
         _reset_counter()
@@ -430,20 +655,36 @@ def main() -> None:
             compiled(activation, *weights)
         torch.spyre.synchronize()
 
-    profiler = create_profiler(
-        torch, str(trace_dir), profile_memory=True, with_stack=False
+    profiler = (
+        create_profiler(
+            torch, str(trace_dir), profile_memory=True, with_stack=False
+        )
+        if args.timing_source == "kineto"
+        else None
+    )
+    aiupti_collector = (
+        AiuptiComputeCollector() if args.timing_source == "aiupti" else None
     )
     walls_us: list[float] = []
     measured = None
-    profiler.start()
+    if profiler is not None:
+        profiler.start()
+    else:
+        require(aiupti_collector is not None, "missing AIUPTI collector")
+        aiupti_collector.start()
     for _ in range(args.runs):
         started = time.perf_counter_ns()
         with torch.no_grad(), spyre_config.patch(patch):
             measured = compiled(activation, *weights)
         torch.spyre.synchronize()
         walls_us.append((time.perf_counter_ns() - started) / 1000.0)
-        profiler.step()
-    profiler.stop()
+        if profiler is not None:
+            profiler.step()
+    if profiler is not None:
+        profiler.stop()
+    else:
+        require(aiupti_collector is not None, "missing AIUPTI collector")
+        aiupti_collector.stop()
     require(measured is not None, "no measured output")
     measured_correctness = output_correctness(measured, expected)
 
@@ -481,7 +722,7 @@ def main() -> None:
         "auto_grid_uses_all_cores": expected_grid
         or all(bmm["num_cores"] == 32 for bmm in bmms),
     }
-    if args.route == "lx":
+    if uses_attached_broadcast:
         route_gates = {
             "no_standalone_shuffle": not shuffles,
             "frontend_broadcast_per_bmm": len(broadcast_contracts)
@@ -516,6 +757,25 @@ def main() -> None:
                 "restickify" in row["op"] for row in artifacts["roots"]
             ),
         }
+    elif args.route == "lx_explicit":
+        route_gates = {
+            "one_explicit_shuffle_per_bmm": len(shuffles) == expected_bmm_count,
+            "no_attached_broadcast_contract": not broadcast_contracts,
+            "no_attached_backend_broadcast": not backend_plans,
+            "bmms_consume_materialized_lx_activation": all(
+                bmm["allocation_components"][0] == "lx" for bmm in bmms
+            ),
+            "bmms_read_weight_from_hbm": all(
+                bmm["allocation_components"][1] == "hbm" for bmm in bmms
+            ),
+            "shuffle_uses_lx_for_s1_and_s2": all(
+                shuffle["allocation_components"] == ["lx", "lx"]
+                for shuffle in shuffles
+            ),
+            "no_restickify": not any(
+                "restickify" in row["op"] for row in artifacts["roots"]
+            ),
+        }
     else:
         route_gates = {
             "no_shuffle": not shuffles,
@@ -533,12 +793,23 @@ def main() -> None:
     correctness_gate = (
         compile_correctness["allclose"] and measured_correctness["allclose"]
     )
-    traces = sorted(glob.glob(str(trace_dir / "*.pt.trace.json")))
-    require(len(traces) == 1, f"expected one trace, found {traces}")
-    trace = trace_report(Path(traces[0]), artifacts["bundle_token"], args.runs)
+    if profiler is not None:
+        traces = sorted(glob.glob(str(trace_dir / "*.pt.trace.json")))
+        require(len(traces) == 1, f"expected one trace, found {traces}")
+        trace_path: str | None = traces[0]
+        trace = trace_report(
+            Path(traces[0]), artifacts["bundle_token"], args.runs
+        )
+    else:
+        require(aiupti_collector is not None, "missing AIUPTI collector")
+        trace_path = None
+        trace = aiupti_report(
+            aiupti_collector, artifacts["bundle_token"], args.runs
+        )
     report = {
-        "schema": "lx_stationary_weight_matmul_probe_v3",
+        "schema": "lx_stationary_weight_matmul_probe_v4",
         "route": args.route,
+        "timing_source": args.timing_source,
         "shape": {
             "m": args.m,
             "k": args.k,
@@ -557,20 +828,29 @@ def main() -> None:
         "dataflow": {
             "activation": (
                 "producer output remains LX resident"
-                if args.route == "lx"
+                if uses_lx_relayout
                 else "producer output spills to HBM before the BMM"
             ),
             "route": (
-                "cohort-root STCDP LX-to-LX grouped fan-out"
-                if args.route == "lx"
-                else "HBM spill/reload control"
+                "cohort-root STCDP LX-to-LX grouped fan-out attached to BMM"
+                if uses_attached_broadcast
+                else (
+                    "generic explicit S1-to-S2 LX shuffle before BMM"
+                    if args.route == "lx_explicit"
+                    else "HBM spill/reload control"
+                )
             ),
             "weight": "HBM-resident and N-owner stationary",
             "consume": (
                 "STCDP input fetch writes the existing BMM LX operand allocation "
                 "immediately before the DL schedule step in one device bundle"
-                if args.route == "lx"
-                else "producer spills to HBM and BMM reloads in one device bundle"
+                if uses_attached_broadcast
+                else (
+                    "explicit shuffle writes a disjoint S2 allocation consumed by "
+                    "the BMM in the same device bundle"
+                    if args.route == "lx_explicit"
+                    else "producer spills to HBM and BMM reloads in one device bundle"
+                )
             ),
         },
         "torch_spyre_root": str(torch_root),
@@ -583,7 +863,7 @@ def main() -> None:
         "structural_gate": structural_gate,
         "structural_gates": structural_gates,
         "artifacts": artifacts,
-        "trace_path": traces[0],
+        "trace_path": trace_path,
         "trace": trace,
         "host_wall_diagnostic_us": {
             "median": statistics.median(walls_us),

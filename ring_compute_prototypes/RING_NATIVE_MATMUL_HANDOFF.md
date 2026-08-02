@@ -2729,3 +2729,167 @@ Accepted M512 gate/up roots:
 Rejected multi-consumer roots:
   /tmp/lx_multi_consumer_{p2_smoke,qkv_m512_probe,q_kv_m512_probe}_20260801
 ```
+
+## 2026-08-02: focused pass 6 — explicit LX versus attached LX
+
+### Question and matched design
+
+This pass answered whether the retained result is merely Torch-level QKV
+fusion, and whether binding the fan-out to the BMM input is faster than the
+reviewed generic relayout-materialization stack.
+
+The compared M64 K4096 QKV programs held all of the following fixed:
+
+- one fused 4096/1024/1024 BMM and the same logical output views;
+- fixed `M4 N8 K1` work division;
+- producer cores `0,8,16,24` and identical consumer placement;
+- inputs, weights, seed, runtime, pod, warmups, and event count.
+
+Only the handoff representation changed:
+
+```text
+Explicit materialization: mul -> LX shuffle S1-to-S2 -> fused BMM
+Consumer attachment:      mul -> resident input fetch -> fused BMM
+Fused Torch control:      mul -> HBM spill/reload -> fused BMM
+```
+
+The explicit route passed exact gates for one shuffle, LX S1 and S2, BMM LX
+input, HBM weight, and no restickify. The attached route passed exact gates for
+no shuffle root, one frontend contract, one realized resident input-fetch
+plan, exact four-group/eight-replica fan-out, BMM LX input, HBM weight, and no
+restickify. All outputs passed the CPU-reference tolerance at compile and
+measurement time.
+
+### Device result
+
+Two 30-event blocks were run in reverse order after 10 warmups per block:
+
+| Route | Block 1 | Block 2 | Pooled median |
+|---|---:|---:|---:|
+| Explicit LX materialization | 398.7085 us | 395.3605 us | 397.558 us |
+| Attached LX fan-out | 397.582 us | 398.3875 us | 397.825 us |
+
+The first block favored attachment by `0.283%`; the reverse-order block favored
+explicit materialization by `0.766%`. The pooled ratio is `0.99933` and the
+geometric mean of block ratios is `0.99760`. This is a tie, not an attachment
+speedup.
+
+The two DeepTools versions were independently calibrated with the same fused
+HBM graph:
+
+| HBM compiler control | Median |
+|---|---:|
+| Reviewed materialization build `a74a581a85` | 663.2485 us |
+| Attached-input-fetch build `a4930be14` plus patch | 663.062 us |
+
+Their ratio is `1.000281`, and both emitted the same canonical bundle hash
+`4c4fbd53e0991cc385340825a250e30e94f74e97478cfd612ef13778d15f69d9`.
+Backend-version bias is therefore negligible. Explicit LX is `1.6683x` faster
+than its fused-HBM control; attached LX is `1.6667x` faster than its own.
+
+The conclusion is narrow but clear. Torch-level QKV fusion is the roughly
+663 us control; it does not explain the roughly 398 us result. LX-to-LX
+transport is the material optimization. Consumer attachment removes a
+standalone shuffle root and redundant S2 abstraction, but it does not improve
+device latency over correct explicit LX materialization for this fused QKV
+case.
+
+### Final emitted transport proof
+
+The accepted bundles were copied and replayed with `DXP_DEBUG=1` to inspect
+the final SMC, rather than relying on the Torch graph or planner telemetry.
+
+| Route | Final SMC | `L3_STGU` | `L3_LDGU` | Shuffle root |
+|---|---|---:|---:|---|
+| Explicit LX | `1_shuffle-Relayout0/smc.txt` | 4 | 28 | yes |
+| Attached LX | `sdsc_1/smc.txt` | 4 | 28 | no |
+
+Both programs therefore realize the same four source cohorts rooted at cores
+`0,8,16,24`, with one sender and seven remote consumers per cohort. The
+explicit form contains that traffic in a standalone shuffle program. The
+attached form embeds it in the BMM program. This final-program evidence
+explains the timing tie: attachment changes integration and LX storage
+lifetime, but not the physical grouped fan-out count for this case.
+
+```text
+Explicit final SMC:
+  /tmp/lx_explicit_matched_final_dump_20260802/debug/
+    1_shuffle-Relayout0/smc.txt
+  SHA-256: 15ac8898a866dc71300b612f67a2c58cf16c579a292609bbf759143e07cc18f4
+
+Attached final SMC:
+  /tmp/lx_attached_matched_final_dump_20260802/debug/sdsc_1/smc.txt
+  SHA-256: e119b20571accd0a3bf20837b15cecb1d620f19e79a58c1c44c1748a9249d313
+```
+
+### Timing method
+
+The selected `_C.so` executed correctly but did not expose the Kineto
+PrivateUse1 activity bridge during this pass. The probe now supports
+`--timing-source aiupti`, which registers directly for AIUPTI compute records
+and uses each matched execute record's `end_ns - start_ns`. This is the device
+timestamp source underneath Kineto, not host wall time. Every accepted run had
+exactly 30 matched execute records, positive duration, zero dropped records,
+and no callback errors.
+
+The copied DXP build has private LLVM/DeepTools libraries that must not leak
+into the Torch process. `dxp_private_runtime_wrapper.sh` adds those libraries
+only in the DXP child, preserving the common runtime for both device programs.
+
+### Exact paths and versions
+
+```text
+Mac feature worktree:
+  /private/tmp/torch-spyre-gqa-sparse.5STuN0
+
+Torch device source/overlay:
+  /home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/
+    latest_cost_model_granite_block_20260724_202708/
+    antoni_exact_repro_20260724/torch-spyre-design-a-2c1ab140
+  Git base: 2c1ab140d23f7e200ef45ef26b057229cb393727
+
+Reviewed materialization source and build on adnan-clc:
+  /home/adnan/codex-isolated/
+    deeptools-lx-materialization-a74-matched-20260802
+  source: a74a581a85315ea8860250b831996a3a65745a67
+  tree:   5aa19523d80fd9214a8800b2c5bee1443e66060e
+  build:  build-manageoff-matched/dxp/dxp_standalone
+
+Copied materialization runtime on adnan-cdx:
+  /tmp/deeptools-a74-runtime-20260802
+  /tmp/dxp-a74-wrapper-20260802/dxp_standalone
+
+Attached-input-fetch DeepTools on adnan-cdx:
+  /home/adnan-cdx/codex-isolated/lx_stationary_matmul_deeptools_20260801
+  base: a4930be14b6e7d01f7447b7692a79a20487c09c3
+  DXP:  fb15c38f2207449eaa725aed62d8e365954f1aa0f4a95286d5dd90b9cdad28be
+
+Accepted explicit runs:
+  /tmp/lx_explicit_matched_qkv_m64_20260802_v12
+  /tmp/lx_explicit_matched_qkv_m64_20260802_v13
+Accepted attached runs:
+  /tmp/lx_attached_matched_qkv_m64_20260802_v1
+  /tmp/lx_attached_matched_qkv_m64_20260802_v2
+Compiler calibration runs:
+  /tmp/lx_hbm_materialization_compiler_qkv_m64_20260802_v1
+  /tmp/lx_hbm_attached_compiler_qkv_m64_20260802_v1
+```
+
+Durable branch artifacts:
+
+```text
+ring_compute_prototypes/lx_stationary_weight_matmul/probe.py
+ring_compute_prototypes/lx_stationary_weight_matmul/dxp_private_runtime_wrapper.sh
+ring_compute_prototypes/lx_stationary_weight_matmul/explicit_vs_attached_results.json
+```
+
+### Stop call
+
+Do not add another consumer-attached optimization solely to chase this fused
+QKV microbenchmark. The direct-consume and explicit-materialization schedules
+already realize the same device service within run-to-run variation. Preserve
+attachment as a lean compiler substrate where it simplifies lifetime and
+capacity, but attribute the measured performance win to LX transport versus
+HBM. A new speedup claim needs a case where attachment enables overlap,
+eliminates otherwise unavoidable storage, or changes the final schedule—not
+just a different representation of the same fan-out.

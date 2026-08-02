@@ -1,0 +1,423 @@
+{
+  "comparison": {
+    "block_1": {
+      "attached_us": 397.582,
+      "explicit_over_attached": 1.0028333777686111,
+      "explicit_us": 398.70849999999996
+    },
+    "block_2_reverse_order": {
+      "attached_us": 398.3875,
+      "explicit_over_attached": 0.9924018700385931,
+      "explicit_us": 395.3605
+    },
+    "geometric_mean_block_ratio": 0.9976039892836679,
+    "hbm_compiler_control": {
+      "attached_compiler_us": 663.062,
+      "materialization_compiler_us": 663.2485,
+      "ratio": 1.0002812708313853
+    },
+    "pooled_60_events": {
+      "attached_us": 397.82500000000005,
+      "explicit_over_attached": 0.9993288506252748,
+      "explicit_us": 397.558
+    },
+    "speedup_over_own_hbm": {
+      "attached": 1.6667177779174258,
+      "explicit": 1.6683062597155636
+    }
+  },
+  "date": "2026-08-02",
+  "decision": "No measurable device-latency difference between explicit materialization and consumer attachment at this fused QKV shape. The material win is LX transport versus a fused Torch-layer HBM spill; attachment removes a standalone shuffle root and redundant S2 abstraction but does not add a separate speedup here.",
+  "device": "a6-quantization/adnan-cdx-spyre-dev-pf",
+  "fixed_factors": [
+    "identical Torch graph",
+    "one fused QKV BMM",
+    "identical M4N8K1 work division",
+    "identical producer and consumer core maps",
+    "same activation and weights",
+    "same pod and runtime",
+    "10 warmups and 30 device events per block"
+  ],
+  "final_emitted_transport": {
+    "attached": {
+      "cohort_source_cores": [
+        0,
+        8,
+        16,
+        24
+      ],
+      "l3_ldgu_count": 28,
+      "l3_stgu_count": 4,
+      "sha256": "e119b20571accd0a3bf20837b15cecb1d620f19e79a58c1c44c1748a9249d313",
+      "smc_path": "/tmp/lx_attached_matched_final_dump_20260802/debug/sdsc_1/smc.txt",
+      "standalone_shuffle_root": false
+    },
+    "collection": "DXP_DEBUG replay of copies of the accepted device bundles",
+    "explicit": {
+      "cohort_source_cores": [
+        0,
+        8,
+        16,
+        24
+      ],
+      "l3_ldgu_count": 28,
+      "l3_stgu_count": 4,
+      "sha256": "15ac8898a866dc71300b612f67a2c58cf16c579a292609bbf759143e07cc18f4",
+      "smc_path": "/tmp/lx_explicit_matched_final_dump_20260802/debug/1_shuffle-Relayout0/smc.txt",
+      "standalone_shuffle_root": true
+    },
+    "interpretation": "Both final programs realize the same four sender and seven remote consumer grouped fan-out. Attachment changes integration and storage lifetime, not the physical communication count in this case."
+  },
+  "only_intended_difference": {
+    "attached": [
+      "mul",
+      "batchmatmul"
+    ],
+    "explicit": [
+      "mul",
+      "shuffle",
+      "batchmatmul"
+    ]
+  },
+  "question": "Does attaching the LX fan-out directly to the fused BMM outperform an otherwise matched explicit S1-to-S2 LX materialization?",
+  "runs": {
+    "attached_block_1": {
+      "bundle_sha256": "e575c64239808a37c2f2d7ec580b33e30a5de6c540991bedfb2baeccdcf5be76",
+      "correctness_gate": true,
+      "deeptools_source": "a4930be14b6e7d01f7447b7692a79a20487c09c3",
+      "device_event_gate": true,
+      "device_us": {
+        "max": 417.279,
+        "mean": 395.49056666666667,
+        "median": 397.582,
+        "min": 367.504,
+        "samples": [
+          399.489,
+          397.66,
+          400.324,
+          397.992,
+          387.583,
+          405.035,
+          417.279,
+          367.504,
+          416.367,
+          398.046,
+          396.194,
+          396.223,
+          401.801,
+          406.162,
+          410.616,
+          388.297,
+          392.324,
+          377.673,
+          378.436,
+          400.255,
+          394.182,
+          407.164,
+          412.192,
+          369.374,
+          393.161,
+          390.031,
+          373.389,
+          394.47,
+          397.99,
+          397.504
+        ]
+      },
+      "op_inventory": [
+        "mul",
+        "batchmatmul"
+      ],
+      "route": "lx",
+      "run_dir": "/tmp/lx_attached_matched_qkv_m64_20260802_v1",
+      "structural_gate": true
+    },
+    "attached_block_2": {
+      "bundle_sha256": "e575c64239808a37c2f2d7ec580b33e30a5de6c540991bedfb2baeccdcf5be76",
+      "correctness_gate": true,
+      "deeptools_source": "a4930be14b6e7d01f7447b7692a79a20487c09c3",
+      "device_event_gate": true,
+      "device_us": {
+        "max": 431.332,
+        "mean": 398.0106333333333,
+        "median": 398.3875,
+        "min": 367.674,
+        "samples": [
+          424.758,
+          384.256,
+          431.332,
+          397.381,
+          404.16,
+          409.569,
+          407.382,
+          400.95,
+          392.015,
+          408.789,
+          382.98,
+          390.354,
+          391.275,
+          377.332,
+          394.646,
+          414.303,
+          367.674,
+          407.23,
+          381.431,
+          413.829,
+          372.838,
+          398.498,
+          404.323,
+          372.989,
+          399.898,
+          398.277,
+          389.536,
+          409.985,
+          392.493,
+          419.836
+        ]
+      },
+      "op_inventory": [
+        "mul",
+        "batchmatmul"
+      ],
+      "route": "lx",
+      "run_dir": "/tmp/lx_attached_matched_qkv_m64_20260802_v2",
+      "structural_gate": true
+    },
+    "explicit_block_1": {
+      "bundle_sha256": "f8326ec53e30c3eb009516cda51c25ce9c1a1aa5c20134bfd8d18b68884cc6f0",
+      "correctness_gate": true,
+      "deeptools_source": "a74a581a85315ea8860250b831996a3a65745a67",
+      "device_event_gate": true,
+      "device_us": {
+        "max": 421.51,
+        "mean": 396.61333333333334,
+        "median": 398.70849999999996,
+        "min": 378.399,
+        "samples": [
+          386.025,
+          390.076,
+          401.097,
+          378.399,
+          398.747,
+          397.078,
+          398.686,
+          399.844,
+          399.973,
+          398.731,
+          380.345,
+          411.215,
+          403.342,
+          398.832,
+          402.343,
+          383.475,
+          386.83,
+          387.386,
+          421.51,
+          385.496,
+          403.812,
+          399.182,
+          411.214,
+          388.203,
+          401.641,
+          396.669,
+          399.747,
+          393.386,
+          397.978,
+          397.138
+        ]
+      },
+      "op_inventory": [
+        "mul",
+        "shuffle",
+        "batchmatmul"
+      ],
+      "route": "lx_explicit",
+      "run_dir": "/tmp/lx_explicit_matched_qkv_m64_20260802_v12",
+      "structural_gate": true
+    },
+    "explicit_block_2": {
+      "bundle_sha256": "f8326ec53e30c3eb009516cda51c25ce9c1a1aa5c20134bfd8d18b68884cc6f0",
+      "correctness_gate": true,
+      "deeptools_source": "a74a581a85315ea8860250b831996a3a65745a67",
+      "device_event_gate": true,
+      "device_us": {
+        "max": 415.53,
+        "mean": 396.1080666666667,
+        "median": 395.3605,
+        "min": 381.726,
+        "samples": [
+          402.606,
+          389.159,
+          384.805,
+          383.639,
+          394.996,
+          395.929,
+          395.725,
+          414.197,
+          389.833,
+          387.558,
+          387.727,
+          384.091,
+          407.285,
+          384.077,
+          405.902,
+          400.579,
+          415.53,
+          403.863,
+          385.055,
+          391.309,
+          411.604,
+          390.575,
+          405.205,
+          411.373,
+          383.135,
+          399.296,
+          381.726,
+          403.514,
+          387.413,
+          405.536
+        ]
+      },
+      "op_inventory": [
+        "mul",
+        "shuffle",
+        "batchmatmul"
+      ],
+      "route": "lx_explicit",
+      "run_dir": "/tmp/lx_explicit_matched_qkv_m64_20260802_v13",
+      "structural_gate": true
+    },
+    "hbm_attached_compiler": {
+      "bundle_sha256": "4c4fbd53e0991cc385340825a250e30e94f74e97478cfd612ef13778d15f69d9",
+      "correctness_gate": true,
+      "deeptools_source": "a4930be14b6e7d01f7447b7692a79a20487c09c3",
+      "device_event_gate": true,
+      "device_us": {
+        "max": 665.974,
+        "mean": 662.9602,
+        "median": 663.062,
+        "min": 659.529,
+        "samples": [
+          662.942,
+          664.552,
+          665.207,
+          661.793,
+          662.522,
+          661.111,
+          662.661,
+          662.533,
+          661.317,
+          663.253,
+          664.586,
+          664.189,
+          661.761,
+          659.529,
+          662.751,
+          660.776,
+          663.006,
+          664.807,
+          663.754,
+          663.459,
+          663.378,
+          663.118,
+          664.888,
+          663.885,
+          662.107,
+          663.328,
+          665.974,
+          662.387,
+          663.529,
+          659.703
+        ]
+      },
+      "op_inventory": [
+        "mul",
+        "batchmatmul"
+      ],
+      "route": "hbm",
+      "run_dir": "/tmp/lx_hbm_attached_compiler_qkv_m64_20260802_v1",
+      "structural_gate": true
+    },
+    "hbm_materialization_compiler": {
+      "bundle_sha256": "4c4fbd53e0991cc385340825a250e30e94f74e97478cfd612ef13778d15f69d9",
+      "correctness_gate": true,
+      "deeptools_source": "a74a581a85315ea8860250b831996a3a65745a67",
+      "device_event_gate": true,
+      "device_us": {
+        "max": 666.729,
+        "mean": 663.0036666666667,
+        "median": 663.2485,
+        "min": 658.316,
+        "samples": [
+          659.921,
+          660.839,
+          665.259,
+          663.875,
+          663.82,
+          661.176,
+          665.253,
+          663.768,
+          663.871,
+          662.289,
+          665.675,
+          662.572,
+          664.709,
+          659.082,
+          661.809,
+          662.572,
+          665.37,
+          660.819,
+          664.696,
+          660.921,
+          661.099,
+          663.829,
+          662.786,
+          664.73,
+          663.177,
+          663.32,
+          665.626,
+          658.316,
+          666.729,
+          662.202
+        ]
+      },
+      "op_inventory": [
+        "mul",
+        "batchmatmul"
+      ],
+      "route": "hbm",
+      "run_dir": "/tmp/lx_hbm_materialization_compiler_qkv_m64_20260802_v1",
+      "structural_gate": true
+    }
+  },
+  "schema": "lx_explicit_vs_attached_matched_v1",
+  "shape": {
+    "k": 4096,
+    "m": 64,
+    "projection_schedule": "fused",
+    "projection_widths": [
+      4096,
+      1024,
+      1024
+    ],
+    "work_division": {
+      "k": 1,
+      "m": 4,
+      "n": 8
+    }
+  },
+  "timing": {
+    "blocks_per_lx_route": 2,
+    "events_per_block": 30,
+    "source": "direct AIUPTI compute-execute activity end_ns minus start_ns",
+    "warmups": 10,
+    "why_not_kineto": "The selected runtime extension did not expose the PrivateUse1 activity bridge in this session; direct AIUPTI is the same underlying device timestamp source."
+  },
+  "versions": {
+    "attached_deeptools_base": "a4930be14b6e7d01f7447b7692a79a20487c09c3",
+    "attached_dxp_sha256": "fb15c38f2207449eaa725aed62d8e365954f1aa0f4a95286d5dd90b9cdad28be",
+    "materialization_deeptools": "a74a581a85315ea8860250b831996a3a65745a67",
+    "materialization_tree": "5aa19523d80fd9214a8800b2c5bee1443e66060e",
+    "torch_spyre_device_base": "2c1ab140d23f7e200ef45ef26b057229cb393727"
+  }
+}
