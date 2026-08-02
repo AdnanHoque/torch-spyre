@@ -12,6 +12,10 @@ FP8_WARMUPS="${FP8_WARMUPS:-5}"
 FP8_REPS="${FP8_REPS:-20}"
 FP8_K="${FP8_K:-4096}"
 FP8_N="${FP8_N:-4096}"
+FP8_WEIGHT_DATA_DIVISOR="${FP8_WEIGHT_DATA_DIVISOR:-8}"
+FP8_M_SPLIT="${FP8_M_SPLIT:-8}"
+FP8_N_SPLIT="${FP8_N_SPLIT:-4}"
+FP8_CASES="${FP8_CASES:-fp16 baseline_fp8 optimized_fp8}"
 FP8_DERIVE_ACTIVATION_SCALE="${FP8_DERIVE_ACTIVATION_SCALE:-0}"
 FP8_FUSED_ACTIVATION_SCALE="${FP8_FUSED_ACTIVATION_SCALE:-0}"
 FP8_LX_RELAYOUT_MIN_SOURCE_BYTES="${FP8_LX_RELAYOUT_MIN_SOURCE_BYTES:-65536}"
@@ -57,12 +61,12 @@ run_case() {
 
   if [[ "$label" == optimized_fp8 ]]; then
     export SPYRE_LX_PLANNER_RELAYOUT=1
-    export TORCH_SPYRE_FP8_LX_POC_M_SPLIT=8
-    export TORCH_SPYRE_FP8_LX_POC_N_SPLIT=4
+    export TORCH_SPYRE_FP8_LX_POC_M_SPLIT="$FP8_M_SPLIT"
+    export TORCH_SPYRE_FP8_LX_POC_N_SPLIT="$FP8_N_SPLIT"
     export TORCH_SPYRE_LX_RELAYOUT_MIN_SOURCE_BYTES="$FP8_LX_RELAYOUT_MIN_SOURCE_BYTES"
     export TORCH_SPYRE_LX_RELAYOUT_MAX_SOURCE_BYTES="$FP8_LX_RELAYOUT_MAX_SOURCE_BYTES"
     export SPYRE_CORE_ID_K_FAST_EMISSION=0
-    extra_args+=(--m-split 8 --n-split 4)
+    extra_args+=(--m-split "$FP8_M_SPLIT" --n-split "$FP8_N_SPLIT")
     if [[ "$FP8_DERIVE_ACTIVATION_SCALE" == 1 && "$FP8_FUSED_ACTIVATION_SCALE" == 1 ]]; then
       extra_args+=(--fused-activation-scale)
     fi
@@ -71,6 +75,7 @@ run_case() {
   if "$PYTHON_BIN" "$SCRIPT_DIR/bench_qo_fp8_poc.py" \
       --variant "$variant" \
       --m "$m" --k "$FP8_K" --n "$FP8_N" \
+      --weight-data-divisor "$FP8_WEIGHT_DATA_DIVISOR" \
       --warmups "$FP8_WARMUPS" --reps "$FP8_REPS" \
       --output-dir "$case_root/result" \
       "${extra_args[@]}" >"$case_root/run.log" 2>&1; then
@@ -84,7 +89,15 @@ run_case() {
 }
 
 for m in $FP8_M_VALUES; do
-  run_case "$m" fp16 fp16
-  run_case "$m" baseline_fp8 fp8_baseline
-  run_case "$m" optimized_fp8 fp8_optimized
+  for label in $FP8_CASES; do
+    case "$label" in
+      fp16) run_case "$m" fp16 fp16 ;;
+      baseline_fp8) run_case "$m" baseline_fp8 fp8_baseline ;;
+      optimized_fp8) run_case "$m" optimized_fp8 fp8_optimized ;;
+      *)
+        echo "Unknown FP8_CASES entry: $label" >&2
+        exit 2
+        ;;
+    esac
+  done
 done
