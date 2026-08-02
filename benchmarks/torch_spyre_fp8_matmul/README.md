@@ -79,3 +79,37 @@ FP8_DXP_PRELOAD=/opt/ibm/spyre/deeptools/lib/libdxp.so
 
 Accepted results and limitations are documented in
 [`../../docs/results/granite_e2e/torch_spyre_fp8_planner_20260731/`](../../docs/results/granite_e2e/torch_spyre_fp8_planner_20260731/).
+
+## K/V shared-activation probe
+
+`bench_kv_pair_fp8.py` compiles the two Granite TP1 K/V projections together:
+
+```text
+[M, 4096] @ [4096, 1024] -> K
+[M, 4096] @ [4096, 1024] -> V
+```
+
+The source deliberately spells two independent dynamic quantization chains.
+The compiler must reduce them to one `quantscalepertokenfp8` and one `qfp8mb`;
+the benchmark rejects generated code that does not. Static K/V weight packing
+is excluded from the timed graph.
+
+The focused LX PoC uses:
+
+```bash
+DXP_LX_FRAC_AVAIL=0.2 \
+SPYRE_LX_PLANNER_RELAYOUT=1 \
+TORCH_SPYRE_FP8_LX_POC_M_SPLIT=8 \
+TORCH_SPYRE_FP8_LX_POC_N_SPLIT=4 \
+TORCH_SPYRE_LX_RELAYOUT_MIN_SOURCE_BYTES=65536 \
+TORCH_SPYRE_LX_RELAYOUT_MAX_SOURCE_BYTES=8388608 \
+TORCH_SPYRE_FP8_LX_POC_RELEASE_QFP8MB_INPUT=1 \
+python benchmarks/torch_spyre_fp8_matmul/bench_kv_pair_fp8.py \
+  --variant fp8_shared --m 2048 --k 4096 --n 1024 \
+  --warmups 5 --reps 30 --output-dir /path/to/result
+```
+
+The qfp8mb input-release flag is an opt-in lifetime experiment, not the default
+allocator policy. Results, emitted-order proof, and remaining production gates
+are documented in
+[`../../docs/results/granite_e2e/torch_spyre_fp8_kv_focused_20260802/`](../../docs/results/granite_e2e/torch_spyre_fp8_kv_focused_20260802/).

@@ -1,0 +1,4 @@
+M,prior_shared_quant_us,shared_destination_us,final_lifetime_us,shared_destination_over_prior,final_over_pre_lifetime,prior_transport,shared_destination_transport,final_transport
+512,155.376633,146.281533,146.389700,1.062175,0.999261,two_shuffles,one_shuffle,one_shuffle
+1024,278.984400,263.449433,263.343167,1.058968,1.000404,two_shuffles,one_shuffle,one_shuffle
+2048,599.450167,599.450167,537.534200,1.000000,1.115185,hbm,hbm,one_shuffle
