@@ -1,0 +1,19 @@
+projection,M_split,N_split,status,kernel_us,repetitions
+Q/O,1,32,pass,240.6165,10
+Q/O,2,16,pass,222.3296,10
+Q/O,4,8,pass,217.6018,10
+Q/O,8,4,pass,220.6869,10
+Q/O,16,2,pass,275.0870,10
+Q/O,32,1,pass,502.2551,10
+K/V shared pair,2,16,illegal QFP8WT group cut,,
+K/V shared pair,4,8,pass,148.0919,10
+K/V shared pair,8,4,pass,143.6519,10
+K/V shared pair,16,2,pass,167.5925,10
+K/V shared pair,32,1,pass,282.1161,10
+gate/up,4,8,illegal QFP8WT group cut,,
+gate/up,8,4,pass,592.6781,10
+gate/up,16,2,pass,748.2878,10
+down,2,16,pass,625.3860,10
+down,4,8,pass,588.3023,10
+down,8,4,pass,603.6343,10
+down,16,2,pass,816.6636,10

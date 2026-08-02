@@ -1,0 +1,9 @@
+M,projection,K,N,measurement_scope,fp16_us,fp8_us,speedup
+64,K/V shared pair,4096,1024,two projections with one activation conversion,124.9038667,93.1816,1.3404348788
+64,Q or O,4096,4096,single projection,228.3632,146.7486,1.5561524948
+64,gate or up,4096,12800,single projection,707.64295,517.6753333,1.3669628520
+64,down,12800,4096,single projection,700.0418,449.8773667,1.5560725029
+512,K/V shared pair,4096,1024,two projections with one activation conversion,188.88,143.1054,1.3198663363
+512,Q or O,4096,4096,single projection M4xN8,318.47625,216.5974,1.4703604475
+512,gate or up,4096,12800,single projection,996.36945,593.4233,1.6790197655
+512,down,12800,4096,single projection,1141.84515,589.40645,1.9372796989
