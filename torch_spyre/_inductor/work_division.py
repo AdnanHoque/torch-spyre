@@ -330,6 +330,14 @@ def _is_qfp8wt_tensor(td: TensorDep) -> bool:
     )
 
 
+def _is_qfp8mb_tensor(td: TensorDep) -> bool:
+    """Check if a specific tensor has QFP8MB element arrangement."""
+    return (
+        hasattr(td.layout.device_layout, "element_arrangement")
+        and td.layout.device_layout.element_arrangement == ElementArrangement.QFP8MB
+    )
+
+
 def _physical_output_split_is_legal(
     logical_elements: int,
     split: int,
@@ -1186,6 +1194,36 @@ def work_distribution_pass(
             del committed_splits[var]
         min_splits[var] = split_val
 
+    planning_splits = dict(committed_splits)
+    pack_m_split = config.fp8_pack_poc_m_split
+    if pack_m_split and _is_qfp8mb_tensor(output_td):
+        # A fixed split of one is still a planning constraint. Keep QFP8MB's
+        # repeated K dimension out of the greedy priority list before it
+        # spends cores there, then apply the requested M-row-pair ownership.
+        # Without this oracle, preserve normal planning: maximum pack fanout
+        # is not universally profitable because it can force an ownership
+        # change before a differently partitioned matmul.
+        planning_splits.update(qfp8_constraints)
+        m_dims = [dim for dim in it_space_adjusted if dim not in qfp8_constraints]
+        if len(m_dims) != 1:
+            raise Unsupported(
+                "QFP8MB packing-grid oracle expected one logical M dimension, "
+                f"found {m_dims}"
+            )
+        m_dim = m_dims[0]
+        m_pair_groups = concretize_expr(it_space_adjusted[m_dim])
+        if (
+            pack_m_split < 1
+            or pack_m_split > max_cores
+            or m_pair_groups % pack_m_split != 0
+        ):
+            raise Unsupported(
+                "QFP8MB packing-grid oracle requires a positive split <= "
+                f"{max_cores} dividing {m_pair_groups} M-row pairs, got "
+                f"{pack_m_split}"
+            )
+        planning_splits[m_dim] = pack_m_split
+
     if not config.ignore_work_division_hints:
         user_splits = _resolve_work_div_hint(op, it_space_adjusted)
         if user_splits is not None:
@@ -1224,7 +1262,7 @@ def work_distribution_pass(
     reduction_vars = [v for v in it_space_adjusted if v not in coord_vars]
     blocked = coordinate_mask_blocked_vars(reduction_vars, stick_vars, it_space)
     splits, output_dims, reduction_dims = _default_split(
-        it_space_adjusted, output_td, committed_splits, max_cores, symbol_meta, blocked
+        it_space_adjusted, output_td, planning_splits, max_cores, symbol_meta, blocked
     )
 
     # Enforce compound-stick split constraints on the final split.
@@ -1264,6 +1302,104 @@ def _is_fp8_scale_op(op: ComputedBuffer) -> bool:
         str(getattr(origin, "target", "")) == "spyre.apply_fp8_scale.default"
         for origin in origins
     )
+
+
+def _has_origin_target(op: ComputedBuffer, target: str) -> bool:
+    origins = getattr(op.data, "origins", ())
+    return any(str(getattr(origin, "target", "")) == target for origin in origins)
+
+
+def _force_fp8_pack_normalization_work_division(
+    graph: GraphLowering,
+    op: ComputedBuffer,
+    args: list[SchedNodeArg],
+    max_cores: int,
+) -> bool:
+    """Apply the private same-owner oracle to div -> QFP8MB only."""
+
+    requested = config.fp8_pack_chain_poc_m_split
+    normalization_targets = {
+        "aten.div.Tensor",
+        "aten.clamp.default",
+        "aten.clamp.Tensor",
+        "spyre.clamp.default",
+    }
+    if not requested or not any(
+        _has_origin_target(op, target) for target in normalization_targets
+    ):
+        return False
+
+    output_name = op.get_name()
+    direct_consumers = [
+        consumer
+        for consumer in graph.operations
+        if isinstance(consumer, ComputedBuffer)
+        and any(
+            getattr(dep, "name", None) == output_name
+            for dep in op_read_writes(consumer).reads
+        )
+    ]
+    feeds_qfp8mb = any(
+        _has_origin_target(consumer, "spyre.qfp8mb.default")
+        for consumer in direct_consumers
+    )
+    if not feeds_qfp8mb and _has_origin_target(op, "aten.div.Tensor"):
+        # The numerically conservative path inserts one explicit clamp between
+        # division and packing. Match both nodes to the same private grid.
+        feeds_qfp8mb = any(
+            any(
+                isinstance(grandchild, ComputedBuffer)
+                and _has_origin_target(grandchild, "spyre.qfp8mb.default")
+                and any(
+                    getattr(dep, "name", None) == consumer.get_name()
+                    for dep in op_read_writes(grandchild).reads
+                )
+                for grandchild in graph.operations
+            )
+            for consumer in direct_consumers
+            if any(
+                _has_origin_target(consumer, target)
+                for target in (
+                    "aten.clamp.default",
+                    "aten.clamp.Tensor",
+                    "spyre.clamp.default",
+                )
+            )
+        )
+    if not feeds_qfp8mb:
+        return False
+
+    it_space = iteration_space_from_op(op)
+    input_tds, output_td = collect_tensor_deps(op, args)
+    symbol_meta = _collect_symbol_metadata(it_space)
+    it_space_adjusted, _ = adjust_it_space_for_sticks(
+        it_space, input_tds + [output_td], symbol_meta
+    )
+    terminal_vars = output_td.device_coords[-1].free_symbols
+    m_dims = [dim for dim in it_space_adjusted if dim not in terminal_vars]
+    if len(m_dims) != 1:
+        raise Unsupported(
+            "FP8 packing-chain oracle expected one non-stick M dimension, "
+            f"found {m_dims}"
+        )
+    m_dim = m_dims[0]
+    m_elements = concretize_expr(it_space_adjusted[m_dim])
+    if requested < 1 or requested > max_cores or m_elements % requested != 0:
+        raise Unsupported(
+            "FP8 packing-chain oracle requires a positive split <= "
+            f"{max_cores} dividing M={m_elements}, got {requested}"
+        )
+
+    splits = {dim: 1 for dim in it_space_adjusted}
+    splits[m_dim] = requested
+    apply_splits(op, splits, output_td)
+    logger.debug(
+        "fp8_pack_chain work_division %s: M split=%s splits=%s",
+        op.get_name(),
+        requested,
+        splits,
+    )
+    return True
 
 
 def _map_producer_output_splits(
@@ -1931,6 +2067,8 @@ def work_distribution(
         rw = op_read_writes(op)
         args = _apply_input_layout_overrides(op, get_mem_deps_from_rw(rw))
         if isinstance(op.data, Pointwise):
+            if _force_fp8_pack_normalization_work_division(graph, op, args, max_cores):
+                continue
             if _inherit_fp8_scale_work_division(graph, op, args, max_cores):
                 continue
             divide_pointwise_op(op, args, max_cores, work_distribution_pass)

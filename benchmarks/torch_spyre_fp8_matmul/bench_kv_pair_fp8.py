@@ -24,6 +24,7 @@ from bench_qo_fp8_poc import (
     dynamic_fp8_row_scale,
     make_host_data,
     quantize_activation_fp8,
+    raw_scaled_mm,
     scaled_mm,
     sha256,
     summarize_trace,
@@ -40,6 +41,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmups", type=int, default=5)
     parser.add_argument("--reps", type=int, default=30)
     parser.add_argument("--weight-data-divisor", type=int, default=8)
+    parser.add_argument(
+        "--compact-fp16-scales",
+        action="store_true",
+        help=(
+            "keep dynamic row scales and static column scales in the FP16 "
+            "format consumed by the two backend scale programs"
+        ),
+    )
+    parser.add_argument(
+        "--explicit-activation-clamp",
+        action="store_true",
+        help=(
+            "retain the explicit E4M3 saturation clamp in the compact FP16 "
+            "scale path instead of relying on the conversion operation"
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
 
@@ -90,6 +107,10 @@ def main() -> None:
     args = parse_args()
     if min(args.m, args.k, args.n, args.reps) < 1 or args.warmups < 0:
         raise ValueError("M/K/N/reps must be positive and warmups non-negative")
+    if args.compact_fp16_scales and args.variant != "fp8_shared":
+        raise ValueError("--compact-fp16-scales requires --variant fp8_shared")
+    if args.explicit_activation_clamp and not args.compact_fp16_scales:
+        raise ValueError("--explicit-activation-clamp requires --compact-fp16-scales")
     if args.m % 2 or args.k % 64 or args.n % 64:
         raise ValueError(
             "the DD2 K/V pair probe requires even M and K/N multiples of 64"
@@ -121,7 +142,11 @@ def main() -> None:
     weight_v = weight_v_host.to("spyre")
     quant_scale_b = quant_scale_b_host.to("spyre")
     output_scale_a = output_scale_a_host.to("spyre")
-    output_scale_b = output_scale_b_host.to("spyre")
+    output_scale_b = (
+        output_scale_b_host.to(torch.float16).to("spyre")
+        if args.compact_fp16_scales
+        else output_scale_b_host.to("spyre")
+    )
     compile_options = {"epilogue_fusion": False}
 
     if args.variant == "fp16":
@@ -150,13 +175,49 @@ def main() -> None:
         # Keep the two source expressions independent here.  The compiler pass,
         # rather than benchmark source sharing, owns their canonicalization.
         def graph_fn(a, wk, wv, column_scale):
-            scale_k = dynamic_fp8_row_scale(a, fused=True)
-            activation_k = quantize_activation_fp8(a, scale_k, "minibatch")
-            result_k = scaled_mm(activation_k, wk, scale_k, column_scale, True)
+            scale_k = dynamic_fp8_row_scale(
+                a,
+                fused=True,
+                keep_backend_fp16=args.compact_fp16_scales,
+            )
+            activation_k = quantize_activation_fp8(
+                a,
+                scale_k,
+                "minibatch",
+                direct_divide=args.compact_fp16_scales,
+                skip_clamp=(
+                    args.compact_fp16_scales and not args.explicit_activation_clamp
+                ),
+            )
+            if args.compact_fp16_scales:
+                zero = torch.zeros((), dtype=torch.float16, device=a.device)
+                result_k = raw_scaled_mm(activation_k, wk, True)
+                result_k = torch.ops.spyre.apply_fp8_scale(result_k, scale_k, zero)
+                result_k = torch.ops.spyre.apply_fp8_scale(result_k, column_scale, zero)
+            else:
+                result_k = scaled_mm(activation_k, wk, scale_k, column_scale, True)
 
-            scale_v = dynamic_fp8_row_scale(a, fused=True)
-            activation_v = quantize_activation_fp8(a, scale_v, "minibatch")
-            result_v = scaled_mm(activation_v, wv, scale_v, column_scale, True)
+            scale_v = dynamic_fp8_row_scale(
+                a,
+                fused=True,
+                keep_backend_fp16=args.compact_fp16_scales,
+            )
+            activation_v = quantize_activation_fp8(
+                a,
+                scale_v,
+                "minibatch",
+                direct_divide=args.compact_fp16_scales,
+                skip_clamp=(
+                    args.compact_fp16_scales and not args.explicit_activation_clamp
+                ),
+            )
+            if args.compact_fp16_scales:
+                zero = torch.zeros((), dtype=torch.float16, device=a.device)
+                result_v = raw_scaled_mm(activation_v, wv, True)
+                result_v = torch.ops.spyre.apply_fp8_scale(result_v, scale_v, zero)
+                result_v = torch.ops.spyre.apply_fp8_scale(result_v, column_scale, zero)
+            else:
+                result_v = scaled_mm(activation_v, wv, scale_v, column_scale, True)
             return result_k, result_v
 
         annotate_named_dimensions(
@@ -269,6 +330,11 @@ def main() -> None:
             "output_scale_passes_per_projection": 2
             if args.variant == "fp8_shared"
             else 0,
+            "compact_fp16_scales_poc": args.compact_fp16_scales,
+            "direct_activation_divide_poc": args.compact_fp16_scales,
+            "skip_activation_clamp_poc": (
+                args.compact_fp16_scales and not args.explicit_activation_clamp
+            ),
         },
         "generated_op_counts": op_counts,
         "correctness": correctness,

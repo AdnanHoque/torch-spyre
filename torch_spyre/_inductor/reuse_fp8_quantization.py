@@ -19,6 +19,10 @@ activation independently.  After Spyre decompositions, each copy has the form
 
     activation, scale -> reciprocal -> mul -> clamp -> qfp8ch/qfp8mb
 
+or, for the compact DD2 packing path,
+
+    activation, scale -> div -> [optional clamp] -> qfp8ch/qfp8mb
+
 and a dynamically-computed scale may itself contain a repeated amin/amax chain.
 This pass performs common-subexpression elimination only inside those matched
 activation-quantization slices.  It deliberately does not run general graph
@@ -53,6 +57,10 @@ _CLAMP_TARGETS = {
 _MUL_TARGETS = {
     "aten.mul.Tensor",
     "aten.mul.Scalar",
+}
+
+_DIV_TARGETS = {
+    "aten.div.Tensor",
 }
 
 _RECIPROCAL_TARGETS = {
@@ -161,29 +169,48 @@ def _match_quantization_slice(root: Node) -> set[Node] | None:
     if _target_name(root) not in _QFP8_ACTIVATION_TARGETS:
         return None
 
-    clamp = _first_node_arg(root)
-    if clamp is None or _target_name(clamp) not in _CLAMP_TARGETS:
+    packed_input = _first_node_arg(root)
+    if packed_input is None:
         return None
 
-    mul = _first_node_arg(clamp)
-    if mul is None or _target_name(mul) not in _MUL_TARGETS:
+    clamp = packed_input if _target_name(packed_input) in _CLAMP_TARGETS else None
+    normalized = _first_node_arg(clamp) if clamp is not None else packed_input
+    if normalized is None:
         return None
 
-    mul_inputs = list(_node_args(mul.args))
-    reciprocal_inputs = [
-        node for node in mul_inputs if _target_name(node) in _RECIPROCAL_TARGETS
-    ]
-    if len(reciprocal_inputs) != 1 or len(mul_inputs) != 2:
+    normalization_nodes: set[Node]
+    normalized_target = _target_name(normalized)
+    if normalized_target in _MUL_TARGETS:
+        mul_inputs = list(_node_args(normalized.args))
+        reciprocal_inputs = [
+            node for node in mul_inputs if _target_name(node) in _RECIPROCAL_TARGETS
+        ]
+        if len(reciprocal_inputs) != 1 or len(mul_inputs) != 2:
+            return None
+
+        reciprocal = reciprocal_inputs[0]
+        activation = next(node for node in mul_inputs if node is not reciprocal)
+        scale = _first_node_arg(reciprocal)
+        normalization_nodes = {normalized, reciprocal}
+    elif normalized_target in _DIV_TARGETS:
+        div_inputs = list(_node_args(normalized.args))
+        if len(div_inputs) != 2:
+            return None
+
+        # aten.div.Tensor is ordered: numerator (activation), denominator
+        # (row scale).  Do not accept a commuted expression here.
+        activation, scale = div_inputs
+        normalization_nodes = {normalized}
+    else:
         return None
 
-    reciprocal = reciprocal_inputs[0]
-    activation = next(node for node in mul_inputs if node is not reciprocal)
-    scale = _first_node_arg(reciprocal)
     if scale is None:
         return None
 
     activation_source, activation_wrappers = _peel_activation_views(activation)
-    candidates = {root, clamp, mul, reciprocal, *activation_wrappers}
+    candidates = {root, *normalization_nodes, *activation_wrappers}
+    if clamp is not None:
+        candidates.add(clamp)
     _collect_scale_derivation(scale, activation_source, candidates)
     return candidates
 

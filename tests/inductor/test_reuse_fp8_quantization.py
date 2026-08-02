@@ -96,6 +96,34 @@ def _emit_specialized_dynamic_quantization(graph: Graph, activation):
     return quantized, scale
 
 
+def _emit_direct_dynamic_quantization(
+    graph: Graph,
+    activation,
+    *,
+    scale_max: float = 65504.0,
+    clamp: bool = False,
+):
+    scale = graph.call_function(
+        torch.ops.spyre.quant_scale_per_token_fp8.default,
+        args=(activation, 1.0 / 448.0, torch.finfo(torch.float32).eps, scale_max),
+    )
+    normalized = graph.call_function(
+        torch.ops.aten.div.Tensor, args=(activation, scale)
+    )
+    packed_input = (
+        graph.call_function(
+            torch.ops.spyre.clamp.default,
+            args=(normalized, -448.0, 448.0),
+        )
+        if clamp
+        else normalized
+    )
+    quantized = graph.call_function(
+        torch.ops.spyre.qfp8mb.default, args=(packed_input,)
+    )
+    return quantized, scale
+
+
 def test_reuses_shared_granite_activation_quantization():
     graph = Graph()
     activation = graph.placeholder("activation")
@@ -142,6 +170,62 @@ def test_reuses_specialized_dd2_activation_quantization():
     output = next(node for node in graph.nodes if node.op == "output").args[0]
     assert output[0] is output[2]
     assert output[1] is output[3]
+
+
+def test_reuses_direct_dd2_activation_quantization_without_clamp():
+    graph = Graph()
+    activation = graph.placeholder("activation")
+    k, k_scale = _emit_direct_dynamic_quantization(graph, activation)
+    v, v_scale = _emit_direct_dynamic_quantization(graph, activation)
+    graph.output((k, k_scale, v, v_scale))
+
+    before = _target_counts(graph)
+    assert before["spyre.quant_scale_per_token_fp8.default"] == 2
+    assert before["aten.div.Tensor"] == 2
+    assert before["spyre.qfp8mb.default"] == 2
+
+    merged = reuse_fp8_activation_quantization(graph)
+
+    after = _target_counts(graph)
+    assert merged > 0
+    assert after["spyre.quant_scale_per_token_fp8.default"] == 1
+    assert after["aten.div.Tensor"] == 1
+    assert after["spyre.qfp8mb.default"] == 1
+
+    output = next(node for node in graph.nodes if node.op == "output").args[0]
+    assert output[0] is output[2]
+    assert output[1] is output[3]
+
+
+def test_reuses_direct_dd2_activation_quantization_with_clamp():
+    graph = Graph()
+    activation = graph.placeholder("activation")
+    k, k_scale = _emit_direct_dynamic_quantization(graph, activation, clamp=True)
+    v, v_scale = _emit_direct_dynamic_quantization(graph, activation, clamp=True)
+    graph.output((k, k_scale, v, v_scale))
+
+    reuse_fp8_activation_quantization(graph)
+
+    counts = _target_counts(graph)
+    assert counts["spyre.quant_scale_per_token_fp8.default"] == 1
+    assert counts["aten.div.Tensor"] == 1
+    assert counts["spyre.clamp.default"] == 1
+    assert counts["spyre.qfp8mb.default"] == 1
+
+
+def test_does_not_merge_direct_dd2_quantization_with_different_scale_parameters():
+    graph = Graph()
+    activation = graph.placeholder("activation")
+    first, _ = _emit_direct_dynamic_quantization(graph, activation)
+    second, _ = _emit_direct_dynamic_quantization(graph, activation, scale_max=32752.0)
+    graph.output((first, second))
+
+    reuse_fp8_activation_quantization(graph)
+
+    counts = _target_counts(graph)
+    assert counts["spyre.quant_scale_per_token_fp8.default"] == 2
+    assert counts["aten.div.Tensor"] == 2
+    assert counts["spyre.qfp8mb.default"] == 2
 
 
 def test_does_not_merge_different_activation_sources():

@@ -53,6 +53,17 @@ sencores: int = int(os.getenv("SENCORES", "32"))
 # after tensor roles have identified M and N. Zero keeps normal planning.
 fp8_lx_poc_m_split: int = int(os.getenv("TORCH_SPYRE_FP8_LX_POC_M_SPLIT", "0"))
 fp8_lx_poc_n_split: int = int(os.getenv("TORCH_SPYRE_FP8_LX_POC_N_SPLIT", "0"))
+# Private DD2 packing-grid oracle.  QFP8MB can divide its logical M dimension
+# only in two-row physical groups.  Zero preserves normal planning; a positive
+# value forces the number of M-row-pair owners so pack/matmul co-planning can
+# be measured before a production candidate cost model is added.
+fp8_pack_poc_m_split: int = int(os.getenv("TORCH_SPYRE_FP8_PACK_POC_M_SPLIT", "0"))
+# Private companion oracle for the FP16 normalization immediately feeding
+# QFP8MB.  A positive value lets the experiment align that producer with the
+# pack operation and test whether their intermediate can remain in LX.
+fp8_pack_chain_poc_m_split: int = int(
+    os.getenv("TORCH_SPYRE_FP8_PACK_CHAIN_POC_M_SPLIT", "0")
+)
 # Private DD2 lifetime oracle: qfp8mb's FP16 input is dead after the pack row,
 # so permit a following explicit LX shuffle destination to reuse that storage.
 # Keep this opt-in until final emitted schedules establish that the backend

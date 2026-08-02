@@ -128,6 +128,48 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--compact-fp16-scales",
+        action="store_true",
+        help=(
+            "diagnostic optimized path that keeps the fused activation scale "
+            "and static column scale in their native FP16 backend format, "
+            "bypassing redundant compact FP16/FP32 conversions"
+        ),
+    )
+    parser.add_argument(
+        "--pointwise-scales",
+        action="store_true",
+        help=(
+            "with --compact-fp16-scales, apply both broadcast scales as one "
+            "ordinary pointwise expression instead of two apply_fp8_scale ops"
+        ),
+    )
+    parser.add_argument(
+        "--direct-activation-divide",
+        action="store_true",
+        help=(
+            "diagnostic packing path that expresses activation/scale directly "
+            "instead of materializing reciprocal followed by multiply"
+        ),
+    )
+    parser.add_argument(
+        "--skip-activation-clamp",
+        action="store_true",
+        help=(
+            "diagnostic packing path that relies on the dynamically derived "
+            "scale and FP8 conversion instead of launching an explicit clamp"
+        ),
+    )
+    parser.add_argument(
+        "--packing-chain-m-split",
+        type=int,
+        help=(
+            "diagnostic work-division hint for activation normalization and "
+            "QFP8MB packing; use 1 to test a same-owner LX handoff before "
+            "the packed activation is consumed by the matmul"
+        ),
+    )
+    parser.add_argument(
         "--activation-packing",
         choices=("auto", "channel", "minibatch"),
         default="auto",
@@ -169,6 +211,31 @@ def validate_args(args: argparse.Namespace) -> None:
         )
     if args.fused_activation_scale and not args.derive_activation_scale:
         raise ValueError("--fused-activation-scale requires --derive-activation-scale")
+    if args.compact_fp16_scales and not (
+        args.variant == "fp8_optimized"
+        and args.derive_activation_scale
+        and args.fused_activation_scale
+    ):
+        raise ValueError(
+            "--compact-fp16-scales requires optimized FP8 with fused dynamic "
+            "activation-scale derivation"
+        )
+    if args.pointwise_scales and not args.compact_fp16_scales:
+        raise ValueError("--pointwise-scales requires --compact-fp16-scales")
+    if (args.direct_activation_divide or args.skip_activation_clamp) and not (
+        args.compact_fp16_scales and args.derive_activation_scale
+    ):
+        raise ValueError(
+            "packing diagnostics require --compact-fp16-scales and dynamic "
+            "activation-scale derivation"
+        )
+    if args.packing_chain_m_split is not None:
+        if args.packing_chain_m_split < 1:
+            raise ValueError("--packing-chain-m-split must be positive")
+        if args.activation_packing != "minibatch":
+            raise ValueError(
+                "--packing-chain-m-split requires --activation-packing minibatch"
+            )
     if args.variant == "fp16" and args.activation_packing != "auto":
         raise ValueError("--activation-packing is only valid for FP8 variants")
     if args.activation_packing == "minibatch" and (args.m % 2 != 0 or args.k % 64 != 0):
@@ -367,6 +434,8 @@ def quantize_activation_fp8(
     activation: torch.Tensor,
     quant_scale_a: torch.Tensor,
     activation_packing: str,
+    direct_divide: bool = False,
+    skip_clamp: bool = False,
 ) -> torch.Tensor:
     """Quantize activation while allowing an explicit physical-layout control."""
 
@@ -380,18 +449,25 @@ def quantize_activation_fp8(
             packing_scale,
         )
 
-    inv_scale = torch.reciprocal(packing_scale)
-    scaled = activation * inv_scale
-    clamped = torch.ops.spyre.clamp(scaled, -448.0, 448.0)
+    scaled = (
+        activation / packing_scale
+        if direct_divide
+        else activation * torch.reciprocal(packing_scale)
+    )
+    packed_input = (
+        scaled if skip_clamp else torch.ops.spyre.clamp(scaled, -448.0, 448.0)
+    )
     if activation_packing == "channel":
-        return torch.ops.spyre.qfp8ch(clamped)
+        return torch.ops.spyre.qfp8ch(packed_input)
     if activation_packing == "minibatch":
-        return torch.ops.spyre.qfp8mb(clamped)
+        return torch.ops.spyre.qfp8mb(packed_input)
     raise AssertionError(f"unknown activation packing: {activation_packing}")
 
 
 def dynamic_fp8_row_scale(
-    activation: torch.Tensor, fused: bool = False
+    activation: torch.Tensor,
+    fused: bool = False,
+    keep_backend_fp16: bool = False,
 ) -> torch.Tensor:
     """Match TorchAO's symmetric dynamic per-row E4M3 scale."""
 
@@ -401,12 +477,13 @@ def dynamic_fp8_row_scale(
         # multiply, and clamp in one reduction program. It exposes an FP16
         # compact vector; widen only that M-element result for _scaled_mm's
         # public FP32 scale contract.
-        return torch.ops.spyre.quant_scale_per_token_fp8(
+        scale = torch.ops.spyre.quant_scale_per_token_fp8(
             activation,
             1.0 / float(torch.finfo(torch.float8_e4m3fn).max),
             eps,
             float(torch.finfo(torch.float16).max),
-        ).to(torch.float32)
+        )
+        return scale if keep_backend_fp16 else scale.to(torch.float32)
 
     # The source activation is FP16, so abs/max merely selects one of those
     # already representable values. Reduce in FP16 and convert only the M row
@@ -427,6 +504,11 @@ def make_benchmark_fn(
     use_fast_accum: bool,
     derive_activation_scale: bool,
     fused_activation_scale: bool,
+    compact_fp16_scales: bool,
+    pointwise_scales: bool,
+    direct_activation_divide: bool,
+    skip_activation_clamp: bool,
+    packing_chain_m_split: int | None,
 ) -> Callable[..., torch.Tensor]:
     if variant == "fp16":
 
@@ -455,19 +537,31 @@ def make_benchmark_fn(
             output_scale_b: torch.Tensor,
         ) -> torch.Tensor:
             effective_scale_a = (
-                dynamic_fp8_row_scale(activation, fused_activation_scale)
+                dynamic_fp8_row_scale(
+                    activation,
+                    fused_activation_scale,
+                    keep_backend_fp16=compact_fp16_scales,
+                )
                 if derive_activation_scale
                 else quant_scale_a
             )
-            activation_fp8 = (
-                activation
-                if prepack_activation
-                else quantize_activation_fp8(
-                    activation,
-                    effective_scale_a,
-                    activation_packing,
-                )
+            packing_context = (
+                spyre_hint(work_div={"M": packing_chain_m_split})
+                if packing_chain_m_split is not None and not prepack_activation
+                else nullcontext()
             )
+            with packing_context:
+                activation_fp8 = (
+                    activation
+                    if prepack_activation
+                    else quantize_activation_fp8(
+                        activation,
+                        effective_scale_a,
+                        activation_packing,
+                        direct_activation_divide,
+                        skip_activation_clamp,
+                    )
+                )
             weight_fp8 = (
                 weight
                 if prepack_weight
@@ -489,21 +583,40 @@ def make_benchmark_fn(
                 else spyre_hint(work_div=work_division)
             )
             with work_div_context:
-                result = (
-                    scaled_mm(
+                if scaled and compact_fp16_scales:
+                    result = raw_scaled_mm(
                         activation_fp8,
                         weight_fp8,
-                        (
-                            effective_scale_a
-                            if derive_activation_scale
-                            else output_scale_a
-                        ),
-                        output_scale_b,
                         use_fast_accum,
                     )
-                    if scaled
-                    else raw_scaled_mm(activation_fp8, weight_fp8, use_fast_accum)
-                )
+                    if pointwise_scales:
+                        result = result * effective_scale_a * output_scale_b
+                    else:
+                        zero = torch.zeros(
+                            (), dtype=torch.float16, device=result.device
+                        )
+                        result = torch.ops.spyre.apply_fp8_scale(
+                            result, effective_scale_a, zero
+                        )
+                        result = torch.ops.spyre.apply_fp8_scale(
+                            result, output_scale_b, zero
+                        )
+                else:
+                    result = (
+                        scaled_mm(
+                            activation_fp8,
+                            weight_fp8,
+                            (
+                                effective_scale_a
+                                if derive_activation_scale
+                                else output_scale_a
+                            ),
+                            output_scale_b,
+                            use_fast_accum,
+                        )
+                        if scaled
+                        else raw_scaled_mm(activation_fp8, weight_fp8, use_fast_accum)
+                    )
             if not scaled:
                 return result
             return result
@@ -746,7 +859,11 @@ def main() -> None:
     quant_scale_a = quant_scale_a_host.to("spyre")
     quant_scale_b = quant_scale_b_host.to("spyre")
     output_scale_a = output_scale_a_host.to("spyre")
-    output_scale_b = output_scale_b_host.to("spyre")
+    output_scale_b = (
+        output_scale_b_host.to(torch.float16).to("spyre")
+        if args.compact_fp16_scales
+        else output_scale_b_host.to("spyre")
+    )
     compile_options = {"epilogue_fusion": False}
 
     timed_weight = weight
@@ -950,6 +1067,11 @@ def main() -> None:
         args.fast_accum,
         args.derive_activation_scale,
         args.fused_activation_scale,
+        args.compact_fp16_scales,
+        args.pointwise_scales,
+        args.direct_activation_divide,
+        args.skip_activation_clamp,
+        args.packing_chain_m_split,
     )
     compiled = torch.compile(
         fn,
@@ -1085,6 +1207,11 @@ def main() -> None:
                 "FP32 per-row activation and per-column weight scales"
             ),
             "use_fast_accum": args.fast_accum,
+            "compact_fp16_scales_poc": args.compact_fp16_scales,
+            "pointwise_scales_poc": args.pointwise_scales,
+            "direct_activation_divide_poc": args.direct_activation_divide,
+            "skip_activation_clamp_poc": args.skip_activation_clamp,
+            "packing_chain_m_split_poc": args.packing_chain_m_split,
         },
         "activation_prepack": activation_prepack_metadata,
         "weight_prepack": prepack_metadata,

@@ -321,3 +321,168 @@ def test_qfp8wt_physical_output_group_rejects_gate_up_n8_split():
 @pytest.mark.parametrize(("n", "split"), [(1024, 4), (4096, 8), (12800, 25)])
 def test_qfp8wt_physical_output_group_accepts_granite_splits(n, split):
     assert work_division._physical_output_split_is_legal(n, split, 128)
+
+
+def test_qfp8mb_packer_spends_cores_on_legal_m_row_pairs(monkeypatch):
+    """A forbidden K split must not consume the greedy core budget first."""
+
+    m_dim, k_dim = sympy.symbols("m k", integer=True)
+    output = SimpleNamespace(
+        dep=SimpleNamespace(index=m_dim * 4096 + k_dim),
+        # QFP8MB's compound stick repeats K around the packed M:2 factor.
+        device_coords=[k_dim, m_dim, k_dim],
+        layout=SimpleNamespace(
+            device_layout=SimpleNamespace(
+                element_arrangement=work_division.ElementArrangement.QFP8MB,
+                device_size=(8, 2, 8),
+            )
+        ),
+    )
+    op = SimpleNamespace(data=MagicMock(), get_name=lambda: "qfp8mb")
+    committed = {}
+
+    monkeypatch.setattr(
+        work_division,
+        "iteration_space_from_op",
+        lambda _op: {m_dim: sympy.Integer(64), k_dim: sympy.Integer(4096)},
+    )
+    monkeypatch.setattr(
+        work_division, "collect_tensor_deps", lambda _op, _args: ([], output)
+    )
+    monkeypatch.setattr(work_division, "_collect_symbol_metadata", lambda _it: {})
+    monkeypatch.setattr(
+        work_division,
+        "adjust_it_space_for_sticks",
+        lambda _it, _tds, _meta: (
+            {m_dim: sympy.Integer(32), k_dim: sympy.Integer(64)},
+            {m_dim: 2, k_dim: 64},
+        ),
+    )
+    monkeypatch.setattr(
+        work_division,
+        "_get_fp8_compound_split_constraints",
+        lambda _inputs, _output: {k_dim: 1},
+    )
+    monkeypatch.setattr(
+        work_division, "coordinate_mask_blocked_vars", lambda *_args: set()
+    )
+    monkeypatch.setattr(work_division, "warn_if_per_core_overflow", lambda *_args: None)
+    monkeypatch.setattr(
+        work_division,
+        "apply_splits",
+        lambda _op, splits, _output: committed.update(splits),
+    )
+
+    with work_division.config.patch(
+        {
+            "ignore_work_division_hints": True,
+            "fp8_pack_poc_m_split": 32,
+        }
+    ):
+        work_division.work_distribution_pass(op, [], 32)
+
+    assert committed == {m_dim: 32, k_dim: 1}
+
+
+def test_qfp8mb_packing_grid_rejects_split_through_m_row_pair(monkeypatch):
+    m_dim, k_dim = sympy.symbols("m k", integer=True)
+    output = SimpleNamespace(
+        device_coords=[k_dim, m_dim, k_dim],
+        layout=SimpleNamespace(
+            device_layout=SimpleNamespace(
+                element_arrangement=work_division.ElementArrangement.QFP8MB
+            )
+        ),
+    )
+    op = SimpleNamespace(data=MagicMock(), get_name=lambda: "qfp8mb")
+
+    monkeypatch.setattr(
+        work_division,
+        "iteration_space_from_op",
+        lambda _op: {m_dim: sympy.Integer(64), k_dim: sympy.Integer(4096)},
+    )
+    monkeypatch.setattr(
+        work_division, "collect_tensor_deps", lambda _op, _args: ([], output)
+    )
+    monkeypatch.setattr(work_division, "_collect_symbol_metadata", lambda _it: {})
+    monkeypatch.setattr(
+        work_division,
+        "adjust_it_space_for_sticks",
+        lambda _it, _tds, _meta: (
+            {m_dim: sympy.Integer(32), k_dim: sympy.Integer(64)},
+            {m_dim: 2, k_dim: 64},
+        ),
+    )
+    monkeypatch.setattr(
+        work_division,
+        "_get_fp8_compound_split_constraints",
+        lambda _inputs, _output: {k_dim: 1},
+    )
+
+    with work_division.config.patch(
+        {
+            "ignore_work_division_hints": True,
+            "fp8_pack_poc_m_split": 3,
+        }
+    ):
+        with pytest.raises(
+            work_division.Unsupported,
+            match="dividing 32 M-row pairs, got 3",
+        ):
+            work_division.work_distribution_pass(op, [], 32)
+
+
+def test_fp8_packing_chain_oracle_targets_only_div_feeding_qfp8mb(monkeypatch):
+    m_dim, k_dim = sympy.symbols("m k", integer=True)
+
+    class FakeComputedBuffer:
+        def __init__(self, target, name):
+            self.data = SimpleNamespace(origins=(SimpleNamespace(target=target),))
+            self._name = name
+
+        def get_name(self):
+            return self._name
+
+    monkeypatch.setattr(work_division, "ComputedBuffer", FakeComputedBuffer)
+    div = FakeComputedBuffer("aten.div.Tensor", "normalized")
+    qfp8mb = FakeComputedBuffer("spyre.qfp8mb.default", "packed")
+    graph = SimpleNamespace(operations=[div, qfp8mb])
+    output = SimpleNamespace(device_coords=[m_dim, k_dim])
+    committed = {}
+
+    monkeypatch.setattr(
+        work_division,
+        "op_read_writes",
+        lambda op: SimpleNamespace(
+            reads=[SimpleNamespace(name="normalized")] if op is qfp8mb else []
+        ),
+    )
+    monkeypatch.setattr(
+        work_division,
+        "iteration_space_from_op",
+        lambda _op: {m_dim: sympy.Integer(64), k_dim: sympy.Integer(4096)},
+    )
+    monkeypatch.setattr(
+        work_division, "collect_tensor_deps", lambda _op, _args: ([], output)
+    )
+    monkeypatch.setattr(work_division, "_collect_symbol_metadata", lambda _it: {})
+    monkeypatch.setattr(
+        work_division,
+        "adjust_it_space_for_sticks",
+        lambda _it, _tds, _meta: (
+            {m_dim: sympy.Integer(64), k_dim: sympy.Integer(64)},
+            {k_dim: 64},
+        ),
+    )
+    monkeypatch.setattr(
+        work_division,
+        "apply_splits",
+        lambda _op, splits, _output: committed.update(splits),
+    )
+
+    with work_division.config.patch({"fp8_pack_chain_poc_m_split": 1}):
+        assert work_division._force_fp8_pack_normalization_work_division(
+            graph, div, [], 32
+        )
+
+    assert committed == {m_dim: 1, k_dim: 1}
