@@ -1,0 +1,4 @@
+path,deeptools_arm,compile_status,kernel_mean_us,kernel_median_us,kernel_min_us,kernel_max_us,kernel_stdev_us,effective_tflops,correctness_passed,relative_l2_error,speedup_vs_fp16,repetitions
+fp16,with_patch,PASS,652.286733,652.738000,642.488000,658.649000,4.096334,52.675820,true,0.004510669,1.000000,30
+optimized_fp8,without_patch,FAIL,,,,,,,,,,0
+optimized_fp8,with_patch,PASS,425.424367,425.532000,422.551000,428.310000,1.365375,80.765798,true,0.047222324,1.533261,30

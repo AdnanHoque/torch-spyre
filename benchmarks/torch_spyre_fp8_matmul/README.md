@@ -41,6 +41,12 @@ and never launches two benchmarks on one device. Accepted results and emitted
 bundle evidence are documented in
 [`../../docs/results/granite_e2e/torch_spyre_fp8_lx_qscale_poc_20260801/`](../../docs/results/granite_e2e/torch_spyre_fp8_lx_qscale_poc_20260801/).
 
+The controlled DeepTools direct-LX-shuffle patch A/B is documented in
+[`../../docs/results/granite_e2e/torch_spyre_fp8_relayout_patch_ab_20260802/`](../../docs/results/granite_e2e/torch_spyre_fp8_relayout_patch_ab_20260802/).
+Without the promotion, the Q/O `M=1024` graph fails DXP scheduling at
+`8_shuffle`; with it, the matched dynamic FP8 path runs `1.533x` faster than
+FP16.
+
 ## Earlier path-isolation sweep
 
 `run_qo_fp8_poc_sweep.sh` runs:
