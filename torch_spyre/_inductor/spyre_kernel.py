@@ -15,6 +15,7 @@
 from abc import ABC
 from dataclasses import dataclass, field, replace
 import logging
+import math
 from typing import Any, Callable, Self, Sequence, Tuple, Union
 
 import torch
@@ -1645,6 +1646,114 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
             buf.writeline("),")
 
 
+def _remap_allocation_distribution(
+    arg: TensorArg,
+    aligned_size: Sequence[sympy.Expr],
+    source_device_dims: Sequence[tuple[int, ...]],
+) -> None:
+    """Carry explicit LX ownership through device-layout normalization."""
+
+    core_map = arg.allocation_core_id_to_device_slice
+    device_dim_splits = arg.allocation_device_dim_splits
+    if core_map is None and device_dim_splits is None:
+        return
+    if core_map is None or device_dim_splits is None:
+        raise ValueError("explicit LX allocation distribution is incomplete")
+    if len(aligned_size) != len(source_device_dims):
+        raise ValueError("aligned device-layout provenance has the wrong rank")
+
+    old_dims = set(device_dim_splits)
+    old_dims.update(
+        device_dim for per_core in core_map.values() for device_dim in per_core
+    )
+    old_dim_components: dict[str, list[tuple[int, int]]] = {}
+    component_slots: dict[str, dict[tuple[str, int], int]] = {
+        str(core): {} for core in core_map
+    }
+
+    for old_dim in sorted(old_dims, key=int):
+        split = int(device_dim_splits.get(old_dim, 1))
+        if split < 1:
+            raise ValueError(
+                f"allocation split must be positive for device dim {old_dim}"
+            )
+
+        old_dim_index = int(old_dim)
+        target_dims = [
+            new_dim
+            for new_dim, provenance in enumerate(source_device_dims[:-1])
+            if old_dim_index in provenance
+        ]
+        remaining = split
+        components: list[tuple[int, int]] = []
+        for new_dim in target_dims:
+            factor = math.gcd(remaining, concretize_expr(aligned_size[new_dim]))
+            if factor > 1:
+                components.append((new_dim, factor))
+                remaining //= factor
+        if remaining != 1:
+            raise ValueError(
+                "align_tensors cannot represent allocation split "
+                f"{split} from device dim {old_dim}"
+            )
+        old_dim_components[old_dim] = components
+
+        component_stride = math.prod(factor for _, factor in components)
+        for core, per_core in core_map.items():
+            slot = int(per_core.get(old_dim, 0))
+            if slot < 0 or slot >= split:
+                raise ValueError(
+                    f"allocation slot {slot} is outside split {split} "
+                    f"for device dim {old_dim}"
+                )
+            stride = component_stride
+            for new_dim, factor in components:
+                stride //= factor
+                component_slots[str(core)][(old_dim, new_dim)] = (
+                    slot // stride
+                ) % factor
+
+    new_splits: dict[str, int] = {}
+    new_core_map: dict[str, dict[str, int]] = {str(core): {} for core in core_map}
+    for new_dim, provenance in enumerate(source_device_dims[:-1]):
+        contributions = [
+            (old_dim, factor)
+            for source_dim in provenance
+            for old_dim, components in old_dim_components.items()
+            if int(old_dim) == source_dim
+            for component_dim, factor in components
+            if component_dim == new_dim
+        ]
+        split = math.prod(factor for _, factor in contributions)
+        if split == 1:
+            continue
+        new_splits[str(new_dim)] = split
+        for core in new_core_map:
+            slot = 0
+            for old_dim, factor in contributions:
+                slot = slot * factor + component_slots[core][(old_dim, new_dim)]
+            new_core_map[core][str(new_dim)] = slot
+
+    arg.allocation_core_id_to_device_slice = new_core_map
+    arg.allocation_device_dim_splits = new_splits
+
+
+def _realign_shuffle_dim_labels(op_spec: OpSpec) -> None:
+    """Keep explicit SHUFFLE labels aligned with normalized iteration dims."""
+
+    if op_spec.op != "shuffle" or op_spec.dim_labels_override is None:
+        return
+    ndim = len(op_spec.iteration_space)
+    if op_spec.layout_labels_override == ["KERNEL", *LAYOUT_LABELS]:
+        if ndim > len(MATMUL_DIM_LABELS):
+            raise ValueError("LX relayout SHUFFLE exceeds supported matmul rank")
+        op_spec.dim_labels_override = MATMUL_DIM_LABELS[-ndim:]
+        return
+    if ndim - 1 > len(INPUT_DIM_LABELS):
+        raise ValueError("LX relayout SHUFFLE exceeds supported pointwise rank")
+    op_spec.dim_labels_override = INPUT_DIM_LABELS[: ndim - 1] + OUTPUT_DIM_LABELS[:1]
+
+
 def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     # Both parameters must be provided together for gather kernels — indirect_sizes
     # decomposes symbols in align_tensors; indirect_access_subs replaces them with IndirectAccess.
@@ -1659,8 +1768,14 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
         indirect_sizes,
     )
     op_spec.iteration_space = new_op_space_splits
+    _realign_shuffle_dim_labels(op_spec)
 
     for arg, t in zip(op_spec.args, new_tensors):
+        _remap_allocation_distribution(
+            arg,
+            t["size"],
+            t["source_device_dims"],
+        )
         arg.device_size = t["size"]
         arg.device_coordinates = t["coordinates"]
 

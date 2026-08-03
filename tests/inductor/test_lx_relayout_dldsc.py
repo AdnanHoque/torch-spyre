@@ -162,6 +162,61 @@ def test_relayout_emits_owner_maps_and_one_shuffle_per_source():
     assert args[0].name == args[1].name == plan.destination_name
 
 
+def test_relayout_owner_maps_follow_aligned_device_dimensions():
+    """Split/synthetic dimensions cannot leave allocation maps on old axes."""
+
+    m, n = Symbol("m"), Symbol("n")
+    plan = LXRelayoutPlan(
+        source_name="buf_split",
+        consumer_name="pointwise",
+        source_core_id_to_device_slice={str(core): {"1": core} for core in range(8)},
+        destination_core_id_to_device_slice={
+            str(core): {"1": 7 - core} for core in range(8)
+        },
+        source_device_dim_splits={"1": 8},
+        destination_device_dim_splits={"1": 8},
+        shuffle_iteration_symbols=(n, m),
+        device_dim_to_iteration_symbol={"1": n},
+        source_lx_address=0x24000,
+        destination_lx_address=0x44000,
+    )
+    source_arg = TensorArg(
+        is_input=True,
+        arg_index=-1,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[32, 8, 64],
+        device_coordinates=[Mod(n, 32), floor(n / 32), Mod(m, 64)],
+        allocation={"lx": plan.source_lx_address},
+        name=plan.source_name,
+    )
+    consumer_spec = OpSpec(
+        op="silu",
+        is_reduction=False,
+        iteration_space={n: (Integer(256), 8), m: (Integer(64), 1)},
+        args=[source_arg],
+        op_info={},
+    )
+
+    shuffle_spec, _ = _materialize_explicit_lx_shuffle(source_arg, consumer_spec, plan)
+    root, allocations = _compile_shuffle(shuffle_spec)
+
+    assert list(shuffle_spec.iteration_space) == [n, Symbol("z0"), m]
+    assert shuffle_spec.dim_labels_override == ["mb", "x", "out"]
+    assert shuffle_spec.args[0].allocation_device_dim_splits == {"2": 8}
+    assert shuffle_spec.args[1].allocation_device_dim_splits == {"2": 8}
+    assert root["numCoresUsed_"] == 8
+    producer_map = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
+    consumer_map = allocations[1]["coordinates_"]["coreIdToWkSlice_"]
+    assert (producer_map["0"], producer_map["7"]) == (
+        {"mb": 0, "x": 0, "out": 0},
+        {"mb": 0, "x": 7, "out": 0},
+    )
+    assert (consumer_map["0"], consumer_map["7"]) == (
+        {"mb": 0, "x": 7, "out": 0},
+        {"mb": 0, "x": 0, "out": 0},
+    )
+
+
 def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
     class _Pointwise:
         pass
