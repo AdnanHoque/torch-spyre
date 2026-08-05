@@ -17,36 +17,24 @@ from types import SimpleNamespace
 
 from sympy import Integer, Mod, Symbol, floor
 from torch._inductor.dependencies import MemoryDep
-from torch._inductor.virtualized import V
 
 import torch_spyre._inductor.lx_relayout as lx_relayout_module
 import torch_spyre._inductor.scratchpad.allocator as allocator_module
 import torch_spyre._inductor.scheduler as scheduler_module
-import torch_spyre._inductor.spyre_kernel as spyre_kernel_module
 
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.lx_relayout import (
-    LX_RELAYOUT_ATTR,
     LX_RELAYOUT_SHUFFLE_ATTR,
     LXRelayoutPlan,
     _is_equal_footprint_geometry,
-    per_core_view_matches_lx_relayout_side,
-    rebind_lx_relayout_iteration_geometry,
 )
-from torch_spyre._inductor.op_spec import OpSpec, TensorArg
+from torch_spyre._inductor.op_spec import DeviceOwnership, OpSpec, TensorArg
 from torch_spyre._inductor.pass_utils import PerCoreView
 from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
-from torch_spyre._inductor.scratchpad.firstfit_bestfit_solver import (
-    FirstFitLayoutSolver,
-)
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
 from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
-from torch_spyre._inductor.spyre_kernel import (
-    SpyreKernel,
-    TensorAccess,
-    simplify_op_spec,
-)
+from torch_spyre._inductor.spyre_kernel import simplify_op_spec
 
 
 class _DummyOp:
@@ -69,20 +57,19 @@ class _DummyGraph:
 def _dense_plan(
     source_name: str = "buf_mlp", consumer_name: str = "pointwise"
 ) -> LXRelayoutPlan:
-    m, n = Symbol("m"), Symbol("n")
     return LXRelayoutPlan(
         source_name=source_name,
         consumer_name=consumer_name,
-        source_core_id_to_device_slice={
-            str(core): {"0": core // 8, "1": core % 8} for core in range(32)
-        },
-        destination_core_id_to_device_slice={
-            str(core): {"0": core, "1": 0} for core in range(32)
-        },
-        source_device_dim_splits={"0": 4, "1": 8},
-        destination_device_dim_splits={"0": 32, "1": 1},
-        shuffle_iteration_symbols=(m, n),
-        device_dim_to_iteration_symbol={"0": m, "1": n},
+        source_ownership=DeviceOwnership(
+            splits={0: 4, 1: 8},
+            core_to_slice={
+                str(core): {0: core // 8, 1: core % 8} for core in range(32)
+            },
+        ),
+        destination_ownership=DeviceOwnership(
+            splits={0: 32, 1: 1},
+            core_to_slice={str(core): {0: core, 1: 0} for core in range(32)},
+        ),
         source_lx_address=0x24000,
         destination_lx_address=0x44000,
     )
@@ -99,22 +86,37 @@ def _compile_shuffle(shuffle_spec):
     return root, allocations
 
 
+def _shuffle_spec(plan, source_arg, iteration_space):
+    return OpSpec(
+        op="shuffle",
+        is_reduction=False,
+        iteration_space=iteration_space,
+        args=[
+            replace(source_arg, ownership=plan.source_ownership),
+            replace(
+                source_arg,
+                is_input=False,
+                name=plan.destination_name,
+                allocation={"lx": plan.destination_lx_address},
+                ownership=plan.destination_ownership,
+            ),
+        ],
+        op_info={"lx_relayout_consumer_is_matmul": False},
+    )
+
+
 def test_relayout_emits_owner_maps():
     plan = _dense_plan()
     assert _is_equal_footprint_geometry(
-        plan.source_core_id_to_device_slice,
-        plan.source_device_dim_splits,
-        plan.destination_core_id_to_device_slice,
-        plan.destination_device_dim_splits,
+        plan.source_ownership,
+        plan.destination_ownership,
     )
     assert not _is_equal_footprint_geometry(
-        {"0": {"0": 0}, "1": {"0": 1}},
-        {"0": 2},
-        {"0": {"0": 0}, "1": {"0": 0}},
-        {"0": 1},
+        DeviceOwnership(splits={0: 2}, core_to_slice={"0": {0: 0}, "1": {0: 1}}),
+        DeviceOwnership(splits={0: 1}, core_to_slice={"0": {0: 0}, "1": {0: 0}}),
     )
 
-    m, n = plan.shuffle_iteration_symbols
+    m, n = Symbol("m"), Symbol("n")
     source_arg = TensorArg(
         is_input=True,
         arg_index=-1,
@@ -124,30 +126,15 @@ def test_relayout_emits_owner_maps():
         allocation={"lx": plan.source_lx_address},
         name=plan.source_name,
     )
-    destination_arg = replace(
+    shuffle_spec = _shuffle_spec(
+        plan,
         source_arg,
-        is_input=False,
-        name=plan.destination_name,
-        allocation={"lx": plan.destination_lx_address},
-        allocation_core_id_to_device_slice=(plan.destination_core_id_to_device_slice),
-        allocation_device_dim_splits=dict(plan.destination_device_dim_splits),
-    )
-    source_arg = replace(
-        source_arg,
-        allocation_core_id_to_device_slice=plan.source_core_id_to_device_slice,
-        allocation_device_dim_splits=dict(plan.source_device_dim_splits),
-    )
-    shuffle_spec = OpSpec(
-        op="shuffle",
-        is_reduction=False,
-        iteration_space={m: (Integer(512), 32), n: (Integer(12800), 1)},
-        args=[source_arg, destination_arg],
-        op_info={"lx_relayout_consumer_is_matmul": False},
+        {m: (Integer(512), 32), n: (Integer(12800), 1)},
     )
 
     root, allocations = _compile_shuffle(shuffle_spec)
     assert root["numCoresUsed_"] == 32
-    assert destination_arg.allocation == {"lx": plan.destination_lx_address}
+    assert shuffle_spec.args[1].allocation == {"lx": plan.destination_lx_address}
     producer_map = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
     consumer_map = allocations[1]["coordinates_"]["coreIdToWkSlice_"]
     assert (producer_map["0"], producer_map["31"]) == (
@@ -167,14 +154,14 @@ def test_relayout_owner_maps_follow_aligned_device_dimensions():
     plan = LXRelayoutPlan(
         source_name="buf_split",
         consumer_name="pointwise",
-        source_core_id_to_device_slice={str(core): {"1": core} for core in range(8)},
-        destination_core_id_to_device_slice={
-            str(core): {"1": 7 - core} for core in range(8)
-        },
-        source_device_dim_splits={"1": 8},
-        destination_device_dim_splits={"1": 8},
-        shuffle_iteration_symbols=(n, m),
-        device_dim_to_iteration_symbol={"1": n},
+        source_ownership=DeviceOwnership(
+            splits={1: 8},
+            core_to_slice={str(core): {1: core} for core in range(8)},
+        ),
+        destination_ownership=DeviceOwnership(
+            splits={1: 8},
+            core_to_slice={str(core): {1: 7 - core} for core in range(8)},
+        ),
         source_lx_address=0x24000,
         destination_lx_address=0x44000,
     )
@@ -187,32 +174,17 @@ def test_relayout_owner_maps_follow_aligned_device_dimensions():
         allocation={"lx": plan.source_lx_address},
         name=plan.source_name,
     )
-    destination_arg = replace(
+    shuffle_spec = _shuffle_spec(
+        plan,
         source_arg,
-        is_input=False,
-        name=plan.destination_name,
-        allocation={"lx": plan.destination_lx_address},
-        allocation_core_id_to_device_slice=(plan.destination_core_id_to_device_slice),
-        allocation_device_dim_splits=dict(plan.destination_device_dim_splits),
-    )
-    source_arg = replace(
-        source_arg,
-        allocation_core_id_to_device_slice=plan.source_core_id_to_device_slice,
-        allocation_device_dim_splits=dict(plan.source_device_dim_splits),
-    )
-    shuffle_spec = OpSpec(
-        op="shuffle",
-        is_reduction=False,
-        iteration_space={n: (Integer(256), 8), m: (Integer(64), 1)},
-        args=[source_arg, destination_arg],
-        op_info={"lx_relayout_consumer_is_matmul": False},
+        {n: (Integer(256), 8), m: (Integer(64), 1)},
     )
 
     root, allocations = _compile_shuffle(shuffle_spec)
 
     assert list(shuffle_spec.iteration_space) == [n, Symbol("z0"), m]
-    assert shuffle_spec.args[0].allocation_device_dim_splits == {"2": 8}
-    assert shuffle_spec.args[1].allocation_device_dim_splits == {"2": 8}
+    assert shuffle_spec.args[0].ownership.splits == {2: 8}
+    assert shuffle_spec.args[1].ownership.splits == {2: 8}
     assert root["numCoresUsed_"] == 8
     producer_map = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
     consumer_map = allocations[1]["coordinates_"]["coreIdToWkSlice_"]
@@ -327,103 +299,6 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
     assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
 
 
-def test_data_op_lowers_real_relayout_node(monkeypatch):
-    class _FixedLayout:
-        allocation = {"lx": 0x1000}
-        device_layout = SimpleNamespace(device_size=(1,))
-        size = (1,)
-
-    layout = _FixedLayout()
-    source = TensorAccess("source", Integer(0), layout)
-    input_arg = TensorArg(
-        True,
-        -1,
-        DataFormats.SEN169_FP16,
-        [1],
-        [Integer(0)],
-        {"lx": 0x1000},
-        name="source",
-    )
-    output_arg = replace(
-        input_arg,
-        is_input=False,
-        name="output",
-        allocation={"lx": 0x2000},
-    )
-    plan = replace(
-        _dense_plan("source", "consumer"),
-        source_lx_address=0x1000,
-        destination_lx_address=0x2000,
-        materialized_destination_name="output",
-    )
-    shuffle_node = SimpleNamespace(get_name=lambda: "output")
-    setattr(shuffle_node, LX_RELAYOUT_SHUFFLE_ATTR, plan)
-
-    monkeypatch.setattr(spyre_kernel_module, "FixedTiledLayout", _FixedLayout)
-    kernel = object.__new__(SpyreKernel)
-    kernel.args = SimpleNamespace(output=lambda _: None)
-    kernel.op_specs = []
-    kernel.indirect_vars = {}
-    kernel.current_node = SimpleNamespace(
-        get_nodes=lambda: [SimpleNamespace(node=shuffle_node)]
-    )
-    kernel.create_tensor_arg = lambda is_input, *_args, **_kwargs: (
-        input_arg if is_input else output_arg
-    )
-    kernel.create_op_spec = lambda op, _is_reduction, args, op_info, *_args: (
-        SimpleNamespace(op=op, args=args, op_info=op_info)
-    )
-
-    graph = SimpleNamespace(
-        scheduler=SimpleNamespace(mutation_real_name={}),
-        removed_buffers=set(),
-        get_buffer=lambda _: SimpleNamespace(get_layout=lambda: layout),
-        sizevars=SimpleNamespace(precomputed_replacements={}),
-    )
-    with V.set_graph_handler(graph):
-        SpyreKernel.store(kernel, "output", Integer(0), source)
-
-    assert len(kernel.op_specs) == 1
-    shuffle_spec = kernel.op_specs[0]
-    assert shuffle_spec.op == "shuffle"
-    assert shuffle_spec.args[0].allocation_core_id_to_device_slice == (
-        plan.source_core_id_to_device_slice
-    )
-    assert shuffle_spec.args[1].allocation_core_id_to_device_slice == (
-        plan.destination_core_id_to_device_slice
-    )
-
-
-def test_scheduler_checks_owner_map_and_rebinds_final_symbols(monkeypatch):
-    plan = _dense_plan()
-    m, n = plan.shuffle_iteration_symbols
-    core_id = Symbol("core_id")
-    op = SimpleNamespace(op_it_space_splits=({m: 4, n: 8}, {}))
-    producer_view = PerCoreView(
-        ((0, 4), (1, 8)),
-        ((0, floor(core_id / 8)), (1, Mod(core_id, 8))),
-    )
-    assert per_core_view_matches_lx_relayout_side(
-        op, producer_view, plan, destination=False
-    )
-    assert not per_core_view_matches_lx_relayout_side(
-        op, producer_view, plan, destination=True
-    )
-
-    final_m, final_n = Symbol("c0"), Symbol("c1")
-    monkeypatch.setattr(
-        lx_relayout_module,
-        "try_device_coordinates",
-        lambda *_: [final_m, floor(final_n / 64), Mod(final_n, 64)],
-    )
-    rebound = rebind_lx_relayout_iteration_geometry(
-        plan, object(), object(), (final_m, final_n)
-    )
-    assert rebound is not None
-    assert rebound.shuffle_iteration_symbols == (final_m, final_n)
-    assert rebound.device_dim_to_iteration_symbol == {"0": final_m, "1": final_n}
-
-
 def test_scheduler_demotes_source_and_drops_stale_plan(monkeypatch):
     class _Dep:
         def __init__(self, name):
@@ -485,7 +360,7 @@ def test_scheduler_demotes_source_and_drops_stale_plan(monkeypatch):
     )
     monkeypatch.setattr(
         scheduler_module,
-        "per_core_view_matches_lx_relayout_side",
+        "matches_relayout_ownership",
         lambda *_args, **_kwargs: False,
     )
 
@@ -493,45 +368,6 @@ def test_scheduler_demotes_source_and_drops_stale_plan(monkeypatch):
     assert "lx" not in producer.layout.allocation
     assert "lx" not in shuffle.layout.allocation
     assert not hasattr(shuffle, LX_RELAYOUT_SHUFFLE_ATTR)
-
-
-def test_atomic_allocation_records_complete_pair_or_falls_back():
-    graph = _DummyGraph("producer", "consumer")
-    graph.name_to_buffer.pop("consumer")
-    plan = _dense_plan("buf_k", "consumer")
-    source = LifetimeBoundBuffer("buf_k", size=128 * 1024, uses=[0, 1])
-    allocator = ScratchpadAllocator(GreedyLayoutSolver(256 * 1024))
-    allocator._lx_relayout_plans_by_edge = {plan.edge_key: plan}
-    buffers = [source]
-    allocator._append_lx_relayout_destinations(graph, buffers)
-
-    destination = next(
-        buffer for buffer in buffers if buffer.name == plan.destination_name
-    )
-    layout_planner = allocator._layout_planner_for_buffers(buffers)
-    assert isinstance(layout_planner, FirstFitLayoutSolver)
-    allocation = allocator._plan_layout_with_atomic_relayouts(layout_planner, buffers)
-    by_name = {buffer.name: buffer for buffer in allocation}
-    assert by_name["buf_k"].address is not None
-    assert destination.address is not None
-    assert by_name["buf_k"].address != destination.address
-    allocator._record_successful_lx_relayouts(graph, allocation)
-    recorded = getattr(graph.operations[1], LX_RELAYOUT_ATTR)["buf_k"]
-    assert (recorded.source_lx_address, recorded.destination_lx_address) == (
-        by_name["buf_k"].address,
-        destination.address,
-    )
-
-    for buffer in buffers:
-        buffer.address = None
-    fallback = ScratchpadAllocator(GreedyLayoutSolver(128 * 1024))
-    fallback._lx_relayout_plans_by_edge = {plan.edge_key: plan}
-    allocation = fallback._plan_layout_with_atomic_relayouts(
-        FirstFitLayoutSolver(128 * 1024), buffers
-    )
-    assert all(buffer.address is None for buffer in allocation)
-    fallback._record_successful_lx_relayouts(graph, allocation)
-    assert not hasattr(graph.operations[1], LX_RELAYOUT_ATTR)
 
 
 def test_relayout_lifetimes_cover_inputs_and_multiple_consumers(monkeypatch):
@@ -626,34 +462,3 @@ def test_partial_allocation_fallback_is_atomic_per_source():
     )
     assert by_name["dependent"].in_place_parents == []
     assert allocator._lx_relayout_plans_by_edge == {complete.edge_key: complete}
-
-
-def test_planned_restickify_source_is_eligible_for_lx_reuse(monkeypatch):
-    class _MutationLayout:
-        pass
-
-    class _FixedTiledLayout:
-        pass
-
-    class _ComputedBuffer:
-        def __init__(self, name, layout=None):
-            self.name = name
-            self.layout = _FixedTiledLayout() if layout is None else layout
-
-        def get_name(self):
-            return self.name
-
-    allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
-    plan = _dense_plan("buf_k", "consumer")
-    allocator._lx_relayout_plans_by_edge = {plan.edge_key: plan}
-    monkeypatch.setattr(allocator_module, "ComputedBuffer", _ComputedBuffer)
-    monkeypatch.setattr(allocator_module, "MutationLayoutSHOULDREMOVE", _MutationLayout)
-    monkeypatch.setattr(allocator_module, "FixedTiledLayout", _FixedTiledLayout)
-    monkeypatch.setattr(allocator_module.config, "allow_all_ops_in_lx_planning", False)
-    monkeypatch.setattr(allocator, "_get_op_name", lambda _: "restickify")
-
-    assert allocator._op_output_good_for_lx_reuse(_ComputedBuffer("buf_k"))
-    assert not allocator._op_output_good_for_lx_reuse(_ComputedBuffer("unrelated"))
-    assert not allocator._op_output_good_for_lx_reuse(
-        _ComputedBuffer("buf_k", _MutationLayout())
-    )

@@ -47,6 +47,7 @@ from torch_spyre._inductor.indirect_access import (
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.op_spec import (
     DebugHandle,
+    DeviceOwnership,
     IndirectAccess,
     OpSpec,
     TensorArg,
@@ -57,6 +58,23 @@ from torch_spyre._inductor.pass_utils import coeff_through_floor
 from .compute_ops import SymbolKind, generate_sdsc, num_bytes
 
 logger = get_inductor_logger("codegen.superdsc")
+
+
+@dataclasses.dataclass(frozen=True)
+class SDSCOwnership:
+    """The tensor region owned by each core in final SDSC coordinates."""
+
+    splits: dict[Symbol, int]
+    core_to_slice: dict[str, dict[str, int]]
+
+    def for_dims(self, dims: tuple[Symbol, ...]) -> "SDSCOwnership":
+        return SDSCOwnership(
+            splits={dim: self.splits[dim] for dim in dims},
+            core_to_slice={
+                core: {str(dim): per_dim[str(dim)] for dim in dims}
+                for core, per_dim in self.core_to_slice.items()
+            },
+        )
 
 
 @dataclasses.dataclass
@@ -71,12 +89,11 @@ class SDSCArgs:
     allocation: dict[str, Any]
     start_address: int | Symbol
     backGap: dict[Symbol, int]
+    ownership: SDSCOwnership = dataclasses.field(init=False)
     arg_index: int = -1
     is_index_tensor: bool = False
     related_value_tensor_idx: int = -1
     device_tile_advance_expr: Expr | None = None
-    allocation_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
-    core_splits: dict[Symbol, int] = dataclasses.field(default_factory=dict)
 
     def __str__(self) -> str:
         scales = ", ".join(f"{k}={v}" for k, v in self.scales.items())
@@ -98,8 +115,7 @@ class SDSCArgs:
             f"  backGap={self.backGap}\n"
             f"  is_index_tensor={self.is_index_tensor}\n"
             f"  related_value_tensor_idx={self.related_value_tensor_idx}\n"
-            f"  allocation_core_id_to_wk_slice={self.allocation_core_id_to_wk_slice}\n"
-            f"  core_splits={self.core_splits}\n"
+            f"  ownership={self.ownership}\n"
             f")"
         )
 
@@ -135,6 +151,12 @@ class SDSCSpec:
     input_coord_padding: dict = dataclasses.field(default_factory=dict)
     input_coord_sizes: dict = dataclasses.field(default_factory=dict)
     emit_memorg_padding: bool = False
+
+    def __post_init__(self) -> None:
+        ownership = default_ownership(self)
+        for tensor in self.args:
+            if not hasattr(tensor, "ownership"):
+                tensor.ownership = ownership.for_dims(tuple(tensor.dim_order))
 
     def __str__(self) -> str:
         iter_space = ", ".join(f"{k}={v}" for k, v in self.iteration_space.items())
@@ -175,6 +197,22 @@ class SDSCSpec:
                 f"  constants=[{', '.join(f'{k}={v}' for k, v in self.constants.items())}]"
             )
         return "SDSCSpec(\n" + "\n".join(parts) + "\n)"
+
+
+def default_ownership(spec: SDSCSpec) -> SDSCOwnership:
+    """Materialize the operation work division as per-tensor ownership."""
+
+    core_id = Symbol("core_id")
+    return SDSCOwnership(
+        splits={dim: int(split) for dim, split in spec.work_slices.items()},
+        core_to_slice={
+            str(core): {
+                str(dim): int(expr.subs({core_id: core}))
+                for dim, expr in spec.core_id_to_work_slice.items()
+            }
+            for core in range(spec.num_cores)
+        },
+    )
 
 
 # Pointwise ops whose *output* padding lanes are seeded to a deterministic value
@@ -286,66 +324,61 @@ def _get_device_dim_order(
     return dim_order, stick_dim
 
 
-def _device_dim_to_sdsc_dim(
-    arg: TensorArg,
-    dim_order: list[Symbol],
-    stride_dim_order: list[Symbol],
-    mb_sym: Symbol | None,
-) -> dict[str, Symbol]:
-    result: dict[str, Symbol] = {}
-    for dim in dim_order:
-        if dim is mb_sym:
-            continue
-        stride_idx = stride_dim_order.index(dim)
-        device_dim = len(arg.device_coordinates) - stride_idx - 2
-        if device_dim >= 0:
-            result[str(device_dim)] = dim
-    return result
+@dataclasses.dataclass(frozen=True)
+class TensorCoordinateProjection:
+    """Maps stable physical device axes to one tensor's SDSC coordinates."""
 
+    sdsc_dims: tuple[Symbol, ...]
+    device_dim_for_sdsc_dim: dict[Symbol, int]
 
-def _map_core_id_to_wk_slice_dims(
-    core_id_to_device_slice: dict[str, dict[str, int]] | None,
-    device_dim_to_sdsc_dim: dict[str, Symbol],
-    dim_order: list[Symbol],
-) -> dict[str, dict[str, int]] | None:
-    if core_id_to_device_slice is None:
-        return None
+    @classmethod
+    def from_tensor(
+        cls,
+        arg: TensorArg,
+        dim_order: list[Symbol],
+        stride_dim_order: list[Symbol],
+        mb_sym: Symbol | None,
+    ) -> "TensorCoordinateProjection":
+        device_dim_for_sdsc_dim = {}
+        for dim in dim_order:
+            if dim is mb_sym:
+                continue
+            device_dim = len(arg.device_coordinates) - stride_dim_order.index(dim) - 2
+            if device_dim >= 0:
+                device_dim_for_sdsc_dim[dim] = device_dim
+        return cls(tuple(dim_order), device_dim_for_sdsc_dim)
 
-    layout_dim_labels = [str(dim) for dim in dim_order]
-    result: dict[str, dict[str, int]] = {}
-    for core, per_device_dim in core_id_to_device_slice.items():
-        per_dim = {dim: 0 for dim in layout_dim_labels}
-        for device_dim, slot in per_device_dim.items():
-            dim = device_dim_to_sdsc_dim.get(str(device_dim))
+    def project(self, ownership: DeviceOwnership) -> SDSCOwnership:
+        sdsc_dim_for_device_dim = {
+            device_dim: sdsc_dim
+            for sdsc_dim, device_dim in self.device_dim_for_sdsc_dim.items()
+        }
+        splits = {dim: 1 for dim in self.sdsc_dims}
+        for device_dim, split in ownership.splits.items():
+            dim = sdsc_dim_for_device_dim.get(device_dim)
             if dim is None:
-                if int(slot) != 0:
+                if split != 1:
                     raise ValueError(
-                        f"allocation uses unmapped device dimension {device_dim}"
+                        f"ownership split uses unmapped device dimension {device_dim}"
                     )
                 continue
-            per_dim[str(dim)] = int(slot)
-        result[str(core)] = per_dim
-    return result
+            splits[dim] = split
 
+        core_to_slice: dict[str, dict[str, int]] = {}
+        for core, device_slice in ownership.core_to_slice.items():
+            sdsc_slice = {str(dim): 0 for dim in self.sdsc_dims}
+            for device_dim, slot in device_slice.items():
+                dim = sdsc_dim_for_device_dim.get(device_dim)
+                if dim is None:
+                    if slot != 0:
+                        raise ValueError(
+                            f"ownership uses unmapped device dimension {device_dim}"
+                        )
+                    continue
+                sdsc_slice[str(dim)] = slot
+            core_to_slice[str(core)] = sdsc_slice
 
-def _map_device_dim_splits(
-    device_dim_splits: dict[str, int] | None,
-    device_dim_to_sdsc_dim: dict[str, Symbol],
-) -> dict[Symbol, int]:
-    if device_dim_splits is None:
-        return {}
-
-    result: dict[Symbol, int] = {}
-    for device_dim, split in device_dim_splits.items():
-        dim = device_dim_to_sdsc_dim.get(str(device_dim))
-        if dim is None:
-            if int(split) != 1:
-                raise ValueError(
-                    f"allocation split uses unmapped device dimension {device_dim}"
-                )
-            continue
-        result[dim] = int(split)
-    return result
+        return SDSCOwnership(splits=splits, core_to_slice=core_to_slice)
 
 
 def _get_layout_label(
@@ -702,7 +735,7 @@ def _create_sdsc_tensors(
         stride_dim_order = [
             d for d in dim_order if d not in reduced_dims
         ] + reduced_dims
-        device_dim_to_sdsc_dim = _device_dim_to_sdsc_dim(
+        projection = TensorCoordinateProjection.from_tensor(
             arg, dim_order, stride_dim_order, mb_sym
         )
 
@@ -796,11 +829,8 @@ def _create_sdsc_tensors(
             else:
                 max_dim_sizes[mb_sym] = -1
 
-        if (
-            arg.allocation_core_id_to_device_slice is not None
-            or arg.allocation_device_dim_splits is not None
-        ) and "lx" not in arg.allocation:
-            raise ValueError("explicit allocation distribution requires LX storage")
+        if arg.ownership is not None and "lx" not in arg.allocation:
+            raise ValueError("explicit ownership requires LX storage")
 
         effective_stick = [op_stick_dim if stick_dim is None else stick_dim]
         if op_spec.op == "shuffle" and op_spec.op_info.get(
@@ -867,33 +897,25 @@ def _create_sdsc_tensors(
             get_value_tensor_idx_for_index(op_spec, i) if is_idx_tensor else -1
         )
 
-        sdsc_args.append(
-            SDSCArgs(
-                layout=label,
-                dim_order=dim_order,
-                data_format=arg_data_format,
-                scales=scales,
-                strides=strides,
-                offsets=offsets,
-                max_dim_sizes=max_dim_sizes,
-                allocation=arg.allocation,
-                start_address=start_addr,
-                backGap=backGap,
-                arg_index=arg.arg_index,
-                is_index_tensor=is_idx_tensor,
-                related_value_tensor_idx=related_val_idx,
-                device_tile_advance_expr=arg.device_tile_advance_expr,
-                allocation_core_id_to_wk_slice=_map_core_id_to_wk_slice_dims(
-                    arg.allocation_core_id_to_device_slice,
-                    device_dim_to_sdsc_dim,
-                    dim_order,
-                ),
-                core_splits=_map_device_dim_splits(
-                    arg.allocation_device_dim_splits,
-                    device_dim_to_sdsc_dim,
-                ),
-            )
+        sdsc_arg = SDSCArgs(
+            layout=label,
+            dim_order=dim_order,
+            data_format=arg_data_format,
+            scales=scales,
+            strides=strides,
+            offsets=offsets,
+            max_dim_sizes=max_dim_sizes,
+            allocation=arg.allocation,
+            start_address=start_addr,
+            backGap=backGap,
+            arg_index=arg.arg_index,
+            is_index_tensor=is_idx_tensor,
+            related_value_tensor_idx=related_val_idx,
+            device_tile_advance_expr=arg.device_tile_advance_expr,
         )
+        if arg.ownership is not None:
+            sdsc_arg.ownership = projection.project(arg.ownership)
+        sdsc_args.append(sdsc_arg)
 
     return sdsc_args, layouts, missing_dim
 

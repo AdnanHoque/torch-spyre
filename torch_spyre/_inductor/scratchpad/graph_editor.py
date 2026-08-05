@@ -100,6 +100,42 @@ class GraphEditor:
 
         raise KeyError(f"could not find buffer {old_name} to replace as output")
 
+    @staticmethod
+    def _clone_output_splits(
+        buffer_name: str,
+        consumer: Operation,
+    ) -> dict:
+        """Map a consumer's division through its read of ``buffer_name``."""
+
+        consumer_splits: tuple[dict, dict] = getattr(
+            consumer, "op_it_space_splits", ({}, {})
+        )
+        if not any(
+            split > 1 for splits in consumer_splits for split in splits.values()
+        ):
+            return {}
+
+        read_writes = op_read_writes(consumer)
+        read = next((dep for dep in read_writes.reads if dep.name == buffer_name), None)
+        if read is None:
+            return {}
+
+        write_index = next(iter(read_writes.writes)).index
+        reference_read = next(iter(read_writes.reads), None)
+        reference_index = (
+            reference_read.index if reference_read is not None else write_index
+        )
+        splits_by_symbol = apply_splits_from_index_coeff(
+            consumer_splits,
+            write_index,
+            reference_index,
+            iteration_space_from_op(consumer),
+        )
+        output_splits, _ = splits_by_index_coeff(
+            splits_by_symbol, read.index, read.index
+        )
+        return output_splits
+
     def push_allocation_with_clone(
         self,
         buffer: ComputedBuffer | TensorBox,
@@ -180,44 +216,12 @@ class GraphEditor:
         # Propagate per-core splits to the clone. Users share one per_core_view
         # (core_div_mismatch guard), so the first user is representative.
         first_user = buffer_users[0]
-        fu_splits: tuple[dict, dict] = getattr(
+        user_splits: tuple[dict, dict] = getattr(
             first_user, "op_it_space_splits", ({}, {})
         )
-        clone_out_splits: dict = fu_splits[0]
+        clone_out_splits: dict = user_splits[0]
         if input:
-            # An input clone is inserted *before* its consumers and they read
-            # the clone, so the clone's split must match how they read it.
-            # op_it_space_splits keys are stride coefficients in the consumer's
-            # index space -- NOT layout-invariant: a key maps to the same
-            # physical dim only when the consumer's output shape matches the
-            # clone's (== the buffer's) shape. A reduction consumer's output
-            # drops the reduced dim, so copying its keys verbatim splits the
-            # wrong axis of the full-shape clone (wrong values / SDSC abort at
-            # multi-core).
-            #
-            # Re-key: recover the consumer's {symbol: split}, then encode it
-            # against the consumer's READ index on this buffer. The clone is a
-            # Pointwise copy writing the buffer with that same (identity) index,
-            # so buffer-stride coeffs are valid clone output-split keys. Every
-            # per-core split -- output-dim or reduction/k-split -- lands on the
-            # matching buffer axis.
-            fu_rw = op_read_writes(first_user)
-            read_dep = next((d for d in fu_rw.reads if d.name == buf_name), None)
-            clone_out_splits = {}
-            if read_dep is not None and any(
-                n > 1 for d in fu_splits for n in d.values()
-            ):
-                fu_write_index = next(iter(fu_rw.writes)).index
-                fu_read_index = next((d.index for d in fu_rw.reads), fu_write_index)
-                per_sym = apply_splits_from_index_coeff(
-                    fu_splits,
-                    fu_write_index,
-                    fu_read_index,
-                    iteration_space_from_op(first_user),
-                )
-                clone_out_splits, _ = splits_by_index_coeff(
-                    per_sym, read_dep.index, read_dep.index
-                )
+            clone_out_splits = self._clone_output_splits(buf_name, first_user)
         # An output clone copies the produced buffer 1:1 (same shape/layout), so
         # the consumer's output splits transfer directly without re-keying.
         new_com_buf.op_it_space_splits = (clone_out_splits, {})
@@ -305,35 +309,10 @@ class GraphEditor:
         clone.name = self.lowering.register_buffer(clone)
         self.lowering.register_operation(clone)
 
-        # Re-key the consumer's division through its read of ``buffer`` so the
-        # copy writes the same physical slices that the consumer expects.  This
-        # is the same mapping used for LX graph-input clones above, including
-        # consumers whose ownership lives on a reduction dimension.
-        consumer_splits: tuple[dict, dict] = getattr(
-            consumer, "op_it_space_splits", ({}, {})
+        clone.op_it_space_splits = (
+            self._clone_output_splits(buf_name, consumer),
+            {},
         )
-        consumer_rw = op_read_writes(consumer)
-        read_dep = next(
-            (dep for dep in consumer_rw.reads if dep.name == buf_name), None
-        )
-        clone_out_splits: dict = {}
-        if read_dep is not None and any(
-            split > 1 for split_map in consumer_splits for split in split_map.values()
-        ):
-            consumer_write_index = next(iter(consumer_rw.writes)).index
-            consumer_read_index = next(
-                (dep.index for dep in consumer_rw.reads), consumer_write_index
-            )
-            splits_by_symbol = apply_splits_from_index_coeff(
-                consumer_splits,
-                consumer_write_index,
-                consumer_read_index,
-                iteration_space_from_op(consumer),
-            )
-            clone_out_splits, _ = splits_by_index_coeff(
-                splits_by_symbol, read_dep.index, read_dep.index
-            )
-        clone.op_it_space_splits = (clone_out_splits, {})
 
         # clone_lowering registers the new dependency in name_to_users. Move
         # only this consumer's entry to the private clone and retain every other

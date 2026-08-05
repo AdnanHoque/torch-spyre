@@ -37,7 +37,7 @@ from .spyre_kernel import SpyreKernel
 from .lx_relayout import (
     LX_RELAYOUT_SHUFFLE_ATTR,
     LXRelayoutPlan,
-    per_core_view_matches_lx_relayout_side,
+    matches_relayout_ownership,
 )
 from .pass_utils import iteration_space, per_core_view_scheduled
 from .logging_utils import get_inductor_logger
@@ -452,23 +452,26 @@ def demote_incoherent_lx_buffers(
     lx_names: OrderedSet[str] = OrderedSet()
     relayout_plans: dict[str, list[LXRelayoutPlan]] = {}
     destination_plans: dict[str, LXRelayoutPlan] = {}
-    for node in nodes:
-        for inner in node.get_nodes():
-            if not isinstance(inner, SchedulerNode):
-                continue
-            plan = getattr(inner.node, LX_RELAYOUT_SHUFFLE_ATTR, None)
-            if isinstance(plan, LXRelayoutPlan):
-                relayout_plans.setdefault(plan.source_name, []).append(plan)
-                if plan.materialized_destination_name is not None:
-                    destination_plans[plan.materialized_destination_name] = plan
-            if _lx_resident(inner):
-                for dep in inner.read_writes.writes:
-                    if isinstance(dep, MemoryDep):
-                        lx_names.add(dep.name)
-            rw = inner.read_writes
-            for dep in list(rw.reads) + list(rw.writes):
+    scheduler_nodes = [
+        inner
+        for node in nodes
+        for inner in node.get_nodes()
+        if isinstance(inner, SchedulerNode)
+    ]
+    for node in scheduler_nodes:
+        plan = getattr(node.node, LX_RELAYOUT_SHUFFLE_ATTR, None)
+        if isinstance(plan, LXRelayoutPlan):
+            relayout_plans.setdefault(plan.source_name, []).append(plan)
+            if plan.materialized_destination_name is not None:
+                destination_plans[plan.materialized_destination_name] = plan
+        if _lx_resident(node):
+            for dep in node.read_writes.writes:
                 if isinstance(dep, MemoryDep):
-                    users.setdefault(dep.name, []).append((inner, dep))
+                    lx_names.add(dep.name)
+        rw = node.read_writes
+        for dep in list(rw.reads) + list(rw.writes):
+            if isinstance(dep, MemoryDep):
+                users.setdefault(dep.name, []).append((node, dep))
 
     for name in lx_names:
         ref = None
@@ -476,9 +479,7 @@ def demote_incoherent_lx_buffers(
         plans = relayout_plans.get(name, [])
         source_plan = plans[0] if plans else None
         if source_plan is not None and any(
-            plan.source_core_id_to_device_slice
-            != source_plan.source_core_id_to_device_slice
-            or plan.source_device_dim_splits != source_plan.source_device_dim_splits
+            plan.source_ownership != source_plan.source_ownership
             or plan.source_lx_address != source_plan.source_lx_address
             for plan in plans[1:]
         ):
@@ -487,11 +488,7 @@ def demote_incoherent_lx_buffers(
             if culprit is not None:
                 break
             node_plan = getattr(node.node, LX_RELAYOUT_SHUFFLE_ATTR, None)
-            if (
-                source_plan is not None
-                and isinstance(node_plan, LXRelayoutPlan)
-                and node_plan.source_name == name
-            ):
+            if node_plan in plans:
                 # The SHUFFLE executes with destination ownership while reading
                 # an allocation described by source ownership. Its ordinary
                 # scheduled read view therefore cannot represent the source
@@ -504,7 +501,7 @@ def demote_incoherent_lx_buffers(
                 culprit = f"{node.get_name()} view unrepresentable"
                 break
             if source_plan is not None:
-                if not per_core_view_matches_lx_relayout_side(
+                if not matches_relayout_ownership(
                     node.node,
                     view,
                     source_plan,
@@ -543,11 +540,9 @@ def demote_incoherent_lx_buffers(
         # Removing the marker makes the real copy node lower through its normal
         # HBM identity fallback rather than emitting SHUFFLE from stale LX
         # addresses.
-        for node in nodes:
-            for inner in node.get_nodes():
-                node_plan = getattr(inner.node, LX_RELAYOUT_SHUFFLE_ATTR, None)
-                if node_plan in related_plans:
-                    delattr(inner.node, LX_RELAYOUT_SHUFFLE_ATTR)
+        for node in scheduler_nodes:
+            if getattr(node.node, LX_RELAYOUT_SHUFFLE_ATTR, None) in related_plans:
+                delattr(node.node, LX_RELAYOUT_SHUFFLE_ATTR)
         logger.info(
             "demoted %s out of LX: %s",
             ", ".join(sorted(demoted_names)),

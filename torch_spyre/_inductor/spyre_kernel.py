@@ -60,6 +60,7 @@ from .views import compute_coordinates, align_tensors, tiling_expr_to_device_exp
 from torch._inductor.dependencies import MemoryDep
 from .logging_utils import get_inductor_logger
 from .op_spec import (
+    DeviceOwnership,
     IndirectAccess,
     LoopSpec,
     OpSpec,
@@ -97,16 +98,8 @@ def _apply_lx_relayout_to_args(
     assert len(args) == 2
     assert args[0].is_input
     assert not args[1].is_input
-    args[0] = replace(
-        args[0],
-        allocation_core_id_to_device_slice=plan.source_core_id_to_device_slice,
-        allocation_device_dim_splits=dict(plan.source_device_dim_splits),
-    )
-    args[1] = replace(
-        args[1],
-        allocation_core_id_to_device_slice=plan.destination_core_id_to_device_slice,
-        allocation_device_dim_splits=dict(plan.destination_device_dim_splits),
-    )
+    args[0] = replace(args[0], ownership=plan.source_ownership)
+    args[1] = replace(args[1], ownership=plan.destination_ownership)
     op_info["lx_relayout_consumer_is_matmul"] = plan.consumer_is_matmul
 
 
@@ -1489,111 +1482,93 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                                 buf.writeline(
                                     f"element_arrangement={arg.element_arrangement},"
                                 )
-                            if arg.allocation_core_id_to_device_slice is not None:
-                                buf.writeline(
-                                    "allocation_core_id_to_device_slice="
-                                    f"{arg.allocation_core_id_to_device_slice!r},"
-                                )
-                            if arg.allocation_device_dim_splits is not None:
-                                buf.writeline(
-                                    "allocation_device_dim_splits="
-                                    f"{arg.allocation_device_dim_splits!r},"
-                                )
+                            if arg.ownership is not None:
+                                buf.writeline(f"ownership={arg.ownership!r},")
                         buf.writeline("),")
                 buf.writeline("]")
             buf.writeline("),")
 
 
-def _remap_allocation_distribution(
+def _remap_ownership(
     arg: TensorArg,
-    aligned_size: Sequence[sympy.Expr],
-    source_device_dims: Sequence[tuple[int, ...]],
+    sizes: Sequence[sympy.Expr],
+    source_axes: Sequence[tuple[int, ...]],
 ) -> None:
-    """Carry explicit LX ownership through device-layout normalization."""
+    """Carry LX ownership through device-layout normalization."""
 
-    core_map = arg.allocation_core_id_to_device_slice
-    device_dim_splits = arg.allocation_device_dim_splits
-    if core_map is None and device_dim_splits is None:
+    ownership = arg.ownership
+    if ownership is None:
         return
-    if core_map is None or device_dim_splits is None:
-        raise ValueError("explicit LX allocation distribution is incomplete")
-    if len(aligned_size) != len(source_device_dims):
+    if len(sizes) != len(source_axes):
         raise ValueError("aligned device-layout provenance has the wrong rank")
 
-    old_dims = set(device_dim_splits)
-    old_dims.update(
-        device_dim for per_core in core_map.values() for device_dim in per_core
-    )
-    old_dim_components: dict[str, list[tuple[int, int]]] = {}
-    component_slots: dict[str, dict[tuple[str, int], int]] = {
+    core_map = ownership.core_to_slice
+    input_axes = set(ownership.splits)
+    input_axes.update(axis for per_core in core_map.values() for axis in per_core)
+    axis_parts: dict[int, list[tuple[int, int]]] = {}
+    part_slots: dict[str, dict[tuple[int, int], int]] = {
         str(core): {} for core in core_map
     }
 
-    for old_dim in sorted(old_dims, key=int):
-        split = int(device_dim_splits.get(old_dim, 1))
+    for input_axis in sorted(input_axes):
+        split = int(ownership.splits.get(input_axis, 1))
         if split < 1:
-            raise ValueError(
-                f"allocation split must be positive for device dim {old_dim}"
-            )
+            raise ValueError(f"allocation split must be positive for axis {input_axis}")
 
-        old_dim_index = int(old_dim)
-        target_dims = [
-            new_dim
-            for new_dim, provenance in enumerate(source_device_dims[:-1])
-            if old_dim_index in provenance
+        output_axes = [
+            output_axis
+            for output_axis, inputs in enumerate(source_axes[:-1])
+            if input_axis in inputs
         ]
         remaining = split
-        components: list[tuple[int, int]] = []
-        for new_dim in target_dims:
-            factor = math.gcd(remaining, concretize_expr(aligned_size[new_dim]))
+        parts: list[tuple[int, int]] = []
+        for output_axis in output_axes:
+            factor = math.gcd(remaining, concretize_expr(sizes[output_axis]))
             if factor > 1:
-                components.append((new_dim, factor))
+                parts.append((output_axis, factor))
                 remaining //= factor
         if remaining != 1:
             raise ValueError(
                 "align_tensors cannot represent allocation split "
-                f"{split} from device dim {old_dim}"
+                f"{split} from device axis {input_axis}"
             )
-        old_dim_components[old_dim] = components
+        axis_parts[input_axis] = parts
 
-        component_stride = math.prod(factor for _, factor in components)
+        stride = math.prod(factor for _, factor in parts)
         for core, per_core in core_map.items():
-            slot = int(per_core.get(old_dim, 0))
+            slot = int(per_core.get(input_axis, 0))
             if slot < 0 or slot >= split:
                 raise ValueError(
                     f"allocation slot {slot} is outside split {split} "
-                    f"for device dim {old_dim}"
+                    f"for device axis {input_axis}"
                 )
-            stride = component_stride
-            for new_dim, factor in components:
-                stride //= factor
-                component_slots[str(core)][(old_dim, new_dim)] = (
-                    slot // stride
+            part_stride = stride
+            for output_axis, factor in parts:
+                part_stride //= factor
+                part_slots[str(core)][(input_axis, output_axis)] = (
+                    slot // part_stride
                 ) % factor
 
-    new_splits: dict[str, int] = {}
-    new_core_map: dict[str, dict[str, int]] = {str(core): {} for core in core_map}
-    for new_dim, provenance in enumerate(source_device_dims[:-1]):
-        contributions = [
-            (old_dim, factor)
-            for source_dim in provenance
-            for old_dim, components in old_dim_components.items()
-            if int(old_dim) == source_dim
-            for component_dim, factor in components
-            if component_dim == new_dim
+    new_splits: dict[int, int] = {}
+    new_core_map: dict[str, dict[int, int]] = {str(core): {} for core in core_map}
+    for output_axis, input_axis_group in enumerate(source_axes[:-1]):
+        parts = [
+            (input_axis, factor)
+            for input_axis in input_axis_group
+            for part_axis, factor in axis_parts.get(input_axis, ())
+            if part_axis == output_axis
         ]
-        split = math.prod(factor for _, factor in contributions)
+        split = math.prod(factor for _, factor in parts)
         if split == 1:
             continue
-        new_splits[str(new_dim)] = split
+        new_splits[output_axis] = split
         for core in new_core_map:
             slot = 0
-            for old_dim, factor in contributions:
-                slot = slot * factor + component_slots[core][(old_dim, new_dim)]
-            new_core_map[core][str(new_dim)] = slot
+            for input_axis, factor in parts:
+                slot = slot * factor + part_slots[core][(input_axis, output_axis)]
+            new_core_map[core][output_axis] = slot
 
-    arg.allocation_core_id_to_device_slice = new_core_map
-    arg.allocation_device_dim_splits = new_splits
+    arg.ownership = DeviceOwnership(splits=new_splits, core_to_slice=new_core_map)
 
 
 def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
@@ -1612,7 +1587,7 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     op_spec.iteration_space = new_op_space_splits
 
     for arg, t in zip(op_spec.args, new_tensors):
-        _remap_allocation_distribution(
+        _remap_ownership(
             arg,
             t["size"],
             t["source_device_dims"],

@@ -1071,11 +1071,7 @@ def generate_sdsc(
             dim_str = str(dim)
             scale = tensor.scales[dim]
             is_tiled = scale == 1
-            nsplits = (
-                tensor.core_splits.get(dim, sdsc_spec.work_slices[dim])
-                if is_tiled
-                else 1
-            )
+            nsplits = tensor.ownership.splits[dim] if is_tiled else 1
             size = (
                 _coord_size(dim_str, sdsc_spec.iteration_space[dim], is_input)
                 // nsplits
@@ -1361,8 +1357,7 @@ def generate_sdsc(
                                     ),
                                     "coordinates_": {
                                         "coordInfo": _build_coord_info(tensor, i),
-                                        "coreIdToWkSlice_": tensor.allocation_core_id_to_wk_slice
-                                        or {},
+                                        "coreIdToWkSlice_": tensor.ownership.core_to_slice,
                                     },
                                 }
                                 for i, tensor in enumerate(sdsc_spec.args)

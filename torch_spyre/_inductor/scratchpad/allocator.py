@@ -94,8 +94,7 @@ from torch_spyre._inductor.lx_relayout import (
     clear_lx_relayout_metadata,
     collect_lx_relayout_plans,
     is_lx_relayout_destination,
-    materialize_lx_relayout_operations,
-    record_lx_relayout_plan,
+    materialize_lx_relayouts,
 )
 from torch_spyre._inductor.pass_utils import _is_matmul_op
 
@@ -155,6 +154,7 @@ class ScratchpadAllocator:
         self.layout_planning: Optional[MemoryPlanSolver] = layout_planning
         self._last_layout_planning: MemoryPlanSolver = layout_planning
         self._lx_relayout_plans_by_edge: dict[tuple[str, str], LXRelayoutPlan] = {}
+        self._accepted_lx_relayouts: list[LXRelayoutPlan] = []
 
     def _planned_lx_relayout_sources(self) -> set[str]:
         return {plan.source_name for plan in self._lx_relayout_plans_by_edge.values()}
@@ -177,10 +177,17 @@ class ScratchpadAllocator:
         self._run_passes(self.pre_optimization_passes, graph)
         buffers = self._prepare_buffers(graph)
         allocation = self._solve(buffers)
+        self._commit_allocation(graph, allocation)
+
+    def _commit_allocation(
+        self, graph: GraphLowering, allocation: Sequence[Any]
+    ) -> None:
+        """Commit one final solver result to the graph."""
         self._post_solve(graph, allocation)
         self._record_reject_reasons(allocation)
         self._push_allocation(graph, allocation)
-        materialize_lx_relayout_operations(graph)
+        clear_lx_relayout_metadata(graph)
+        materialize_lx_relayouts(graph, self._accepted_lx_relayouts)
         self._log_lx_pinning(graph)
         self._run_passes(self.post_optimization_passes, graph)
 
@@ -219,7 +226,16 @@ class ScratchpadAllocator:
 
     def _post_solve(self, graph: GraphLowering, allocation: Sequence[Any]) -> None:
         """Record only relayouts whose source and destination both landed in LX."""
-        self._record_successful_lx_relayouts(graph, allocation)
+        self._accepted_lx_relayouts = [
+            replace(
+                plan,
+                source_lx_address=source_address,
+                destination_lx_address=destination_address,
+            )
+            for plan, source_address, destination_address in (
+                self._iter_complete_lx_relayouts(allocation)
+            )
+        ]
 
     def _layout_planner_for_buffers(
         self, buffers: Sequence[LifetimeBoundBuffer]
@@ -363,27 +379,6 @@ class ScratchpadAllocator:
 
     def _get_op_name(self, op: Any) -> str:
         return _op_short_name(op)
-
-    def _record_successful_lx_relayouts(
-        self,
-        graph: GraphLowering,
-        allocation: Sequence[LifetimeBoundBuffer],
-    ) -> None:
-        """Commit relayout metadata only after all required LX storage exists."""
-        clear_lx_relayout_metadata(graph)
-        for (
-            plan,
-            source_address,
-            destination_address,
-        ) in self._iter_complete_lx_relayouts(allocation):
-            record_lx_relayout_plan(
-                graph,
-                replace(
-                    plan,
-                    source_lx_address=source_address,
-                    destination_lx_address=destination_address,
-                ),
-            )
 
     def _op_output_good_for_lx_reuse(self, op: Any) -> bool:
         if not isinstance(op, ComputedBuffer):
@@ -1627,12 +1622,7 @@ class StrategyBCoOptimizingAllocator(ScratchpadAllocator):
             lifetimes=None if clone_inserted else search_lifetimes,
         )
         allocation = self._solve(buffers)
-        self._post_solve(graph, allocation)
-        self._record_reject_reasons(allocation)
-        self._push_allocation(graph, allocation)
-        self._log_lx_pinning(graph)
-        for p in self.post_optimization_passes:
-            p.apply_pass(graph)
+        self._commit_allocation(graph, allocation)
 
     # ------------------------------------------------------------------
     # Search
@@ -1810,7 +1800,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             super()._post_solve(graph, allocation)
             return
 
-        clear_lx_relayout_metadata(graph)
+        self._accepted_lx_relayouts = []
         # The divisions must be committed such that any buffer clones can correctly
         # pull the selected core division from the dependent buffers when the graph
         # is updated with clones in ``_push_allocation``.

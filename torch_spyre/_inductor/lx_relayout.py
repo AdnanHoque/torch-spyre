@@ -30,10 +30,9 @@ import sympy
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import ComputedBuffer, Operation, Pointwise
-from torch_spyre._C import SpyreTensorLayout
-
 from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
+from torch_spyre._inductor.op_spec import DeviceOwnership
 from torch_spyre._inductor.pass_utils import (
     PerCoreView,
     _is_matmul_op,
@@ -44,7 +43,6 @@ from torch_spyre._inductor.pass_utils import (
 )
 from torch_spyre._inductor.scratchpad.utils import _op_num_cores, _op_short_name
 
-LX_RELAYOUT_ATTR = "_spyre_lx_relayout_inputs"
 LX_RELAYOUT_SHUFFLE_ATTR = "_spyre_lx_relayout_shuffle"
 LX_RELAYOUT_DESTINATION_PREFIX = "__spyre_lx_relayout_destination__"
 
@@ -65,12 +63,8 @@ class LXRelayoutPlan:
 
     source_name: str
     consumer_name: str
-    source_core_id_to_device_slice: dict[str, dict[str, int]]
-    destination_core_id_to_device_slice: dict[str, dict[str, int]]
-    source_device_dim_splits: dict[str, int]
-    destination_device_dim_splits: dict[str, int]
-    shuffle_iteration_symbols: tuple[sympy.Symbol, ...]
-    device_dim_to_iteration_symbol: dict[str, sympy.Symbol]
+    source_ownership: DeviceOwnership
+    destination_ownership: DeviceOwnership
     consumer_is_matmul: bool = False
     source_lx_address: int | None = None
     destination_lx_address: int | None = None
@@ -94,17 +88,15 @@ def _intervals_overlap(
 
 
 def _is_equal_footprint_geometry(
-    producer_map: dict[str, dict[str, int]],
-    producer_splits: dict[str, int],
-    consumer_map: dict[str, dict[str, int]],
-    consumer_splits: dict[str, int],
+    producer: DeviceOwnership,
+    consumer: DeviceOwnership,
 ) -> bool:
     """Whether two complete per-core partitions admit a bounded shuffle."""
 
-    if producer_map.keys() != consumer_map.keys():
+    if producer.core_to_slice.keys() != consumer.core_to_slice.keys():
         return False
 
-    def slice_count(core_map: dict[str, dict[str, int]]) -> int:
+    def slice_count(core_map: dict[str, dict[int, int]]) -> int:
         return len(
             {
                 tuple(sorted((dim, int(slot)) for dim, slot in per_core.items()))
@@ -112,18 +104,18 @@ def _is_equal_footprint_geometry(
             }
         )
 
-    fanout = {core: 0 for core in producer_map}
-    fanin = {core: 0 for core in consumer_map}
+    fanout = {core: 0 for core in producer.core_to_slice}
+    fanin = {core: 0 for core in consumer.core_to_slice}
     transfer_count = 0
-    dims = set(producer_splits) | set(consumer_splits)
-    for producer_core, producer_slice in producer_map.items():
-        for consumer_core, consumer_slice in consumer_map.items():
+    dims = set(producer.splits) | set(consumer.splits)
+    for producer_core, producer_slice in producer.core_to_slice.items():
+        for consumer_core, consumer_slice in consumer.core_to_slice.items():
             if all(
                 _intervals_overlap(
                     int(producer_slice.get(dim, 0)),
-                    int(producer_splits.get(dim, 1)),
+                    int(producer.splits.get(dim, 1)),
                     int(consumer_slice.get(dim, 0)),
-                    int(consumer_splits.get(dim, 1)),
+                    int(consumer.splits.get(dim, 1)),
                 )
                 for dim in dims
             ):
@@ -137,12 +129,12 @@ def _is_equal_footprint_geometry(
     covers_all_cores = (
         min(fanout_values, default=0) > 0 and min(fanin_values, default=0) > 0
     )
-    producer_is_partitioned = slice_count(producer_map) == len(
-        producer_map
-    ) and math.prod(producer_splits.values()) == len(producer_map)
-    consumer_is_partitioned = slice_count(consumer_map) == len(
-        consumer_map
-    ) and math.prod(consumer_splits.values()) == len(consumer_map)
+    producer_is_partitioned = slice_count(producer.core_to_slice) == len(
+        producer.core_to_slice
+    ) and math.prod(producer.splits.values()) == len(producer.core_to_slice)
+    consumer_is_partitioned = slice_count(consumer.core_to_slice) == len(
+        consumer.core_to_slice
+    ) and math.prod(consumer.splits.values()) == len(consumer.core_to_slice)
     return (
         transfer_count > 0
         and covers_all_cores
@@ -161,47 +153,29 @@ def _single_write_dep(op: ComputedBuffer, buf_name: str) -> MemoryDep | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def _operations_by_name(graph: GraphLowering) -> dict[str, Operation]:
-    """Index the current graph, including operations inserted by graph editing."""
+def _is_activation_source(operations: dict[str, Operation], op: Operation) -> bool:
+    """Exclude restickified graph inputs and weights from activation relayout."""
 
-    return {op.get_name(): op for op in graph.operations}
-
-
-def _restickify_reads_computed_input(
-    operations: dict[str, Operation], op: Operation
-) -> bool:
-    if _op_short_name(op) != "restickify":
-        return False
-    return any(
+    return _op_short_name(op) != "restickify" or any(
         isinstance(operations.get(dep.name), ComputedBuffer)
         for dep in op_read_writes(op).reads
         if isinstance(dep, MemoryDep)
     )
 
 
-def _matmul_operand_source_good_for_lx_relayout(
-    operations: dict[str, Operation], op: Operation
-) -> bool:
-    """Exclude graph-input and weight restickifies from activation relayout."""
-
-    return _op_short_name(op) != "restickify" or _restickify_reads_computed_input(
-        operations, op
-    )
-
-
 def _core_id_to_device_slice(
     view: PerCoreView,
     core_count: int,
-) -> dict[str, dict[str, int]] | None:
+) -> dict[str, dict[int, int]] | None:
     """Return ownership as ``core -> device-dim -> slice-index``."""
 
     core_id = sympy.Symbol("core_id")
     expr_by_dim = {int(dim): expr for dim, expr in view.core_to_slot}
     split_dims = {int(dim): int(split) for dim, split in view.work_slice_dims}
-    result: dict[str, dict[str, int]] = {}
+    result: dict[str, dict[int, int]] = {}
 
     for core in range(core_count):
-        per_core: dict[str, int] = {}
+        per_core: dict[int, int] = {}
         for dim, split in split_dims.items():
             expr = sympy.sympify(expr_by_dim.get(dim, 0))
             slot = sympy.simplify(expr.subs(core_id, core))
@@ -213,54 +187,46 @@ def _core_id_to_device_slice(
                 return None
             if slot_int < 0 or slot_int >= split:
                 return None
-            per_core[str(dim)] = slot_int
+            per_core[dim] = slot_int
         result[str(core)] = per_core
 
     return result
 
 
-def _work_slice_dims(view: PerCoreView) -> dict[str, int]:
-    return {str(int(dim)): int(split) for dim, split in view.work_slice_dims}
+def _work_slice_dims(view: PerCoreView) -> dict[int, int]:
+    return {int(dim): int(split) for dim, split in view.work_slice_dims}
 
 
-def _materializable_iteration_geometry(
+def _has_materializable_iteration_geometry(
     device_coordinates: list[sympy.Expr],
     iteration_symbols: tuple[sympy.Symbol, ...],
-    source_device_dim_splits: dict[str, int],
-    destination_device_dim_splits: dict[str, int],
-) -> tuple[tuple[sympy.Symbol, ...], dict[str, sympy.Symbol]] | None:
-    """Resolve every non-unit allocation dimension before LX is committed.
+    source: DeviceOwnership,
+    destination: DeviceOwnership,
+) -> bool:
+    """Check every non-unit allocation dimension before LX is committed.
 
     The allocator cannot safely reserve S1/S2 from device-dimension indices
-    alone: codegen ultimately needs iteration symbols to emit the SHUFFLE.
-    Return that complete symbol contract here, while fallback to HBM is still
-    possible.  Unit dimensions may be absent from an access; their only legal
-    slot is zero and the SDSC mapper already treats them as implicit.
+    alone: codegen needs those dimensions to map to iteration symbols. Unit
+    dimensions may be absent; their only legal slot is zero.
     """
 
     iteration_symbol_set = set(iteration_symbols)
-    used_symbols = tuple(
-        symbol
-        for symbol in iteration_symbols
-        if any(symbol in coordinate.free_symbols for coordinate in device_coordinates)
-    )
-    if not used_symbols:
-        return None
+    if not any(
+        coordinate.free_symbols & iteration_symbol_set
+        for coordinate in device_coordinates
+    ):
+        return False
 
-    device_dim_to_symbol: dict[str, sympy.Symbol] = {}
     symbol_splits: dict[tuple[str, sympy.Symbol], int] = {}
-    device_dims = set(source_device_dim_splits) | set(destination_device_dim_splits)
+    device_dims = set(source.splits) | set(destination.splits)
     for device_dim in device_dims:
-        try:
-            index = int(device_dim)
-        except ValueError:
-            return None
-        source_split = int(source_device_dim_splits.get(device_dim, 1))
-        destination_split = int(destination_device_dim_splits.get(device_dim, 1))
+        index = int(device_dim)
+        source_split = int(source.splits.get(device_dim, 1))
+        destination_split = int(destination.splits.get(device_dim, 1))
         requires_symbol = source_split != 1 or destination_split != 1
         if index < 0 or index >= len(device_coordinates):
             if requires_symbol:
-                return None
+                return False
             continue
         symbols = [
             symbol
@@ -269,10 +235,9 @@ def _materializable_iteration_geometry(
         ]
         if len(symbols) != 1:
             if requires_symbol:
-                return None
+                return False
             continue
         symbol = symbols[0]
-        device_dim_to_symbol[device_dim] = symbol
         for side, split in (
             ("source", source_split),
             ("destination", destination_split),
@@ -280,33 +245,27 @@ def _materializable_iteration_geometry(
             key = (side, symbol)
             previous = symbol_splits.get(key)
             if previous is not None and previous != split:
-                return None
+                return False
             symbol_splits[key] = split
 
-    if any(
-        int(split) != 1 and device_dim not in device_dim_to_symbol
-        for splits in (source_device_dim_splits, destination_device_dim_splits)
-        for device_dim, split in splits.items()
-    ):
-        return None
-    return used_symbols, device_dim_to_symbol
+    return True
 
 
 def _dense_view(
-    core_map: dict[str, dict[str, int]],
-    splits: dict[str, int],
-    dims: set[str],
-) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
-    ordered_dims = sorted(dims, key=int)
+    core_map: dict[str, dict[int, int]],
+    splits: dict[int, int],
+    dims: set[int],
+) -> DeviceOwnership:
+    ordered_dims = sorted(dims)
     dense_map = {
         core: {dim: int(per_core.get(dim, 0)) for dim in ordered_dims}
         for core, per_core in core_map.items()
     }
     dense_splits = {dim: int(splits.get(dim, 1)) for dim in ordered_dims}
-    return dense_map, dense_splits
+    return DeviceOwnership(splits=dense_splits, core_to_slice=dense_map)
 
 
-def per_core_view_matches_lx_relayout_side(
+def matches_relayout_ownership(
     op: Operation,
     view: PerCoreView,
     plan: LXRelayoutPlan,
@@ -320,67 +279,23 @@ def per_core_view_matches_lx_relayout_side(
     positional core mapping, not merely with the split-factor product.
     """
 
-    expected_map = (
-        plan.destination_core_id_to_device_slice
-        if destination
-        else plan.source_core_id_to_device_slice
-    )
-    expected_splits = (
-        plan.destination_device_dim_splits
-        if destination
-        else plan.source_device_dim_splits
-    )
+    expected = plan.destination_ownership if destination else plan.source_ownership
     core_count = _op_num_cores(op)
-    if core_count != len(expected_map):
+    if core_count != len(expected.core_to_slice):
         return False
     current_map = _core_id_to_device_slice(view, core_count)
     if current_map is None:
         return False
-    current_map, current_splits = _dense_view(
+    current = _dense_view(
         current_map,
         _work_slice_dims(view),
-        set(expected_splits),
+        set(expected.splits),
     )
-    return current_map == expected_map and current_splits == expected_splits
-
-
-def rebind_lx_relayout_iteration_geometry(
-    plan: LXRelayoutPlan,
-    stl: SpyreTensorLayout,
-    dep: MemoryDep,
-    iteration_symbols: tuple[sympy.Symbol, ...],
-) -> LXRelayoutPlan | None:
-    """Rebind a pre-scheduling plan to the scheduler's final loop symbols.
-
-    The allocation-facing ownership is expressed in stable device dimensions,
-    while Inductor is free to rename loop symbols during scheduling.  Rebinding
-    happens in the post-fusion safety pass; failure there demotes the source to
-    HBM before codegen, so symbol drift cannot become a late assertion.
-    """
-
-    device_coordinates = try_device_coordinates(stl, dep, None)
-    if device_coordinates is None:
-        return None
-    geometry = _materializable_iteration_geometry(
-        device_coordinates,
-        iteration_symbols,
-        plan.source_device_dim_splits,
-        plan.destination_device_dim_splits,
-    )
-    if geometry is None:
-        return None
-    shuffle_iteration_symbols, device_dim_to_iteration_symbol = geometry
-    return dataclasses.replace(
-        plan,
-        shuffle_iteration_symbols=shuffle_iteration_symbols,
-        device_dim_to_iteration_symbol=device_dim_to_iteration_symbol,
-    )
+    return current == expected
 
 
 def clear_lx_relayout_metadata(graph: GraphLowering) -> None:
     for op in graph.operations:
-        if hasattr(op, LX_RELAYOUT_ATTR):
-            delattr(op, LX_RELAYOUT_ATTR)
         if hasattr(op, LX_RELAYOUT_SHUFFLE_ATTR):
             delattr(op, LX_RELAYOUT_SHUFFLE_ATTR)
 
@@ -400,7 +315,7 @@ def collect_lx_relayout_plans(
     if not config.lx_planner_relayout:
         return []
 
-    operations = _operations_by_name(graph)
+    operations = {op.get_name(): op for op in graph.operations}
     reads_by_source: dict[str, list[tuple[Operation, MemoryDep, int]]] = {}
     indirect_consumers: set[str] = set()
     for consumer in graph.operations:
@@ -472,7 +387,7 @@ def collect_lx_relayout_plans(
                 source_is_covered = False
                 break
             if is_matmul_consumer and (
-                not _matmul_operand_source_good_for_lx_relayout(operations, producer)
+                not _is_activation_source(operations, producer)
                 or read_index not in (0, 1)
             ):
                 source_is_covered = False
@@ -489,17 +404,15 @@ def collect_lx_relayout_plans(
             relayout_dims = set(producer_work_slice_dims) | set(
                 consumer_work_slice_dims
             )
-            dense_producer_core_slices, dense_producer_work_slice_dims = _dense_view(
+            producer_ownership = _dense_view(
                 producer_core_slices, producer_work_slice_dims, relayout_dims
             )
-            dense_consumer_core_slices, dense_consumer_work_slice_dims = _dense_view(
+            consumer_ownership = _dense_view(
                 consumer_core_slices, consumer_work_slice_dims, relayout_dims
             )
             if not _is_equal_footprint_geometry(
-                dense_producer_core_slices,
-                dense_producer_work_slice_dims,
-                dense_consumer_core_slices,
-                dense_consumer_work_slice_dims,
+                producer_ownership,
+                consumer_ownership,
             ):
                 source_is_covered = False
                 break
@@ -512,28 +425,20 @@ def collect_lx_relayout_plans(
             if device_coordinates is None:
                 source_is_covered = False
                 break
-            iteration_geometry = _materializable_iteration_geometry(
+            if not _has_materializable_iteration_geometry(
                 device_coordinates,
                 tuple(iteration_space_from_op(consumer)),
-                dense_producer_work_slice_dims,
-                dense_consumer_work_slice_dims,
-            )
-            if iteration_geometry is None:
+                producer_ownership,
+                consumer_ownership,
+            ):
                 source_is_covered = False
                 break
-            shuffle_iteration_symbols, device_dim_to_iteration_symbol = (
-                iteration_geometry
-            )
 
             plan = LXRelayoutPlan(
                 source_name=source_name,
                 consumer_name=consumer.get_name(),
-                source_core_id_to_device_slice=dense_producer_core_slices,
-                destination_core_id_to_device_slice=dense_consumer_core_slices,
-                source_device_dim_splits=dense_producer_work_slice_dims,
-                destination_device_dim_splits=dense_consumer_work_slice_dims,
-                shuffle_iteration_symbols=shuffle_iteration_symbols,
-                device_dim_to_iteration_symbol=device_dim_to_iteration_symbol,
+                source_ownership=producer_ownership,
+                destination_ownership=consumer_ownership,
                 consumer_is_matmul=is_matmul_consumer,
             )
             if plan.consumer_name in direct_consumers:
@@ -557,8 +462,8 @@ def collect_lx_relayout_plans(
                     % (
                         plan.source_name,
                         plan.consumer_name,
-                        plan.source_device_dim_splits,
-                        plan.destination_device_dim_splits,
+                        plan.source_ownership.splits,
+                        plan.destination_ownership.splits,
                     )
                     for plan in plans
                 ),
@@ -569,37 +474,22 @@ def collect_lx_relayout_plans(
     return plans
 
 
-def record_lx_relayout_plan(graph: GraphLowering, plan: LXRelayoutPlan) -> None:
-    """Stamp a relayout plan after the source buffer is placed in LX."""
-
-    consumer = _operations_by_name(graph)[plan.consumer_name]
-    plans = dict(getattr(consumer, LX_RELAYOUT_ATTR, {}))
-    plans[plan.source_name] = plan
-    setattr(consumer, LX_RELAYOUT_ATTR, plans)
-
-
-def materialize_lx_relayout_operations(graph: GraphLowering) -> None:
+def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) -> None:
     """Insert accepted LX relayouts as real graph operations.
 
-    Scratchpad planning first proves that both S1 and S2 fit atomically and
-    records their addresses on the consumer.  This pass turns each accepted
-    edge into a private identity-copy node before scheduling; codegen recognizes
-    the node's relayout metadata and lowers it to SHUFFLE/STCDPOpLx.
+    Scratchpad planning first proves that both S1 and S2 fit atomically. This
+    pass turns each accepted edge into a private identity-copy node before
+    scheduling; codegen lowers its relayout metadata to SHUFFLE/STCDPOpLx.
     """
 
     from torch_spyre._inductor.ir import FixedTiledLayout
     from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
 
-    pending = [
-        plan
-        for consumer in graph.operations
-        for plan in getattr(consumer, LX_RELAYOUT_ATTR, {}).values()
-    ]
-    if not pending:
+    if not plans:
         return
 
     editor = GraphEditor(graph)
-    for plan in pending:
+    for plan in plans:
         source = graph.try_get_buffer(plan.source_name)
         consumer = graph.try_get_buffer(plan.consumer_name)
         assert isinstance(source, ComputedBuffer)
@@ -665,9 +555,3 @@ def materialize_lx_relayout_operations(graph: GraphLowering) -> None:
             plan.source_lx_address,
             plan.destination_lx_address,
         )
-
-    # The consumer metadata was a deferred insertion queue.  Once real graph
-    # nodes exist it must not reach codegen as a second, late materialization.
-    for op in graph.operations:
-        if hasattr(op, LX_RELAYOUT_ATTR):
-            delattr(op, LX_RELAYOUT_ATTR)

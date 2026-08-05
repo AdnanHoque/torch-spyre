@@ -137,6 +137,14 @@ class DebugHandle:
         }
 
 
+@dataclasses.dataclass(frozen=True)
+class DeviceOwnership:
+    """The tensor region owned by each core, keyed by physical device axis."""
+
+    splits: dict[int, int]
+    core_to_slice: dict[str, dict[int, int]]
+
+
 @dataclasses.dataclass
 class TensorArg:
     """
@@ -168,11 +176,9 @@ class TensorArg:
             device-element space via views.tiling_expr_to_device_expr, and summed into a
             single combined Expr. This is the sole tile-advance mechanism. ``None`` for
             ops without loop_info/coarse tiling.
-        allocation_core_id_to_device_slice: Optional physical ownership of an
-                LX allocation. Keys are device-dimension indices; SuperDSC
-                codegen maps them to SDSC dimensions using the tensor layout.
-        allocation_device_dim_splits: Optional allocation fold geometry keyed
-                by the same device-dimension indices.
+        ownership: Optional LX ownership. Physical device axes remain stable
+                while tensor coordinates are normalized; SuperDSC projects
+                them to descriptor coordinates during code generation.
     """
 
     is_input: bool
@@ -186,8 +192,7 @@ class TensorArg:
     element_arrangement: ElementArrangement = dataclasses.field(
         default_factory=lambda: ElementArrangement.STANDARD
     )
-    allocation_core_id_to_device_slice: dict[str, dict[str, int]] | None = None
-    allocation_device_dim_splits: dict[str, int] | None = None
+    ownership: DeviceOwnership | None = None
 
 
 @dataclasses.dataclass
