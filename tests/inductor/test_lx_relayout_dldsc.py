@@ -75,9 +75,9 @@ def _dense_plan(
     )
 
 
-def _compile_shuffle(shuffle_spec):
-    simplify_op_spec(shuffle_spec)
-    sdsc, *_ = compile_op_spec(0, shuffle_spec, [])
+def _compile_spec(op_spec):
+    simplify_op_spec(op_spec)
+    sdsc, *_ = compile_op_spec(0, op_spec, [])
     root = next(iter(sdsc.values()))
     shuffle_dsc = next(iter(root["dscs_"][0].values()))
     allocations = [
@@ -132,7 +132,7 @@ def test_relayout_emits_owner_maps():
         {m: (Integer(512), 32), n: (Integer(12800), 1)},
     )
 
-    root, allocations = _compile_shuffle(shuffle_spec)
+    root, allocations = _compile_spec(shuffle_spec)
     assert root["numCoresUsed_"] == 32
     assert shuffle_spec.args[1].allocation == {"lx": plan.destination_lx_address}
     producer_map = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
@@ -144,6 +144,39 @@ def test_relayout_emits_owner_maps():
     assert (consumer_map["0"], consumer_map["31"]) == (
         {"mb": 0, "out": 0},
         {"mb": 31, "out": 0},
+    )
+
+
+def test_default_ownership_keeps_implicit_core_map():
+    m, n = Symbol("m"), Symbol("n")
+
+    def tensor(is_input, name, address):
+        return TensorArg(
+            is_input=is_input,
+            arg_index=-1,
+            device_dtype=DataFormats.SEN169_FP16,
+            device_size=[512, 2, 64],
+            device_coordinates=[m, floor(n / 64), Mod(n, 64)],
+            allocation={"lx": address},
+            name=name,
+        )
+
+    spec = OpSpec(
+        op="add",
+        is_reduction=False,
+        iteration_space={m: (Integer(512), 32), n: (Integer(128), 1)},
+        args=[
+            tensor(True, "lhs", 0x24000),
+            tensor(True, "rhs", 0x44000),
+            tensor(False, "output", 0x64000),
+        ],
+        op_info={},
+    )
+
+    _, allocations = _compile_spec(spec)
+    assert all(
+        allocation["coordinates_"]["coreIdToWkSlice_"] == {}
+        for allocation in allocations
     )
 
 
@@ -180,7 +213,7 @@ def test_relayout_owner_maps_follow_aligned_device_dimensions():
         {n: (Integer(256), 8), m: (Integer(64), 1)},
     )
 
-    root, allocations = _compile_shuffle(shuffle_spec)
+    root, allocations = _compile_spec(shuffle_spec)
 
     assert list(shuffle_spec.iteration_space) == [n, Symbol("z0"), m]
     assert shuffle_spec.args[0].ownership.splits == {2: 8}

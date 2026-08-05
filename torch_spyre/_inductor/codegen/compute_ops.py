@@ -1357,7 +1357,7 @@ def generate_sdsc(
                                     ),
                                     "coordinates_": {
                                         "coordInfo": _build_coord_info(tensor, i),
-                                        "coreIdToWkSlice_": tensor.ownership.core_to_slice,
+                                        "coreIdToWkSlice_": tensor.ownership.core_map_override,
                                     },
                                 }
                                 for i, tensor in enumerate(sdsc_spec.args)

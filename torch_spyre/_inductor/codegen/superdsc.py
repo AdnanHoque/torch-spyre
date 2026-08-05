@@ -66,6 +66,13 @@ class SDSCOwnership:
 
     splits: dict[Symbol, int]
     core_to_slice: dict[str, dict[str, int]]
+    is_default: bool = False
+
+    @property
+    def core_map_override(self) -> dict[str, dict[str, int]]:
+        """Return only ownership that must override the SDSC work division."""
+
+        return {} if self.is_default else self.core_to_slice
 
     def for_dims(self, dims: tuple[Symbol, ...]) -> "SDSCOwnership":
         return SDSCOwnership(
@@ -74,6 +81,7 @@ class SDSCOwnership:
                 core: {str(dim): per_dim[str(dim)] for dim in dims}
                 for core, per_dim in self.core_to_slice.items()
             },
+            is_default=self.is_default,
         )
 
 
@@ -212,6 +220,7 @@ def default_ownership(spec: SDSCSpec) -> SDSCOwnership:
             }
             for core in range(spec.num_cores)
         },
+        is_default=True,
     )
 
 
