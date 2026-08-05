@@ -35,10 +35,9 @@ from torch.utils._ordered_set import OrderedSet
 
 from .spyre_kernel import SpyreKernel
 from .lx_relayout import (
-    LX_RELAYOUT_ATTR,
+    LX_RELAYOUT_SHUFFLE_ATTR,
     LXRelayoutPlan,
     per_core_view_matches_lx_relayout_side,
-    rebind_lx_relayout_iteration_geometry,
 )
 from .pass_utils import iteration_space, per_core_view_scheduled
 from .logging_utils import get_inductor_logger
@@ -357,10 +356,11 @@ def align_lx_producer_loop_order(
     ``get_ncores_for_buffers``) -- so matching the first consumer matches all.
     """
     planned_sources = {
-        source_name
+        plan.source_name
         for node in nodes
         for inner in node.get_nodes()
-        for source_name in getattr(inner.node, LX_RELAYOUT_ATTR, {})
+        for plan in [getattr(inner.node, LX_RELAYOUT_SHUFFLE_ATTR, None)]
+        if isinstance(plan, LXRelayoutPlan)
     }
     producers: dict[str, SchedulerNode] = {}
     for node in nodes:
@@ -451,13 +451,16 @@ def demote_incoherent_lx_buffers(
     users: dict[str, list[tuple[SchedulerNode, MemoryDep]]] = {}
     lx_names: OrderedSet[str] = OrderedSet()
     relayout_plans: dict[str, list[LXRelayoutPlan]] = {}
+    destination_plans: dict[str, LXRelayoutPlan] = {}
     for node in nodes:
         for inner in node.get_nodes():
             if not isinstance(inner, SchedulerNode):
                 continue
-            for source_name, plan in getattr(inner.node, LX_RELAYOUT_ATTR, {}).items():
-                if isinstance(plan, LXRelayoutPlan):
-                    relayout_plans.setdefault(source_name, []).append(plan)
+            plan = getattr(inner.node, LX_RELAYOUT_SHUFFLE_ATTR, None)
+            if isinstance(plan, LXRelayoutPlan):
+                relayout_plans.setdefault(plan.source_name, []).append(plan)
+                if plan.materialized_destination_name is not None:
+                    destination_plans[plan.materialized_destination_name] = plan
             if _lx_resident(inner):
                 for dep in inner.read_writes.writes:
                     if isinstance(dep, MemoryDep):
@@ -483,47 +486,34 @@ def demote_incoherent_lx_buffers(
         for node, dep in users.get(name, []):
             if culprit is not None:
                 break
+            node_plan = getattr(node.node, LX_RELAYOUT_SHUFFLE_ATTR, None)
+            if (
+                source_plan is not None
+                and isinstance(node_plan, LXRelayoutPlan)
+                and node_plan.source_name == name
+            ):
+                # The SHUFFLE executes with destination ownership while reading
+                # an allocation described by source ownership. Its ordinary
+                # scheduled read view therefore cannot represent the source
+                # allocation map; validate the producer/direct users here and
+                # the SHUFFLE output against its consumer as the destination
+                # buffer's normal coherence check.
+                continue
             view, _, representable = per_core_view_scheduled(node, dep, name)
             if not representable:
                 culprit = f"{node.get_name()} view unrepresentable"
                 break
-            consumer_plan = getattr(node.node, LX_RELAYOUT_ATTR, {}).get(name)
             if source_plan is not None:
-                expected_plan = consumer_plan or source_plan
                 if not per_core_view_matches_lx_relayout_side(
                     node.node,
                     view,
-                    expected_plan,
-                    destination=consumer_plan is not None,
+                    source_plan,
+                    destination=False,
                 ):
-                    side = "destination" if consumer_plan is not None else "source"
                     culprit = (
-                        f"{node.get_name()} no longer matches relayout {side} ownership"
+                        f"{node.get_name()} no longer matches relayout source ownership"
                     )
                     break
-                if consumer_plan is not None:
-                    source_buf = V.graph.try_get_buffer(name)
-                    source_layout = getattr(source_buf, "layout", None)
-                    stl = getattr(source_layout, "device_layout", None)
-                    rebound = (
-                        rebind_lx_relayout_iteration_geometry(
-                            consumer_plan,
-                            stl,
-                            dep,
-                            tuple(iteration_space(node)),
-                        )
-                        if stl is not None
-                        else None
-                    )
-                    if rebound is None:
-                        culprit = (
-                            f"{node.get_name()} relayout iteration geometry "
-                            "is no longer materializable"
-                        )
-                        break
-                    rebound_plans = dict(getattr(node.node, LX_RELAYOUT_ATTR, {}))
-                    rebound_plans[name] = rebound
-                    setattr(node.node, LX_RELAYOUT_ATTR, rebound_plans)
                 continue
             if ref is None:
                 ref = view
@@ -532,29 +522,37 @@ def demote_incoherent_lx_buffers(
                 break
         if culprit is None:
             continue
-        buf = V.graph.try_get_buffer(name)
-        layout = getattr(buf, "layout", None)
-        allocation = getattr(layout, "allocation", None)
-        if allocation is not None:
-            allocation.pop("lx", None)
-        # A stale plan carries concrete S1/S2 LX addresses. Remove it whenever
-        # the source is demoted so codegen cannot emit a shuffle from storage
-        # that the producer no longer writes.
+        related_plan = source_plan or destination_plans.get(name)
+        demoted_names = {name}
+        related_plans: list[LXRelayoutPlan] = []
+        if related_plan is not None:
+            related_plans = relayout_plans.get(related_plan.source_name, [related_plan])
+            demoted_names.add(related_plan.source_name)
+            demoted_names.update(
+                plan.materialized_destination_name
+                for plan in related_plans
+                if plan.materialized_destination_name is not None
+            )
+        for demoted_name in demoted_names:
+            buf = V.graph.try_get_buffer(demoted_name)
+            layout = getattr(buf, "layout", None)
+            allocation = getattr(layout, "allocation", None)
+            if allocation is not None:
+                allocation.pop("lx", None)
+
+        # Removing the marker makes the real copy node lower through its normal
+        # HBM identity fallback rather than emitting SHUFFLE from stale LX
+        # addresses.
         for node in nodes:
             for inner in node.get_nodes():
-                plans_for_consumer = getattr(inner.node, LX_RELAYOUT_ATTR, None)
-                if (
-                    not isinstance(plans_for_consumer, dict)
-                    or name not in plans_for_consumer
-                ):
-                    continue
-                remaining = dict(plans_for_consumer)
-                remaining.pop(name)
-                if remaining:
-                    setattr(inner.node, LX_RELAYOUT_ATTR, remaining)
-                else:
-                    delattr(inner.node, LX_RELAYOUT_ATTR)
-        logger.info("demoted %s out of LX: %s", name, culprit)
+                node_plan = getattr(inner.node, LX_RELAYOUT_SHUFFLE_ATTR, None)
+                if node_plan in related_plans:
+                    delattr(inner.node, LX_RELAYOUT_SHUFFLE_ATTR)
+        logger.info(
+            "demoted %s out of LX: %s",
+            ", ".join(sorted(demoted_names)),
+            culprit,
+        )
 
     return nodes
 

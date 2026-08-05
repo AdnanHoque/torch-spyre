@@ -94,6 +94,7 @@ from torch_spyre._inductor.lx_relayout import (
     clear_lx_relayout_metadata,
     collect_lx_relayout_plans,
     is_lx_relayout_destination,
+    materialize_lx_relayout_operations,
     record_lx_relayout_plan,
 )
 from torch_spyre._inductor.pass_utils import _is_matmul_op
@@ -179,6 +180,7 @@ class ScratchpadAllocator:
         self._post_solve(graph, allocation)
         self._record_reject_reasons(allocation)
         self._push_allocation(graph, allocation)
+        materialize_lx_relayout_operations(graph)
         self._log_lx_pinning(graph)
         self._run_passes(self.post_optimization_passes, graph)
 

@@ -37,12 +37,8 @@ from .constants import (
     SPYRE_FP32_OPS,
     BATCH_MATMUL_OP,
     BATCH_MATMUL_FP8_OP,
-    INPUT_DIM_LABELS,
     IDENTITY_OP,
     POOL_OPS,
-    LAYOUT_LABELS,
-    MATMUL_DIM_LABELS,
-    OUTPUT_DIM_LABELS,
     RESTICKIFY_OP,
     SEGMENT_OFFSETS,
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
@@ -50,7 +46,7 @@ from .constants import (
 from . import config as _spyre_config
 from .errors import Unsupported
 from .ir import FixedTiledLayout
-from .lx_relayout import LX_RELAYOUT_ATTR, LXRelayoutPlan
+from .lx_relayout import LX_RELAYOUT_SHUFFLE_ATTR, LXRelayoutPlan
 from .pass_utils import (
     concretize_expr,
     concretize_index,
@@ -76,157 +72,42 @@ from torch_spyre._inductor.provenance import build_debug_handle
 logger = get_inductor_logger("spyre_kernel")
 
 
-def _current_node_lx_relayout_inputs(
-    current_node,
-) -> dict[str, LXRelayoutPlan]:
-    return {
-        source_name: plan
-        for scheduler_node in current_node.get_nodes()
-        for source_name, plan in getattr(
-            scheduler_node.node, LX_RELAYOUT_ATTR, {}
-        ).items()
-    }
+def _current_lx_relayout_shuffle(
+    current_node, output_name: str
+) -> LXRelayoutPlan | None:
+    """Return the plan carried by this real graph operation, if any."""
 
-
-def _materialize_explicit_lx_shuffle(
-    source_arg: TensorArg,
-    consumer_spec: OpSpec,
-    plan: LXRelayoutPlan,
-) -> tuple[OpSpec, TensorArg]:
-    """Build one standard bounded S1 -> SHUFFLE -> S2 operation."""
-    source_address = plan.source_lx_address
-    destination_address = plan.destination_lx_address
-    destination_name = plan.destination_name
-    producer_map = plan.source_core_id_to_device_slice
-    consumer_map = plan.destination_core_id_to_device_slice
-    assert source_address is not None, (
-        f"allocator recorded LX relayout without S1 address for {plan.source_name}"
-    )
-    assert destination_address is not None, (
-        f"allocator recorded LX relayout without S2 address for {plan.source_name}"
+    return next(
+        (
+            plan
+            for scheduler_node in current_node.get_nodes()
+            if scheduler_node.node.get_name() == output_name
+            for plan in [getattr(scheduler_node.node, LX_RELAYOUT_SHUFFLE_ATTR, None)]
+            if isinstance(plan, LXRelayoutPlan)
+        ),
+        None,
     )
 
-    consumer_is_matmul = consumer_spec.op in (
-        BATCH_MATMUL_OP,
-        BATCH_MATMUL_FP8_OP,
-    )
-    consumer_symbols = list(consumer_spec.iteration_space)
-    consumer_labels = (
-        MATMUL_DIM_LABELS[-len(consumer_symbols) :]
-        if consumer_is_matmul
-        else INPUT_DIM_LABELS[: len(consumer_symbols) - 1] + OUTPUT_DIM_LABELS[:1]
-    )
-    symbol_to_label = dict(zip(consumer_symbols, consumer_labels))
-    missing_symbols = set(plan.shuffle_iteration_symbols) - set(consumer_symbols)
-    assert not missing_symbols, (
-        "LX relayout plan/codegen iteration-space contract changed for "
-        f"{plan.source_name}: missing {sorted(map(str, missing_symbols))}"
-    )
-    shuffle_iteration_space = {
-        symbol: consumer_spec.iteration_space[symbol]
-        for symbol in plan.shuffle_iteration_symbols
-    }
 
-    def splits_by_symbol(
-        device_dim_splits: dict[str, int],
-    ) -> dict[sympy.Symbol, int]:
-        splits_by_symbol: dict[sympy.Symbol, int] = {}
-        for device_dim, split in device_dim_splits.items():
-            symbol = plan.device_dim_to_iteration_symbol.get(device_dim)
-            if symbol is None:
-                # The planner permits an unmapped device dim only when it is
-                # an implicit unit fold. No codegen-side inference is needed.
-                if split == 1:
-                    continue
-                raise AssertionError(
-                    "materializable LX relayout contract omitted non-unit "
-                    f"device dimension {device_dim} for {plan.source_name}"
-                )
-            assert symbol in symbol_to_label
-            previous = splits_by_symbol.get(symbol)
-            if previous is not None and previous != split:
-                raise AssertionError(
-                    "materializable LX relayout contract assigned conflicting "
-                    f"splits to {symbol} for {plan.source_name}"
-                )
-            splits_by_symbol[symbol] = split
-        return splits_by_symbol
+def _apply_lx_relayout_to_args(
+    args: list[TensorArg], plan: LXRelayoutPlan, op_info: dict[str, Any]
+) -> None:
+    """Attach source/destination ownership to one explicit copy operation."""
 
-    # Validate both halves of the planner contract even though the shuffle
-    # iteration space is partitioned according to its destination ownership.
-    splits_by_symbol(plan.source_device_dim_splits)
-    destination_splits = splits_by_symbol(plan.destination_device_dim_splits)
-
-    shuffle_iteration_space = {
-        symbol: (extent, destination_splits.get(symbol, 1))
-        for symbol, (extent, _) in shuffle_iteration_space.items()
-    }
-
-    source = replace(
-        source_arg,
-        is_input=True,
-        name=plan.source_name,
-        allocation={"lx": source_address},
-        allocation_core_id_to_device_slice=producer_map,
+    assert len(args) == 2
+    assert args[0].is_input
+    assert not args[1].is_input
+    args[0] = replace(
+        args[0],
+        allocation_core_id_to_device_slice=plan.source_core_id_to_device_slice,
         allocation_device_dim_splits=dict(plan.source_device_dim_splits),
     )
-    destination_input = replace(
-        source_arg,
-        is_input=True,
-        name=destination_name,
-        allocation={"lx": destination_address},
-        allocation_core_id_to_device_slice=None,
-        allocation_device_dim_splits=None,
-    )
-    destination_output = replace(
-        destination_input,
-        is_input=False,
-        allocation_core_id_to_device_slice=consumer_map,
+    args[1] = replace(
+        args[1],
+        allocation_core_id_to_device_slice=plan.destination_core_id_to_device_slice,
         allocation_device_dim_splits=dict(plan.destination_device_dim_splits),
     )
-    shuffle = OpSpec(
-        op="shuffle",
-        is_reduction=False,
-        iteration_space=shuffle_iteration_space,
-        args=[source, destination_output],
-        op_info={},
-        symbolic_dim_bounds=dict(consumer_spec.symbolic_dim_bounds),
-        dim_labels_override=[
-            symbol_to_label[symbol] for symbol in shuffle_iteration_space
-        ],
-        layout_labels_override=(
-            ["KERNEL", *LAYOUT_LABELS] if consumer_is_matmul else LAYOUT_LABELS
-        ),
-    )
-    return shuffle, destination_input
-
-
-def _materialize_lx_relayout_inputs(
-    current_node,
-    args: list[TensorArg],
-    tensor_args: Sequence[tuple[int, Any]],
-    consumer_spec: OpSpec,
-) -> list[OpSpec]:
-    """Materialize every planned consumer input before its compute row."""
-
-    plans = _current_node_lx_relayout_inputs(current_node)
-    prefix_specs: list[OpSpec] = []
-    destinations: dict[str, TensorArg] = {}
-    for arg_index, tensor in tensor_args:
-        plan = plans.get(tensor.name)
-        if plan is None:
-            continue
-        destination_arg = destinations.get(plan.source_name)
-        if destination_arg is None:
-            shuffle_spec, destination_arg = _materialize_explicit_lx_shuffle(
-                args[arg_index],
-                consumer_spec,
-                plan,
-            )
-            prefix_specs.append(shuffle_spec)
-            destinations[plan.source_name] = destination_arg
-        args[arg_index] = destination_arg
-    return prefix_specs
+    op_info["lx_relayout_consumer_is_matmul"] = plan.consumer_is_matmul
 
 
 class RValue(ABC):
@@ -1183,7 +1064,6 @@ class SpyreKernel(Kernel[CSEVariable]):
         elif isinstance(value, PointwiseOp):
             # Pointwise compute ops
             args: list[TensorArg] = []
-            tensor_args: list[tuple[int, TensorAccess]] = []
             indirect_syms = _indirect_syms_used(value, self.indirect_vars)
             if indirect_syms:
                 args += [
@@ -1198,24 +1078,21 @@ class SpyreKernel(Kernel[CSEVariable]):
                 ]
             for input in value.arguments:
                 if isinstance(input, TensorAccess):
-                    tensor_args.append((len(args), input))
                     args.append(self.create_tensor_arg(True, input.name, input))
                 else:
                     raise Unsupported(f"unexpected argument {input} to {value.op}")
             args.append(self.create_tensor_arg(False, real_dst_name, dst))
             op_info.update(value.op_info)
-            consumer_spec = self.create_op_spec(
-                value.op, False, args, op_info, self.indirect_var_names()
+            relayout_plan = _current_lx_relayout_shuffle(
+                self.current_node, real_dst_name
             )
-            self.op_specs.extend(
-                _materialize_lx_relayout_inputs(
-                    self.current_node,
-                    args,
-                    tensor_args,
-                    consumer_spec,
-                )
+            op = value.op
+            if relayout_plan is not None:
+                _apply_lx_relayout_to_args(args, relayout_plan, op_info)
+                op = "shuffle"
+            self.op_specs.append(
+                self.create_op_spec(op, False, args, op_info, self.indirect_var_names())
             )
-            self.op_specs.append(consumer_spec)
         elif isinstance(value, TensorAccess):
             # Reshapes, transposes, and other dataops.
             # Compute which indirect variables THIS operation actually uses:
@@ -1263,25 +1140,23 @@ class SpyreKernel(Kernel[CSEVariable]):
                 op_indirect_var_names = None
             in_coords = args[-2].device_coordinates
             out_coords = args[-1].device_coordinates
-            if all(e == 0 for e in in_coords) and not all(e == 0 for e in out_coords):
+            relayout_plan = _current_lx_relayout_shuffle(
+                self.current_node, real_dst_name
+            )
+            if relayout_plan is not None:
+                assert value.name == relayout_plan.source_name
+                _apply_lx_relayout_to_args(args, relayout_plan, op_info)
+                op = "shuffle"
+            elif all(e == 0 for e in in_coords) and not all(e == 0 for e in out_coords):
                 # Broadcast: scalar input expanding to non-scalar output.
                 op = IDENTITY_OP
             elif in_coords[-1].free_symbols != out_coords[-1].free_symbols:
                 op = RESTICKIFY_OP
             else:
                 op = IDENTITY_OP
-            op_spec = self.create_op_spec(
-                op, False, args, op_info, op_indirect_var_names
+            self.op_specs.append(
+                self.create_op_spec(op, False, args, op_info, op_indirect_var_names)
             )
-            self.op_specs.extend(
-                _materialize_lx_relayout_inputs(
-                    self.current_node,
-                    args,
-                    [(len(args) - 2, value)],
-                    op_spec,
-                )
-            )
-            self.op_specs.append(op_spec)
         else:
             raise Unsupported(f"store value of unexpected type {type(value)}")
 
@@ -1334,16 +1209,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                 self.create_tensor_arg(True, y.name, y),
                 self.create_tensor_arg(False, real_dst_name, dst),
             ]
-            consumer_spec = self.create_op_spec(value.op, True, args, op_info)
-            self.op_specs.extend(
-                _materialize_lx_relayout_inputs(
-                    self.current_node,
-                    args,
-                    [(0, x), (1, y)],
-                    consumer_spec,
-                )
-            )
-            self.op_specs.append(consumer_spec)
+            self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
         else:
             # All other reductions have exactly one input which is a tensor
             if (not len(value.arguments) == 1) or (
@@ -1589,14 +1455,6 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                         )
                         + "),"
                     )
-                if op_spec.dim_labels_override is not None:
-                    buf.writeline(
-                        f"dim_labels_override={op_spec.dim_labels_override!r},"
-                    )
-                if op_spec.layout_labels_override is not None:
-                    buf.writeline(
-                        f"layout_labels_override={op_spec.layout_labels_override!r},"
-                    )
                 if op_spec.debug_handle is not None:
                     # Source-to-kernel provenance must survive the OpSpec ->
                     # generated-source -> exec round-trip. DebugHandle/SourceLoc
@@ -1738,22 +1596,6 @@ def _remap_allocation_distribution(
     arg.allocation_device_dim_splits = new_splits
 
 
-def _realign_shuffle_dim_labels(op_spec: OpSpec) -> None:
-    """Keep explicit SHUFFLE labels aligned with normalized iteration dims."""
-
-    if op_spec.op != "shuffle" or op_spec.dim_labels_override is None:
-        return
-    ndim = len(op_spec.iteration_space)
-    if op_spec.layout_labels_override == ["KERNEL", *LAYOUT_LABELS]:
-        if ndim > len(MATMUL_DIM_LABELS):
-            raise ValueError("LX relayout SHUFFLE exceeds supported matmul rank")
-        op_spec.dim_labels_override = MATMUL_DIM_LABELS[-ndim:]
-        return
-    if ndim - 1 > len(INPUT_DIM_LABELS):
-        raise ValueError("LX relayout SHUFFLE exceeds supported pointwise rank")
-    op_spec.dim_labels_override = INPUT_DIM_LABELS[: ndim - 1] + OUTPUT_DIM_LABELS[:1]
-
-
 def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     # Both parameters must be provided together for gather kernels — indirect_sizes
     # decomposes symbols in align_tensors; indirect_access_subs replaces them with IndirectAccess.
@@ -1768,7 +1610,6 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
         indirect_sizes,
     )
     op_spec.iteration_space = new_op_space_splits
-    _realign_shuffle_dim_labels(op_spec)
 
     for arg, t in zip(op_spec.args, new_tensors):
         _remap_allocation_distribution(

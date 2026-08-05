@@ -249,8 +249,6 @@ class OpSpec:
     # node exposes no data.ranges.
     node_output_ranges: tuple[Expr, ...] | None = None
     debug_handle: DebugHandle | None = None
-    dim_labels_override: list[str] | None = None
-    layout_labels_override: list[str] | None = None
 
 
 # --- Module-level constant tensor cache --------------------------------------

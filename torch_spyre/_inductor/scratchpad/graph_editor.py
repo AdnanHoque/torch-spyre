@@ -243,7 +243,7 @@ class GraphEditor:
             # Step 4: Hack user nodes' inner_fn
             for old_com_buf in buffer_users:
                 if GraphEditor.is_rewritable_consumer(old_com_buf):
-                    self._swap_loops_input(old_com_buf, buf_name, new_buf_name)
+                    self.replace_loop_input(old_com_buf, buf_name, new_buf_name)
                 else:
                     raise NotImplementedError(
                         f"unexpected buffer user type {type(old_com_buf)} ({old_com_buf})"
@@ -262,6 +262,104 @@ class GraphEditor:
         self.lowering.operations.insert(idx_to_first_user, new_com_buf)
 
         return new_com_buf
+
+    def insert_clone_before_consumer(
+        self,
+        buffer: ComputedBuffer,
+        consumer: ComputedBuffer,
+        layout: FixedTiledLayout,
+    ) -> ComputedBuffer:
+        """Insert a private clone immediately before one consumer.
+
+        Unlike :meth:`push_allocation_with_clone`, this does not redirect every
+        user of ``buffer``.  It is the graph-editing primitive used when a
+        compiler pass materializes a single producer-to-consumer edge as an
+        explicit operation (for example an LX relayout).
+        """
+
+        buf_name = buffer.get_name()
+        consumer_name = consumer.get_name()
+        buf_fx = getattr(buffer, "origin_node", None) or next(iter(buffer.origins))
+        consumer_fx = getattr(consumer, "origin_node", None) or next(
+            iter(consumer.origins)
+        )
+        with self.fx_graph.inserting_before(consumer_fx):
+            clone_fx = self.fx_graph.create_node(
+                "call_function", self.clone_aten_op, (buf_fx,)
+            )
+        consumer_fx.args = tuple(
+            clone_fx if arg is buf_fx else arg for arg in consumer_fx.args
+        )
+        self.lowering.orig_gm.recompile()
+
+        clone_tb = clone_lowering(buffer)
+        clone = ComputedBuffer(
+            name=None,
+            layout=layout,
+            data=clone_tb.data.data,  # type: ignore[union-attr]
+        )
+        clone.data.origins.add(clone_fx)
+        clone.origins.add(clone_fx)
+        clone.origin_node = clone_fx
+        copy_op_metadata(src=consumer, dst=clone)
+        clone.name = self.lowering.register_buffer(clone)
+        self.lowering.register_operation(clone)
+
+        # Re-key the consumer's division through its read of ``buffer`` so the
+        # copy writes the same physical slices that the consumer expects.  This
+        # is the same mapping used for LX graph-input clones above, including
+        # consumers whose ownership lives on a reduction dimension.
+        consumer_splits: tuple[dict, dict] = getattr(
+            consumer, "op_it_space_splits", ({}, {})
+        )
+        consumer_rw = op_read_writes(consumer)
+        read_dep = next(
+            (dep for dep in consumer_rw.reads if dep.name == buf_name), None
+        )
+        clone_out_splits: dict = {}
+        if read_dep is not None and any(
+            split > 1 for split_map in consumer_splits for split in split_map.values()
+        ):
+            consumer_write_index = next(iter(consumer_rw.writes)).index
+            consumer_read_index = next(
+                (dep.index for dep in consumer_rw.reads), consumer_write_index
+            )
+            splits_by_symbol = apply_splits_from_index_coeff(
+                consumer_splits,
+                consumer_write_index,
+                consumer_read_index,
+                iteration_space_from_op(consumer),
+            )
+            clone_out_splits, _ = splits_by_index_coeff(
+                splits_by_symbol, read_dep.index, read_dep.index
+            )
+        clone.op_it_space_splits = (clone_out_splits, {})
+
+        # clone_lowering registers the new dependency in name_to_users. Move
+        # only this consumer's entry to the private clone and retain every other
+        # source user unchanged.
+        source_users = []
+        clone_users = []
+        for node in self.lowering.name_to_users.get(buf_name, []):
+            unwrapped = node
+            while not isinstance(unwrapped, Buffer):
+                assert hasattr(unwrapped, "data")
+                unwrapped = unwrapped.data
+            if unwrapped.name == consumer_name:
+                clone_users.append(node)
+            else:
+                source_users.append(node)
+        self.lowering.name_to_users[buf_name] = source_users
+        self.lowering.name_to_users[clone.name] = clone_users
+
+        self.replace_loop_input(consumer, buf_name, clone.name)
+
+        # register_operation appends; restore topological order immediately
+        # before the selected consumer.
+        self.lowering.operations.remove(clone)
+        consumer_index = self.lowering.operations.index(consumer)
+        self.lowering.operations.insert(consumer_index, clone)
+        return clone
 
     @staticmethod
     def all_uses_are_rewritable(graph: GraphLowering, uses: list[int]) -> bool:
@@ -290,7 +388,9 @@ class GraphEditor:
         """
         return hasattr(op, "data") and isinstance(op.data, Pointwise | Reduction)
 
-    def _swap_loops_input(self, old_loop: Operation, old_name: str, new_name: str):
+    def replace_loop_input(
+        self, old_loop: Operation, old_name: str, new_name: str
+    ) -> None:
         """Hack inner_fn with a nameSwapper ops handler and make a new LoopIR."""
         assert isinstance(old_loop.data, Pointwise | Reduction)
         new_loop = self._create_loop_hack_inner_fn(

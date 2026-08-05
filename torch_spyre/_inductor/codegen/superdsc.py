@@ -98,6 +98,8 @@ class SDSCArgs:
             f"  backGap={self.backGap}\n"
             f"  is_index_tensor={self.is_index_tensor}\n"
             f"  related_value_tensor_idx={self.related_value_tensor_idx}\n"
+            f"  allocation_core_id_to_wk_slice={self.allocation_core_id_to_wk_slice}\n"
+            f"  core_splits={self.core_splits}\n"
             f")"
         )
 
@@ -801,11 +803,15 @@ def _create_sdsc_tensors(
             raise ValueError("explicit allocation distribution requires LX storage")
 
         effective_stick = [op_stick_dim if stick_dim is None else stick_dim]
-        layout_labels = (
-            (MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS)
-            if op_spec.layout_labels_override is None
-            else op_spec.layout_labels_override
-        )
+        if op_spec.op == "shuffle" and op_spec.op_info.get(
+            "lx_relayout_consumer_is_matmul", False
+        ):
+            # The first SHUFFLE argument is a matmul kernel operand and the
+            # second is the relaid output. These are SDSC labels, so derive them
+            # here rather than carrying backend naming through OpSpec.
+            layout_labels = ["KERNEL", *LAYOUT_LABELS]
+        else:
+            layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
 
         # Special handling for FP8 matmul KERNEL tensor
         dtype_stick_size = arg.device_dtype.elems_per_stick()
@@ -1029,6 +1035,9 @@ def _extend_matmul_k_to_padded(
 
 def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     is_matmul = _is_matmul(op_spec.op)
+    uses_matmul_shuffle_labels = op_spec.op == "shuffle" and op_spec.op_info.get(
+        "lx_relayout_consumer_is_matmul", False
+    )
     is_pool = _is_pool(op_spec.op)
     ndim = len(op_spec.iteration_space)
     # Detect indirect access from device_coordinates: index tensors are those
@@ -1039,12 +1048,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     }
     has_indirect_access = bool(index_tensor_indices)
 
-    if op_spec.dim_labels_override is not None:
-        dim_labels = op_spec.dim_labels_override
-    elif is_pool:
+    if is_pool:
         dim_labels = _align_pool_dim_labels(op_spec.node_output_ranges, ndim)
     else:
-        dim_labels = _get_op_dim_labels(ndim, is_matmul)
+        dim_labels = _get_op_dim_labels(ndim, is_matmul or uses_matmul_shuffle_labels)
     symbol_mapping = {
         sym: Symbol(dim_labels[i]) for i, sym in enumerate(op_spec.iteration_space)
     }

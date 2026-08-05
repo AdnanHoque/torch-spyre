@@ -23,6 +23,7 @@ S1 -> SHUFFLE -> S2 sequence.
 from __future__ import annotations
 
 import dataclasses
+import logging
 import math
 
 import sympy
@@ -32,6 +33,7 @@ from torch._inductor.ir import ComputedBuffer, Operation, Pointwise
 from torch_spyre._C import SpyreTensorLayout
 
 from torch_spyre._inductor import config
+from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.pass_utils import (
     PerCoreView,
     _is_matmul_op,
@@ -43,7 +45,10 @@ from torch_spyre._inductor.pass_utils import (
 from torch_spyre._inductor.scratchpad.utils import _op_num_cores, _op_short_name
 
 LX_RELAYOUT_ATTR = "_spyre_lx_relayout_inputs"
+LX_RELAYOUT_SHUFFLE_ATTR = "_spyre_lx_relayout_shuffle"
 LX_RELAYOUT_DESTINATION_PREFIX = "__spyre_lx_relayout_destination__"
+
+logger = get_inductor_logger("lx_relayout")
 
 
 def make_lx_relayout_destination_name(source_name: str, consumer_name: str) -> str:
@@ -66,8 +71,10 @@ class LXRelayoutPlan:
     destination_device_dim_splits: dict[str, int]
     shuffle_iteration_symbols: tuple[sympy.Symbol, ...]
     device_dim_to_iteration_symbol: dict[str, sympy.Symbol]
+    consumer_is_matmul: bool = False
     source_lx_address: int | None = None
     destination_lx_address: int | None = None
+    materialized_destination_name: str | None = None
 
     @property
     def destination_name(self) -> str:
@@ -374,6 +381,8 @@ def clear_lx_relayout_metadata(graph: GraphLowering) -> None:
     for op in graph.operations:
         if hasattr(op, LX_RELAYOUT_ATTR):
             delattr(op, LX_RELAYOUT_ATTR)
+        if hasattr(op, LX_RELAYOUT_SHUFFLE_ATTR):
+            delattr(op, LX_RELAYOUT_SHUFFLE_ATTR)
 
 
 def collect_lx_relayout_plans(
@@ -525,6 +534,7 @@ def collect_lx_relayout_plans(
                 destination_device_dim_splits=dense_consumer_work_slice_dims,
                 shuffle_iteration_symbols=shuffle_iteration_symbols,
                 device_dim_to_iteration_symbol=device_dim_to_iteration_symbol,
+                consumer_is_matmul=is_matmul_consumer,
             )
             if plan.consumer_name in direct_consumers:
                 source_is_covered = False
@@ -538,6 +548,24 @@ def collect_lx_relayout_plans(
         if source_is_covered:
             plans.extend(source_plans.values())
 
+    if logger.isEnabledFor(logging.DEBUG):
+        if plans:
+            logger.debug(
+                "final LX relayout plan:\n%s",
+                "\n".join(
+                    "  %s -> %s: source_splits=%s destination_splits=%s"
+                    % (
+                        plan.source_name,
+                        plan.consumer_name,
+                        plan.source_device_dim_splits,
+                        plan.destination_device_dim_splits,
+                    )
+                    for plan in plans
+                ),
+            )
+        else:
+            logger.debug("final LX relayout plan: (none)")
+
     return plans
 
 
@@ -545,6 +573,101 @@ def record_lx_relayout_plan(graph: GraphLowering, plan: LXRelayoutPlan) -> None:
     """Stamp a relayout plan after the source buffer is placed in LX."""
 
     consumer = _operations_by_name(graph)[plan.consumer_name]
-    plans = getattr(consumer, LX_RELAYOUT_ATTR, {})
+    plans = dict(getattr(consumer, LX_RELAYOUT_ATTR, {}))
     plans[plan.source_name] = plan
     setattr(consumer, LX_RELAYOUT_ATTR, plans)
+
+
+def materialize_lx_relayout_operations(graph: GraphLowering) -> None:
+    """Insert accepted LX relayouts as real graph operations.
+
+    Scratchpad planning first proves that both S1 and S2 fit atomically and
+    records their addresses on the consumer.  This pass turns each accepted
+    edge into a private identity-copy node before scheduling; codegen recognizes
+    the node's relayout metadata and lowers it to SHUFFLE/STCDPOpLx.
+    """
+
+    from torch_spyre._inductor.ir import FixedTiledLayout
+    from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
+
+    pending = [
+        plan
+        for consumer in graph.operations
+        for plan in getattr(consumer, LX_RELAYOUT_ATTR, {}).values()
+    ]
+    if not pending:
+        return
+
+    editor = GraphEditor(graph)
+    for plan in pending:
+        source = graph.try_get_buffer(plan.source_name)
+        consumer = graph.try_get_buffer(plan.consumer_name)
+        assert isinstance(source, ComputedBuffer)
+        assert isinstance(consumer, ComputedBuffer)
+        assert plan.source_lx_address is not None
+        assert plan.destination_lx_address is not None
+
+        # GraphLowering's pre-scheduling pipeline can be entered more than once
+        # by nested Inductor compilation. Re-plan the already-materialized copy
+        # in place instead of growing another clone in front of it.
+        if getattr(consumer, "operation_name", None) == "lx_relayout_shuffle":
+            reads = [
+                dep
+                for dep in op_read_writes(consumer).reads
+                if isinstance(dep, MemoryDep)
+            ]
+            assert any(dep.name == plan.source_name for dep in reads)
+            destination_layout = consumer.get_layout()
+            assert isinstance(destination_layout, FixedTiledLayout)
+            destination_layout.allocation["lx"] = plan.destination_lx_address
+            materialized_plan = dataclasses.replace(
+                plan,
+                materialized_destination_name=consumer.get_name(),
+            )
+            setattr(consumer, LX_RELAYOUT_SHUFFLE_ATTR, materialized_plan)
+            logger.debug(
+                "updated LX relayout %s -> %s at %#x -> %#x",
+                plan.source_name,
+                consumer.get_name(),
+                plan.source_lx_address,
+                plan.destination_lx_address,
+            )
+            continue
+
+        source_layout = source.get_layout()
+        assert isinstance(source_layout, FixedTiledLayout)
+        destination_layout = FixedTiledLayout(
+            source_layout.device,
+            source_layout.dtype,
+            source_layout.size,
+            source_layout.stride,
+            source_layout.device_layout,
+        )
+        destination_layout.allocation["lx"] = plan.destination_lx_address
+
+        shuffle = editor.insert_clone_before_consumer(
+            source,
+            consumer,
+            destination_layout,
+        )
+        shuffle.operation_name = "lx_relayout_shuffle"
+        materialized_plan = dataclasses.replace(
+            plan,
+            materialized_destination_name=shuffle.get_name(),
+        )
+        setattr(shuffle, LX_RELAYOUT_SHUFFLE_ATTR, materialized_plan)
+
+        logger.debug(
+            "materialized LX relayout %s -> %s -> %s at %#x -> %#x",
+            plan.source_name,
+            shuffle.get_name(),
+            plan.consumer_name,
+            plan.source_lx_address,
+            plan.destination_lx_address,
+        )
+
+    # The consumer metadata was a deferred insertion queue.  Once real graph
+    # nodes exist it must not reach codegen as a second, late materialization.
+    for op in graph.operations:
+        if hasattr(op, LX_RELAYOUT_ATTR):
+            delattr(op, LX_RELAYOUT_ATTR)
