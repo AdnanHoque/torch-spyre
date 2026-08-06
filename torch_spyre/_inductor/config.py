@@ -29,9 +29,9 @@ global_stick_optimizer: bool = os.environ.get("GLOBAL_STICK_OPTIMIZER", "1") == 
 
 allow_all_ops_in_lx_planning: bool = False
 
-# Opt-in extension to LX planning: materialize compatible producer and
-# consumer per-core views as an explicit S1 -> SHUFFLE -> S2 sequence in LX.
-lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
+# Materialize compatible producer and consumer per-core views as an explicit
+# S1 -> SHUFFLE -> S2 sequence in LX. The flag remains as a debugging kill switch.
+lx_planner_relayout: bool = _get_env_bool("SPYRE_LX_PLANNER_RELAYOUT", True)
 
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 

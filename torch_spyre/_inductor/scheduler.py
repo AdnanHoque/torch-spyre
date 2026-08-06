@@ -478,6 +478,7 @@ def demote_incoherent_lx_buffers(
         culprit = None
         plans = relayout_plans.get(name, [])
         source_plan = plans[0] if plans else None
+        destination_plan = destination_plans.get(name)
         if source_plan is not None and any(
             plan.source_ownership != source_plan.source_ownership
             or plan.source_lx_address != source_plan.source_lx_address
@@ -512,6 +513,19 @@ def demote_incoherent_lx_buffers(
                     )
                     break
                 continue
+            if destination_plan is not None:
+                if not matches_relayout_ownership(
+                    node.node,
+                    view,
+                    destination_plan,
+                    destination=True,
+                ):
+                    culprit = (
+                        f"{node.get_name()} no longer matches relayout "
+                        "destination ownership"
+                    )
+                    break
+                continue
             if ref is None:
                 ref = view
             elif view != ref:
@@ -519,7 +533,7 @@ def demote_incoherent_lx_buffers(
                 break
         if culprit is None:
             continue
-        related_plan = source_plan or destination_plans.get(name)
+        related_plan = source_plan or destination_plan
         demoted_names = {name}
         related_plans: list[LXRelayoutPlan] = []
         if related_plan is not None:

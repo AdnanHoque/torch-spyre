@@ -15,6 +15,7 @@
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from sympy import Integer, Mod, Symbol, floor
 from torch._inductor.dependencies import MemoryDep
 
@@ -332,7 +333,10 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
     assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
 
 
-def test_scheduler_demotes_source_and_drops_stale_plan(monkeypatch):
+@pytest.mark.parametrize("mismatched_destination", [False, True])
+def test_scheduler_demotes_mismatched_relayout_side(
+    monkeypatch, mismatched_destination
+):
     class _Dep:
         def __init__(self, name):
             self.name = name
@@ -394,7 +398,7 @@ def test_scheduler_demotes_source_and_drops_stale_plan(monkeypatch):
     monkeypatch.setattr(
         scheduler_module,
         "matches_relayout_ownership",
-        lambda *_args, **_kwargs: False,
+        lambda *_args, destination: destination != mismatched_destination,
     )
 
     scheduler_module.demote_incoherent_lx_buffers(nodes)

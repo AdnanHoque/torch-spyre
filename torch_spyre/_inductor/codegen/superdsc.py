@@ -31,6 +31,7 @@ from torch_spyre._inductor.constants import (
     POOL_DIM_LABELS,
     POOL_OPS,
     RESTICKIFY_OP,
+    SHUFFLE_LAYOUT_LABELS,
     TOPK_OPS,
 )
 from torch_spyre._inductor import config as _spyre_config
@@ -75,6 +76,8 @@ class SDSCOwnership:
         return {} if self.is_default else self.core_to_slice
 
     def for_dims(self, dims: tuple[Symbol, ...]) -> "SDSCOwnership":
+        """Restrict this ownership to the coordinates present on one tensor."""
+
         return SDSCOwnership(
             splits={dim: self.splits[dim] for dim in dims},
             core_to_slice={
@@ -335,7 +338,13 @@ def _get_device_dim_order(
 
 @dataclasses.dataclass(frozen=True)
 class TensorCoordinateProjection:
-    """Maps stable physical device axes to one tensor's SDSC coordinates."""
+    """Maps stable physical device axes to one tensor's SDSC coordinates.
+
+    Attributes:
+        sdsc_dims: Final coordinate order emitted for the tensor.
+        device_dim_for_sdsc_dim: Physical device axis represented by each SDSC
+            coordinate. The within-stick lane has no entry.
+    """
 
     sdsc_dims: tuple[Symbol, ...]
     device_dim_for_sdsc_dim: dict[Symbol, int]
@@ -358,6 +367,13 @@ class TensorCoordinateProjection:
         return cls(tuple(dim_order), device_dim_for_sdsc_dim)
 
     def project(self, ownership: DeviceOwnership) -> SDSCOwnership:
+        """Translate device-axis ownership to descriptor coordinates.
+
+        For example, if device axis 1 is represented by SDSC coordinate ``x``,
+        an eight-way split on axis 1 becomes an eight-way split on ``x`` and
+        each core's axis-1 slot becomes its ``x`` slot.
+        """
+
         sdsc_dim_for_device_dim = {
             device_dim: sdsc_dim
             for sdsc_dim, device_dim in self.device_dim_for_sdsc_dim.items()
@@ -848,7 +864,7 @@ def _create_sdsc_tensors(
             # The first SHUFFLE argument is a matmul kernel operand and the
             # second is the relaid output. These are SDSC labels, so derive them
             # here rather than carrying backend naming through OpSpec.
-            layout_labels = ["KERNEL", *LAYOUT_LABELS]
+            layout_labels = SHUFFLE_LAYOUT_LABELS
         else:
             layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
 
@@ -923,6 +939,8 @@ def _create_sdsc_tensors(
             device_tile_advance_expr=arg.device_tile_advance_expr,
         )
         if arg.ownership is not None:
+            # Relayout ownership is planned on stable device axes. Convert it
+            # only after this tensor's final SDSC coordinates are known.
             sdsc_arg.ownership = projection.project(arg.ownership)
         sdsc_args.append(sdsc_arg)
 
