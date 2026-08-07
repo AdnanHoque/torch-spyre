@@ -232,7 +232,9 @@ def test_relayout_owner_maps_follow_aligned_device_dimensions():
     )
 
 
-def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
+def test_planner_handles_different_consumer_views_and_requires_every_read(
+    monkeypatch,
+):
     class _Pointwise:
         pass
 
@@ -258,7 +260,13 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
         "consumer_b": SimpleNamespace(reads=[read_b], writes=[]),
     }
     producer_view = PerCoreView(((1, 2),), ((1, core_id),))
-    consumer_view = PerCoreView(((1, 2),), ((1, 1 - core_id),))
+    consumer_a_view = PerCoreView(((1, 2),), ((1, 1 - core_id),))
+    consumer_b_view = PerCoreView(((0, 2),), ((0, core_id),))
+    views = {
+        producer: producer_view,
+        consumer_a: consumer_a_view,
+        consumer_b: consumer_b_view,
+    }
 
     monkeypatch.setattr(lx_relayout_module.config, "lx_planner_relayout", True)
     monkeypatch.setattr(lx_relayout_module, "ComputedBuffer", _ComputedBuffer)
@@ -272,7 +280,7 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
         lx_relayout_module,
         "_per_core_view_on_buf",
         lambda op, *_: (
-            producer_view if op is producer else consumer_view,
+            views[op],
             False,
             True,
         ),
@@ -288,11 +296,22 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
     )
 
     graph = SimpleNamespace(operations=[producer, consumer_a, consumer_b])
-    assert {
-        plan.edge_key for plan in lx_relayout_module.collect_lx_relayout_plans(graph)
-    } == {
+    plans = {
+        plan.edge_key: plan
+        for plan in lx_relayout_module.collect_lx_relayout_plans(graph)
+    }
+    assert plans.keys() == {
         ("shared", "consumer_a"),
         ("shared", "consumer_b"),
+    }
+    assert (
+        plans[("shared", "consumer_a")].destination_ownership
+        != plans[("shared", "consumer_b")].destination_ownership
+    )
+    assert plans[("shared", "consumer_a")].destination_ownership.splits == {1: 2}
+    assert plans[("shared", "consumer_b")].destination_ownership.splits == {
+        0: 2,
+        1: 1,
     }
 
     indirect_read = MemoryDep("indices", Symbol("indirect0"), (x, y), (2, 64))
@@ -322,7 +341,7 @@ def test_planner_requires_materializable_geometry_for_every_read(monkeypatch):
         lx_relayout_module,
         "_per_core_view_on_buf",
         lambda op, dep, *_: (
-            producer_view if op is producer or dep is direct_read_a else consumer_view,
+            producer_view if dep is direct_read_a else views[op],
             False,
             True,
         ),
