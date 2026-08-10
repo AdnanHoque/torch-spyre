@@ -259,7 +259,7 @@ def _has_materializable_iteration_geometry(
 def clear_lx_relayout_metadata(graph: GraphLowering) -> None:
     for op in graph.operations:
         layout = getattr(op, "layout", None)
-        if hasattr(layout, "lx_view"):
+        if layout is not None and hasattr(layout, "lx_view"):
             layout.lx_view = None
             layout.lx_is_kernel_operand = False
 

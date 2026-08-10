@@ -512,7 +512,7 @@ def demote_incoherent_lx_buffers(
             allocation = getattr(layout, "allocation", None)
             if allocation is not None:
                 allocation.pop("lx", None)
-            if hasattr(layout, "lx_view"):
+            if layout is not None and hasattr(layout, "lx_view"):
                 layout.lx_view = None
                 layout.lx_is_kernel_operand = False
         logger.info(

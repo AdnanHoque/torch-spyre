@@ -85,8 +85,8 @@ def _work_division_from_view(
 
     symbols = set(iteration_symbols)
     slots_by_dim = dict(view.core_to_slot)
-    work_slices = {}
-    core_id_to_work_slice = {}
+    work_slices: dict[sympy.Symbol, int] = {}
+    core_id_to_work_slice: dict[sympy.Symbol, sympy.Expr] = {}
     for device_dim, split in view.work_slice_dims:
         if device_dim >= len(device_coordinates):
             raise ValueError(f"LX view uses missing device dimension {device_dim}")
@@ -802,7 +802,7 @@ class SpyreKernel(Kernel[CSEVariable]):
         work_division = _work_division_from_view(
             lx_view,
             device_coords,
-            it_space,
+            tuple(it_space),
         )
         device_tile_advance_expr = self._general_tile_advance(tensor, is_input, name)
         tensor_arg = TensorArg(
@@ -1518,8 +1518,8 @@ def _remap_work_division(arg: TensorArg, iteration_remap) -> None:
     if arg.work_division is None:
         return
 
-    new_splits = {}
-    new_core_map = {}
+    new_splits: dict[sympy.Symbol, int] = {}
+    new_core_map: dict[sympy.Symbol, sympy.Expr] = {}
     for old_dim, split in arg.work_division.work_slices.items():
         parts = iteration_remap.get(old_dim)
         if parts is None:
