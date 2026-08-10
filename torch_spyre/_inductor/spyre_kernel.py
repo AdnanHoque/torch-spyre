@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from abc import ABC
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 import logging
 import math
 from typing import Any, Callable, Self, Sequence, Tuple, Union
@@ -46,8 +46,8 @@ from .constants import (
 from . import config as _spyre_config
 from .errors import Unsupported
 from .ir import FixedTiledLayout
-from .lx_relayout import LX_RELAYOUT_SHUFFLE_ATTR, LXRelayoutPlan
 from .pass_utils import (
+    PerCoreView,
     concretize_expr,
     concretize_index,
     compute_symbolic_bounds,
@@ -60,11 +60,11 @@ from .views import compute_coordinates, align_tensors, tiling_expr_to_device_exp
 from torch._inductor.dependencies import MemoryDep
 from .logging_utils import get_inductor_logger
 from .op_spec import (
-    DeviceOwnership,
     IndirectAccess,
     LoopSpec,
     OpSpec,
     TensorArg,
+    TensorWorkDivision,
     UnimplementedOp as OpSpecUnimplementedOp,
     format_op_spec_list,
 )
@@ -73,34 +73,44 @@ from torch_spyre._inductor.provenance import build_debug_handle
 logger = get_inductor_logger("spyre_kernel")
 
 
-def _current_lx_relayout_shuffle(
-    current_node, output_name: str
-) -> LXRelayoutPlan | None:
-    """Return the plan carried by this real graph operation, if any."""
+def _work_division_from_view(
+    view: PerCoreView | None,
+    device_coordinates: Sequence[sympy.Expr],
+    iteration_symbols: Sequence[sympy.Symbol],
+) -> TensorWorkDivision | None:
+    """Express a physical per-core view in this operation's loop symbols."""
 
-    return next(
-        (
-            plan
-            for scheduler_node in current_node.get_nodes()
-            if scheduler_node.node.get_name() == output_name
-            for plan in [getattr(scheduler_node.node, LX_RELAYOUT_SHUFFLE_ATTR, None)]
-            if isinstance(plan, LXRelayoutPlan)
-        ),
-        None,
+    if view is None:
+        return None
+
+    symbols = set(iteration_symbols)
+    slots_by_dim = dict(view.core_to_slot)
+    work_slices = {}
+    core_id_to_work_slice = {}
+    for device_dim, split in view.work_slice_dims:
+        if device_dim >= len(device_coordinates):
+            raise ValueError(f"LX view uses missing device dimension {device_dim}")
+        coordinate_symbols = device_coordinates[device_dim].free_symbols & symbols
+        if len(coordinate_symbols) != 1:
+            raise ValueError(
+                f"LX view dimension {device_dim} does not map to one loop symbol"
+            )
+        symbol = next(iter(coordinate_symbols))
+        slot = slots_by_dim.get(device_dim, sympy.S.Zero)
+        if symbol in work_slices and (
+            work_slices[symbol] != split or core_id_to_work_slice[symbol] != slot
+        ):
+            raise ValueError(f"conflicting LX views for loop symbol {symbol}")
+        work_slices[symbol] = int(split)
+        core_id_to_work_slice[symbol] = slot
+    return TensorWorkDivision(work_slices, core_id_to_work_slice)
+
+
+def _is_lx_relayout_copy(current_node) -> bool:
+    return any(
+        getattr(node.node, "operation_name", None) == "lx_relayout_copy"
+        for node in current_node.get_nodes()
     )
-
-
-def _apply_lx_relayout_to_args(
-    args: list[TensorArg], plan: LXRelayoutPlan, op_info: dict[str, Any]
-) -> None:
-    """Attach source/destination ownership to one explicit copy operation."""
-
-    assert len(args) == 2
-    assert args[0].is_input
-    assert not args[1].is_input
-    args[0] = replace(args[0], ownership=plan.source_ownership)
-    args[1] = replace(args[1], ownership=plan.destination_ownership)
-    op_info["lx_relayout_consumer_is_matmul"] = plan.consumer_is_matmul
 
 
 class RValue(ABC):
@@ -787,6 +797,13 @@ class SpyreKernel(Kernel[CSEVariable]):
             index,
             self.indirect_sizes,
         )
+        is_relayout_copy = _is_lx_relayout_copy(self.current_node)
+        lx_view = tensor.layout.lx_view if is_relayout_copy else None
+        work_division = _work_division_from_view(
+            lx_view,
+            device_coords,
+            it_space,
+        )
         device_tile_advance_expr = self._general_tile_advance(tensor, is_input, name)
         tensor_arg = TensorArg(
             is_input,
@@ -798,6 +815,10 @@ class SpyreKernel(Kernel[CSEVariable]):
             element_arrangement=tensor.layout.device_layout.element_arrangement,
             name=opspec_name,
             device_tile_advance_expr=device_tile_advance_expr,
+            work_division=work_division,
+            is_kernel_operand=(
+                tensor.layout.lx_is_kernel_operand if is_relayout_copy else False
+            ),
         )
         if (
             "lx" not in tensor.layout.allocation
@@ -1076,15 +1097,10 @@ class SpyreKernel(Kernel[CSEVariable]):
                     raise Unsupported(f"unexpected argument {input} to {value.op}")
             args.append(self.create_tensor_arg(False, real_dst_name, dst))
             op_info.update(value.op_info)
-            relayout_plan = _current_lx_relayout_shuffle(
-                self.current_node, real_dst_name
-            )
-            op = value.op
-            if relayout_plan is not None:
-                _apply_lx_relayout_to_args(args, relayout_plan, op_info)
-                op = "shuffle"
             self.op_specs.append(
-                self.create_op_spec(op, False, args, op_info, self.indirect_var_names())
+                self.create_op_spec(
+                    value.op, False, args, op_info, self.indirect_var_names()
+                )
             )
         elif isinstance(value, TensorAccess):
             # Reshapes, transposes, and other dataops.
@@ -1133,14 +1149,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                 op_indirect_var_names = None
             in_coords = args[-2].device_coordinates
             out_coords = args[-1].device_coordinates
-            relayout_plan = _current_lx_relayout_shuffle(
-                self.current_node, real_dst_name
-            )
-            if relayout_plan is not None:
-                assert value.name == relayout_plan.source_name
-                _apply_lx_relayout_to_args(args, relayout_plan, op_info)
-                op = "shuffle"
-            elif all(e == 0 for e in in_coords) and not all(e == 0 for e in out_coords):
+            if all(e == 0 for e in in_coords) and not all(e == 0 for e in out_coords):
                 # Broadcast: scalar input expanding to non-scalar output.
                 op = IDENTITY_OP
             elif in_coords[-1].free_symbols != out_coords[-1].free_symbols:
@@ -1482,93 +1491,69 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                                 buf.writeline(
                                     f"element_arrangement={arg.element_arrangement},"
                                 )
-                            if arg.ownership is not None:
-                                buf.writeline(f"ownership={arg.ownership!r},")
+                            if arg.work_division is not None:
+                                splits = ", ".join(
+                                    f"{sympy_str(dim)}: {split}"
+                                    for dim, split in arg.work_division.work_slices.items()
+                                )
+                                core_map = ", ".join(
+                                    f"{sympy_str(dim)}: {sympy_str(slot)}"
+                                    for dim, slot in arg.work_division.core_id_to_work_slice.items()
+                                )
+                                buf.writeline(
+                                    "work_division=TensorWorkDivision("
+                                    f"work_slices={{{splits}}}, "
+                                    f"core_id_to_work_slice={{{core_map}}}),"
+                                )
+                            if arg.is_kernel_operand:
+                                buf.writeline("is_kernel_operand=True,")
                         buf.writeline("),")
                 buf.writeline("]")
             buf.writeline("),")
 
 
-def _remap_ownership(
-    arg: TensorArg,
-    sizes: Sequence[sympy.Expr],
-    source_axes: Sequence[tuple[int, ...]],
-) -> None:
-    """Carry LX ownership through device-layout normalization."""
+def _remap_work_division(arg: TensorArg, iteration_remap) -> None:
+    """Carry a tensor work division through iteration-space normalization."""
 
-    ownership = arg.ownership
-    if ownership is None:
+    if arg.work_division is None:
         return
-    if len(sizes) != len(source_axes):
-        raise ValueError("aligned device-layout provenance has the wrong rank")
 
-    core_map = ownership.core_to_slice
-    input_axes = set(ownership.splits)
-    input_axes.update(axis for per_core in core_map.values() for axis in per_core)
-    axis_parts: dict[int, list[tuple[int, int]]] = {}
-    part_slots: dict[str, dict[tuple[int, int], int]] = {
-        str(core): {} for core in core_map
-    }
+    new_splits = {}
+    new_core_map = {}
+    for old_dim, split in arg.work_division.work_slices.items():
+        parts = iteration_remap.get(old_dim)
+        if parts is None:
+            raise ValueError(f"missing normalized mapping for {old_dim}")
 
-    for input_axis in sorted(input_axes):
-        split = int(ownership.splits.get(input_axis, 1))
-        if split < 1:
-            raise ValueError(f"allocation split must be positive for axis {input_axis}")
-
-        output_axes = [
-            output_axis
-            for output_axis, inputs in enumerate(source_axes[:-1])
-            if input_axis in inputs
-        ]
-        remaining = split
-        parts: list[tuple[int, int]] = []
-        for output_axis in output_axes:
-            factor = math.gcd(remaining, concretize_expr(sizes[output_axis]))
-            if factor > 1:
-                parts.append((output_axis, factor))
+        remaining = int(split)
+        factors = []
+        if len(parts) == 1:
+            factors.append((parts[0][0], remaining))
+            remaining = 1
+        else:
+            for new_dim, basis in reversed(parts):
+                factor = math.gcd(remaining, basis)
+                factors.append((new_dim, factor))
                 remaining //= factor
+            factors.reverse()
         if remaining != 1:
-            raise ValueError(
-                "align_tensors cannot represent allocation split "
-                f"{split} from device axis {input_axis}"
-            )
-        axis_parts[input_axis] = parts
+            raise ValueError(f"cannot normalize {split}-way split on {old_dim}")
 
-        stride = math.prod(factor for _, factor in parts)
-        for core, per_core in core_map.items():
-            slot = int(per_core.get(input_axis, 0))
-            if slot < 0 or slot >= split:
-                raise ValueError(
-                    f"allocation slot {slot} is outside split {split} "
-                    f"for device axis {input_axis}"
-                )
-            part_stride = stride
-            for output_axis, factor in parts:
-                part_stride //= factor
-                part_slots[str(core)][(input_axis, output_axis)] = (
-                    slot // part_stride
-                ) % factor
+        slot = arg.work_division.core_id_to_work_slice[old_dim]
+        stride = math.prod(factor for _, factor in factors)
+        for new_dim, factor in factors:
+            stride //= factor
+            if factor == 1:
+                continue
+            new_slot = sympy.Mod(sympy.floor(slot / stride), factor)
+            if new_dim in new_splits and (
+                new_splits[new_dim] != factor or new_core_map[new_dim] != new_slot
+            ):
+                raise ValueError(f"conflicting normalized work division on {new_dim}")
+            new_splits[new_dim] = factor
+            new_core_map[new_dim] = new_slot
 
-    new_splits: dict[int, int] = {}
-    new_core_map: dict[str, dict[int, int]] = {str(core): {} for core in core_map}
-    for output_axis, input_axis_group in enumerate(source_axes[:-1]):
-        parts = [
-            (input_axis, factor)
-            for input_axis in input_axis_group
-            for part_axis, factor in axis_parts.get(input_axis, ())
-            if part_axis == output_axis
-        ]
-        split = math.prod(factor for _, factor in parts)
-        if split == 1:
-            continue
-        new_splits[output_axis] = split
-        for core in new_core_map:
-            slot = 0
-            for input_axis, factor in parts:
-                slot = slot * factor + part_slots[core][(input_axis, output_axis)]
-            new_core_map[core][output_axis] = slot
-
-    arg.ownership = DeviceOwnership(splits=new_splits, core_to_slice=new_core_map)
+    arg.work_division = TensorWorkDivision(new_splits, new_core_map)
 
 
 def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
@@ -1576,7 +1561,7 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     # decomposes symbols in align_tensors; indirect_access_subs replaces them with IndirectAccess.
     it_space = op_spec.iteration_space
 
-    new_op_space_splits, new_tensors = align_tensors(
+    new_op_space_splits, new_tensors, iteration_remap = align_tensors(
         it_space,
         [
             {"size": arg.device_size, "coordinates": arg.device_coordinates}
@@ -1587,11 +1572,7 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     op_spec.iteration_space = new_op_space_splits
 
     for arg, t in zip(op_spec.args, new_tensors):
-        _remap_ownership(
-            arg,
-            t["size"],
-            t["source_device_dims"],
-        )
+        _remap_work_division(arg, iteration_remap)
         arg.device_size = t["size"]
         arg.device_coordinates = t["coordinates"]
 

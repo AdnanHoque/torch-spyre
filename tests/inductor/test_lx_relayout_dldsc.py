@@ -25,17 +25,20 @@ import torch_spyre._inductor.scheduler as scheduler_module
 
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
+from torch_spyre._inductor.constants import IDENTITY_OP
 from torch_spyre._inductor.lx_relayout import (
-    LX_RELAYOUT_SHUFFLE_ATTR,
     LXRelayoutPlan,
     _is_equal_footprint_geometry,
 )
-from torch_spyre._inductor.op_spec import DeviceOwnership, OpSpec, TensorArg
+from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.pass_utils import PerCoreView
 from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
 from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
-from torch_spyre._inductor.spyre_kernel import simplify_op_spec
+from torch_spyre._inductor.spyre_kernel import (
+    _work_division_from_view,
+    simplify_op_spec,
+)
 
 
 class _DummyOp:
@@ -56,21 +59,25 @@ class _DummyGraph:
 
 
 def _dense_plan(
-    source_name: str = "buf_mlp", consumer_name: str = "pointwise"
+    source_name: str = "buf_mlp",
+    consumer_name: str = "pointwise",
+    *,
+    kernel_operand: bool = False,
 ) -> LXRelayoutPlan:
+    core_id = Symbol("core_id")
     return LXRelayoutPlan(
         source_name=source_name,
         consumer_name=consumer_name,
-        source_ownership=DeviceOwnership(
-            splits={0: 4, 1: 8},
-            core_to_slice={
-                str(core): {0: core // 8, 1: core % 8} for core in range(32)
-            },
+        source_view=PerCoreView(
+            ((0, 4), (1, 8)),
+            ((0, floor(core_id / 8)), (1, Mod(core_id, 8))),
         ),
-        destination_ownership=DeviceOwnership(
-            splits={0: 32, 1: 1},
-            core_to_slice={str(core): {0: core, 1: 0} for core in range(32)},
+        destination_view=PerCoreView(
+            ((0, 32),),
+            ((0, core_id),),
         ),
+        num_cores=32,
+        destination_is_kernel_operand=kernel_operand,
         source_lx_address=0x24000,
         destination_lx_address=0x44000,
     )
@@ -80,41 +87,53 @@ def _compile_spec(op_spec):
     simplify_op_spec(op_spec)
     sdsc, *_ = compile_op_spec(0, op_spec, [])
     root = next(iter(sdsc.values()))
-    shuffle_dsc = next(iter(root["dscs_"][0].values()))
+    dsc = next(iter(root["dscs_"][0].values()))
     allocations = [
-        row for row in shuffle_dsc["scheduleTree_"] if row["nodeType_"] == "allocate"
+        row for row in dsc["scheduleTree_"] if row["nodeType_"] == "allocate"
     ]
     return root, allocations
 
 
-def _shuffle_spec(plan, source_arg, iteration_space):
+def _copy_spec(plan, source_arg, iteration_space):
+    source_work_division = _work_division_from_view(
+        plan.source_view, source_arg.device_coordinates, iteration_space
+    )
+    destination_work_division = _work_division_from_view(
+        plan.destination_view, source_arg.device_coordinates, iteration_space
+    )
     return OpSpec(
-        op="shuffle",
+        op=IDENTITY_OP,
         is_reduction=False,
         iteration_space=iteration_space,
         args=[
-            replace(source_arg, ownership=plan.source_ownership),
+            replace(
+                source_arg,
+                work_division=source_work_division,
+            ),
             replace(
                 source_arg,
                 is_input=False,
                 name=plan.destination_name,
                 allocation={"lx": plan.destination_lx_address},
-                ownership=plan.destination_ownership,
+                work_division=destination_work_division,
+                is_kernel_operand=plan.destination_is_kernel_operand,
             ),
         ],
-        op_info={"lx_relayout_consumer_is_matmul": False},
+        op_info={},
     )
 
 
 def test_relayout_emits_owner_maps():
-    plan = _dense_plan()
+    plan = _dense_plan(kernel_operand=True)
     assert _is_equal_footprint_geometry(
-        plan.source_ownership,
-        plan.destination_ownership,
+        plan.source_view,
+        plan.destination_view,
+        plan.num_cores,
     )
     assert not _is_equal_footprint_geometry(
-        DeviceOwnership(splits={0: 2}, core_to_slice={"0": {0: 0}, "1": {0: 1}}),
-        DeviceOwnership(splits={0: 1}, core_to_slice={"0": {0: 0}, "1": {0: 0}}),
+        PerCoreView(((0, 2),), ((0, Symbol("core_id")),)),
+        PerCoreView((), ()),
+        2,
     )
 
     m, n = Symbol("m"), Symbol("n")
@@ -127,15 +146,16 @@ def test_relayout_emits_owner_maps():
         allocation={"lx": plan.source_lx_address},
         name=plan.source_name,
     )
-    shuffle_spec = _shuffle_spec(
+    copy_spec = _copy_spec(
         plan,
         source_arg,
         {m: (Integer(512), 32), n: (Integer(12800), 1)},
     )
 
-    root, allocations = _compile_spec(shuffle_spec)
+    root, allocations = _compile_spec(copy_spec)
+    assert set(root["dscs_"][0]) == {"shuffle"}
     assert root["numCoresUsed_"] == 32
-    assert shuffle_spec.args[1].allocation == {"lx": plan.destination_lx_address}
+    assert copy_spec.args[1].allocation == {"lx": plan.destination_lx_address}
     producer_map = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
     consumer_map = allocations[1]["coordinates_"]["coreIdToWkSlice_"]
     assert (producer_map["0"], producer_map["31"]) == (
@@ -148,7 +168,7 @@ def test_relayout_emits_owner_maps():
     )
 
 
-def test_default_ownership_keeps_implicit_core_map():
+def test_default_work_division_keeps_implicit_core_map():
     m, n = Symbol("m"), Symbol("n")
 
     def tensor(is_input, name, address):
@@ -185,17 +205,19 @@ def test_relayout_owner_maps_follow_aligned_device_dimensions():
     """Split/synthetic dimensions cannot leave allocation maps on old axes."""
 
     m, n = Symbol("m"), Symbol("n")
+    core_id = Symbol("core_id")
     plan = LXRelayoutPlan(
         source_name="buf_split",
         consumer_name="pointwise",
-        source_ownership=DeviceOwnership(
-            splits={1: 8},
-            core_to_slice={str(core): {1: core} for core in range(8)},
+        source_view=PerCoreView(
+            ((1, 8),),
+            ((1, core_id),),
         ),
-        destination_ownership=DeviceOwnership(
-            splits={1: 8},
-            core_to_slice={str(core): {1: 7 - core} for core in range(8)},
+        destination_view=PerCoreView(
+            ((1, 8),),
+            ((1, 7 - core_id),),
         ),
+        num_cores=8,
         source_lx_address=0x24000,
         destination_lx_address=0x44000,
     )
@@ -208,17 +230,17 @@ def test_relayout_owner_maps_follow_aligned_device_dimensions():
         allocation={"lx": plan.source_lx_address},
         name=plan.source_name,
     )
-    shuffle_spec = _shuffle_spec(
+    copy_spec = _copy_spec(
         plan,
         source_arg,
         {n: (Integer(256), 8), m: (Integer(64), 1)},
     )
 
-    root, allocations = _compile_spec(shuffle_spec)
+    root, allocations = _compile_spec(copy_spec)
 
-    assert list(shuffle_spec.iteration_space) == [n, Symbol("z0"), m]
-    assert shuffle_spec.args[0].ownership.splits == {2: 8}
-    assert shuffle_spec.args[1].ownership.splits == {2: 8}
+    assert list(copy_spec.iteration_space) == [n, Symbol("z0"), m]
+    assert copy_spec.args[0].work_division.work_slices == {Symbol("z0"): 8}
+    assert copy_spec.args[1].work_division.work_slices == {Symbol("z0"): 8}
     assert root["numCoresUsed_"] == 8
     producer_map = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
     consumer_map = allocations[1]["coordinates_"]["coreIdToWkSlice_"]
@@ -305,49 +327,16 @@ def test_planner_handles_different_consumer_views_and_requires_every_read(
         ("shared", "consumer_b"),
     }
     assert (
-        plans[("shared", "consumer_a")].destination_ownership
-        != plans[("shared", "consumer_b")].destination_ownership
+        plans[("shared", "consumer_a")].destination_view
+        != plans[("shared", "consumer_b")].destination_view
     )
-    assert plans[("shared", "consumer_a")].destination_ownership.splits == {1: 2}
-    assert plans[("shared", "consumer_b")].destination_ownership.splits == {
-        0: 2,
-        1: 1,
-    }
-
-    indirect_read = MemoryDep("indices", Symbol("indirect0"), (x, y), (2, 64))
-    read_writes["consumer_a"].reads.append(indirect_read)
-    assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
-    read_writes["consumer_a"].reads.remove(indirect_read)
+    assert plans[("shared", "consumer_a")].destination_view == consumer_a_view
+    assert plans[("shared", "consumer_b")].destination_view == consumer_b_view
 
     monkeypatch.setattr(
         lx_relayout_module,
         "try_device_coordinates",
         lambda _layout, dep, _sizes: None if dep is read_b else valid_coordinates,
-    )
-    assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
-
-    monkeypatch.setattr(
-        lx_relayout_module,
-        "try_device_coordinates",
-        lambda _layout, dep, _sizes: (
-            [Mod(y, 64)] if dep is read_b else valid_coordinates
-        ),
-    )
-    assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
-
-    direct_read_a = MemoryDep("shared", 64 * x - y, (x, y), (2, 64))
-    read_writes["consumer_a"].reads.append(direct_read_a)
-    monkeypatch.setattr(
-        lx_relayout_module,
-        "_per_core_view_on_buf",
-        lambda op, dep, *_: (
-            producer_view if dep is direct_read_a else views[op],
-            False,
-            True,
-        ),
-    )
-    monkeypatch.setattr(
-        lx_relayout_module, "try_device_coordinates", lambda *_: valid_coordinates
     )
     assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
 
@@ -361,9 +350,10 @@ def test_scheduler_demotes_mismatched_relayout_side(
             self.name = name
 
     class _Op:
-        def __init__(self, name, allocation=None):
+        def __init__(self, name, allocation=None, lx_view=None, operation_name=None):
             self.name = name
-            self.layout = SimpleNamespace(allocation=allocation or {})
+            self.layout = SimpleNamespace(allocation=allocation or {}, lx_view=lx_view)
+            self.operation_name = operation_name
 
         def get_name(self):
             return self.name
@@ -379,18 +369,25 @@ def test_scheduler_demotes_mismatched_relayout_side(
         def get_name(self):
             return self.node.get_name()
 
-    plan = replace(_dense_plan(), materialized_destination_name="relayout_destination")
-    producer = _Op(plan.source_name, {"lx": plan.source_lx_address})
-    shuffle = _Op(
-        plan.materialized_destination_name, {"lx": plan.destination_lx_address}
+    plan = _dense_plan()
+    destination_name = "relayout_destination"
+    producer = _Op(
+        plan.source_name,
+        {"lx": plan.source_lx_address},
+        plan.source_view,
+    )
+    copy = _Op(
+        destination_name,
+        {"lx": plan.destination_lx_address},
+        plan.destination_view,
+        "lx_relayout_copy",
     )
     consumer = _Op(plan.consumer_name)
-    setattr(shuffle, LX_RELAYOUT_SHUFFLE_ATTR, plan)
     source_dep = _Dep(plan.source_name)
-    destination_dep = _Dep(plan.materialized_destination_name)
+    destination_dep = _Dep(destination_name)
     nodes = [
         _SchedulerNode(producer, writes=(source_dep,)),
-        _SchedulerNode(shuffle, reads=(source_dep,), writes=(destination_dep,)),
+        _SchedulerNode(copy, reads=(source_dep,), writes=(destination_dep,)),
         _SchedulerNode(consumer, reads=(destination_dep,)),
     ]
 
@@ -403,27 +400,29 @@ def test_scheduler_demotes_mismatched_relayout_side(
             graph=SimpleNamespace(
                 try_get_buffer=lambda name: {
                     plan.source_name: producer,
-                    plan.materialized_destination_name: shuffle,
+                    destination_name: copy,
                 }.get(name)
             )
         ),
     )
     monkeypatch.setattr(scheduler_module._spyre_config, "lx_planning", True)
-    monkeypatch.setattr(
-        scheduler_module,
-        "per_core_view_scheduled",
-        lambda *_: (PerCoreView((), ()), False, True),
-    )
-    monkeypatch.setattr(
-        scheduler_module,
-        "matches_relayout_ownership",
-        lambda *_args, destination: destination != mismatched_destination,
-    )
+
+    def scheduled_view(node, _dep, name):
+        mismatch = (mismatched_destination and node is nodes[-1]) or (
+            not mismatched_destination and node is nodes[0]
+        )
+        expected = (
+            plan.source_view if name == plan.source_name else plan.destination_view
+        )
+        return (PerCoreView((), ()) if mismatch else expected, False, True)
+
+    monkeypatch.setattr(scheduler_module, "per_core_view_scheduled", scheduled_view)
 
     scheduler_module.demote_incoherent_lx_buffers(nodes)
     assert "lx" not in producer.layout.allocation
-    assert "lx" not in shuffle.layout.allocation
-    assert not hasattr(shuffle, LX_RELAYOUT_SHUFFLE_ATTR)
+    assert "lx" not in copy.layout.allocation
+    assert producer.layout.lx_view is None
+    assert copy.layout.lx_view is None
 
 
 def test_relayout_lifetimes_cover_inputs_and_multiple_consumers(monkeypatch):

@@ -16,8 +16,8 @@
 
 The regular LX planner handles same-core scratchpad persistence. This module
 finds edges where a producer and consumer use different per-core views of the
-same tensor. Accepted edges are materialized as an explicit, frontend-allocated
-S1 -> SHUFFLE -> S2 sequence.
+same tensor. Accepted edges are materialized as ordinary pointwise copies;
+SDSC codegen selects the LX transport from the two tensor work divisions.
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import ComputedBuffer, Operation, Pointwise
 from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
-from torch_spyre._inductor.op_spec import DeviceOwnership
 from torch_spyre._inductor.pass_utils import (
     PerCoreView,
     _is_matmul_op,
@@ -43,7 +42,6 @@ from torch_spyre._inductor.pass_utils import (
 )
 from torch_spyre._inductor.scratchpad.utils import _op_num_cores, _op_short_name
 
-LX_RELAYOUT_SHUFFLE_ATTR = "_spyre_lx_relayout_shuffle"
 LX_RELAYOUT_DESTINATION_PREFIX = "__spyre_lx_relayout_destination__"
 
 logger = get_inductor_logger("lx_relayout")
@@ -59,16 +57,16 @@ def is_lx_relayout_destination(name: str) -> bool:
 
 @dataclasses.dataclass(frozen=True)
 class LXRelayoutPlan:
-    """Names and exact per-core geometry for one LX shuffle."""
+    """Names and exact per-core geometry for one LX copy."""
 
     source_name: str
     consumer_name: str
-    source_ownership: DeviceOwnership
-    destination_ownership: DeviceOwnership
-    consumer_is_matmul: bool = False
+    source_view: PerCoreView
+    destination_view: PerCoreView
+    num_cores: int
+    destination_is_kernel_operand: bool = False
     source_lx_address: int | None = None
     destination_lx_address: int | None = None
-    materialized_destination_name: str | None = None
 
     @property
     def destination_name(self) -> str:
@@ -88,12 +86,15 @@ def _intervals_overlap(
 
 
 def _is_equal_footprint_geometry(
-    producer: DeviceOwnership,
-    consumer: DeviceOwnership,
+    producer: PerCoreView,
+    consumer: PerCoreView,
+    num_cores: int,
 ) -> bool:
-    """Whether two complete per-core partitions admit a bounded shuffle."""
+    """Whether two complete per-core partitions admit a bounded peer copy."""
 
-    if producer.core_to_slice.keys() != consumer.core_to_slice.keys():
+    producer_core_map = _core_id_to_device_slice(producer, num_cores)
+    consumer_core_map = _core_id_to_device_slice(consumer, num_cores)
+    if producer_core_map is None or consumer_core_map is None:
         return False
 
     def slice_count(core_map: dict[str, dict[int, int]]) -> int:
@@ -104,18 +105,20 @@ def _is_equal_footprint_geometry(
             }
         )
 
-    fanout = {core: 0 for core in producer.core_to_slice}
-    fanin = {core: 0 for core in consumer.core_to_slice}
+    producer_splits = _work_slice_dims(producer)
+    consumer_splits = _work_slice_dims(consumer)
+    fanout = {core: 0 for core in producer_core_map}
+    fanin = {core: 0 for core in consumer_core_map}
     transfer_count = 0
-    dims = set(producer.splits) | set(consumer.splits)
-    for producer_core, producer_slice in producer.core_to_slice.items():
-        for consumer_core, consumer_slice in consumer.core_to_slice.items():
+    dims = set(producer_splits) | set(consumer_splits)
+    for producer_core, producer_slice in producer_core_map.items():
+        for consumer_core, consumer_slice in consumer_core_map.items():
             if all(
                 _intervals_overlap(
                     int(producer_slice.get(dim, 0)),
-                    int(producer.splits.get(dim, 1)),
+                    int(producer_splits.get(dim, 1)),
                     int(consumer_slice.get(dim, 0)),
-                    int(consumer.splits.get(dim, 1)),
+                    int(consumer_splits.get(dim, 1)),
                 )
                 for dim in dims
             ):
@@ -129,12 +132,12 @@ def _is_equal_footprint_geometry(
     covers_all_cores = (
         min(fanout_values, default=0) > 0 and min(fanin_values, default=0) > 0
     )
-    producer_is_partitioned = slice_count(producer.core_to_slice) == len(
-        producer.core_to_slice
-    ) and math.prod(producer.splits.values()) == len(producer.core_to_slice)
-    consumer_is_partitioned = slice_count(consumer.core_to_slice) == len(
-        consumer.core_to_slice
-    ) and math.prod(consumer.splits.values()) == len(consumer.core_to_slice)
+    producer_is_partitioned = slice_count(producer_core_map) == num_cores and (
+        math.prod(producer_splits.values()) == num_cores
+    )
+    consumer_is_partitioned = slice_count(consumer_core_map) == num_cores and (
+        math.prod(consumer_splits.values()) == num_cores
+    )
     return (
         transfer_count > 0
         and covers_all_cores
@@ -200,8 +203,8 @@ def _work_slice_dims(view: PerCoreView) -> dict[int, int]:
 def _has_materializable_iteration_geometry(
     device_coordinates: list[sympy.Expr],
     iteration_symbols: tuple[sympy.Symbol, ...],
-    source: DeviceOwnership,
-    destination: DeviceOwnership,
+    source: PerCoreView,
+    destination: PerCoreView,
 ) -> bool:
     """Check every non-unit allocation dimension before LX is committed.
 
@@ -218,11 +221,13 @@ def _has_materializable_iteration_geometry(
         return False
 
     symbol_splits: dict[tuple[str, sympy.Symbol], int] = {}
-    device_dims = set(source.splits) | set(destination.splits)
+    source_splits = _work_slice_dims(source)
+    destination_splits = _work_slice_dims(destination)
+    device_dims = set(source_splits) | set(destination_splits)
     for device_dim in device_dims:
         index = int(device_dim)
-        source_split = int(source.splits.get(device_dim, 1))
-        destination_split = int(destination.splits.get(device_dim, 1))
+        source_split = int(source_splits.get(device_dim, 1))
+        destination_split = int(destination_splits.get(device_dim, 1))
         requires_symbol = source_split != 1 or destination_split != 1
         if index < 0 or index >= len(device_coordinates):
             if requires_symbol:
@@ -251,53 +256,12 @@ def _has_materializable_iteration_geometry(
     return True
 
 
-def _dense_view(
-    core_map: dict[str, dict[int, int]],
-    splits: dict[int, int],
-    dims: set[int],
-) -> DeviceOwnership:
-    ordered_dims = sorted(dims)
-    dense_map = {
-        core: {dim: int(per_core.get(dim, 0)) for dim in ordered_dims}
-        for core, per_core in core_map.items()
-    }
-    dense_splits = {dim: int(splits.get(dim, 1)) for dim in ordered_dims}
-    return DeviceOwnership(splits=dense_splits, core_to_slice=dense_map)
-
-
-def matches_relayout_ownership(
-    op: Operation,
-    view: PerCoreView,
-    plan: LXRelayoutPlan,
-    *,
-    destination: bool,
-) -> bool:
-    """Check a final scheduled access against one side of a relayout plan.
-
-    Planning records physical device-dimension ownership before the scheduler
-    exists.  Post-fusion validation must compare that contract with the final
-    positional core mapping, not merely with the split-factor product.
-    """
-
-    expected = plan.destination_ownership if destination else plan.source_ownership
-    core_count = _op_num_cores(op)
-    if core_count != len(expected.core_to_slice):
-        return False
-    current_map = _core_id_to_device_slice(view, core_count)
-    if current_map is None:
-        return False
-    current = _dense_view(
-        current_map,
-        _work_slice_dims(view),
-        set(expected.splits),
-    )
-    return current == expected
-
-
 def clear_lx_relayout_metadata(graph: GraphLowering) -> None:
     for op in graph.operations:
-        if hasattr(op, LX_RELAYOUT_SHUFFLE_ATTR):
-            delattr(op, LX_RELAYOUT_SHUFFLE_ATTR)
+        layout = getattr(op, "layout", None)
+        if hasattr(layout, "lx_view"):
+            layout.lx_view = None
+            layout.lx_is_kernel_operand = False
 
 
 def collect_lx_relayout_plans(
@@ -342,12 +306,8 @@ def collect_lx_relayout_plans(
         if producer_has_partial or not producer_representable:
             continue
         producer_core_count = _op_num_cores(producer)
-        producer_core_slices = _core_id_to_device_slice(
-            producer_view, producer_core_count
-        )
-        if producer_core_slices is None:
+        if _core_id_to_device_slice(producer_view, producer_core_count) is None:
             continue
-        producer_work_slice_dims = _work_slice_dims(producer_view)
 
         source_plans: dict[tuple[str, str], LXRelayoutPlan] = {}
         direct_consumers: set[str] = set()
@@ -393,26 +353,17 @@ def collect_lx_relayout_plans(
                 source_is_covered = False
                 break
 
-            consumer_work_slice_dims = _work_slice_dims(consumer_view)
-            consumer_core_slices = _core_id_to_device_slice(
-                consumer_view, consumer_core_count
-            )
-            if consumer_core_slices is None:
+            if (
+                consumer_core_count != producer_core_count
+                or _core_id_to_device_slice(consumer_view, consumer_core_count) is None
+            ):
                 source_is_covered = False
                 break
 
-            relayout_dims = set(producer_work_slice_dims) | set(
-                consumer_work_slice_dims
-            )
-            producer_ownership = _dense_view(
-                producer_core_slices, producer_work_slice_dims, relayout_dims
-            )
-            consumer_ownership = _dense_view(
-                consumer_core_slices, consumer_work_slice_dims, relayout_dims
-            )
             if not _is_equal_footprint_geometry(
-                producer_ownership,
-                consumer_ownership,
+                producer_view,
+                consumer_view,
+                producer_core_count,
             ):
                 source_is_covered = False
                 break
@@ -428,8 +379,8 @@ def collect_lx_relayout_plans(
             if not _has_materializable_iteration_geometry(
                 device_coordinates,
                 tuple(iteration_space_from_op(consumer)),
-                producer_ownership,
-                consumer_ownership,
+                producer_view,
+                consumer_view,
             ):
                 source_is_covered = False
                 break
@@ -437,9 +388,10 @@ def collect_lx_relayout_plans(
             plan = LXRelayoutPlan(
                 source_name=source_name,
                 consumer_name=consumer.get_name(),
-                source_ownership=producer_ownership,
-                destination_ownership=consumer_ownership,
-                consumer_is_matmul=is_matmul_consumer,
+                source_view=producer_view,
+                destination_view=consumer_view,
+                num_cores=producer_core_count,
+                destination_is_kernel_operand=is_matmul_consumer,
             )
             if plan.consumer_name in direct_consumers:
                 source_is_covered = False
@@ -462,8 +414,8 @@ def collect_lx_relayout_plans(
                     % (
                         plan.source_name,
                         plan.consumer_name,
-                        plan.source_ownership.splits,
-                        plan.destination_ownership.splits,
+                        plan.source_view.work_slice_dims,
+                        plan.destination_view.work_slice_dims,
                     )
                     for plan in plans
                 ),
@@ -479,7 +431,8 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
 
     Scratchpad planning first proves that both S1 and S2 fit atomically. This
     pass turns each accepted edge into a private identity-copy node before
-    scheduling; codegen lowers its relayout metadata to SHUFFLE/STCDPOpLx.
+    scheduling. SDSC codegen selects SHUFFLE from the copy's tensor work
+    divisions.
     """
 
     from torch_spyre._inductor.ir import FixedTiledLayout
@@ -500,7 +453,7 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
         # GraphLowering's pre-scheduling pipeline can be entered more than once
         # by nested Inductor compilation. Re-plan the already-materialized copy
         # in place instead of growing another clone in front of it.
-        if getattr(consumer, "operation_name", None) == "lx_relayout_shuffle":
+        if getattr(consumer, "operation_name", None) == "lx_relayout_copy":
             reads = [
                 dep
                 for dep in op_read_writes(consumer).reads
@@ -510,11 +463,11 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
             destination_layout = consumer.get_layout()
             assert isinstance(destination_layout, FixedTiledLayout)
             destination_layout.allocation["lx"] = plan.destination_lx_address
-            materialized_plan = dataclasses.replace(
-                plan,
-                materialized_destination_name=consumer.get_name(),
-            )
-            setattr(consumer, LX_RELAYOUT_SHUFFLE_ATTR, materialized_plan)
+            source_layout = source.get_layout()
+            assert isinstance(source_layout, FixedTiledLayout)
+            source_layout.lx_view = plan.source_view
+            destination_layout.lx_view = plan.destination_view
+            destination_layout.lx_is_kernel_operand = plan.destination_is_kernel_operand
             logger.debug(
                 "updated LX relayout %s -> %s at %#x -> %#x",
                 plan.source_name,
@@ -534,23 +487,21 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
             source_layout.device_layout,
         )
         destination_layout.allocation["lx"] = plan.destination_lx_address
+        source_layout.lx_view = plan.source_view
+        destination_layout.lx_view = plan.destination_view
+        destination_layout.lx_is_kernel_operand = plan.destination_is_kernel_operand
 
-        shuffle = editor.insert_clone_before_consumer(
+        copy = editor.insert_clone_before_consumer(
             source,
             consumer,
             destination_layout,
         )
-        shuffle.operation_name = "lx_relayout_shuffle"
-        materialized_plan = dataclasses.replace(
-            plan,
-            materialized_destination_name=shuffle.get_name(),
-        )
-        setattr(shuffle, LX_RELAYOUT_SHUFFLE_ATTR, materialized_plan)
+        copy.operation_name = "lx_relayout_copy"
 
         logger.debug(
             "materialized LX relayout %s -> %s -> %s at %#x -> %#x",
             plan.source_name,
-            shuffle.get_name(),
+            copy.get_name(),
             plan.consumer_name,
             plan.source_lx_address,
             plan.destination_lx_address,

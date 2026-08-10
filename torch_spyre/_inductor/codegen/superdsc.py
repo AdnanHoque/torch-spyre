@@ -16,7 +16,7 @@ import dataclasses
 import math
 from typing import Any
 from collections import Counter
-from sympy import Integer, Symbol, Expr
+from sympy import Integer, Symbol, Expr, sympify
 
 from torch._inductor.virtualized import V
 from torch_spyre._C import DataFormats, ElementArrangement
@@ -48,10 +48,10 @@ from torch_spyre._inductor.indirect_access import (
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.op_spec import (
     DebugHandle,
-    DeviceOwnership,
     IndirectAccess,
     OpSpec,
     TensorArg,
+    TensorWorkDivision,
 )
 from torch_spyre._inductor.dtype_ops import DtypeOpTable
 from torch_spyre._inductor.pass_utils import coeff_through_floor
@@ -59,33 +59,6 @@ from torch_spyre._inductor.pass_utils import coeff_through_floor
 from .compute_ops import SymbolKind, generate_sdsc, num_bytes
 
 logger = get_inductor_logger("codegen.superdsc")
-
-
-@dataclasses.dataclass(frozen=True)
-class SDSCOwnership:
-    """The tensor region owned by each core in final SDSC coordinates."""
-
-    splits: dict[Symbol, int]
-    core_to_slice: dict[str, dict[str, int]]
-    is_default: bool = False
-
-    @property
-    def core_map_override(self) -> dict[str, dict[str, int]]:
-        """Return only ownership that must override the SDSC work division."""
-
-        return {} if self.is_default else self.core_to_slice
-
-    def for_dims(self, dims: tuple[Symbol, ...]) -> "SDSCOwnership":
-        """Restrict this ownership to the coordinates present on one tensor."""
-
-        return SDSCOwnership(
-            splits={dim: self.splits[dim] for dim in dims},
-            core_to_slice={
-                core: {str(dim): per_dim[str(dim)] for dim in dims}
-                for core, per_dim in self.core_to_slice.items()
-            },
-            is_default=self.is_default,
-        )
 
 
 @dataclasses.dataclass
@@ -100,7 +73,7 @@ class SDSCArgs:
     allocation: dict[str, Any]
     start_address: int | Symbol
     backGap: dict[Symbol, int]
-    ownership: SDSCOwnership = dataclasses.field(init=False)
+    work_division: TensorWorkDivision | None = None
     arg_index: int = -1
     is_index_tensor: bool = False
     related_value_tensor_idx: int = -1
@@ -126,7 +99,7 @@ class SDSCArgs:
             f"  backGap={self.backGap}\n"
             f"  is_index_tensor={self.is_index_tensor}\n"
             f"  related_value_tensor_idx={self.related_value_tensor_idx}\n"
-            f"  ownership={self.ownership}\n"
+            f"  work_division={self.work_division}\n"
             f")"
         )
 
@@ -162,12 +135,6 @@ class SDSCSpec:
     input_coord_padding: dict = dataclasses.field(default_factory=dict)
     input_coord_sizes: dict = dataclasses.field(default_factory=dict)
     emit_memorg_padding: bool = False
-
-    def __post_init__(self) -> None:
-        ownership = default_ownership(self)
-        for tensor in self.args:
-            if not hasattr(tensor, "ownership"):
-                tensor.ownership = ownership.for_dims(tuple(tensor.dim_order))
 
     def __str__(self) -> str:
         iter_space = ", ".join(f"{k}={v}" for k, v in self.iteration_space.items())
@@ -208,23 +175,6 @@ class SDSCSpec:
                 f"  constants=[{', '.join(f'{k}={v}' for k, v in self.constants.items())}]"
             )
         return "SDSCSpec(\n" + "\n".join(parts) + "\n)"
-
-
-def default_ownership(spec: SDSCSpec) -> SDSCOwnership:
-    """Materialize the operation work division as per-tensor ownership."""
-
-    core_id = Symbol("core_id")
-    return SDSCOwnership(
-        splits={dim: int(split) for dim, split in spec.work_slices.items()},
-        core_to_slice={
-            str(core): {
-                str(dim): int(expr.subs({core_id: core}))
-                for dim, expr in spec.core_id_to_work_slice.items()
-            }
-            for core in range(spec.num_cores)
-        },
-        is_default=True,
-    )
 
 
 # Pointwise ops whose *output* padding lanes are seeded to a deterministic value
@@ -334,76 +284,6 @@ def _get_device_dim_order(
             if sym not in dim_order:
                 dim_order.append(sym)
     return dim_order, stick_dim
-
-
-@dataclasses.dataclass(frozen=True)
-class TensorCoordinateProjection:
-    """Maps stable physical device axes to one tensor's SDSC coordinates.
-
-    Attributes:
-        sdsc_dims: Final coordinate order emitted for the tensor.
-        device_dim_for_sdsc_dim: Physical device axis represented by each SDSC
-            coordinate. The within-stick lane has no entry.
-    """
-
-    sdsc_dims: tuple[Symbol, ...]
-    device_dim_for_sdsc_dim: dict[Symbol, int]
-
-    @classmethod
-    def from_tensor(
-        cls,
-        arg: TensorArg,
-        dim_order: list[Symbol],
-        stride_dim_order: list[Symbol],
-        mb_sym: Symbol | None,
-    ) -> "TensorCoordinateProjection":
-        device_dim_for_sdsc_dim = {}
-        for dim in dim_order:
-            if dim is mb_sym:
-                continue
-            device_dim = len(arg.device_coordinates) - stride_dim_order.index(dim) - 2
-            if device_dim >= 0:
-                device_dim_for_sdsc_dim[dim] = device_dim
-        return cls(tuple(dim_order), device_dim_for_sdsc_dim)
-
-    def project(self, ownership: DeviceOwnership) -> SDSCOwnership:
-        """Translate device-axis ownership to descriptor coordinates.
-
-        For example, if device axis 1 is represented by SDSC coordinate ``x``,
-        an eight-way split on axis 1 becomes an eight-way split on ``x`` and
-        each core's axis-1 slot becomes its ``x`` slot.
-        """
-
-        sdsc_dim_for_device_dim = {
-            device_dim: sdsc_dim
-            for sdsc_dim, device_dim in self.device_dim_for_sdsc_dim.items()
-        }
-        splits = {dim: 1 for dim in self.sdsc_dims}
-        for device_dim, split in ownership.splits.items():
-            dim = sdsc_dim_for_device_dim.get(device_dim)
-            if dim is None:
-                if split != 1:
-                    raise ValueError(
-                        f"ownership split uses unmapped device dimension {device_dim}"
-                    )
-                continue
-            splits[dim] = split
-
-        core_to_slice: dict[str, dict[str, int]] = {}
-        for core, device_slice in ownership.core_to_slice.items():
-            sdsc_slice = {str(dim): 0 for dim in self.sdsc_dims}
-            for device_dim, slot in device_slice.items():
-                dim = sdsc_dim_for_device_dim.get(device_dim)
-                if dim is None:
-                    if slot != 0:
-                        raise ValueError(
-                            f"ownership uses unmapped device dimension {device_dim}"
-                        )
-                    continue
-                sdsc_slice[str(dim)] = slot
-            core_to_slice[str(core)] = sdsc_slice
-
-        return SDSCOwnership(splits=splits, core_to_slice=core_to_slice)
 
 
 def _get_layout_label(
@@ -760,9 +640,6 @@ def _create_sdsc_tensors(
         stride_dim_order = [
             d for d in dim_order if d not in reduced_dims
         ] + reduced_dims
-        projection = TensorCoordinateProjection.from_tensor(
-            arg, dim_order, stride_dim_order, mb_sym
-        )
 
         for dim in dim_order:
             stride_idx = stride_dim_order.index(dim)
@@ -854,16 +731,13 @@ def _create_sdsc_tensors(
             else:
                 max_dim_sizes[mb_sym] = -1
 
-        if arg.ownership is not None and "lx" not in arg.allocation:
-            raise ValueError("explicit ownership requires LX storage")
+        if arg.work_division is not None and "lx" not in arg.allocation:
+            raise ValueError("a per-tensor work division requires LX storage")
 
         effective_stick = [op_stick_dim if stick_dim is None else stick_dim]
-        if op_spec.op == "shuffle" and op_spec.op_info.get(
-            "lx_relayout_consumer_is_matmul", False
+        if _is_lx_relayout_copy(op_spec) and any(
+            tensor.is_kernel_operand for tensor in op_spec.args
         ):
-            # The first SHUFFLE argument is a matmul kernel operand and the
-            # second is the relaid output. These are SDSC labels, so derive them
-            # here rather than carrying backend naming through OpSpec.
             layout_labels = SHUFFLE_LAYOUT_LABELS
         else:
             layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
@@ -938,10 +812,23 @@ def _create_sdsc_tensors(
             related_value_tensor_idx=related_val_idx,
             device_tile_advance_expr=arg.device_tile_advance_expr,
         )
-        if arg.ownership is not None:
-            # Relayout ownership is planned on stable device axes. Convert it
-            # only after this tensor's final SDSC coordinates are known.
-            sdsc_arg.ownership = projection.project(arg.ownership)
+        if arg.work_division is not None:
+            remapped_splits = {
+                symbol_mapping.get(dim, dim): split
+                for dim, split in arg.work_division.work_slices.items()
+            }
+            remapped_core_map = {
+                symbol_mapping.get(dim, dim): sympify(slot).xreplace(symbol_mapping)
+                for dim, slot in arg.work_division.core_id_to_work_slice.items()
+            }
+            sdsc_arg.work_division = TensorWorkDivision(
+                work_slices={
+                    dim: int(remapped_splits.get(dim, 1)) for dim in dim_order
+                },
+                core_id_to_work_slice={
+                    dim: remapped_core_map.get(dim, Integer(0)) for dim in dim_order
+                },
+            )
         sdsc_args.append(sdsc_arg)
 
     return sdsc_args, layouts, missing_dim
@@ -958,6 +845,19 @@ def _get_op_func(op: str, is_reduction: bool, output_scales: dict) -> str:
     ):
         return op + "nonstick"
     return op
+
+
+def _is_lx_relayout_copy(op_spec: OpSpec) -> bool:
+    """Whether an ordinary identity copy crosses LX ownership views."""
+
+    if op_spec.op != IDENTITY_OP or len(op_spec.args) != 2:
+        return False
+    source, destination = op_spec.args
+    if "lx" not in source.allocation or "lx" not in destination.allocation:
+        return False
+    if source.work_division is None or destination.work_division is None:
+        return False
+    return source.work_division != destination.work_division
 
 
 def _concretize_for_sdsc(expr: Expr) -> int:
@@ -1084,9 +984,7 @@ def _extend_matmul_k_to_padded(
 
 def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     is_matmul = _is_matmul(op_spec.op)
-    uses_matmul_shuffle_labels = op_spec.op == "shuffle" and op_spec.op_info.get(
-        "lx_relayout_consumer_is_matmul", False
-    )
+    is_lx_relayout = _is_lx_relayout_copy(op_spec)
     is_pool = _is_pool(op_spec.op)
     ndim = len(op_spec.iteration_space)
     # Detect indirect access from device_coordinates: index tensors are those
@@ -1100,7 +998,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     if is_pool:
         dim_labels = _align_pool_dim_labels(op_spec.node_output_ranges, ndim)
     else:
-        dim_labels = _get_op_dim_labels(ndim, is_matmul or uses_matmul_shuffle_labels)
+        dim_labels = _get_op_dim_labels(ndim, is_matmul)
     symbol_mapping = {
         sym: Symbol(dim_labels[i]) for i, sym in enumerate(op_spec.iteration_space)
     }
@@ -1364,7 +1262,11 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
 
     return (
         SDSCSpec(
-            opfunc=_get_op_func(op_spec.op, op_spec.is_reduction, args[-1].scales),
+            opfunc=(
+                "shuffle"
+                if is_lx_relayout
+                else _get_op_func(op_spec.op, op_spec.is_reduction, args[-1].scales)
+            ),
             execution_unit="pt" if is_matmul else "sfp",
             data_format=args[
                 1 if indirect_access_indices else 0

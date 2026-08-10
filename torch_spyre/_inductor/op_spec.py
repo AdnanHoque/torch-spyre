@@ -137,12 +137,12 @@ class DebugHandle:
         }
 
 
-@dataclasses.dataclass(frozen=True)
-class DeviceOwnership:
-    """The tensor region owned by each core, keyed by physical device axis."""
+@dataclasses.dataclass
+class TensorWorkDivision:
+    """An operation's existing work-division contract for one tensor."""
 
-    splits: dict[int, int]
-    core_to_slice: dict[str, dict[int, int]]
+    work_slices: dict[Symbol, int]
+    core_id_to_work_slice: dict[Symbol, Expr]
 
 
 @dataclasses.dataclass
@@ -176,9 +176,10 @@ class TensorArg:
             device-element space via views.tiling_expr_to_device_expr, and summed into a
             single combined Expr. This is the sole tile-advance mechanism. ``None`` for
             ops without loop_info/coarse tiling.
-        ownership: Optional LX ownership. Physical device axes remain stable
-                while tensor coordinates are normalized; SuperDSC projects
-                them to descriptor coordinates during code generation.
+        work_division: Optional per-tensor work division. Normal tensors inherit
+            the operation work division; LX copies may override it independently
+            for their input and output.
+        is_kernel_operand: Whether this copy prepares a matmul kernel operand.
     """
 
     is_input: bool
@@ -192,7 +193,8 @@ class TensorArg:
     element_arrangement: ElementArrangement = dataclasses.field(
         default_factory=lambda: ElementArrangement.STANDARD
     )
-    ownership: DeviceOwnership | None = None
+    work_division: TensorWorkDivision | None = None
+    is_kernel_operand: bool = False
 
 
 @dataclasses.dataclass

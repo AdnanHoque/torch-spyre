@@ -18,7 +18,7 @@ import dataclasses
 from torch_spyre._C import encode_constant, DataFormats
 from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.pass_utils import coeff_through_floor
-from sympy import Symbol
+from sympy import Symbol, sympify
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1067,11 +1067,16 @@ def generate_sdsc(
         stick_dim_order = layout["stick_dim_order"]
         is_input = tensor_idx < sdsc_spec.num_inputs
         result = {}
+        work_slices = (
+            tensor.work_division.work_slices
+            if tensor.work_division is not None
+            else sdsc_spec.work_slices
+        )
         for dim in dim_order:
             dim_str = str(dim)
             scale = tensor.scales[dim]
             is_tiled = scale == 1
-            nsplits = tensor.ownership.splits[dim] if is_tiled else 1
+            nsplits = work_slices[dim] if is_tiled else 1
             size = (
                 _coord_size(dim_str, sdsc_spec.iteration_space[dim], is_input)
                 // nsplits
@@ -1092,6 +1097,18 @@ def generate_sdsc(
                 padding=_coord_padding(dim_str, is_input),
             )
         return result
+
+    def _core_map_override(tensor) -> dict[str, dict[str, int]]:
+        if tensor.work_division is None:
+            return {}
+        core_id = Symbol("core_id")
+        return {
+            str(core): {
+                str(dim): int(sympify(slot).subs({core_id: core}))
+                for dim, slot in tensor.work_division.core_id_to_work_slice.items()
+            }
+            for core in range(sdsc_spec.num_cores)
+        }
 
     def _filter_window_dims(dims: list) -> list:
         """Drop the op's reduction-window dims (e.g. pool ki/kj) from a dim order.
@@ -1357,7 +1374,7 @@ def generate_sdsc(
                                     ),
                                     "coordinates_": {
                                         "coordInfo": _build_coord_info(tensor, i),
-                                        "coreIdToWkSlice_": tensor.ownership.core_map_override,
+                                        "coreIdToWkSlice_": _core_map_override(tensor),
                                     },
                                 }
                                 for i, tensor in enumerate(sdsc_spec.args)

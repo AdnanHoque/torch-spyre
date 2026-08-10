@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Callable, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence
 
 from sympy import Expr
 import torch
@@ -34,6 +34,9 @@ import sympy
 from torch.utils._ordered_set import OrderedSet
 import torch._inductor.ir as ir
 from torch_spyre._inductor.logging_utils import get_inductor_logger
+
+if TYPE_CHECKING:
+    from torch_spyre._inductor.pass_utils import PerCoreView
 
 logger = get_inductor_logger("ir")
 
@@ -99,6 +102,10 @@ class FixedTiledLayout(FixedLayout):
         super().__init__(device, dtype, size, stride, offset)
         self.device_layout: SpyreTensorLayout = device_layout
         self.allocation: dict[str, Any] = {}
+        # Optional canonical per-core view for an LX-resident tensor.  Ordinary
+        # tensors leave this unset and inherit their operation's work division.
+        self.lx_view: Optional["PerCoreView"] = None
+        self.lx_is_kernel_operand = False
 
     def __str__(self) -> str:
         device_index_str = "" if self.device.index is None else f":{self.device.index}"

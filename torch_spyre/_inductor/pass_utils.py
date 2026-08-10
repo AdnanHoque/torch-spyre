@@ -1406,21 +1406,10 @@ def lower_pad_sequence(
 
 @dataclass(frozen=True)
 class PerCoreView:
-    """Geometric description of a buffer's per-core slicing.
+    """A buffer's physical slices and their core owners.
 
-    - work_slice_dims: (device-dim index, split factor) pairs, one per
-      split dim.
-    - core_to_slot: (device-dim index, slice-index expression in core_id)
-      pairs giving each core's position along that split dim.
-
-    Both fields are keyed by the buffer's device-dim index — not by op-
-    local iter symbols — so the value depends only on the buffer's
-    physical slicing.
-
-    Example: a 2D buffer split 4-ways on dim 0 across 4 cores has
-        work_slice_dims = ((0, 4),)
-        core_to_slot    = ((0, Mod(core_id, 4)),)
-    so core_id=2 owns slot 2 along dim 0.
+    Both fields use device-dimension indices, so the view is independent of an
+    operation's local iteration symbols.
     """
 
     work_slice_dims: tuple[tuple[int, int], ...]

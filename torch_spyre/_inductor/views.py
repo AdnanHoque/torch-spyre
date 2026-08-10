@@ -14,7 +14,7 @@
 
 # Helper methods to handle views
 
-from dataclasses import astuple, dataclass, field
+from dataclasses import astuple, dataclass
 import math
 import sympy
 from typing import Callable, Dict, Optional, Sequence, Tuple, cast
@@ -365,16 +365,6 @@ class Term:
     mod: sympy.Expr | None  # modulo
     dim_size: sympy.Expr
     offset: sympy.Expr = sympy.S.Zero  # offset
-    # Original device dimensions represented by this normalized term.  This
-    # provenance lets callers carry device-dimension metadata through the
-    # split/fuse/rank-alignment transformations below.
-    source_device_dims: tuple[int, ...] = field(default_factory=tuple, compare=False)
-
-
-def _merge_source_device_dims(*dims: tuple[int, ...]) -> tuple[int, ...]:
-    """Return the ordered union of original device dimensions."""
-
-    return tuple(dict.fromkeys(dim for group in dims for dim in group))
 
 
 def normalize_coordinates(
@@ -413,29 +403,10 @@ def normalize_coordinates(
                 var = synthetic_var_fn()
                 var_ranges[var] = 1
                 num = den = mod = sympy.S.One
-                terms.append(
-                    Term(
-                        num,
-                        den,
-                        var,
-                        mod,
-                        dim_size,
-                        offset,
-                        (dim_idx,),
-                    )
-                )
+                terms.append(Term(num, den, var, mod, dim_size, offset))
             else:
                 assert offset == 0
-                terms.append(
-                    Term(
-                        None,
-                        None,
-                        None,
-                        None,
-                        dim_size,
-                        source_device_dims=(dim_idx,),
-                    )
-                )
+                terms.append(Term(None, None, None, None, dim_size))
             continue
         # If any free symbols are not loop vars, check if they're indirect symbols
         # with known sizes (from indirect_sizes). If so, treat them like loop vars.
@@ -447,17 +418,7 @@ def normalize_coordinates(
             ):
                 # Symbols with unknown ranges: pass the raw coordinate through
                 # as an opaque offset on a var=None term.
-                terms.append(
-                    Term(
-                        None,
-                        None,
-                        None,
-                        None,
-                        dim_size,
-                        offset=coordinate,
-                        source_device_dims=(dim_idx,),
-                    )
-                )
+                terms.append(Term(None, None, None, None, dim_size, coordinate))
                 continue
         dim_terms = []  # terms for current dimension
         for var in vars:
@@ -476,25 +437,11 @@ def normalize_coordinates(
             # pattern match expression tree, there is small number of possibilities
             if term.is_symbol:
                 dim_terms.append(
-                    Term(
-                        sympy.S.One,
-                        sympy.S.One,
-                        var,
-                        var_range,
-                        dim_size,
-                        source_device_dims=(dim_idx,),
-                    )
+                    Term(sympy.S.One, sympy.S.One, var, var_range, dim_size)
                 )
             elif term.func == sympy.Mod:
                 dim_terms.append(
-                    Term(
-                        sympy.S.One,
-                        sympy.S.One,
-                        var,
-                        term.args[1],
-                        dim_size,
-                        source_device_dims=(dim_idx,),
-                    )
+                    Term(sympy.S.One, sympy.S.One, var, term.args[1], dim_size)
                 )
             elif term.func == sympy.Mul and term.args[0].is_rational:
                 expr0, expr1 = term.args
@@ -505,14 +452,7 @@ def normalize_coordinates(
                     f"Unsupported coordinate expression {expr}"
                 )
                 dim_terms.append(
-                    Term(
-                        expr0.numerator,
-                        expr0.denominator,
-                        var,
-                        mod,
-                        dim_size,
-                        source_device_dims=(dim_idx,),
-                    )
+                    Term(expr0.numerator, expr0.denominator, var, mod, dim_size)
                 )
             else:
                 assert False, f"Unsupported coordinate expression {expr}"
@@ -575,9 +515,6 @@ def normalize_coordinates(
             fused_term.den = term.den
             fused_term.dim_size *= term.dim_size
             fused_term.offset += term.offset
-            fused_term.source_device_dims = _merge_source_device_dims(
-                fused_term.source_device_dims, term.source_device_dims
-            )
         else:
             if fused_term.dim_size > 1 or fused_term.var is not None:
                 fused_terms.append(fused_term)
@@ -597,6 +534,7 @@ def align_tensors(
 ) -> tuple[
     dict[sympy.Symbol, tuple[sympy.Expr, int]],
     list[dict[str, list]],
+    dict[sympy.Symbol, tuple[tuple[sympy.Symbol, int], ...]],
 ]:
     """
     Transform op iteration space and tensor arguments to satisfy codegen requirements.
@@ -688,9 +626,7 @@ def align_tensors(
     splits: dict[sympy.Symbol, sympy.Expr] = {var: set() for var in all_vars}
 
     for i, terms in enumerate(all_terms):
-        for num, den, var, mod, dim_size, offset, _ in [
-            astuple(term) for term in terms
-        ]:
+        for num, den, var, mod, dim_size, offset in [astuple(term) for term in terms]:
             if var is not None:
                 if den != stick_size[i] or var != stick_dim[i]:
                     # add den to splits unless stick dim and stick size
@@ -728,6 +664,7 @@ def align_tensors(
     new_var_ranges = {}
     new_op_it_space_splits = {}
     remap = {}  # map old var to new vars in splits order
+    work_division_remap = {}
     for var, split in splits.items():
         div = op_it_space_splits[var] if var in op_it_space_splits else 1
         if len(split) > 1:
@@ -738,6 +675,7 @@ def align_tensors(
                 new_var_ranges[new_var] = split[i + 1] // split[i]
                 remap[var].append(new_var)
 
+            bases = {}
             # distribute work division for old var to new vars
             for v in reversed(remap[var]):
                 # Re-intersect the committed split against the basis work
@@ -751,8 +689,10 @@ def align_tensors(
                 else:
                     # Non-stick var (or synthetic sub-dim): element range.
                     basis = new_var_ranges[v]
+                bases[v] = int(basis)
                 new_op_it_space_splits[v] = math.gcd(div, basis)
                 div //= new_op_it_space_splits[v]
+            work_division_remap[var] = tuple((v, bases[v]) for v in remap[var])
         else:
             # no splits keep existing var, range, and work division
             # may happen with a single stick since the stick size is omitted
@@ -776,13 +716,13 @@ def align_tensors(
             new_op_it_space_splits[var] = (
                 op_it_space_splits[var] if var in op_it_space_splits else 1
             )
+            work_division_remap[var] = ((var, 1),)
     # create new tensors with new sizes and coordinate expressions matching new vars
     new_tensors = []
     for j, terms in enumerate(all_terms):
         size = []
         coordinates = []
-        source_device_dims = []
-        for num, den, var, mod, dim_size, offset, term_source_device_dims in [
+        for num, den, var, mod, dim_size, offset in [
             astuple(term) for term in terms[:-1]
         ]:
             # for each term except last one (stick dim)
@@ -791,7 +731,6 @@ def align_tensors(
                 # (indirect load access) that must pass through unchanged.
                 size.append(dim_size)
                 coordinates.append(offset)
-                source_device_dims.append(term_source_device_dims)
                 continue
             # decompose dimension according to splits and tiling of stick dim
             low = (
@@ -805,7 +744,6 @@ def align_tensors(
             if low == high:
                 size.append(dim_size)
                 coordinates.append(var + offset)
-                source_device_dims.append(term_source_device_dims)
             for i in reversed(range(low, high)):
                 if i == splits[var].index(mod) - 1:
                     # upper bound of iteration range is dim_size * den
@@ -814,7 +752,6 @@ def align_tensors(
                     # upper bound of iteration range is split
                     size.append(splits[var][i + 1] // splits[var][i])
                 coordinates.append(remap[var][i] + offset // splits[var][i])
-                source_device_dims.append(term_source_device_dims)
                 offset %= splits[var][i]
             if var == stick_dim[j] and den == stick_size[j] and den not in splits[var]:
                 # outer stick dim
@@ -825,23 +762,13 @@ def align_tensors(
                 # iteration skips over elements in dim, realize gap as new dimension
                 size.append(num)
                 coordinates.append(sympy.S.Zero)
-                source_device_dims.append(())
         # add stick dim
-        num, den, var, mod, dim_size, offset, term_source_device_dims = astuple(
-            terms[-1]
-        )
+        num, den, var, mod, dim_size, offset = astuple(terms[-1])
         size.append(dim_size)
         coordinates.append(
             (var % dim_size if var is not None else sympy.S.Zero) + offset
         )
-        source_device_dims.append(term_source_device_dims)
-        new_tensors.append(
-            {
-                "size": size,
-                "coordinates": coordinates,
-                "source_device_dims": source_device_dims,
-            }
-        )
+        new_tensors.append({"size": size, "coordinates": coordinates})
 
     # decide desired rank for all tensors
     rank = 0
@@ -867,7 +794,6 @@ def align_tensors(
         gap = rank - len(t["size"])
         t["size"] = [sympy.S.One] * gap + t["size"]
         t["coordinates"] = [sympy.S.Zero] * gap + t["coordinates"]
-        t["source_device_dims"] = [()] * gap + t["source_device_dims"]
 
     # ensure stick dim var occurs twice if it occurs once using a dim of size 1
     for t in new_tensors:
@@ -885,7 +811,6 @@ def align_tensors(
                     if t["size"][i] == 1 and t["coordinates"][i] == 0:
                         t["coordinates"][i] = stick_dim_var // t["size"][-1]
                         t["coordinates"][-1] = stick_dim_var % t["size"][-1]
-                        t["source_device_dims"][i] = t["source_device_dims"][-1]
                         break
     # Restore original symbolic expressions wherever the algorithm left the
     # concretized value unchanged (i.e. no splits were applied to that dim).
@@ -910,7 +835,7 @@ def align_tensors(
         if k not in indirect_syms
     }
 
-    return new_iteration_space, new_tensors
+    return new_iteration_space, new_tensors, work_division_remap
 
 
 def tiling_expr_to_device_expr(
