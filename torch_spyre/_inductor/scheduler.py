@@ -36,6 +36,10 @@ from torch.utils._ordered_set import OrderedSet
 from .spyre_kernel import SpyreKernel
 from .pass_utils import iteration_space, per_core_view_scheduled
 from .logging_utils import get_inductor_logger
+from .lx_relayout import (
+    discard_materialized_lx_relayouts,
+    materialized_lx_relayout_copies,
+)
 from .op_spec import LoopSpec
 from . import config as _spyre_config
 
@@ -453,9 +457,18 @@ def demote_incoherent_lx_buffers(
         for inner in node.get_nodes()
         if isinstance(inner, SchedulerNode)
     ]
+    relayout_copies = materialized_lx_relayout_copies(V.graph)
+    registered_by_copy = {
+        copy_name: plan for copy_name, plan in relayout_copies.values()
+    }
     copy_destinations: dict[str, set[str]] = {}
     copy_sources: dict[str, str] = {}
+    for copy_name, plan in registered_by_copy.items():
+        copy_destinations.setdefault(plan.source_name, set()).add(copy_name)
+        copy_sources[copy_name] = plan.source_name
     copy_reads: set[tuple[str, str]] = set()
+    malformed_sources: dict[str, str] = {}
+    scheduled_copies: set[str] = set()
     for node in scheduler_nodes:
         if _lx_resident(node):
             for dep in node.read_writes.writes:
@@ -467,20 +480,74 @@ def demote_incoherent_lx_buffers(
                 users.setdefault(dep.name, []).append((node, dep))
         reads = [dep for dep in rw.reads if isinstance(dep, MemoryDep)]
         writes = [dep for dep in rw.writes if isinstance(dep, MemoryDep)]
+        registered_writes = [dep for dep in writes if dep.name in registered_by_copy]
+        if not registered_writes:
+            continue
+        if len(registered_writes) != 1:
+            for dep in registered_writes:
+                plan = registered_by_copy[dep.name]
+                malformed_sources[plan.source_name] = (
+                    f"registered relayout copy {dep.name} is structurally invalid"
+                )
+            continue
+        destination_name = registered_writes[0].name
+        scheduled_copies.add(destination_name)
+        plan = registered_by_copy[destination_name]
+        source_view = _lx_view(plan.source_name)
+        destination_view = _lx_view(destination_name)
         if (
-            getattr(node.node, "operation_name", None) == "lx_relayout_copy"
-            and len(reads) == 1
-            and len(writes) == 1
+            len(reads) != 1
+            or len(writes) != 1
+            or reads[0].name != plan.source_name
+            or writes[0].name != destination_name
+            or source_view is None
+            or destination_view is None
+            or source_view == destination_view
         ):
-            source_name = reads[0].name
-            destination_name = writes[0].name
-            copy_destinations.setdefault(source_name, set()).add(destination_name)
-            copy_sources[destination_name] = source_name
-            copy_reads.add((node.get_name(), source_name))
+            malformed_sources[plan.source_name] = (
+                f"registered relayout copy {destination_name} is structurally invalid"
+            )
+            continue
+        copy_reads.add((node.get_name(), plan.source_name))
+
+    for copy_name, plan in registered_by_copy.items():
+        if copy_name not in scheduled_copies:
+            malformed_sources[plan.source_name] = (
+                f"registered relayout copy {copy_name} is missing from the schedule"
+            )
+
+    demoted_sources: set[str] = set()
+
+    def demote_group(source_name: str, culprit: str) -> None:
+        if source_name in demoted_sources:
+            return
+        demoted_sources.add(source_name)
+        demoted_names = {
+            source_name,
+            *copy_destinations.get(source_name, set()),
+        }
+        discard_materialized_lx_relayouts(V.graph, source_name)
+        for demoted_name in demoted_names:
+            buf = V.graph.try_get_buffer(demoted_name)
+            layout = getattr(buf, "layout", None)
+            allocation = getattr(layout, "allocation", None)
+            if allocation is not None:
+                allocation.pop("lx", None)
+            if layout is not None and hasattr(layout, "lx_view"):
+                layout.lx_view = None
+                layout.lx_consumer_is_matmul = False
+        logger.info(
+            "demoted %s out of LX: %s",
+            ", ".join(sorted(demoted_names)),
+            culprit,
+        )
+
+    for source_name, malformed_reason in malformed_sources.items():
+        demote_group(source_name, malformed_reason)
 
     for name in lx_names:
         ref = None
-        culprit = None
+        drift_reason: str | None = None
         expected = _lx_view(name)
         for node, dep in users.get(name, []):
             # A copy executes with the destination work division. Its input's
@@ -490,36 +557,21 @@ def demote_incoherent_lx_buffers(
                 continue
             view, _, representable = per_core_view_scheduled(node, dep, name)
             if not representable:
-                culprit = f"{node.get_name()} view unrepresentable"
+                drift_reason = f"{node.get_name()} view unrepresentable"
                 break
             if expected is not None:
                 if view != expected:
-                    culprit = f"{node.get_name()} no longer matches {expected}"
+                    drift_reason = f"{node.get_name()} view {view} != {expected}"
                     break
                 continue
             if ref is None:
                 ref = view
             elif view != ref:
-                culprit = f"{node.get_name()} disagrees: {view} != {ref}"
+                drift_reason = f"{node.get_name()} disagrees: {view} != {ref}"
                 break
-        if culprit is None:
+        if drift_reason is None:
             continue
-        source_name = copy_sources.get(name, name)
-        demoted_names = {source_name, *copy_destinations.get(source_name, set())}
-        for demoted_name in demoted_names:
-            buf = V.graph.try_get_buffer(demoted_name)
-            layout = getattr(buf, "layout", None)
-            allocation = getattr(layout, "allocation", None)
-            if allocation is not None:
-                allocation.pop("lx", None)
-            if layout is not None and hasattr(layout, "lx_view"):
-                layout.lx_view = None
-                layout.lx_is_kernel_operand = False
-        logger.info(
-            "demoted %s out of LX: %s",
-            ", ".join(sorted(demoted_names)),
-            culprit,
-        )
+        demote_group(copy_sources.get(name, name), drift_reason)
 
     return nodes
 

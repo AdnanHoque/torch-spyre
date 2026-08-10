@@ -23,7 +23,6 @@ SDSC codegen selects the LX transport from the two tensor work divisions.
 from __future__ import annotations
 
 import dataclasses
-import logging
 import math
 
 import sympy
@@ -40,11 +39,20 @@ from torch_spyre._inductor.pass_utils import (
     op_read_writes,
     try_device_coordinates,
 )
-from torch_spyre._inductor.scratchpad.utils import _op_num_cores, _op_short_name
+from torch_spyre._inductor.scratchpad.utils import _op_num_cores
 
 LX_RELAYOUT_DESTINATION_PREFIX = "__spyre_lx_relayout_destination__"
-
+_MATERIALIZED_COPIES_ATTR = "_spyre_lx_relayout_copies"
 logger = get_inductor_logger("lx_relayout")
+
+
+def _op_short_name(op: Operation) -> str:
+    for fx_node in (getattr(op, "origin_node", None), *getattr(op, "origins", ())):
+        target = getattr(fx_node, "target", None)
+        for attr in ("_opname", "__name__", "name"):
+            if name := getattr(target, attr, None):
+                return str(name)
+    return "None"
 
 
 def make_lx_relayout_destination_name(source_name: str, consumer_name: str) -> str:
@@ -64,17 +72,42 @@ class LXRelayoutPlan:
     source_view: PerCoreView
     destination_view: PerCoreView
     num_cores: int
-    destination_is_kernel_operand: bool = False
+    consumer_is_matmul: bool = False
+    destination_buffer_name: str | None = None
     source_lx_address: int | None = None
     destination_lx_address: int | None = None
 
     @property
     def destination_name(self) -> str:
-        return make_lx_relayout_destination_name(self.source_name, self.consumer_name)
+        return self.destination_buffer_name or make_lx_relayout_destination_name(
+            self.source_name, self.consumer_name
+        )
 
     @property
     def edge_key(self) -> tuple[str, str]:
         return self.source_name, self.consumer_name
+
+
+def materialized_lx_relayout_copies(
+    graph: GraphLowering,
+) -> dict[tuple[str, str], tuple[str, LXRelayoutPlan]]:
+    """Return the exact private copies materialized for this graph."""
+
+    return getattr(graph, _MATERIALIZED_COPIES_ATTR, {})
+
+
+def discard_materialized_lx_relayouts(
+    graph: GraphLowering, source_name: str
+) -> set[str]:
+    """Forget every materialized relayout destination connected to a source."""
+
+    copies = materialized_lx_relayout_copies(graph)
+    removed = set()
+    for edge, (copy_name, _) in list(copies.items()):
+        if edge[0] == source_name:
+            removed.add(copy_name)
+            del copies[edge]
+    return removed
 
 
 def _intervals_overlap(
@@ -97,53 +130,43 @@ def _is_equal_footprint_geometry(
     if producer_core_map is None or consumer_core_map is None:
         return False
 
-    def slice_count(core_map: dict[str, dict[int, int]]) -> int:
-        return len(
-            {
-                tuple(sorted((dim, int(slot)) for dim, slot in per_core.items()))
-                for per_core in core_map.values()
-            }
-        )
-
     producer_splits = _work_slice_dims(producer)
     consumer_splits = _work_slice_dims(consumer)
-    fanout = {core: 0 for core in producer_core_map}
-    fanin = {core: 0 for core in consumer_core_map}
-    transfer_count = 0
     dims = set(producer_splits) | set(consumer_splits)
-    for producer_core, producer_slice in producer_core_map.items():
-        for consumer_core, consumer_slice in consumer_core_map.items():
-            if all(
-                _intervals_overlap(
-                    int(producer_slice.get(dim, 0)),
-                    int(producer_splits.get(dim, 1)),
-                    int(consumer_slice.get(dim, 0)),
-                    int(consumer_splits.get(dim, 1)),
-                )
-                for dim in dims
-            ):
-                fanout[producer_core] += 1
-                fanin[consumer_core] += 1
-                transfer_count += 1
+    overlaps = {
+        (producer_core, consumer_core)
+        for producer_core, producer_slice in producer_core_map.items()
+        for consumer_core, consumer_slice in consumer_core_map.items()
+        if all(
+            _intervals_overlap(
+                int(producer_slice.get(dim, 0)),
+                int(producer_splits.get(dim, 1)),
+                int(consumer_slice.get(dim, 0)),
+                int(consumer_splits.get(dim, 1)),
+            )
+            for dim in dims
+        )
+    }
+    fanout = [
+        sum(source == core for source, _ in overlaps) for core in range(num_cores)
+    ]
+    fanin = [sum(target == core for _, target in overlaps) for core in range(num_cores)]
 
-    fanout_values = set(fanout.values())
-    fanin_values = set(fanin.values())
-    uniform = len(fanout_values) == 1 and len(fanin_values) == 1
-    covers_all_cores = (
-        min(fanout_values, default=0) > 0 and min(fanin_values, default=0) > 0
-    )
-    producer_is_partitioned = slice_count(producer_core_map) == num_cores and (
-        math.prod(producer_splits.values()) == num_cores
-    )
-    consumer_is_partitioned = slice_count(consumer_core_map) == num_cores and (
-        math.prod(consumer_splits.values()) == num_cores
-    )
-    return (
-        transfer_count > 0
-        and covers_all_cores
-        and uniform
-        and producer_is_partitioned
-        and consumer_is_partitioned
+    def unique_slices(core_map):
+        return len({tuple(sorted(row.items())) for row in core_map.values()})
+
+    return all(
+        (
+            overlaps,
+            min(fanout, default=0) > 0,
+            min(fanin, default=0) > 0,
+            len(set(fanout)) == 1,
+            len(set(fanin)) == 1,
+            unique_slices(producer_core_map) == num_cores,
+            unique_slices(consumer_core_map) == num_cores,
+            math.prod(producer_splits.values()) == num_cores,
+            math.prod(consumer_splits.values()) == num_cores,
+        )
     )
 
 
@@ -169,13 +192,13 @@ def _is_activation_source(operations: dict[str, Operation], op: Operation) -> bo
 def _core_id_to_device_slice(
     view: PerCoreView,
     core_count: int,
-) -> dict[str, dict[int, int]] | None:
+) -> dict[int, dict[int, int]] | None:
     """Return ownership as ``core -> device-dim -> slice-index``."""
 
     core_id = sympy.Symbol("core_id")
     expr_by_dim = {int(dim): expr for dim, expr in view.core_to_slot}
     split_dims = {int(dim): int(split) for dim, split in view.work_slice_dims}
-    result: dict[str, dict[int, int]] = {}
+    result: dict[int, dict[int, int]] = {}
 
     for core in range(core_count):
         per_core: dict[int, int] = {}
@@ -191,7 +214,7 @@ def _core_id_to_device_slice(
             if slot_int < 0 or slot_int >= split:
                 return None
             per_core[dim] = slot_int
-        result[str(core)] = per_core
+        result[core] = per_core
 
     return result
 
@@ -206,53 +229,22 @@ def _has_materializable_iteration_geometry(
     source: PerCoreView,
     destination: PerCoreView,
 ) -> bool:
-    """Check every non-unit allocation dimension before LX is committed.
-
-    The allocator cannot safely reserve S1/S2 from device-dimension indices
-    alone: codegen needs those dimensions to map to iteration symbols. Unit
-    dimensions may be absent; their only legal slot is zero.
-    """
-
-    iteration_symbol_set = set(iteration_symbols)
-    if not any(
-        coordinate.free_symbols & iteration_symbol_set
-        for coordinate in device_coordinates
-    ):
-        return False
-
-    symbol_splits: dict[tuple[str, sympy.Symbol], int] = {}
-    source_splits = _work_slice_dims(source)
-    destination_splits = _work_slice_dims(destination)
-    device_dims = set(source_splits) | set(destination_splits)
-    for device_dim in device_dims:
-        index = int(device_dim)
-        source_split = int(source_splits.get(device_dim, 1))
-        destination_split = int(destination_splits.get(device_dim, 1))
-        requires_symbol = source_split != 1 or destination_split != 1
-        if index < 0 or index >= len(device_coordinates):
-            if requires_symbol:
+    """Require every split device dimension to map to one loop symbol."""
+    symbols = set(iteration_symbols)
+    seen: dict[tuple[int, sympy.Symbol], int] = {}
+    for side, view in enumerate((source, destination)):
+        for device_dim, split in view.work_slice_dims:
+            if split == 1:
+                continue
+            if device_dim < 0 or device_dim >= len(device_coordinates):
                 return False
-            continue
-        symbols = [
-            symbol
-            for symbol in device_coordinates[index].free_symbols
-            if symbol in iteration_symbol_set
-        ]
-        if len(symbols) != 1:
-            if requires_symbol:
+            coordinate_symbols = device_coordinates[device_dim].free_symbols & symbols
+            if len(coordinate_symbols) != 1:
                 return False
-            continue
-        symbol = symbols[0]
-        for side, split in (
-            ("source", source_split),
-            ("destination", destination_split),
-        ):
-            key = (side, symbol)
-            previous = symbol_splits.get(key)
-            if previous is not None and previous != split:
+            key = (side, next(iter(coordinate_symbols)))
+            previous = seen.setdefault(key, int(split))
+            if previous != split:
                 return False
-            symbol_splits[key] = split
-
     return True
 
 
@@ -261,7 +253,64 @@ def clear_lx_relayout_metadata(graph: GraphLowering) -> None:
         layout = getattr(op, "layout", None)
         if layout is not None and hasattr(layout, "lx_view"):
             layout.lx_view = None
-            layout.lx_is_kernel_operand = False
+            layout.lx_consumer_is_matmul = False
+
+
+_DIRECT_EDGE = object()
+
+
+def _plan_consumer_edge(
+    operations: dict[str, Operation],
+    producer: ComputedBuffer,
+    source_name: str,
+    source_view: PerCoreView,
+    num_cores: int,
+    consumer: Operation,
+    dep: MemoryDep,
+    read_index: int,
+    cache: dict | None,
+) -> LXRelayoutPlan | object | None:
+    if not isinstance(consumer, ComputedBuffer) or consumer is producer:
+        return None
+    reads = [d for d in op_read_writes(consumer).reads if isinstance(d, MemoryDep)]
+    if any(d.is_indirect() for d in reads):
+        return None
+
+    view, has_partial, representable = _per_core_view_on_buf(
+        consumer, dep, source_name, cache
+    )
+    consumer_cores = _op_num_cores(consumer)
+    if has_partial or not representable or consumer_cores != num_cores:
+        return None
+    if view == source_view:
+        return _DIRECT_EDGE
+
+    is_matmul = _is_matmul_op(consumer)
+    if not is_matmul and not isinstance(consumer.data, Pointwise):
+        return None
+    if is_matmul and (
+        not _is_activation_source(operations, producer) or read_index not in (0, 1)
+    ):
+        return None
+    if not _is_equal_footprint_geometry(source_view, view, num_cores):
+        return None
+
+    coordinates = try_device_coordinates(producer.layout.device_layout, dep, None)
+    if coordinates is None or not _has_materializable_iteration_geometry(
+        coordinates,
+        tuple(iteration_space_from_op(consumer)),
+        source_view,
+        view,
+    ):
+        return None
+    return LXRelayoutPlan(
+        source_name,
+        consumer.get_name(),
+        source_view,
+        view,
+        num_cores,
+        is_matmul,
+    )
 
 
 def collect_lx_relayout_plans(
@@ -279,15 +328,36 @@ def collect_lx_relayout_plans(
     if not config.lx_planner_relayout:
         return []
 
+    materialized = materialized_lx_relayout_copies(graph)
+    if materialized:
+        restored = []
+        for (source_name, _), (copy_name, original) in materialized.items():
+            source = graph.try_get_buffer(source_name)
+            copy = graph.try_get_buffer(copy_name)
+            source_layout = getattr(source, "layout", None)
+            copy_layout = getattr(copy, "layout", None)
+            if source_layout is None or copy_layout is None:
+                return []
+            source_layout.lx_view = original.source_view
+            copy_layout.lx_view = original.destination_view
+            copy_layout.lx_consumer_is_matmul = original.consumer_is_matmul
+            restored.append(
+                dataclasses.replace(
+                    original,
+                    consumer_name=copy_name,
+                    destination_buffer_name=copy_name,
+                    source_lx_address=None,
+                    destination_lx_address=None,
+                )
+            )
+        return restored
+
     operations = {op.get_name(): op for op in graph.operations}
     reads_by_source: dict[str, list[tuple[Operation, MemoryDep, int]]] = {}
-    indirect_consumers: set[str] = set()
     for consumer in graph.operations:
         memory_reads = [
             dep for dep in op_read_writes(consumer).reads if isinstance(dep, MemoryDep)
         ]
-        if any(dep.is_indirect() for dep in memory_reads):
-            indirect_consumers.add(consumer.get_name())
         for read_index, dep in enumerate(memory_reads):
             reads_by_source.setdefault(dep.name, []).append((consumer, dep, read_index))
     plans: list[LXRelayoutPlan] = []
@@ -309,119 +379,28 @@ def collect_lx_relayout_plans(
         if _core_id_to_device_slice(producer_view, producer_core_count) is None:
             continue
 
-        source_plans: dict[tuple[str, str], LXRelayoutPlan] = {}
-        direct_consumers: set[str] = set()
-        source_is_covered = True
+        source_plans: list[LXRelayoutPlan] = []
+        consumers: set[str] = set()
         for consumer, dep, read_index in read_edges:
-            if not isinstance(consumer, ComputedBuffer) or producer is consumer:
-                source_is_covered = False
-                break
-            # Indirect indices are separate TensorArgs in codegen and cannot be
-            # rebound to a relayout destination without also rewriting the
-            # gather/scatter index contract.  Keep the whole consumer on its
-            # normal fallback path instead of stamping a plan that codegen
-            # cannot faithfully materialize.
-            if consumer.get_name() in indirect_consumers:
-                source_is_covered = False
-                break
-            consumer_view, consumer_has_partial, consumer_representable = (
-                _per_core_view_on_buf(consumer, dep, source_name, cache)
-            )
-            if consumer_has_partial or not consumer_representable:
-                source_is_covered = False
-                break
-            consumer_core_count = _op_num_cores(consumer)
-            if (
-                producer_view == consumer_view
-                and producer_core_count == consumer_core_count
-            ):
-                consumer_name = consumer.get_name()
-                if (source_name, consumer_name) in source_plans:
-                    source_is_covered = False
-                    break
-                direct_consumers.add(consumer_name)
-                continue
-
-            is_matmul_consumer = _is_matmul_op(consumer)
-            if not is_matmul_consumer and not isinstance(consumer.data, Pointwise):
-                source_is_covered = False
-                break
-            if is_matmul_consumer and (
-                not _is_activation_source(operations, producer)
-                or read_index not in (0, 1)
-            ):
-                source_is_covered = False
-                break
-
-            if (
-                consumer_core_count != producer_core_count
-                or _core_id_to_device_slice(consumer_view, consumer_core_count) is None
-            ):
-                source_is_covered = False
-                break
-
-            if not _is_equal_footprint_geometry(
+            consumer_name = consumer.get_name()
+            result = _plan_consumer_edge(
+                operations,
+                producer,
+                source_name,
                 producer_view,
-                consumer_view,
                 producer_core_count,
-            ):
-                source_is_covered = False
-                break
-
-            device_coordinates = try_device_coordinates(
-                producer.layout.device_layout,
+                consumer,
                 dep,
-                None,
+                read_index,
+                cache,
             )
-            if device_coordinates is None:
-                source_is_covered = False
+            if result is None or consumer_name in consumers:
                 break
-            if not _has_materializable_iteration_geometry(
-                device_coordinates,
-                tuple(iteration_space_from_op(consumer)),
-                producer_view,
-                consumer_view,
-            ):
-                source_is_covered = False
-                break
-
-            plan = LXRelayoutPlan(
-                source_name=source_name,
-                consumer_name=consumer.get_name(),
-                source_view=producer_view,
-                destination_view=consumer_view,
-                num_cores=producer_core_count,
-                destination_is_kernel_operand=is_matmul_consumer,
-            )
-            if plan.consumer_name in direct_consumers:
-                source_is_covered = False
-                break
-            previous = source_plans.get(plan.edge_key)
-            if previous is not None and previous != plan:
-                source_is_covered = False
-                break
-            source_plans[plan.edge_key] = plan
-
-        if source_is_covered:
-            plans.extend(source_plans.values())
-
-    if logger.isEnabledFor(logging.DEBUG):
-        if plans:
-            logger.debug(
-                "final LX relayout plan:\n%s",
-                "\n".join(
-                    "  %s -> %s: source_splits=%s destination_splits=%s"
-                    % (
-                        plan.source_name,
-                        plan.consumer_name,
-                        plan.source_view.work_slice_dims,
-                        plan.destination_view.work_slice_dims,
-                    )
-                    for plan in plans
-                ),
-            )
+            consumers.add(consumer_name)
+            if isinstance(result, LXRelayoutPlan):
+                source_plans.append(result)
         else:
-            logger.debug("final LX relayout plan: (none)")
+            plans.extend(source_plans)
 
     return plans
 
@@ -442,67 +421,50 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
         return
 
     editor = GraphEditor(graph)
+    copies = materialized_lx_relayout_copies(graph)
+    setattr(graph, _MATERIALIZED_COPIES_ATTR, copies)
     for plan in plans:
         source = graph.try_get_buffer(plan.source_name)
-        consumer = graph.try_get_buffer(plan.consumer_name)
         assert isinstance(source, ComputedBuffer)
-        assert isinstance(consumer, ComputedBuffer)
         assert plan.source_lx_address is not None
         assert plan.destination_lx_address is not None
 
-        # GraphLowering's pre-scheduling pipeline can be entered more than once
-        # by nested Inductor compilation. Re-plan the already-materialized copy
-        # in place instead of growing another clone in front of it.
-        if getattr(consumer, "operation_name", None) == "lx_relayout_copy":
-            reads = [
-                dep
-                for dep in op_read_writes(consumer).reads
-                if isinstance(dep, MemoryDep)
-            ]
-            assert any(dep.name == plan.source_name for dep in reads)
-            destination_layout = consumer.get_layout()
+        copy_name = plan.destination_buffer_name
+        if copy_name is not None:
+            copy = graph.try_get_buffer(copy_name)
+            assert isinstance(copy, ComputedBuffer)
+            destination_layout = copy.get_layout()
             assert isinstance(destination_layout, FixedTiledLayout)
-            destination_layout.allocation["lx"] = plan.destination_lx_address
-            source_layout = source.get_layout()
-            assert isinstance(source_layout, FixedTiledLayout)
-            source_layout.lx_view = plan.source_view
-            destination_layout.lx_view = plan.destination_view
-            destination_layout.lx_is_kernel_operand = plan.destination_is_kernel_operand
-            logger.debug(
-                "updated LX relayout %s -> %s at %#x -> %#x",
-                plan.source_name,
-                consumer.get_name(),
-                plan.source_lx_address,
-                plan.destination_lx_address,
+        else:
+            consumer = graph.try_get_buffer(plan.consumer_name)
+            assert isinstance(consumer, ComputedBuffer)
+            template = source.get_layout()
+            assert isinstance(template, FixedTiledLayout)
+            destination_layout = FixedTiledLayout(
+                template.device,
+                template.dtype,
+                list(template.size),
+                list(template.stride),
+                template.device_layout,
             )
-            continue
+            copy = editor.insert_clone_before_consumer(
+                source, consumer, destination_layout
+            )
+            copies[plan.edge_key] = (copy.get_name(), plan)
 
         source_layout = source.get_layout()
         assert isinstance(source_layout, FixedTiledLayout)
-        destination_layout = FixedTiledLayout(
-            source_layout.device,
-            source_layout.dtype,
-            source_layout.size,
-            source_layout.stride,
-            source_layout.device_layout,
-        )
         destination_layout.allocation["lx"] = plan.destination_lx_address
         source_layout.lx_view = plan.source_view
         destination_layout.lx_view = plan.destination_view
-        destination_layout.lx_is_kernel_operand = plan.destination_is_kernel_operand
-
-        copy = editor.insert_clone_before_consumer(
-            source,
-            consumer,
-            destination_layout,
-        )
-        copy.operation_name = "lx_relayout_copy"
-
+        destination_layout.lx_consumer_is_matmul = plan.consumer_is_matmul
         logger.debug(
-            "materialized LX relayout %s -> %s -> %s at %#x -> %#x",
+            "accepted LX relayout %s -> %s: source_view=%s source_lx=%d "
+            "destination_view=%s destination_lx=%d",
             plan.source_name,
             copy.get_name(),
-            plan.consumer_name,
+            plan.source_view,
             plan.source_lx_address,
+            plan.destination_view,
             plan.destination_lx_address,
         )

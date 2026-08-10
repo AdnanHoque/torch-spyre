@@ -13,23 +13,22 @@
 # limitations under the License.
 
 from dataclasses import replace
+import re
 from types import SimpleNamespace
 
 import pytest
+import torch
 from sympy import Integer, Mod, Symbol, floor
-from torch._inductor.dependencies import MemoryDep
+from torch._inductor.utils import run_and_get_code
 
-import torch_spyre._inductor.lx_relayout as lx_relayout_module
-import torch_spyre._inductor.scratchpad.allocator as allocator_module
 import torch_spyre._inductor.scheduler as scheduler_module
+import torch_spyre._inductor.wsr.propagate_named_dims as named_dims
 
 from torch_spyre._C import DataFormats
-from torch_spyre._inductor.codegen.superdsc import compile_op_spec
+from torch_spyre._inductor import config, spyre_hint
+from torch_spyre._inductor.codegen.superdsc import compile_op_spec, parse_op_spec
 from torch_spyre._inductor.constants import IDENTITY_OP
-from torch_spyre._inductor.lx_relayout import (
-    LXRelayoutPlan,
-    _is_equal_footprint_geometry,
-)
+from torch_spyre._inductor.lx_relayout import LXRelayoutPlan
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.pass_utils import PerCoreView
 from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
@@ -41,50 +40,49 @@ from torch_spyre._inductor.spyre_kernel import (
 )
 
 
-class _DummyOp:
-    def __init__(self, name):
-        self.name = name
-
-    def get_name(self):
-        return self.name
-
-
-class _DummyGraph:
-    def __init__(self, *names):
-        self.operations = [_DummyOp(name) for name in names]
-        self.name_to_buffer = {op.name: op for op in self.operations}
-
-    def try_get_buffer(self, name):
-        return self.name_to_buffer.get(name)
+_CORE_ID = Symbol("core_id")
+_SOURCE_VIEW = PerCoreView(
+    ((0, 4), (1, 8)),
+    ((0, floor(_CORE_ID / 8)), (1, Mod(_CORE_ID, 8))),
+)
+_DESTINATION_VIEW = PerCoreView(((0, 32),), ((0, _CORE_ID),))
 
 
-def _dense_plan(
-    source_name: str = "buf_mlp",
-    consumer_name: str = "pointwise",
-    *,
-    kernel_operand: bool = False,
-) -> LXRelayoutPlan:
-    core_id = Symbol("core_id")
+def _dense_plan(source="buf_mlp", consumer="pointwise") -> LXRelayoutPlan:
     return LXRelayoutPlan(
-        source_name=source_name,
-        consumer_name=consumer_name,
-        source_view=PerCoreView(
-            ((0, 4), (1, 8)),
-            ((0, floor(core_id / 8)), (1, Mod(core_id, 8))),
-        ),
-        destination_view=PerCoreView(
-            ((0, 32),),
-            ((0, core_id),),
-        ),
+        source,
+        consumer,
+        _SOURCE_VIEW,
+        _DESTINATION_VIEW,
         num_cores=32,
-        destination_is_kernel_operand=kernel_operand,
         source_lx_address=0x24000,
         destination_lx_address=0x44000,
     )
 
 
-def _compile_spec(op_spec):
-    simplify_op_spec(op_spec)
+class _Dep:
+    def __init__(self, name):
+        self.name = name
+
+
+class _Node:
+    def __init__(self, name, reads=(), writes=(), allocation=None, lx_view=None):
+        self.name = name
+        self.node = SimpleNamespace(
+            layout=SimpleNamespace(allocation=allocation or {}, lx_view=lx_view)
+        )
+        self.read_writes = SimpleNamespace(reads=set(reads), writes=set(writes))
+
+    def get_nodes(self):
+        return [self]
+
+    def get_name(self):
+        return self.name
+
+
+def _compile_spec(op_spec, *, normalize=True):
+    if normalize:
+        simplify_op_spec(op_spec)
     sdsc, *_ = compile_op_spec(0, op_spec, [])
     root = next(iter(sdsc.values()))
     dsc = next(iter(root["dscs_"][0].values()))
@@ -116,88 +114,10 @@ def _copy_spec(plan, source_arg, iteration_space):
                 name=plan.destination_name,
                 allocation={"lx": plan.destination_lx_address},
                 work_division=destination_work_division,
-                is_kernel_operand=plan.destination_is_kernel_operand,
+                lx_consumer_is_matmul=plan.consumer_is_matmul,
             ),
         ],
         op_info={},
-    )
-
-
-def test_relayout_emits_owner_maps():
-    plan = _dense_plan(kernel_operand=True)
-    assert _is_equal_footprint_geometry(
-        plan.source_view,
-        plan.destination_view,
-        plan.num_cores,
-    )
-    assert not _is_equal_footprint_geometry(
-        PerCoreView(((0, 2),), ((0, Symbol("core_id")),)),
-        PerCoreView((), ()),
-        2,
-    )
-
-    m, n = Symbol("m"), Symbol("n")
-    source_arg = TensorArg(
-        is_input=True,
-        arg_index=-1,
-        device_dtype=DataFormats.SEN169_FP16,
-        device_size=[512, 200, 64],
-        device_coordinates=[m, floor(n / 64), Mod(n, 64)],
-        allocation={"lx": plan.source_lx_address},
-        name=plan.source_name,
-    )
-    copy_spec = _copy_spec(
-        plan,
-        source_arg,
-        {m: (Integer(512), 32), n: (Integer(12800), 1)},
-    )
-
-    root, allocations = _compile_spec(copy_spec)
-    assert set(root["dscs_"][0]) == {"shuffle"}
-    assert root["numCoresUsed_"] == 32
-    assert copy_spec.args[1].allocation == {"lx": plan.destination_lx_address}
-    producer_map = allocations[0]["coordinates_"]["coreIdToWkSlice_"]
-    consumer_map = allocations[1]["coordinates_"]["coreIdToWkSlice_"]
-    assert (producer_map["0"], producer_map["31"]) == (
-        {"mb": 0, "out": 0},
-        {"mb": 3, "out": 7},
-    )
-    assert (consumer_map["0"], consumer_map["31"]) == (
-        {"mb": 0, "out": 0},
-        {"mb": 31, "out": 0},
-    )
-
-
-def test_default_work_division_keeps_implicit_core_map():
-    m, n = Symbol("m"), Symbol("n")
-
-    def tensor(is_input, name, address):
-        return TensorArg(
-            is_input=is_input,
-            arg_index=-1,
-            device_dtype=DataFormats.SEN169_FP16,
-            device_size=[512, 2, 64],
-            device_coordinates=[m, floor(n / 64), Mod(n, 64)],
-            allocation={"lx": address},
-            name=name,
-        )
-
-    spec = OpSpec(
-        op="add",
-        is_reduction=False,
-        iteration_space={m: (Integer(512), 32), n: (Integer(128), 1)},
-        args=[
-            tensor(True, "lhs", 0x24000),
-            tensor(True, "rhs", 0x44000),
-            tensor(False, "output", 0x64000),
-        ],
-        op_info={},
-    )
-
-    _, allocations = _compile_spec(spec)
-    assert all(
-        allocation["coordinates_"]["coreIdToWkSlice_"] == {}
-        for allocation in allocations
     )
 
 
@@ -218,6 +138,7 @@ def test_relayout_owner_maps_follow_aligned_device_dimensions():
             ((1, 7 - core_id),),
         ),
         num_cores=8,
+        consumer_is_matmul=True,
         source_lx_address=0x24000,
         destination_lx_address=0x44000,
     )
@@ -238,6 +159,7 @@ def test_relayout_owner_maps_follow_aligned_device_dimensions():
 
     root, allocations = _compile_spec(copy_spec)
 
+    assert set(root["dscs_"][0]) == {"shuffle"}
     assert list(copy_spec.iteration_space) == [n, Symbol("z0"), m]
     assert copy_spec.args[0].work_division.work_slices == {Symbol("z0"): 8}
     assert copy_spec.args[1].work_division.work_slices == {Symbol("z0"): 8}
@@ -253,158 +175,61 @@ def test_relayout_owner_maps_follow_aligned_device_dimensions():
         {"mb": 0, "x": 0, "out": 0},
     )
 
-
-def test_planner_handles_different_consumer_views_and_requires_every_read(
-    monkeypatch,
-):
-    class _Pointwise:
-        pass
-
-    class _ComputedBuffer:
-        def __init__(self, name):
-            self.name = name
-            self.data = _Pointwise()
-            self.layout = SimpleNamespace(device_layout=object())
-
-        def get_name(self):
-            return self.name
-
-    x, y, core_id = Symbol("x"), Symbol("y"), Symbol("core_id")
-    producer = _ComputedBuffer("shared")
-    consumer_a = _ComputedBuffer("consumer_a")
-    consumer_b = _ComputedBuffer("consumer_b")
-    write = MemoryDep("shared", 64 * x + y, (x, y), (2, 64))
-    read_a = MemoryDep("shared", 64 * x + y, (x, y), (2, 64))
-    read_b = MemoryDep("shared", 64 * x + y, (x, y), (2, 64))
-    read_writes = {
-        "shared": SimpleNamespace(reads=[], writes=[write]),
-        "consumer_a": SimpleNamespace(reads=[read_a], writes=[]),
-        "consumer_b": SimpleNamespace(reads=[read_b], writes=[]),
-    }
-    producer_view = PerCoreView(((1, 2),), ((1, core_id),))
-    consumer_a_view = PerCoreView(((1, 2),), ((1, 1 - core_id),))
-    consumer_b_view = PerCoreView(((0, 2),), ((0, core_id),))
-    views = {
-        producer: producer_view,
-        consumer_a: consumer_a_view,
-        consumer_b: consumer_b_view,
-    }
-
-    monkeypatch.setattr(lx_relayout_module.config, "lx_planner_relayout", True)
-    monkeypatch.setattr(lx_relayout_module, "ComputedBuffer", _ComputedBuffer)
-    monkeypatch.setattr(lx_relayout_module, "Pointwise", _Pointwise)
-    monkeypatch.setattr(
-        lx_relayout_module, "op_read_writes", lambda op: read_writes[op.get_name()]
+    ordinary_spec = OpSpec(
+        op=IDENTITY_OP,
+        is_reduction=False,
+        iteration_space=dict(copy_spec.iteration_space),
+        args=[
+            replace(copy_spec.args[0], work_division=None),
+            replace(copy_spec.args[1], work_division=None),
+        ],
+        op_info={},
     )
-    monkeypatch.setattr(lx_relayout_module, "_is_matmul_op", lambda _: False)
-    monkeypatch.setattr(lx_relayout_module, "_op_num_cores", lambda _: 2)
-    monkeypatch.setattr(
-        lx_relayout_module,
-        "_per_core_view_on_buf",
-        lambda op, *_: (
-            views[op],
-            False,
-            True,
-        ),
+    ordinary_root, ordinary_allocations = _compile_spec(ordinary_spec, normalize=False)
+    ordinary_sdsc, _ = parse_op_spec(ordinary_spec)
+    assert all(arg.work_division is not None for arg in ordinary_sdsc.args)
+    assert set(ordinary_root["dscs_"][0]) == {IDENTITY_OP}
+    assert all(
+        allocation["coordinates_"]["coreIdToWkSlice_"] == {}
+        for allocation in ordinary_allocations
     )
-    monkeypatch.setattr(
-        lx_relayout_module,
-        "iteration_space_from_op",
-        lambda _: {x: Integer(2), y: Integer(64)},
-    )
-    valid_coordinates = [x, Mod(y, 64)]
-    monkeypatch.setattr(
-        lx_relayout_module, "try_device_coordinates", lambda *_: valid_coordinates
-    )
-
-    graph = SimpleNamespace(operations=[producer, consumer_a, consumer_b])
-    plans = {
-        plan.edge_key: plan
-        for plan in lx_relayout_module.collect_lx_relayout_plans(graph)
-    }
-    assert plans.keys() == {
-        ("shared", "consumer_a"),
-        ("shared", "consumer_b"),
-    }
-    assert (
-        plans[("shared", "consumer_a")].destination_view
-        != plans[("shared", "consumer_b")].destination_view
-    )
-    assert plans[("shared", "consumer_a")].destination_view == consumer_a_view
-    assert plans[("shared", "consumer_b")].destination_view == consumer_b_view
-
-    monkeypatch.setattr(
-        lx_relayout_module,
-        "try_device_coordinates",
-        lambda _layout, dep, _sizes: None if dep is read_b else valid_coordinates,
-    )
-    assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
 
 
 @pytest.mark.parametrize("mismatched_destination", [False, True])
 def test_scheduler_demotes_mismatched_relayout_side(
     monkeypatch, mismatched_destination
 ):
-    class _Dep:
-        def __init__(self, name):
-            self.name = name
-
-    class _Op:
-        def __init__(self, name, allocation=None, lx_view=None, operation_name=None):
-            self.name = name
-            self.layout = SimpleNamespace(allocation=allocation or {}, lx_view=lx_view)
-            self.operation_name = operation_name
-
-        def get_name(self):
-            return self.name
-
-    class _SchedulerNode:
-        def __init__(self, op, reads=(), writes=()):
-            self.node = op
-            self.read_writes = SimpleNamespace(reads=set(reads), writes=set(writes))
-
-        def get_nodes(self):
-            return [self]
-
-        def get_name(self):
-            return self.node.get_name()
-
     plan = _dense_plan()
     destination_name = "relayout_destination"
-    producer = _Op(
-        plan.source_name,
-        {"lx": plan.source_lx_address},
-        plan.source_view,
-    )
-    copy = _Op(
-        destination_name,
-        {"lx": plan.destination_lx_address},
-        plan.destination_view,
-        "lx_relayout_copy",
-    )
-    consumer = _Op(plan.consumer_name)
     source_dep = _Dep(plan.source_name)
     destination_dep = _Dep(destination_name)
-    nodes = [
-        _SchedulerNode(producer, writes=(source_dep,)),
-        _SchedulerNode(copy, reads=(source_dep,), writes=(destination_dep,)),
-        _SchedulerNode(consumer, reads=(destination_dep,)),
-    ]
-
-    monkeypatch.setattr(scheduler_module, "SchedulerNode", _SchedulerNode)
-    monkeypatch.setattr(scheduler_module, "MemoryDep", _Dep)
-    monkeypatch.setattr(
-        scheduler_module,
-        "V",
-        SimpleNamespace(
-            graph=SimpleNamespace(
-                try_get_buffer=lambda name: {
-                    plan.source_name: producer,
-                    destination_name: copy,
-                }.get(name)
-            )
-        ),
+    producer = _Node(
+        plan.source_name,
+        writes=(source_dep,),
+        allocation={"lx": plan.source_lx_address},
+        lx_view=plan.source_view,
     )
+    copy = _Node(
+        destination_name,
+        reads=(source_dep,),
+        writes=(destination_dep,),
+        allocation={"lx": plan.destination_lx_address},
+        lx_view=plan.destination_view,
+    )
+    nodes = [producer, copy, _Node(plan.consumer_name, reads=(destination_dep,))]
+
+    monkeypatch.setattr(scheduler_module, "SchedulerNode", _Node)
+    monkeypatch.setattr(scheduler_module, "MemoryDep", _Dep)
+    graph = SimpleNamespace(
+        try_get_buffer=lambda name: {
+            plan.source_name: producer.node,
+            destination_name: copy.node,
+        }.get(name),
+        _spyre_lx_relayout_copies={
+            plan.edge_key: (destination_name, plan),
+        },
+    )
+    monkeypatch.setattr(scheduler_module, "V", SimpleNamespace(graph=graph))
     monkeypatch.setattr(scheduler_module._spyre_config, "lx_planning", True)
 
     def scheduled_view(node, _dep, name):
@@ -419,46 +244,54 @@ def test_scheduler_demotes_mismatched_relayout_side(
     monkeypatch.setattr(scheduler_module, "per_core_view_scheduled", scheduled_view)
 
     scheduler_module.demote_incoherent_lx_buffers(nodes)
-    assert "lx" not in producer.layout.allocation
-    assert "lx" not in copy.layout.allocation
-    assert producer.layout.lx_view is None
-    assert copy.layout.lx_view is None
+    for node in (producer, copy):
+        assert "lx" not in node.node.layout.allocation
+        assert node.node.layout.lx_view is None
+    assert graph._spyre_lx_relayout_copies == {}
 
 
-def test_relayout_lifetimes_cover_inputs_and_multiple_consumers(monkeypatch):
-    graph = _DummyGraph(
-        "producer_input", "buf_k", "consumer_a", "independent", "consumer_b"
+def test_scheduler_does_not_treat_an_unregistered_unary_as_a_relayout(monkeypatch):
+    source_dep = _Dep("ordinary_source")
+    destination_dep = _Dep("ordinary_unary")
+    producer = _Node(
+        "ordinary_source",
+        writes=(source_dep,),
+        allocation={"lx": 0},
+        lx_view=_SOURCE_VIEW,
     )
-    plan_a = _dense_plan("buf_k", "consumer_a")
-    plan_b = _dense_plan("buf_k", "consumer_b")
-    producer_input = LifetimeBoundBuffer("producer_input", size=128, uses=[0, 1])
-    source = LifetimeBoundBuffer("buf_k", size=128, uses=[1, 2, 4])
-    input_child = LifetimeBoundBuffer(
-        "input_child", size=128, uses=[1, 2], in_place_parents=["producer_input"]
+    unary = _Node(
+        "ordinary_unary",
+        reads=(source_dep,),
+        writes=(destination_dep,),
+        allocation={"lx": 256},
+        lx_view=_DESTINATION_VIEW,
     )
-    source_child = LifetimeBoundBuffer(
-        "source_child", size=128, uses=[2, 3], in_place_parents=["buf_k"]
-    )
-    buffers = [producer_input, source, input_child, source_child]
-    allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
-    allocator._lx_relayout_plans_by_edge = {
-        plan_a.edge_key: plan_a,
-        plan_b.edge_key: plan_b,
+    consumer = _Node("ordinary_consumer", reads=(destination_dep,))
+    nodes = [producer, unary, consumer]
+    buffers = {
+        producer.name: producer.node,
+        unary.name: unary.node,
     }
-    monkeypatch.setattr(
-        allocator_module,
-        "op_read_writes",
-        lambda _: SimpleNamespace(reads=[SimpleNamespace(name="producer_input")]),
+    graph = SimpleNamespace(
+        try_get_buffer=buffers.get,
+        _spyre_lx_relayout_copies={},
     )
 
-    allocator._append_lx_relayout_destinations(graph, buffers)
-    by_name = {buffer.name: buffer for buffer in buffers}
-    assert source.uses == [1, 2, 5]
-    assert by_name[plan_a.destination_name].uses == [2, 3]
-    assert by_name[plan_b.destination_name].uses == [5, 6]
-    assert producer_input.uses == [0, 1, 2, 5]
-    assert input_child.in_place_parents == []
-    assert source_child.in_place_parents == []
+    monkeypatch.setattr(scheduler_module, "SchedulerNode", _Node)
+    monkeypatch.setattr(scheduler_module, "MemoryDep", _Dep)
+    monkeypatch.setattr(scheduler_module, "V", SimpleNamespace(graph=graph))
+    monkeypatch.setattr(scheduler_module._spyre_config, "lx_planning", True)
+
+    def scheduled_view(node, _dep, name):
+        if node is unary and name == producer.name:
+            return _DESTINATION_VIEW, False, True
+        return buffers[name].layout.lx_view, False, True
+
+    monkeypatch.setattr(scheduler_module, "per_core_view_scheduled", scheduled_view)
+
+    scheduler_module.demote_incoherent_lx_buffers(nodes)
+    assert "lx" not in producer.node.layout.allocation
+    assert "lx" in unary.node.layout.allocation
 
 
 def test_partial_allocation_fallback_is_atomic_per_source():
@@ -517,3 +350,113 @@ def test_partial_allocation_fallback_is_atomic_per_source():
     )
     assert by_name["dependent"].in_place_parents == []
     assert allocator._lx_relayout_plans_by_edge == {complete.edge_key: complete}
+
+    allocator = ScratchpadAllocator(GreedyLayoutSolver(1536 * 1024))
+    allocator._lx_relayout_plans_by_edge = {
+        plan.edge_key: plan for plan in (incomplete_a, incomplete_b)
+    }
+    graph_buffers = {
+        "incomplete": SimpleNamespace(
+            layout=SimpleNamespace(
+                allocation={"lx": 512},
+                lx_view=_SOURCE_VIEW,
+                lx_consumer_is_matmul=False,
+            )
+        ),
+        **{
+            plan.destination_name: SimpleNamespace(
+                layout=SimpleNamespace(
+                    allocation={"lx": 768},
+                    lx_view=_DESTINATION_VIEW,
+                    lx_consumer_is_matmul=False,
+                )
+            )
+            for plan in (incomplete_a, incomplete_b)
+        },
+    }
+    graph = SimpleNamespace(
+        try_get_buffer=graph_buffers.get,
+        _spyre_lx_relayout_copies={
+            plan.edge_key: (plan.destination_name, plan)
+            for plan in (incomplete_a, incomplete_b)
+        },
+    )
+    fallback = allocator._plan_layout_with_atomic_relayouts(
+        _PartialLayout(),
+        [
+            by_name[name]
+            for name in (
+                "incomplete",
+                *[p.destination_name for p in (incomplete_a, incomplete_b)],
+            )
+        ],
+        graph=graph,
+        stock_buffers=lambda: [
+            LifetimeBoundBuffer("incomplete", size=128, uses=[2, 3, 5])
+        ],
+    )
+    assert [(buffer.name, buffer.address) for buffer in fallback] == [("incomplete", 0)]
+    assert graph._spyre_lx_relayout_copies == {}
+    assert all(
+        "lx" not in buffer.layout.allocation for buffer in graph_buffers.values()
+    )
+    assert all(buffer.layout.lx_view is None for buffer in graph_buffers.values())
+
+
+def test_multiple_consumer_views_get_private_numeric_copies():
+    torch.manual_seed(0)
+    x = torch.randn(128, 256, dtype=torch.float16)
+
+    named_dims.declare_tensor_dim("M", 128)
+    named_dims.declare_tensor_dim("N", 256)
+
+    def fn(x):
+        with spyre_hint(work_div={"M": 4, "N": 2}):
+            hidden = torch.neg(x)
+        with spyre_hint(work_div={"M": 2, "N": 4}):
+            consumer_a = torch.relu(hidden)
+        with spyre_hint(work_div={"M": 8, "N": 1}):
+            consumer_b = torch.abs(hidden)
+        return consumer_a, consumer_b
+
+    device_x = named_dims.name_tensor_dims(x.to("spyre"), ["M", "N"])
+    with config.patch(
+        {
+            "sencores": 8,
+            "lx_planning": True,
+            "allow_all_ops_in_lx_planning": True,
+        }
+    ):
+        actual, source_codes = run_and_get_code(
+            torch.compile(
+                fn,
+                dynamic=False,
+                options={"epilogue_fusion": False},
+            ),
+            device_x,
+        )
+
+    for result, expected in zip(actual, fn(x)):
+        torch.testing.assert_close(result.cpu(), expected, atol=0.1, rtol=0.1)
+    generated = "\n".join(source_codes)
+    assert generated.count("op='identity'") == 2
+    assert generated.count("work_division=TensorWorkDivision") == 4
+    owner_maps = re.findall(
+        r"TensorWorkDivision\(work_slices=\{([^}]*)\}, "
+        r"core_id_to_work_slice=\{([^}]*)\}\)",
+        generated,
+    )
+    assert len(owner_maps) == 4
+    assert owner_maps[0] == owner_maps[2]
+    assert {owner_maps[1], owner_maps[3]} == {
+        (
+            "sympify('c1'): 4, sympify('c0'): 2",
+            "sympify('c1'): sympify('Mod(floor(Mod(floor(core_id/2), 4)), 4)'), "
+            "sympify('c0'): sympify('Mod(floor(Mod(core_id, 2)), 2)')",
+        ),
+        (
+            "sympify('c0'): 8",
+            "sympify('c0'): sympify('Mod(floor(Mod(core_id, 8)), 8)')",
+        ),
+    }
+    assert "op='shuffle'" not in generated

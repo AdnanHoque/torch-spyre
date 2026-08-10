@@ -24,6 +24,7 @@ from sympy import Symbol, Expr, Function
 from torch_spyre._C import DataFormats, ElementArrangement
 import torch
 from torch_spyre import _C
+from torch_spyre._inductor.constants import IDENTITY_OP
 
 
 class IndirectAccess(Function):
@@ -137,9 +138,9 @@ class DebugHandle:
         }
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class TensorWorkDivision:
-    """An operation's existing work-division contract for one tensor."""
+    """Physical core ownership for one tensor."""
 
     work_slices: dict[Symbol, int]
     core_id_to_work_slice: dict[Symbol, Expr]
@@ -179,7 +180,7 @@ class TensorArg:
         work_division: Optional per-tensor work division. Normal tensors inherit
             the operation work division; LX copies may override it independently
             for their input and output.
-        is_kernel_operand: Whether this copy prepares a matmul kernel operand.
+        lx_consumer_is_matmul: Whether this LX copy feeds a matmul consumer.
     """
 
     is_input: bool
@@ -194,7 +195,22 @@ class TensorArg:
         default_factory=lambda: ElementArrangement.STANDARD
     )
     work_division: TensorWorkDivision | None = None
-    is_kernel_operand: bool = False
+    lx_consumer_is_matmul: bool = False
+
+
+def is_lx_relayout_identity(op: str, args: Sequence[TensorArg]) -> bool:
+    """Return true when an LX identity's input and output owners differ."""
+
+    if op != IDENTITY_OP or len(args) != 2:
+        return False
+    source, destination = args
+    return (
+        "lx" in source.allocation
+        and "lx" in destination.allocation
+        and source.work_division is not None
+        and destination.work_division is not None
+        and source.work_division != destination.work_division
+    )
 
 
 @dataclasses.dataclass

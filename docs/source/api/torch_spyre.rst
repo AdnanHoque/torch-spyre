@@ -612,9 +612,6 @@ Environment Variables
    * - ``LX_PLANNING``
      - Enable LX scratchpad planning (default ``1``; set ``0`` to skip the
        ``scratchpad_planning`` pass)
-   * - ``SPYRE_LX_PLANNER_RELAYOUT``
-     - Enable producer/consumer LX relayout copies (default ``1``; set ``0``
-       to disable; requires ``LX_PLANNING=1``)
    * - ``CO_OPTIMIZING_LX_PLANNING``
      - Use the co-optimizing LX allocator strategy (default ``0``)
    * - ``HBM_POOL_PLANNING``

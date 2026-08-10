@@ -1067,11 +1067,8 @@ def generate_sdsc(
         stick_dim_order = layout["stick_dim_order"]
         is_input = tensor_idx < sdsc_spec.num_inputs
         result = {}
-        work_slices = (
-            tensor.work_division.work_slices
-            if tensor.work_division is not None
-            else sdsc_spec.work_slices
-        )
+        assert tensor.work_division is not None
+        work_slices = tensor.work_division.work_slices
         for dim in dim_order:
             dim_str = str(dim)
             scale = tensor.scales[dim]
@@ -1098,8 +1095,12 @@ def generate_sdsc(
             )
         return result
 
-    def _core_map_override(tensor) -> dict[str, dict[str, int]]:
-        if tensor.work_division is None:
+    def _tensor_core_map(tensor) -> dict[str, dict[str, int]]:
+        assert tensor.work_division is not None
+        # DeepTools treats a non-empty allocation map as a custom schedule and
+        # currently accepts that contract only for shuffle tensors. Ordinary
+        # tensors use the equivalent operation-level map serialized above.
+        if sdsc_spec.opfunc != "shuffle":
             return {}
         core_id = Symbol("core_id")
         return {
@@ -1374,7 +1375,7 @@ def generate_sdsc(
                                     ),
                                     "coordinates_": {
                                         "coordInfo": _build_coord_info(tensor, i),
-                                        "coreIdToWkSlice_": _core_map_override(tensor),
+                                        "coreIdToWkSlice_": _tensor_core_map(tensor),
                                     },
                                 }
                                 for i, tensor in enumerate(sdsc_spec.args)

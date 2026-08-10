@@ -103,7 +103,7 @@ class GraphEditor:
     @staticmethod
     def _clone_output_splits(
         buffer_name: str,
-        consumer: Operation,
+        consumer: ComputedBuffer,
     ) -> dict:
         """Map a consumer's division through its read of ``buffer_name``."""
 
@@ -135,6 +135,35 @@ class GraphEditor:
             splits_by_symbol, read.index, read.index
         )
         return output_splits
+
+    def _register_clone(
+        self,
+        buffer: ComputedBuffer | TensorBox,
+        layout: FixedTiledLayout,
+        fx_node,
+        metadata_source: ComputedBuffer,
+    ) -> ComputedBuffer:
+        """Lower and register one pointwise identity copy."""
+
+        clone_tb = clone_lowering(buffer)
+        clone = ComputedBuffer(
+            name=None,
+            layout=layout,
+            data=clone_tb.data.data,  # type: ignore[union-attr]
+        )
+        clone.data.origins.add(fx_node)
+        clone.origins.add(fx_node)
+        clone.origin_node = fx_node
+        copy_op_metadata(src=metadata_source, dst=clone)
+        clone.name = self.lowering.register_buffer(clone)
+        self.lowering.register_operation(clone)
+        return clone
+
+    def _move_before(self, clone: ComputedBuffer, consumer: Operation) -> None:
+        """Move a newly registered operation immediately before its consumer."""
+
+        self.lowering.operations.remove(clone)
+        self.lowering.operations.insert(self.lowering.operations.index(consumer), clone)
 
     def push_allocation_with_clone(
         self,
@@ -185,33 +214,30 @@ class GraphEditor:
         self.lowering.orig_gm.recompile()
 
         # Step 2: Create a new ComBuf of a Pointwise IR (need to support Reduction?)
-        pw_ir_tb = clone_lowering(buffer)  # a TensorBox wrapping a PointwiseIR
         layout = buffer.layout
         assert isinstance(layout, FixedTiledLayout)
-        new_com_buf = ComputedBuffer(
-            name=None,
-            layout=FixedTiledLayout(
-                layout.device,
-                layout.dtype,
-                layout.size,  # pyright: ignore[reportArgumentType]
-                layout.stride,  # pyright: ignore[reportArgumentType]
-                layout.device_layout,
-                offset=layout.offset,
-            ),  # create a new copy of FixedTiledLayout from buffer's layout
-            data=pw_ir_tb.data.data,  # type: ignore
+        clone_layout = FixedTiledLayout(
+            layout.device,
+            layout.dtype,
+            list(layout.size),
+            list(layout.stride),
+            layout.device_layout,
+            offset=layout.offset,
         )
-        new_com_buf.origins.add(new_fx_node)
-        new_com_buf.origin_node = new_fx_node
         # Copy loop-group metadata so the clone stays in the same coarse-tile
         # group as its neighbours and doesn't split a contiguous run.
         # For input clones the original buffer is an InputBuffer (no metadata),
         # so we inherit from the first consumer instead. For output clones the
         # original ComputedBuffer already carries the right metadata.
-        copy_op_metadata(src=buffer_users[0] if input else buffer, dst=new_com_buf)
-        # TODO why arg0 ComputedBuffer doesn't have this attr?
-        new_com_buf.name = self.lowering.register_buffer(new_com_buf)
-        self.lowering.register_operation(new_com_buf)
-        new_buf_name = new_com_buf.name
+        metadata_source = buffer_users[0] if input else buffer
+        assert isinstance(metadata_source, ComputedBuffer)
+        new_com_buf = self._register_clone(
+            buffer,
+            clone_layout,
+            new_fx_node,
+            metadata_source,
+        )
+        new_buf_name = new_com_buf.get_name()
 
         # Propagate per-core splits to the clone. Users share one per_core_view
         # (core_div_mismatch guard), so the first user is representative.
@@ -221,6 +247,7 @@ class GraphEditor:
         )
         clone_out_splits: dict = user_splits[0]
         if input:
+            assert isinstance(first_user, ComputedBuffer)
             clone_out_splits = self._clone_output_splits(buf_name, first_user)
         # An output clone copies the produced buffer 1:1 (same shape/layout), so
         # the consumer's output splits transfer directly without re-keying.
@@ -256,14 +283,7 @@ class GraphEditor:
         # NOTE: operations is a reference to graph.operations, which is already
         # updated when we call graph.register_operation() earlier. But the new Op
         # was appended at the end of the list, need to insert at the correct position.
-        first_user = buffer_users[0]
-        idx_to_first_user = self.lowering.operations.index(first_user)
-        assert self.lowering.operations[-1].name == new_com_buf.name, (
-            f"removing {new_com_buf.name} from "
-            f"{[op.name for op in self.lowering.operations]}"
-        )
-        self.lowering.operations.pop()
-        self.lowering.operations.insert(idx_to_first_user, new_com_buf)
+        self._move_before(new_com_buf, buffer_users[0])
 
         return new_com_buf
 
@@ -273,13 +293,7 @@ class GraphEditor:
         consumer: ComputedBuffer,
         layout: FixedTiledLayout,
     ) -> ComputedBuffer:
-        """Insert a private clone immediately before one consumer.
-
-        Unlike :meth:`push_allocation_with_clone`, this does not redirect every
-        user of ``buffer``.  It is the graph-editing primitive used when a
-        compiler pass materializes a single producer-to-consumer edge as an
-        explicit operation (for example an LX relayout).
-        """
+        """Insert a private identity copy and redirect only ``consumer``."""
 
         buf_name = buffer.get_name()
         consumer_name = consumer.get_name()
@@ -291,23 +305,10 @@ class GraphEditor:
             clone_fx = self.fx_graph.create_node(
                 "call_function", self.clone_aten_op, (buf_fx,)
             )
-        consumer_fx.args = tuple(
-            clone_fx if arg is buf_fx else arg for arg in consumer_fx.args
-        )
+        consumer_fx.replace_input_with(buf_fx, clone_fx)
         self.lowering.orig_gm.recompile()
 
-        clone_tb = clone_lowering(buffer)
-        clone = ComputedBuffer(
-            name=None,
-            layout=layout,
-            data=clone_tb.data.data,  # type: ignore[union-attr]
-        )
-        clone.data.origins.add(clone_fx)
-        clone.origins.add(clone_fx)
-        clone.origin_node = clone_fx
-        copy_op_metadata(src=consumer, dst=clone)
-        clone.name = self.lowering.register_buffer(clone)
-        self.lowering.register_operation(clone)
+        clone = self._register_clone(buffer, layout, clone_fx, consumer)
 
         clone.op_it_space_splits = (
             self._clone_output_splits(buf_name, consumer),
@@ -329,15 +330,14 @@ class GraphEditor:
             else:
                 source_users.append(node)
         self.lowering.name_to_users[buf_name] = source_users
-        self.lowering.name_to_users[clone.name] = clone_users
+        clone_name = clone.get_name()
+        self.lowering.name_to_users[clone_name] = clone_users
 
-        self.replace_loop_input(consumer, buf_name, clone.name)
+        self.replace_loop_input(consumer, buf_name, clone_name)
 
         # register_operation appends; restore topological order immediately
         # before the selected consumer.
-        self.lowering.operations.remove(clone)
-        consumer_index = self.lowering.operations.index(consumer)
-        self.lowering.operations.insert(consumer_index, clone)
+        self._move_before(clone, consumer)
         return clone
 
     @staticmethod

@@ -183,7 +183,6 @@ TOPK_OPS = {"topkvalue", "topkindex"}
 
 LAYOUT_LABELS = ["OUTPUT", "KERNEL", "INPUT", "KERNEL_IDX"]
 MATMUL_LAYOUT_LABELS = ["INPUT", "KERNEL", "OUTPUT", "KERNEL_IDX"]
-SHUFFLE_LAYOUT_LABELS = ["KERNEL", *LAYOUT_LABELS]
 
 AVGPOOL2D_OP = "avgpoolfwd"
 # Pool opfunc names, mirroring TOPK_OPS. Add maxpool/minpool here as they land so

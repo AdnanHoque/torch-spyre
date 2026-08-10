@@ -31,7 +31,6 @@ from torch_spyre._inductor.constants import (
     POOL_DIM_LABELS,
     POOL_OPS,
     RESTICKIFY_OP,
-    SHUFFLE_LAYOUT_LABELS,
     TOPK_OPS,
 )
 from torch_spyre._inductor import config as _spyre_config
@@ -52,6 +51,7 @@ from torch_spyre._inductor.op_spec import (
     OpSpec,
     TensorArg,
     TensorWorkDivision,
+    is_lx_relayout_identity,
 )
 from torch_spyre._inductor.dtype_ops import DtypeOpTable
 from torch_spyre._inductor.pass_utils import coeff_through_floor
@@ -59,6 +59,7 @@ from torch_spyre._inductor.pass_utils import coeff_through_floor
 from .compute_ops import SymbolKind, generate_sdsc, num_bytes
 
 logger = get_inductor_logger("codegen.superdsc")
+SHUFFLE_LAYOUT_LABELS = ["KERNEL", *LAYOUT_LABELS]
 
 
 @dataclasses.dataclass
@@ -735,8 +736,8 @@ def _create_sdsc_tensors(
             raise ValueError("a per-tensor work division requires LX storage")
 
         effective_stick = [op_stick_dim if stick_dim is None else stick_dim]
-        if _is_lx_relayout_copy(op_spec) and any(
-            tensor.is_kernel_operand for tensor in op_spec.args
+        if is_lx_relayout_identity(op_spec.op, op_spec.args) and any(
+            tensor.lx_consumer_is_matmul for tensor in op_spec.args
         ):
             layout_labels = SHUFFLE_LAYOUT_LABELS
         else:
@@ -845,19 +846,6 @@ def _get_op_func(op: str, is_reduction: bool, output_scales: dict) -> str:
     ):
         return op + "nonstick"
     return op
-
-
-def _is_lx_relayout_copy(op_spec: OpSpec) -> bool:
-    """Whether an ordinary identity copy crosses LX ownership views."""
-
-    if op_spec.op != IDENTITY_OP or len(op_spec.args) != 2:
-        return False
-    source, destination = op_spec.args
-    if "lx" not in source.allocation or "lx" not in destination.allocation:
-        return False
-    if source.work_division is None or destination.work_division is None:
-        return False
-    return source.work_division != destination.work_division
 
 
 def _concretize_for_sdsc(expr: Expr) -> int:
@@ -982,9 +970,39 @@ def _extend_matmul_k_to_padded(
         sdsc_iteration_space[k_sym] = k_padded
 
 
+def _finalize_tensor_work_divisions(
+    args: list[SDSCArgs],
+    work_slices: dict[Symbol, Any],
+    core_id_to_work_slice: dict[str, Any],
+) -> None:
+    """Give every tensor one effective answer after schedule normalization."""
+
+    dimensions = tuple(work_slices)
+    operation_work_division = TensorWorkDivision(
+        work_slices={dim: int(work_slices[dim]) for dim in dimensions},
+        core_id_to_work_slice={
+            dim: core_id_to_work_slice.get(str(dim), Integer(0)) for dim in dimensions
+        },
+    )
+    for arg in args:
+        if arg.work_division is None:
+            arg.work_division = operation_work_division
+            continue
+        arg.work_division = TensorWorkDivision(
+            work_slices={
+                dim: int(arg.work_division.work_slices.get(dim, 1))
+                for dim in dimensions
+            },
+            core_id_to_work_slice={
+                dim: arg.work_division.core_id_to_work_slice.get(dim, Integer(0))
+                for dim in dimensions
+            },
+        )
+
+
 def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     is_matmul = _is_matmul(op_spec.op)
-    is_lx_relayout = _is_lx_relayout_copy(op_spec)
+    is_lx_relayout = is_lx_relayout_identity(op_spec.op, op_spec.args)
     is_pool = _is_pool(op_spec.op)
     ndim = len(op_spec.iteration_space)
     # Detect indirect access from device_coordinates: index tensors are those
@@ -1254,6 +1272,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         num_cores,
         contiguous_dim=contiguous_dim,
     )
+    _finalize_tensor_work_divisions(args, work_slices, core_id_to_work_slice)
 
     # Collect index tensor indices for indirect access
     indirect_access_indices = [

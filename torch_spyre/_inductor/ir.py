@@ -105,7 +105,7 @@ class FixedTiledLayout(FixedLayout):
         # Optional canonical per-core view for an LX-resident tensor.  Ordinary
         # tensors leave this unset and inherit their operation's work division.
         self.lx_view: Optional["PerCoreView"] = None
-        self.lx_is_kernel_operand = False
+        self.lx_consumer_is_matmul: bool = False
 
     def __str__(self) -> str:
         device_index_str = "" if self.device.index is None else f":{self.device.index}"

@@ -67,6 +67,7 @@ from .op_spec import (
     TensorWorkDivision,
     UnimplementedOp as OpSpecUnimplementedOp,
     format_op_spec_list,
+    is_lx_relayout_identity,
 )
 from torch_spyre._inductor.provenance import build_debug_handle
 
@@ -104,13 +105,6 @@ def _work_division_from_view(
         work_slices[symbol] = int(split)
         core_id_to_work_slice[symbol] = slot
     return TensorWorkDivision(work_slices, core_id_to_work_slice)
-
-
-def _is_lx_relayout_copy(current_node) -> bool:
-    return any(
-        getattr(node.node, "operation_name", None) == "lx_relayout_copy"
-        for node in current_node.get_nodes()
-    )
 
 
 class RValue(ABC):
@@ -797,8 +791,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             index,
             self.indirect_sizes,
         )
-        is_relayout_copy = _is_lx_relayout_copy(self.current_node)
-        lx_view = tensor.layout.lx_view if is_relayout_copy else None
+        lx_view = tensor.layout.lx_view if "lx" in tensor.layout.allocation else None
         work_division = _work_division_from_view(
             lx_view,
             device_coords,
@@ -816,9 +809,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             name=opspec_name,
             device_tile_advance_expr=device_tile_advance_expr,
             work_division=work_division,
-            is_kernel_operand=(
-                tensor.layout.lx_is_kernel_operand if is_relayout_copy else False
-            ),
+            lx_consumer_is_matmul=tensor.layout.lx_consumer_is_matmul,
         )
         if (
             "lx" not in tensor.layout.allocation
@@ -982,6 +973,16 @@ class SpyreKernel(Kernel[CSEVariable]):
             and hasattr(ir_node.data, "ranges")
             else None
         )
+
+        # Explicit ownership is a property of the copy that realizes the LX
+        # transition. Producer and consumer layouts retain their PerCoreView for
+        # scheduler validation, but ordinary SDSCs use their operation-level
+        # work division; DeepTools accepts custom per-tensor owner maps on the
+        # serialized SHUFFLE boundary only.
+        if not is_lx_relayout_identity(op, args):
+            for arg in args:
+                arg.work_division = None
+                arg.lx_consumer_is_matmul = False
 
         return OpSpec(
             op,
@@ -1505,8 +1506,8 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                                     f"work_slices={{{splits}}}, "
                                     f"core_id_to_work_slice={{{core_map}}}),"
                                 )
-                            if arg.is_kernel_operand:
-                                buf.writeline("is_kernel_operand=True,")
+                            if arg.lx_consumer_is_matmul:
+                                buf.writeline("lx_consumer_is_matmul=True,")
                         buf.writeline("),")
                 buf.writeline("]")
             buf.writeline("),")
