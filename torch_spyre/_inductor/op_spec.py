@@ -137,6 +137,14 @@ class DebugHandle:
         }
 
 
+@dataclasses.dataclass(frozen=True)
+class TensorWorkDivision:
+    """Which tensor region each core owns."""
+
+    work_slices: dict[Symbol, int]
+    core_id_to_work_slice: dict[Symbol, Expr]
+
+
 @dataclasses.dataclass
 class TensorArg:
     """
@@ -180,6 +188,23 @@ class TensorArg:
     device_tile_advance_expr: Expr | None = None
     element_arrangement: ElementArrangement = dataclasses.field(
         default_factory=lambda: ElementArrangement.STANDARD
+    )
+    work_division: TensorWorkDivision | None = None
+    lx_consumer_is_matmul: bool = False
+
+
+def is_lx_relayout_identity(op: str, args: Sequence[TensorArg]) -> bool:
+    """An LX identity whose input and output have different owners."""
+
+    if op != "identity" or len(args) != 2:
+        return False
+    source, destination = args
+    return (
+        "lx" in source.allocation
+        and "lx" in destination.allocation
+        and source.work_division is not None
+        and destination.work_division is not None
+        and source.work_division != destination.work_division
     )
 
 

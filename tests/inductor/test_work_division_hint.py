@@ -13,14 +13,16 @@
 # limitations under the License.
 
 from collections.abc import Sequence
+from dataclasses import replace
 import logging
 import logging.handlers
+import re
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch as mock_patch
 
 import pytest
-from sympy import Integer, Symbol
+from sympy import floor, Integer, Mod, Symbol
 import torch
 import torch.fx.traceback
 from torch.fx.graph_module import GraphModule
@@ -35,8 +37,21 @@ from torch._inductor.utils import run_and_get_code, InputType
 
 
 from torch_spyre._inductor import config, spyre_hint
+import torch_spyre._inductor.scheduler as scheduler_module
 import torch_spyre._inductor.work_division as _wd
 import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
+from torch_spyre._C import DataFormats
+from torch_spyre._inductor.codegen.superdsc import compile_op_spec, parse_op_spec
+from torch_spyre._inductor.constants import IDENTITY_OP
+from torch_spyre._inductor.lx_relayout import LXRelayoutPlan
+from torch_spyre._inductor.op_spec import OpSpec, TensorArg
+from torch_spyre._inductor.pass_utils import PerCoreView
+from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
+from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
+from torch_spyre._inductor.spyre_kernel import (
+    _work_division_from_view,
+    simplify_op_spec,
+)
 
 _LAUNCH_JOBPLAN = "torch_spyre.execution.kernel_runner.launch_jobplan"
 _PREPARE_KERNEL = "torch_spyre.execution.kernel_runner.prepare_kernel"
@@ -521,6 +536,263 @@ class TestNamedWorkDivisionHint(InductorTestCase):
             Exception, "reduction dimensions|expected exactly 1 reduction variable"
         ):
             torch.compile(fn, dynamic=False)(x)
+
+
+_CORE_ID = Symbol("core_id")
+_SOURCE_VIEW = PerCoreView(
+    ((0, 4), (1, 2)), ((0, floor(_CORE_ID / 2)), (1, Mod(_CORE_ID, 2)))
+)
+_DESTINATION_VIEW = PerCoreView(((0, 8),), ((0, _CORE_ID),))
+
+
+def _relayout_plan(source="source", consumer="consumer"):
+    return LXRelayoutPlan(source, consumer, _SOURCE_VIEW, _DESTINATION_VIEW, 8)
+
+
+def _compile_spec(spec, normalize=True):
+    if normalize:
+        simplify_op_spec(spec)
+    payload, *_ = compile_op_spec(0, spec, [])
+    root = next(iter(payload.values()))
+    dsc = next(iter(root["dscs_"][0].values()))
+    return root, [
+        node for node in dsc["scheduleTree_"] if node["nodeType_"] == "allocate"
+    ]
+
+
+def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
+    m, n = Symbol("m"), Symbol("n")
+    source_view = PerCoreView(((1, 8),), ((1, _CORE_ID),))
+    destination_view = PerCoreView(((1, 8),), ((1, 7 - _CORE_ID),))
+    coordinates = [Mod(n, 32), floor(n / 32), Mod(m, 64)]
+    base = TensorArg(
+        True, -1, DataFormats.SEN169_FP16, [32, 8, 64], coordinates, {"lx": 0}
+    )
+    args = [
+        replace(
+            base,
+            work_division=_work_division_from_view(source_view, coordinates, (m, n)),
+        ),
+        replace(
+            base,
+            is_input=False,
+            allocation={"lx": 256},
+            work_division=_work_division_from_view(
+                destination_view, coordinates, (m, n)
+            ),
+            lx_consumer_is_matmul=True,
+        ),
+    ]
+    spec = OpSpec(IDENTITY_OP, False, {n: (256, 8), m: (64, 1)}, args, {})
+    root, allocations = _compile_spec(spec)
+    assert spec.op == IDENTITY_OP
+    assert set(root["dscs_"][0]) == {"shuffle"}
+    assert all(arg.work_division.work_slices == {Symbol("z0"): 8} for arg in spec.args)
+    maps = [node["coordinates_"]["coreIdToWkSlice_"] for node in allocations]
+    assert [maps[0][str(i)]["x"] for i in range(8)] == list(range(8))
+    assert [maps[1][str(i)]["x"] for i in range(8)] == list(reversed(range(8)))
+
+    for arg in spec.args:
+        arg.work_division = None
+    ordinary_root, ordinary_allocations = _compile_spec(spec, normalize=False)
+    ordinary_sdsc, _ = parse_op_spec(spec)
+    assert set(ordinary_root["dscs_"][0]) == {IDENTITY_OP}
+    assert all(arg.work_division is not None for arg in ordinary_sdsc.args)
+    assert all(
+        not node["coordinates_"]["coreIdToWkSlice_"] for node in ordinary_allocations
+    )
+
+
+@config.patch(
+    {
+        "sencores": 8,
+        "lx_planning": True,
+        "allow_all_ops_in_lx_planning": True,
+        "lx_planner_relayout": True,
+    }
+)
+def test_lx_relayout_two_private_consumers_are_numerically_correct():
+    torch.manual_seed(0)
+    x = torch.randn(128, 256, dtype=torch.float16)
+    _declare_tensor_dim("M", 128)
+    _declare_tensor_dim("N", 256)
+
+    def fn(x):
+        with spyre_hint(work_div={"M": 4, "N": 2}):
+            hidden = torch.neg(x)
+        with spyre_hint(work_div={"M": 2, "N": 4}):
+            a = torch.relu(hidden)
+        with spyre_hint(work_div={"M": 8}):
+            b = torch.abs(hidden)
+        return a, b
+
+    device_x = _name_tensor_dims(x.to("spyre"), ["M", "N"])
+    actual, code = run_and_get_code(
+        torch.compile(fn, dynamic=False, options={"epilogue_fusion": False}), device_x
+    )
+    for got, expected in zip(actual, fn(x)):
+        torch.testing.assert_close(got.cpu(), expected)
+    generated = "\n".join(code)
+    identities = [
+        block for block in generated.split("OpSpec(") if "op='identity'" in block[:100]
+    ]
+    divisions = [
+        re.findall(r"TensorWorkDivision\(work_slices=\{([^}]*)", block)
+        for block in identities
+    ]
+    assert len(divisions) == 2 and all(len(pair) == 2 for pair in divisions)
+    assert divisions[0][0] == divisions[1][0]
+    assert {divisions[0][1], divisions[1][1]} == {
+        "sympify('c1'): 4, sympify('c0'): 2",
+        "sympify('c0'): 8",
+    }
+
+
+def test_lx_relayout_allocation_is_atomic_and_retries_stock_once():
+    complete = _relayout_plan("complete", "a")
+    incomplete = _relayout_plan("incomplete", "b")
+
+    class Solver:
+        calls = 0
+
+        def __init__(self, buffers, _size):
+            self.buffers = buffers
+
+        def plan_layout(self, log_lx_usage=False):
+            Solver.calls += 1
+            addresses = (
+                {"complete": 0, complete.destination_name: 256, "incomplete": 512}
+                if Solver.calls == 1
+                else {"incomplete": 0}
+            )
+            for buffer in self.buffers:
+                buffer.address = addresses.get(buffer.name)
+            return list(self.buffers)
+
+    def solve(allocator, buffers, graph):
+        solver = allocator._build_solver(buffers)
+        return allocator._finalize_lx_relayout_allocation(
+            graph, solver, allocator._solve(solver)
+        )[1]
+
+    allocator = ScratchpadAllocator(Solver, 1024)
+    allocator._lx_relayout_plans = {p.edge: p for p in (complete, incomplete)}
+    names = [
+        "complete",
+        complete.destination_name,
+        "incomplete",
+        incomplete.destination_name,
+    ]
+    buffers = [
+        LifetimeBoundBuffer(name, 128, [i, i + 1]) for i, name in enumerate(names)
+    ]
+    allocation = solve(allocator, buffers, SimpleNamespace())
+    by_name = {buffer.name: buffer for buffer in allocation}
+    assert by_name["complete"].address == 0
+    assert by_name[complete.destination_name].address == 256
+    assert by_name["incomplete"].address is None
+    assert allocator._lx_relayout_plans == {complete.edge: complete}
+
+    Solver.calls = 0
+    allocator = ScratchpadAllocator(Solver, 1024)
+    allocator._lx_relayout_plans = {incomplete.edge: incomplete}
+    layout = SimpleNamespace(allocation={}, lx_view=None, lx_consumer_is_matmul=False)
+    graph = SimpleNamespace(
+        _spyre_lx_relayout_copies={},
+        get_buffer=lambda _name: SimpleNamespace(layout=layout),
+    )
+    allocator._generate_buffers = lambda _graph: [
+        LifetimeBoundBuffer("incomplete", 128, [2, 3])
+    ]
+    fallback = solve(allocator, buffers[2:], graph)
+    assert [(buffer.name, buffer.address) for buffer in fallback] == [("incomplete", 0)]
+    assert Solver.calls == 2
+
+
+class _RelayoutNode:
+    def __init__(self, name, reads=(), writes=(), layout=None):
+        self.name = name
+        self.node = SimpleNamespace(layout=layout or SimpleNamespace(allocation={}))
+        self.read_writes = SimpleNamespace(reads=list(reads), writes=list(writes))
+
+    def get_nodes(self):
+        return [self]
+
+    def get_name(self):
+        return self.name
+
+
+def _relayout_layout(address, view):
+    return SimpleNamespace(
+        allocation={"lx": address}, lx_view=view, lx_consumer_is_matmul=False
+    )
+
+
+def test_lx_relayout_scheduler_demotes_groups_but_not_ordinary_unary():
+    def run_registered(drift):
+        plan = _relayout_plan()
+        src, dst = SimpleNamespace(name="source"), SimpleNamespace(name="destination")
+        unary_src = SimpleNamespace(name="ordinary_source")
+        unary_dst = SimpleNamespace(name="ordinary_unary")
+        layouts = {
+            "source": _relayout_layout(0, _SOURCE_VIEW),
+            "destination": _relayout_layout(256, _DESTINATION_VIEW),
+            "ordinary_source": _relayout_layout(512, _SOURCE_VIEW),
+            "ordinary_unary": _relayout_layout(768, _DESTINATION_VIEW),
+        }
+        node = _RelayoutNode
+        nodes = [
+            node("source", writes=(src,), layout=layouts["source"]),
+            node("destination", (src,), (dst,), layouts["destination"]),
+            node("consumer", reads=(dst,)),
+            node(
+                "ordinary_source",
+                writes=(unary_src,),
+                layout=layouts["ordinary_source"],
+            ),
+            node(
+                "ordinary_unary", (unary_src,), (unary_dst,), layouts["ordinary_unary"]
+            ),
+            node("ordinary_consumer", reads=(unary_dst,)),
+        ]
+        buffers = {
+            name: SimpleNamespace(layout=layout) for name, layout in layouts.items()
+        }
+        graph = SimpleNamespace(
+            _spyre_lx_relayout_copies={plan.edge: ("destination", plan)},
+            try_get_buffer=buffers.get,
+            get_buffer=buffers.__getitem__,
+        )
+
+        def view(node, _dep, name):
+            if name == "ordinary_source":
+                expected = (
+                    _DESTINATION_VIEW if node.name == "ordinary_unary" else _SOURCE_VIEW
+                )
+            else:
+                expected = _SOURCE_VIEW if name == "source" else _DESTINATION_VIEW
+            return (
+                PerCoreView((), ()) if node.name == drift else expected,
+                False,
+                True,
+            )
+
+        with (
+            mock_patch.object(scheduler_module, "SchedulerNode", _RelayoutNode),
+            mock_patch.object(scheduler_module, "MemoryDep", SimpleNamespace),
+            mock_patch.object(scheduler_module, "V", SimpleNamespace(graph=graph)),
+            mock_patch.object(scheduler_module, "per_core_view_scheduled", view),
+            config.patch({"lx_planning": True}),
+        ):
+            scheduler_module.demote_incoherent_lx_buffers(nodes)
+        assert graph._spyre_lx_relayout_copies == {}
+        assert "lx" not in layouts["source"].allocation
+        assert "lx" not in layouts["destination"].allocation
+        assert "lx" not in layouts["ordinary_source"].allocation
+        assert "lx" in layouts["ordinary_unary"].allocation
+
+    run_registered("source")
+    run_registered("consumer")
 
 
 def aot_backend(gm: GraphModule, example_inputs: Sequence[InputType]):

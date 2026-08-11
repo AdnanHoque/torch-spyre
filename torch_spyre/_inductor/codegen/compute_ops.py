@@ -18,7 +18,7 @@ import dataclasses
 from torch_spyre._C import encode_constant, DataFormats
 from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.pass_utils import coeff_through_floor
-from sympy import Symbol
+from sympy import Symbol, sympify
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1071,7 +1071,8 @@ def generate_sdsc(
             dim_str = str(dim)
             scale = tensor.scales[dim]
             is_tiled = scale == 1
-            nsplits = sdsc_spec.work_slices[dim] if is_tiled else 1
+            assert tensor.work_division is not None
+            nsplits = tensor.work_division.work_slices[dim] if is_tiled else 1
             size = (
                 _coord_size(dim_str, sdsc_spec.iteration_space[dim], is_input)
                 // nsplits
@@ -1092,6 +1093,20 @@ def generate_sdsc(
                 padding=_coord_padding(dim_str, is_input),
             )
         return result
+
+    def _tensor_core_map(tensor) -> dict[str, dict[str, int]]:
+        assert tensor.work_division is not None
+        # DeepTools accepts custom tensor ownership only on shuffle allocations.
+        if sdsc_spec.opfunc != "shuffle":
+            return {}
+        core_id = Symbol("core_id")
+        return {
+            str(core): {
+                str(dim): int(sympify(slot).subs(core_id, core))
+                for dim, slot in tensor.work_division.core_id_to_work_slice.items()
+            }
+            for core in range(sdsc_spec.num_cores)
+        }
 
     def _filter_window_dims(dims: list) -> list:
         """Drop the op's reduction-window dims (e.g. pool ki/kj) from a dim order.
@@ -1357,7 +1372,7 @@ def generate_sdsc(
                                     ),
                                     "coordinates_": {
                                         "coordInfo": _build_coord_info(tensor, i),
-                                        "coreIdToWkSlice_": {},
+                                        "coreIdToWkSlice_": _tensor_core_map(tensor),
                                     },
                                 }
                                 for i, tensor in enumerate(sdsc_spec.args)

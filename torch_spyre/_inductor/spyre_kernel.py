@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
+import math
 from typing import Any, Callable, Self, Sequence, Tuple, Union
 from abc import ABC
 
@@ -45,6 +46,7 @@ from . import config as _spyre_config
 from .errors import Unsupported
 from .ir import FixedTiledLayout
 from .pass_utils import (
+    PerCoreView,
     concretize_expr,
     concretize_index,
     compute_symbolic_bounds,
@@ -61,6 +63,7 @@ from .op_spec import (
     LoopSpec,
     OpSpec,
     TensorArg,
+    TensorWorkDivision,
     UnimplementedOp as OpSpecUnimplementedOp,
     format_op_spec_list,
 )
@@ -68,6 +71,36 @@ from torch_spyre._inductor.provenance import build_debug_handle
 import logging
 
 logger = get_inductor_logger("spyre_kernel")
+
+
+def _work_division_from_view(
+    view: PerCoreView | None,
+    device_coordinates: Sequence[sympy.Expr],
+    iteration_symbols: Sequence[sympy.Symbol],
+) -> TensorWorkDivision | None:
+    """Project a physical per-core view into an operation's loop symbols."""
+
+    if view is None:
+        return None
+    loop_symbols = set(iteration_symbols)
+    slot_by_device_dim = dict(view.core_to_slot)
+    work_slices: dict[sympy.Symbol, int] = {}
+    core_map: dict[sympy.Symbol, sympy.Expr] = {}
+    for device_dim, split in view.work_slice_dims:
+        if device_dim >= len(device_coordinates):
+            raise ValueError(f"LX view uses missing device dimension {device_dim}")
+        loop_dims = device_coordinates[device_dim].free_symbols & loop_symbols
+        if len(loop_dims) != 1:
+            raise ValueError(
+                f"LX view dimension {device_dim} does not map to one loop symbol"
+            )
+        dim = next(iter(loop_dims))
+        slot = slot_by_device_dim.get(device_dim, sympy.S.Zero)
+        if dim in work_slices and (work_slices[dim], core_map[dim]) != (split, slot):
+            raise ValueError(f"conflicting LX ownership for loop symbol {dim}")
+        work_slices[dim] = int(split)
+        core_map[dim] = slot
+    return TensorWorkDivision(work_slices, core_map)
 
 
 class RValue(ABC):
@@ -764,6 +797,11 @@ class SpyreKernel(Kernel[CSEVariable]):
             index,
             self.indirect_sizes,
         )
+        work_division = _work_division_from_view(
+            tensor.layout.lx_view if "lx" in tensor.layout.allocation else None,
+            device_coords,
+            tuple(it_space),
+        )
         device_tile_advance_expr = self._general_tile_advance(tensor, is_input, name)
         tensor_arg = TensorArg(
             is_input,
@@ -775,6 +813,8 @@ class SpyreKernel(Kernel[CSEVariable]):
             element_arrangement=tensor.layout.device_layout.element_arrangement,
             name=opspec_name,
             device_tile_advance_expr=device_tile_advance_expr,
+            work_division=work_division,
+            lx_consumer_is_matmul=tensor.layout.lx_consumer_is_matmul,
         )
         if (
             "lx" not in tensor.layout.allocation
@@ -1448,9 +1488,67 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                                 buf.writeline(
                                     f"element_arrangement={arg.element_arrangement},"
                                 )
+                            if arg.work_division is not None:
+                                splits = ", ".join(
+                                    f"{sympy_str(dim)}: {split}"
+                                    for dim, split in arg.work_division.work_slices.items()
+                                )
+                                core_map = ", ".join(
+                                    f"{sympy_str(dim)}: {sympy_str(slot)}"
+                                    for dim, slot in arg.work_division.core_id_to_work_slice.items()
+                                )
+                                buf.writeline(
+                                    "work_division=TensorWorkDivision("
+                                    f"work_slices={{{splits}}}, "
+                                    f"core_id_to_work_slice={{{core_map}}}),"
+                                )
+                            if arg.lx_consumer_is_matmul:
+                                buf.writeline("lx_consumer_is_matmul=True,")
                         buf.writeline("),")
                 buf.writeline("]")
             buf.writeline("),")
+
+
+def _remap_work_division(arg: TensorArg, iteration_remap) -> None:
+    """Carry tensor ownership through iteration-space normalization."""
+
+    if arg.work_division is None:
+        return
+    new_splits: dict[sympy.Symbol, int] = {}
+    new_core_map: dict[sympy.Symbol, sympy.Expr] = {}
+    for old_dim, split in arg.work_division.work_slices.items():
+        new_dims = iteration_remap.get(old_dim)
+        if new_dims is None:
+            raise ValueError(f"missing normalized mapping for {old_dim}")
+        remaining_split = int(split)
+        split_factors = []
+        if len(new_dims) == 1:
+            split_factors = [(new_dims[0][0], remaining_split)]
+            remaining_split = 1
+        else:
+            for new_dim, basis in reversed(new_dims):
+                factor = math.gcd(remaining_split, basis)
+                split_factors.append((new_dim, factor))
+                remaining_split //= factor
+            split_factors.reverse()
+        if remaining_split != 1:
+            raise ValueError(f"cannot normalize {split}-way split on {old_dim}")
+
+        slot = arg.work_division.core_id_to_work_slice[old_dim]
+        slot_stride = math.prod(factor for _, factor in split_factors)
+        for new_dim, factor in split_factors:
+            slot_stride //= factor
+            if factor == 1:
+                continue
+            new_slot = sympy.Mod(sympy.floor(slot / slot_stride), factor)
+            if new_dim in new_splits and (
+                new_splits[new_dim],
+                new_core_map[new_dim],
+            ) != (factor, new_slot):
+                raise ValueError(f"conflicting normalized ownership on {new_dim}")
+            new_splits[new_dim] = factor
+            new_core_map[new_dim] = new_slot
+    arg.work_division = TensorWorkDivision(new_splits, new_core_map)
 
 
 def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
@@ -1458,7 +1556,7 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     # decomposes symbols in align_tensors; indirect_access_subs replaces them with IndirectAccess.
     it_space = op_spec.iteration_space
 
-    new_op_space_splits, new_tensors = align_tensors(
+    new_op_space_splits, new_tensors, iteration_remap = align_tensors(
         it_space,
         [
             {"size": arg.device_size, "coordinates": arg.device_coordinates}
@@ -1469,6 +1567,7 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     op_spec.iteration_space = new_op_space_splits
 
     for arg, t in zip(op_spec.args, new_tensors):
+        _remap_work_division(arg, iteration_remap)
         arg.device_size = t["size"]
         arg.device_coordinates = t["coordinates"]
 

@@ -16,7 +16,7 @@ import dataclasses
 import math
 from typing import Any
 from collections import Counter
-from sympy import Integer, Symbol, Expr
+from sympy import Integer, Symbol, Expr, sympify
 
 from torch._inductor.virtualized import V
 from torch_spyre._C import DataFormats, ElementArrangement
@@ -50,6 +50,8 @@ from torch_spyre._inductor.op_spec import (
     IndirectAccess,
     OpSpec,
     TensorArg,
+    TensorWorkDivision,
+    is_lx_relayout_identity,
 )
 from torch_spyre._inductor.dtype_ops import DtypeOpTable
 from torch_spyre._inductor.pass_utils import coeff_through_floor
@@ -57,6 +59,7 @@ from torch_spyre._inductor.pass_utils import coeff_through_floor
 from .compute_ops import SymbolKind, generate_sdsc, num_bytes
 
 logger = get_inductor_logger("codegen.superdsc")
+SHUFFLE_LAYOUT_LABELS = ["KERNEL", *LAYOUT_LABELS]
 
 
 @dataclasses.dataclass
@@ -71,6 +74,7 @@ class SDSCArgs:
     allocation: dict[str, Any]
     start_address: int | Symbol
     backGap: dict[Symbol, int]
+    work_division: TensorWorkDivision | None = None
     arg_index: int = -1
     is_index_tensor: bool = False
     related_value_tensor_idx: int = -1
@@ -96,6 +100,7 @@ class SDSCArgs:
             f"  backGap={self.backGap}\n"
             f"  is_index_tensor={self.is_index_tensor}\n"
             f"  related_value_tensor_idx={self.related_value_tensor_idx}\n"
+            f"  work_division={self.work_division}\n"
             f")"
         )
 
@@ -542,6 +547,9 @@ def _create_sdsc_tensors(
     dims = list(iteration_space.keys())
     layouts: dict = {}
     use_op_dims = not _is_matmul(op_spec.op)
+    shuffle_to_matmul = is_lx_relayout_identity(op_spec.op, op_spec.args) and any(
+        tensor.lx_consumer_is_matmul for tensor in op_spec.args
+    )
 
     # Detect indirect access from device_coordinates: index tensors are those
     # whose name is referenced by an IndirectAccess in another tensor's coordinates,
@@ -728,7 +736,10 @@ def _create_sdsc_tensors(
                 max_dim_sizes[mb_sym] = -1
 
         effective_stick = [op_stick_dim if stick_dim is None else stick_dim]
-        layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
+        if shuffle_to_matmul:
+            layout_labels = SHUFFLE_LAYOUT_LABELS
+        else:
+            layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
 
         # Special handling for FP8 matmul KERNEL tensor
         dtype_stick_size = arg.device_dtype.elems_per_stick()
@@ -784,24 +795,36 @@ def _create_sdsc_tensors(
             get_value_tensor_idx_for_index(op_spec, i) if is_idx_tensor else -1
         )
 
-        sdsc_args.append(
-            SDSCArgs(
-                layout=label,
-                dim_order=dim_order,
-                data_format=arg_data_format,
-                scales=scales,
-                strides=strides,
-                offsets=offsets,
-                max_dim_sizes=max_dim_sizes,
-                allocation=arg.allocation,
-                start_address=start_addr,
-                backGap=backGap,
-                arg_index=arg.arg_index,
-                is_index_tensor=is_idx_tensor,
-                related_value_tensor_idx=related_val_idx,
-                device_tile_advance_expr=arg.device_tile_advance_expr,
-            )
+        sdsc_arg = SDSCArgs(
+            layout=label,
+            dim_order=dim_order,
+            data_format=arg_data_format,
+            scales=scales,
+            strides=strides,
+            offsets=offsets,
+            max_dim_sizes=max_dim_sizes,
+            allocation=arg.allocation,
+            start_address=start_addr,
+            backGap=backGap,
+            arg_index=arg.arg_index,
+            is_index_tensor=is_idx_tensor,
+            related_value_tensor_idx=related_val_idx,
+            device_tile_advance_expr=arg.device_tile_advance_expr,
         )
+        if arg.work_division is not None:
+            splits = {
+                symbol_mapping.get(dim, dim): split
+                for dim, split in arg.work_division.work_slices.items()
+            }
+            core_map = {
+                symbol_mapping.get(dim, dim): sympify(slot).xreplace(symbol_mapping)
+                for dim, slot in arg.work_division.core_id_to_work_slice.items()
+            }
+            sdsc_arg.work_division = TensorWorkDivision(
+                {dim: int(splits.get(dim, 1)) for dim in dim_order},
+                {dim: core_map.get(dim, Integer(0)) for dim in dim_order},
+            )
+        sdsc_args.append(sdsc_arg)
 
     return sdsc_args, layouts, missing_dim
 
@@ -939,6 +962,33 @@ def _extend_matmul_k_to_padded(
             k_sym,
         )
         sdsc_iteration_space[k_sym] = k_padded
+
+
+def _finalize_tensor_work_divisions(
+    args: list[SDSCArgs],
+    work_slices: dict[Symbol, Any],
+    core_map: dict[str, Expr],
+) -> None:
+    """Give every tensor one effective ownership after SDSC normalization."""
+
+    dims = tuple(work_slices)
+    operation = TensorWorkDivision(
+        {dim: int(work_slices[dim]) for dim in dims},
+        {dim: core_map[str(dim)] for dim in dims},
+    )
+    for arg in args:
+        override = arg.work_division
+        arg.work_division = (
+            operation
+            if override is None
+            else TensorWorkDivision(
+                {dim: int(override.work_slices.get(dim, 1)) for dim in dims},
+                {
+                    dim: override.core_id_to_work_slice.get(dim, Integer(0))
+                    for dim in dims
+                },
+            )
+        )
 
 
 def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
@@ -1212,6 +1262,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         num_cores,
         contiguous_dim=contiguous_dim,
     )
+    _finalize_tensor_work_divisions(args, work_slices, core_id_to_work_slice)
 
     # Collect index tensor indices for indirect access
     indirect_access_indices = [
@@ -1220,7 +1271,11 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
 
     return (
         SDSCSpec(
-            opfunc=_get_op_func(op_spec.op, op_spec.is_reduction, args[-1].scales),
+            opfunc=(
+                "shuffle"
+                if is_lx_relayout_identity(op_spec.op, op_spec.args)
+                else _get_op_func(op_spec.op, op_spec.is_reduction, args[-1].scales)
+            ),
             execution_unit="pt" if is_matmul else "sfp",
             data_format=args[
                 1 if indirect_access_indices else 0
