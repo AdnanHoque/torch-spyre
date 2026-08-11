@@ -114,7 +114,7 @@ class SDSCSpec:
     iteration_space: dict[Symbol, Any]
     num_cores: int
     work_slices: dict[Symbol, Any]
-    core_id_to_work_slice: dict[Symbol, Any]
+    core_id_to_work_slice: dict[Symbol | str, Any]
     padding: dict[Symbol, Any]
     layouts: dict[int, Any]
     args: list[SDSCArgs]
@@ -820,6 +820,9 @@ def _create_sdsc_tensors(
                 symbol_mapping.get(dim, dim): sympify(slot).xreplace(symbol_mapping)
                 for dim, slot in arg.work_division.core_id_to_work_slice.items()
             }
+            assert all(
+                split == 1 or dim in dim_order for dim, split in splits.items()
+            ), f"tensor ownership split was dropped during normalization: {splits}"
             sdsc_arg.work_division = TensorWorkDivision(
                 {dim: int(splits.get(dim, 1)) for dim in dim_order},
                 {dim: core_map.get(dim, Integer(0)) for dim in dim_order},
@@ -1271,7 +1274,6 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     _finalize_tensor_work_divisions(
         args, mapping_dims, work_slices, core_id_to_work_slice, num_cores
     )
-
     # Collect index tensor indices for indirect access
     indirect_access_indices = [
         i for i, arg in enumerate(op_spec.args) if is_index_tensor(arg, op_spec)

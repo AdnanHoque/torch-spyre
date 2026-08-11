@@ -587,7 +587,13 @@ def generate_sdsc(
         for c in range(sdsc_spec.num_cores)
     }
     operation_work_division = TensorWorkDivision(
-        sdsc_spec.work_slices, sdsc_spec.core_id_to_work_slice
+        dict(sdsc_spec.work_slices),
+        {
+            dim: sdsc_spec.core_id_to_work_slice[
+                dim if dim in sdsc_spec.core_id_to_work_slice else str(dim)
+            ]
+            for dim in sdsc_spec.work_slices
+        },
     )
     for tensor in sdsc_spec.args:
         if tensor.work_division is None:
