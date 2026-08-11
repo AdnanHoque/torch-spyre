@@ -89,6 +89,7 @@ from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.lx_relayout import (
     LXRelayoutPlan,
+    clear_lx_relayout_state,
     collect_lx_relayout_plans,
     discard_lx_relayout_group,
     materialize_lx_relayouts,
@@ -130,6 +131,8 @@ class ScratchpadAllocator:
     """
     Class for allocating on scratchpad
     """
+
+    supports_lx_relayout = True
 
     def __init__(
         self,
@@ -216,9 +219,11 @@ class ScratchpadAllocator:
 
     def _prepare_buffers(self, graph: GraphLowering) -> Sequence[Any]:
         """Buffers to hand the solver. Base: fixed-division LifetimeBoundBuffers."""
-        self._lx_relayout_plans = {
-            plan.edge: plan for plan in collect_lx_relayout_plans(graph)
-        }
+        self._lx_relayout_plans = (
+            {plan.edge: plan for plan in collect_lx_relayout_plans(graph)}
+            if self.supports_lx_relayout
+            else {}
+        )
         for name in self._planned_lx_buffers():
             if layout := getattr(graph.try_get_buffer(name), "layout", None):
                 layout.allocation.pop("lx", None)
@@ -889,6 +894,8 @@ class ScratchpadAllocator:
         for buffer in buffers:
             buffer.uses = [2 * use + 1 for use in buffer.uses]
 
+        # Adjacent half-ticks rely on DSCs within a bundle executing serially;
+        # otherwise the allocator's lifetime reuse is unsound beyond relayout too.
         for source, plan, original_tick in entries:
             consumer_tick = 2 * original_tick + 1
             transfer_tick = consumer_tick - 1
@@ -946,10 +953,7 @@ class ScratchpadAllocator:
             if not copy_names:
                 continue
             for name in {source_name, *copy_names}:
-                layout = getattr(graph.get_buffer(name), "layout")
-                layout.allocation.pop("lx", None)
-                layout.lx_view = None
-                layout.lx_consumer_is_matmul = False
+                clear_lx_relayout_state(graph.get_buffer(name).get_layout())
         self._lx_relayout_plans = {
             edge: plan
             for edge, plan in self._lx_relayout_plans.items()
@@ -1478,6 +1482,8 @@ class StrategyBCoOptimizingAllocator(ScratchpadAllocator):
     space, the worst case matches ScratchpadAllocator.
     """
 
+    supports_lx_relayout = False
+
     def plan_allocation(self, graph: GraphLowering):
         for p in self.pre_optimization_passes:
             p.apply_pass(graph)
@@ -1543,6 +1549,7 @@ class StrategyBCoOptimizingAllocator(ScratchpadAllocator):
         )
         solver = self._build_solver(buffers)
         allocation = solver.plan_layout(log_lx_usage=True)
+        assert not self._lx_relayout_plans
         reasons = self._get_spill_reasons(solver, allocation)
         self._push_allocation(graph, allocation)
         self._log_lx_pinning(graph, reasons)
@@ -1670,6 +1677,8 @@ class StrategyBCoOptimizingAllocator(ScratchpadAllocator):
 
 
 class CoOptimizingAllocator(ScratchpadAllocator):
+    supports_lx_relayout = False
+
     def __init__(
         self,
         layout_planning: CoreDivisionSolverFactory,
@@ -2385,7 +2394,7 @@ def select_allocator() -> ScratchpadAllocator:
             if config.lx_planner_relayout:
                 logger.warning(
                     "LX relayout is not supported by CoOptimizingAllocator; "
-                    "using stock LX placement"
+                    "continuing without relayout"
                 )
             return CoOptimizingAllocator(layout_planning=solver, size=size)
         # Placement-only CP-SAT on the pre-determined core divisions.
@@ -2407,7 +2416,7 @@ def select_allocator() -> ScratchpadAllocator:
         if config.lx_planner_relayout:
             logger.warning(
                 "LX relayout is not supported by StrategyBCoOptimizingAllocator; "
-                "using stock LX placement"
+                "continuing without relayout"
             )
         return StrategyBCoOptimizingAllocator(layout_planning=solver_cls, size=size)
     return ScratchpadAllocator(layout_planning=solver_cls, size=size)

@@ -36,7 +36,11 @@ from torch.utils._ordered_set import OrderedSet
 from .spyre_kernel import SpyreKernel
 from .pass_utils import iteration_space, per_core_view_scheduled
 from .logging_utils import get_inductor_logger
-from .lx_relayout import discard_lx_relayout_group, materialized_lx_relayouts
+from .lx_relayout import (
+    clear_lx_relayout_state,
+    discard_lx_relayout_group,
+    materialized_lx_relayouts,
+)
 from .op_spec import LoopSpec
 from . import config as _spyre_config
 
@@ -324,7 +328,9 @@ def _lx_resident(node: SchedulerNode) -> bool:
 
 def _lx_view(name: str):
     buffer = V.graph.try_get_buffer(name)
-    layout = getattr(buffer, "layout", None)
+    if buffer is None:
+        return None
+    layout = buffer.get_layout()
     if "lx" not in getattr(layout, "allocation", {}):
         return None
     return getattr(layout, "lx_view", None)
@@ -455,11 +461,9 @@ def demote_incoherent_lx_buffers(
         copy_name: plan
         for copy_name, plan in materialized_lx_relayouts(V.graph).values()
     }
-    copies_by_source: dict[str, set[str]] = {}
-    source_by_copy = {}
-    for copy_name, plan in plans_by_copy.items():
-        copies_by_source.setdefault(plan.source_name, set()).add(copy_name)
-        source_by_copy[copy_name] = plan.source_name
+    source_by_copy = {
+        copy_name: plan.source_name for copy_name, plan in plans_by_copy.items()
+    }
 
     copy_reads = set()
     invalid_sources = {}
@@ -501,18 +505,14 @@ def demote_incoherent_lx_buffers(
         if source_name in demoted:
             return
         demoted.add(source_name)
-        names = {source_name, *copies_by_source.get(source_name, set())}
-        discard_lx_relayout_group(V.graph, source_name)
+        names = {source_name, *discard_lx_relayout_group(V.graph, source_name)}
+        # Scheduler nodes already contain the live identity copy. Keep it as an
+        # ordinary HBM/pool fallback; removing it here would require rescheduling.
         for name in names:
             buffer = V.graph.try_get_buffer(name)
-            layout = getattr(buffer, "layout", None)
-            if layout is None:
+            if buffer is None:
                 continue
-            if not hasattr(layout, "allocation"):
-                continue
-            layout.allocation.pop("lx", None)
-            layout.lx_view = None
-            layout.lx_consumer_is_matmul = False
+            clear_lx_relayout_state(buffer.get_layout())
         logger.info("demoted %s out of LX: %s", ", ".join(sorted(names)), reason)
 
     for source_name, reason in invalid_sources.items():

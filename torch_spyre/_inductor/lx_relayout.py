@@ -114,6 +114,14 @@ def discard_lx_relayout_group(graph: GraphLowering, source_name: str) -> set[str
     return removed
 
 
+def clear_lx_relayout_state(layout: FixedTiledLayout) -> None:
+    """Clear the placement and ownership attached to an LX relayout buffer."""
+
+    layout.allocation.pop("lx", None)
+    layout.lx_view = None
+    layout.lx_consumer_is_matmul = False
+
+
 def _core_slices(view: PerCoreView, num_cores: int) -> dict[int, dict[int, int]] | None:
     core_id = sympy.Symbol("core_id")
     splits = dict(view.work_slice_dims)
@@ -258,6 +266,11 @@ def collect_lx_relayout_plans(
         if partial or not representable or _core_slices(source_view, num_cores) is None:
             continue
 
+        # Activation eligibility belongs to the producer, not to an individual
+        # edge. Never relayout a restickified graph input or weight.
+        if not _is_activation_source(operations, producer):
+            continue
+
         source_plans = []
         seen_consumers = set()
         for consumer, dep, read_index in consumer_reads:
@@ -287,11 +300,7 @@ def collect_lx_relayout_plans(
                 continue
             is_matmul = _is_matmul_op(consumer)
             if (not is_matmul and not isinstance(consumer.data, Pointwise)) or (
-                is_matmul
-                and (
-                    not _is_activation_source(operations, producer)
-                    or read_index not in (0, 1)
-                )
+                is_matmul and read_index not in (0, 1)
             ):
                 break
             consumer_coordinates = try_device_coordinates(

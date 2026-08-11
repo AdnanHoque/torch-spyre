@@ -625,7 +625,8 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
         "lx_planner_relayout": True,
     }
 )
-def test_lx_relayout_two_private_consumers_are_numerically_correct():
+@pytest.mark.parametrize("second_consumer", ["pointwise", "matmul"])
+def test_lx_relayout_two_private_consumers_are_numerically_correct(second_consumer):
     torch.manual_seed(0)
     x = torch.randn(8, 32, 64, dtype=torch.float16)
     weight = torch.randn(8, 64, 32, dtype=torch.float16)
@@ -638,8 +639,12 @@ def test_lx_relayout_two_private_consumers_are_numerically_correct():
         with spyre_hint(work_div={"B": 2, "M": 4}):
             pointwise = torch.relu(hidden)
         with spyre_hint(work_div={"B": 8}):
-            matmul = torch.bmm(hidden, weight)
-        return pointwise, matmul
+            second = (
+                torch.bmm(hidden, weight)
+                if second_consumer == "matmul"
+                else torch.abs(hidden)
+            )
+        return pointwise, second
 
     device_x = _name_tensor_dims(x.to("spyre"), ["B", "M", "K"])
     device_weight = _name_tensor_dims(weight.to("spyre"), ["B", "K", "N"])
@@ -649,8 +654,13 @@ def test_lx_relayout_two_private_consumers_are_numerically_correct():
         device_x,
         device_weight,
     )
-    for got, expected in zip(actual, fn(x, weight)):
-        torch.testing.assert_close(got.cpu(), expected, rtol=2e-2, atol=1e-1)
+    for index, (got, expected) in enumerate(zip(actual, fn(x, weight))):
+        tolerance = (
+            {"rtol": 2e-2, "atol": 1e-1}
+            if index == 1 and second_consumer == "matmul"
+            else {}
+        )
+        torch.testing.assert_close(got.cpu(), expected, **tolerance)
     generated = "\n".join(code)
     identities = [
         block for block in generated.split("OpSpec(") if "op='identity'" in block[:100]
@@ -671,7 +681,9 @@ def test_lx_relayout_two_private_consumers_are_numerically_correct():
         "sympify('c1'): 4, sympify('c0'): 2",
         "sympify('c0'): 8",
     }
-    assert sum("lx_consumer_is_matmul=True" in block for block in identities) == 1
+    assert sum("lx_consumer_is_matmul=True" in block for block in identities) == (
+        second_consumer == "matmul"
+    )
 
 
 def test_lx_relayout_allocation_is_atomic_and_retries_stock_once():
@@ -781,8 +793,14 @@ def test_lx_relayout_scheduler_demotes_groups_but_not_ordinary_unary():
             ),
             node("ordinary_consumer", reads=(unary_dst,)),
         ]
+        if drift == "missing":
+            nodes = [node for node in nodes if node.name != "destination"]
         buffers = {
-            name: SimpleNamespace(layout=layout) for name, layout in layouts.items()
+            name: SimpleNamespace(
+                layout=SimpleNamespace(),
+                get_layout=lambda layout=layout: layout,
+            )
+            for name, layout in layouts.items()
         }
         graph = SimpleNamespace(
             _spyre_lx_relayout_copies={plan.edge: ("destination", plan)},
@@ -819,6 +837,7 @@ def test_lx_relayout_scheduler_demotes_groups_but_not_ordinary_unary():
 
     run_registered("source")
     run_registered("consumer")
+    run_registered("missing")
 
 
 def aot_backend(gm: GraphModule, example_inputs: Sequence[InputType]):
