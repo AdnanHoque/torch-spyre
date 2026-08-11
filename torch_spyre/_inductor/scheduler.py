@@ -34,10 +34,11 @@ from torch._inductor.codecache import code_hash
 from torch.utils._ordered_set import OrderedSet
 
 from .spyre_kernel import SpyreKernel
+from .ir import FixedTiledLayout
 from .pass_utils import iteration_space, per_core_view_scheduled
 from .logging_utils import get_inductor_logger
 from .lx_relayout import (
-    clear_lx_relayout_state,
+    clear_lx_state,
     discard_lx_relayout_group,
     materialized_lx_relayouts,
 )
@@ -328,12 +329,12 @@ def _lx_resident(node: SchedulerNode) -> bool:
 
 def _lx_view(name: str):
     buffer = V.graph.try_get_buffer(name)
-    if buffer is None:
-        return None
+    assert buffer is not None, f"missing LX buffer {name}"
     layout = buffer.get_layout()
-    if "lx" not in getattr(layout, "allocation", {}):
+    assert isinstance(layout, FixedTiledLayout)
+    if "lx" not in layout.allocation:
         return None
-    return getattr(layout, "lx_view", None)
+    return layout.lx_view
 
 
 def align_lx_producer_loop_order(
@@ -484,14 +485,11 @@ def demote_incoherent_lx_buffers(
         for dep in copies:
             seen_copies.add(dep.name)
             plan = plans_by_copy[dep.name]
-            if (
-                len(reads) != 1
-                or len(writes) != 1
-                or reads[0].name != plan.source_name
-                or _lx_view(plan.source_name) is None
-                or _lx_view(dep.name) is None
-                or _lx_view(plan.source_name) == _lx_view(dep.name)
-            ):
+            source_view = _lx_view(plan.source_name)
+            destination_view = _lx_view(dep.name)
+            assert source_view is not None and destination_view is not None
+            assert source_view != destination_view
+            if len(reads) != 1 or len(writes) != 1 or reads[0].name != plan.source_name:
                 invalid_sources[plan.source_name] = f"invalid relayout copy {dep.name}"
             else:
                 copy_reads.add((node.get_name(), plan.source_name))
@@ -506,13 +504,15 @@ def demote_incoherent_lx_buffers(
             return
         demoted.add(source_name)
         names = {source_name, *discard_lx_relayout_group(V.graph, source_name)}
-        # Scheduler nodes already contain the live identity copy. Keep it as an
-        # ordinary HBM/pool fallback; removing it here would require rescheduling.
+        # The clone is already rewired and scheduled. Clearing its LX state makes
+        # it an ordinary HBM/pool identity; removing it would require rescheduling.
         for name in names:
             buffer = V.graph.try_get_buffer(name)
             if buffer is None:
                 continue
-            clear_lx_relayout_state(buffer.get_layout())
+            layout = buffer.get_layout()
+            assert isinstance(layout, FixedTiledLayout)
+            clear_lx_state(layout)
         logger.info("demoted %s out of LX: %s", ", ".join(sorted(names)), reason)
 
     for source_name, reason in invalid_sources.items():

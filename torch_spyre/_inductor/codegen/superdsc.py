@@ -114,7 +114,7 @@ class SDSCSpec:
     iteration_space: dict[Symbol, Any]
     num_cores: int
     work_slices: dict[Symbol, Any]
-    core_id_to_work_slice: dict[Symbol | str, Any]
+    core_id_to_work_slice: dict[Symbol, Any]
     padding: dict[Symbol, Any]
     layouts: dict[int, Any]
     args: list[SDSCArgs]
@@ -812,20 +812,15 @@ def _create_sdsc_tensors(
             device_tile_advance_expr=arg.device_tile_advance_expr,
         )
         if arg.work_division is not None:
-            splits = {
-                symbol_mapping.get(dim, dim): split
-                for dim, split in arg.work_division.work_slices.items()
-            }
-            core_map = {
-                symbol_mapping.get(dim, dim): sympify(slot).xreplace(symbol_mapping)
-                for dim, slot in arg.work_division.core_id_to_work_slice.items()
-            }
-            assert all(
-                split == 1 or dim in dim_order for dim, split in splits.items()
-            ), f"tensor ownership split was dropped during normalization: {splits}"
             sdsc_arg.work_division = TensorWorkDivision(
-                {dim: int(splits.get(dim, 1)) for dim in dim_order},
-                {dim: core_map.get(dim, Integer(0)) for dim in dim_order},
+                {
+                    symbol_mapping.get(dim, dim): split
+                    for dim, split in arg.work_division.work_slices.items()
+                },
+                {
+                    symbol_mapping.get(dim, dim): sympify(slot).xreplace(symbol_mapping)
+                    for dim, slot in arg.work_division.core_id_to_work_slice.items()
+                },
             )
         sdsc_args.append(sdsc_arg)
 
@@ -971,14 +966,18 @@ def _finalize_tensor_work_divisions(
     args: list[SDSCArgs],
     mapping_dims: tuple[Symbol, ...],
     work_slices: dict[Symbol, Any],
-    core_map: dict[str, Expr],
+    core_map: dict[Symbol, Expr],
     num_cores: int,
+    allow_overrides: bool,
 ) -> None:
     """Give every tensor one effective ownership after SDSC normalization."""
 
     operation = TensorWorkDivision(
-        {dim: int(work_slices.get(dim, 1)) for dim in mapping_dims},
-        {dim: core_map[str(dim)] for dim in mapping_dims},
+        {dim: int(work_slices[dim]) for dim in mapping_dims},
+        {dim: core_map[dim] for dim in mapping_dims},
+    )
+    assert allow_overrides or all(arg.work_division is None for arg in args), (
+        "tensor ownership overrides require an LX relayout identity"
     )
     for arg in args:
         override = arg.work_division
@@ -1002,6 +1001,7 @@ def _finalize_tensor_work_divisions(
 
 def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     is_matmul = _is_matmul(op_spec.op)
+    is_relayout = is_lx_relayout_identity(op_spec.op, op_spec.args)
     is_pool = _is_pool(op_spec.op)
     ndim = len(op_spec.iteration_space)
     # Detect indirect access from device_coordinates: index tensors are those
@@ -1272,7 +1272,12 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         contiguous_dim=contiguous_dim,
     )
     _finalize_tensor_work_divisions(
-        args, mapping_dims, work_slices, core_id_to_work_slice, num_cores
+        args,
+        mapping_dims,
+        work_slices,
+        core_id_to_work_slice,
+        num_cores,
+        is_relayout,
     )
     # Collect index tensor indices for indirect access
     indirect_access_indices = [
@@ -1283,7 +1288,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         SDSCSpec(
             opfunc=(
                 "shuffle"
-                if is_lx_relayout_identity(op_spec.op, op_spec.args)
+                if is_relayout
                 else _get_op_func(op_spec.op, op_spec.is_reduction, args[-1].scales)
             ),
             execution_unit="pt" if is_matmul else "sfp",

@@ -1493,9 +1493,7 @@ def _remap_work_division(arg: TensorArg, iteration_remap) -> None:
     new_splits: dict[sympy.Symbol, int] = {}
     new_core_map: dict[sympy.Symbol, sympy.Expr] = {}
     for old_dim, split in arg.work_division.work_slices.items():
-        new_dims = iteration_remap.get(old_dim)
-        if new_dims is None:
-            raise ValueError(f"missing normalized mapping for {old_dim}")
+        new_dims = iteration_remap[old_dim]
         remaining_split = int(split)
         split_factors = []
         if len(new_dims) == 1:

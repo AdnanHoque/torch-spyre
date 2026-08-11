@@ -588,12 +588,7 @@ def generate_sdsc(
     }
     operation_work_division = TensorWorkDivision(
         dict(sdsc_spec.work_slices),
-        {
-            dim: sdsc_spec.core_id_to_work_slice[
-                dim if dim in sdsc_spec.core_id_to_work_slice else str(dim)
-            ]
-            for dim in sdsc_spec.work_slices
-        },
+        {dim: sdsc_spec.core_id_to_work_slice[dim] for dim in sdsc_spec.work_slices},
     )
     for tensor in sdsc_spec.args:
         if tensor.work_division is None:
@@ -1084,7 +1079,6 @@ def generate_sdsc(
             dim_str = str(dim)
             scale = tensor.scales[dim]
             is_tiled = scale == 1
-            assert tensor.work_division is not None
             nsplits = tensor.work_division.work_slices[dim] if is_tiled else 1
             size = (
                 _coord_size(dim_str, sdsc_spec.iteration_space[dim], is_input)
@@ -1111,7 +1105,6 @@ def generate_sdsc(
         # DeepTools accepts custom tensor ownership only on shuffle allocations.
         if sdsc_spec.opfunc != "shuffle":
             return {}
-        assert tensor.work_division is not None
         core_id = Symbol("core_id")
         result = {}
         for core in range(sdsc_spec.num_cores):
