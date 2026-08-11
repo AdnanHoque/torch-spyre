@@ -43,6 +43,7 @@ from torch_spyre._inductor.pass_utils import (
     op_read_writes,
     _prepare_per_core_view,
     _per_core_view_from_prep,
+    _op_short_name,
 )
 from torch_spyre._inductor.work_division import enumerate_work_division_candidates
 from torch_spyre._inductor.errors import Unsupported
@@ -89,9 +90,7 @@ from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.lx_relayout import (
     LXRelayoutPlan,
-    clear_lx_relayout_state,
     collect_lx_relayout_plans,
-    discard_lx_relayout_group,
     materialize_lx_relayouts,
 )
 from torch_spyre._inductor.pass_utils import _is_matmul_op
@@ -131,8 +130,6 @@ class ScratchpadAllocator:
     """
     Class for allocating on scratchpad
     """
-
-    supports_lx_relayout = True
 
     def __init__(
         self,
@@ -219,14 +216,9 @@ class ScratchpadAllocator:
 
     def _prepare_buffers(self, graph: GraphLowering) -> Sequence[Any]:
         """Buffers to hand the solver. Base: fixed-division LifetimeBoundBuffers."""
-        self._lx_relayout_plans = (
-            {plan.edge: plan for plan in collect_lx_relayout_plans(graph)}
-            if self.supports_lx_relayout
-            else {}
-        )
-        for name in self._planned_lx_buffers():
-            if layout := getattr(graph.try_get_buffer(name), "layout", None):
-                layout.allocation.pop("lx", None)
+        self._lx_relayout_plans = {
+            plan.edge: plan for plan in collect_lx_relayout_plans(graph)
+        }
         buffers = self._generate_buffers(graph)
         self._append_lx_relayout_destinations(graph, buffers)
         return buffers
@@ -249,7 +241,7 @@ class ScratchpadAllocator:
             plan.source_name for plan in self._lx_relayout_plans.values()
         } - complete
         if rejected:
-            self._clear_lx_relayout_groups(graph, allocation, rejected)
+            self._clear_lx_relayout_groups(allocation, rejected)
         if not complete:
             self._lx_relayout_plans = {}
             stock = self._generate_buffers(graph)
@@ -867,19 +859,16 @@ class ScratchpadAllocator:
         entries = []
         invalid = set()
         for plan in self._lx_relayout_plans.values():
-            source = by_name.get(plan.source_name)
-            consumer_tick = op_index.get(plan.consumer_name)
-            if source is None or source.residency_reason is not None:
-                invalid.add(plan.source_name)
-            elif plan.destination_name in by_name:
-                continue
-            elif consumer_tick is None or consumer_tick not in source.uses:
+            source = by_name[plan.source_name]
+            consumer_tick = op_index[plan.consumer_name]
+            assert consumer_tick in source.uses
+            if source.residency_reason is not None:
                 invalid.add(plan.source_name)
             else:
                 entries.append((source, plan, consumer_tick))
         if invalid:
             entries = [entry for entry in entries if entry[0].name not in invalid]
-            self._clear_lx_relayout_groups(graph, buffers, invalid)
+            self._clear_lx_relayout_groups(buffers, invalid)
         planned_sources = {
             plan.source_name for plan in self._lx_relayout_plans.values()
         }
@@ -918,12 +907,11 @@ class ScratchpadAllocator:
             groups.setdefault(plan.source_name, []).append(plan)
         complete = set()
         for source_name, plans in groups.items():
-            source = by_name.get(source_name)
-            if source is None or source.address is None:
+            source = by_name[source_name]
+            if source.address is None:
                 continue
             if all(
-                (destination := by_name.get(plan.destination_name)) is not None
-                and destination.address is not None
+                (destination := by_name[plan.destination_name]).address is not None
                 and not (
                     source.address < destination.address + destination.size
                     and destination.address < source.address + source.size
@@ -935,7 +923,6 @@ class ScratchpadAllocator:
 
     def _clear_lx_relayout_groups(
         self,
-        graph: GraphLowering,
         allocation: Sequence[LifetimeBoundBuffer],
         sources: set[str],
     ) -> None:
@@ -948,12 +935,6 @@ class ScratchpadAllocator:
         for buffer in allocation:
             if buffer.name in names:
                 buffer.address = None
-        for source_name in sources:
-            copy_names = discard_lx_relayout_group(graph, source_name)
-            if not copy_names:
-                continue
-            for name in {source_name, *copy_names}:
-                clear_lx_relayout_state(graph.get_buffer(name).get_layout())
         self._lx_relayout_plans = {
             edge: plan
             for edge, plan in self._lx_relayout_plans.items()
@@ -1063,30 +1044,6 @@ def _fixed_core_division(op: Operation) -> CoreDivision:
     """
     seed: tuple[dict, dict] = getattr(op, "op_it_space_splits", None) or ({}, {})
     return CoreDivision(output_splits=dict(seed[0]), reduction_splits=dict(seed[1]))
-
-
-def _op_short_name(op: Any) -> str:
-    """Resolve an op's short name from its ``origin_node`` target, falling back
-    to each fused fx node in ``op.origins``; ``"None"`` when unresolvable.
-
-    ``origin_node`` is tried first (independent of ``origins``, which may be
-    empty), so a plain op still resolves; the ``origins`` fallback recovers a
-    fused op like bmm+permute, whose ``origin_node`` target has no resolvable
-    name and would otherwise resolve to ``"None"`` and be wrongly rejected as
-    "op not allowed". Module-level so ``ScratchpadAllocator._get_op_name``
-    delegates to one implementation.
-    """
-    name = None
-    for fx_node in (getattr(op, "origin_node", None), *getattr(op, "origins", ())):
-        target = getattr(fx_node, "target", None)
-        name = (
-            getattr(target, "_opname", None)
-            or getattr(target, "__name__", None)
-            or getattr(target, "name", None)
-        )
-        if name is not None:
-            break
-    return name if name is not None else "None"
 
 
 DEFAULT_VARIANT_CAP = 6
@@ -1482,8 +1439,6 @@ class StrategyBCoOptimizingAllocator(ScratchpadAllocator):
     space, the worst case matches ScratchpadAllocator.
     """
 
-    supports_lx_relayout = False
-
     def plan_allocation(self, graph: GraphLowering):
         for p in self.pre_optimization_passes:
             p.apply_pass(graph)
@@ -1677,8 +1632,6 @@ class StrategyBCoOptimizingAllocator(ScratchpadAllocator):
 
 
 class CoOptimizingAllocator(ScratchpadAllocator):
-    supports_lx_relayout = False
-
     def __init__(
         self,
         layout_planning: CoreDivisionSolverFactory,

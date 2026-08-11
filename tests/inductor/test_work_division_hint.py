@@ -37,6 +37,7 @@ from torch._inductor.utils import run_and_get_code, InputType
 
 
 from torch_spyre._inductor import config, spyre_hint
+import torch_spyre._inductor.lx_relayout as lx_relayout_module
 import torch_spyre._inductor.scheduler as scheduler_module
 import torch_spyre._inductor.work_division as _wd
 import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
@@ -549,6 +550,25 @@ def _relayout_plan(source="source", consumer="consumer"):
     return LXRelayoutPlan(source, consumer, _SOURCE_VIEW, _DESTINATION_VIEW, 8)
 
 
+def test_lx_relayout_activation_policy_is_source_wide():
+    dep = SimpleNamespace(name="input")
+    producer = SimpleNamespace()
+    with (
+        mock_patch.object(
+            lx_relayout_module, "_op_short_name", return_value="restickify"
+        ),
+        mock_patch.object(
+            lx_relayout_module,
+            "op_read_writes",
+            return_value=SimpleNamespace(reads=[dep]),
+        ),
+        mock_patch.object(lx_relayout_module, "MemoryDep", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "ComputedBuffer", SimpleNamespace),
+    ):
+        assert not lx_relayout_module._is_activation_source({}, producer)
+        assert lx_relayout_module._is_activation_source({"input": dep}, producer)
+
+
 def _compile_spec(spec, normalize=True):
     if normalize:
         simplify_op_spec(spec)
@@ -592,6 +612,8 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
     maps = [node["coordinates_"]["coreIdToWkSlice_"] for node in allocations]
     assert [maps[0][str(i)]["x"] for i in range(8)] == list(range(8))
     assert [maps[1][str(i)]["x"] for i in range(8)] == list(reversed(range(8)))
+    with pytest.raises(ValueError, match="cannot map device dimension"):
+        work_division_from_view(source_view, [Integer(0), m + n, Integer(0)], (m, n))
 
     for arg in spec.args:
         arg.work_division = None
@@ -687,8 +709,8 @@ def test_lx_relayout_two_private_consumers_are_numerically_correct(second_consum
 
 
 def test_lx_relayout_allocation_is_atomic_and_retries_stock_once():
-    complete = _relayout_plan("complete", "a")
-    incomplete = _relayout_plan("incomplete", "b")
+    complete = [_relayout_plan("complete", name) for name in ("a", "b")]
+    incomplete = [_relayout_plan("incomplete", name) for name in ("c", "d")]
 
     class Solver:
         calls = 0
@@ -699,7 +721,13 @@ def test_lx_relayout_allocation_is_atomic_and_retries_stock_once():
         def plan_layout(self, log_lx_usage=False):
             Solver.calls += 1
             addresses = (
-                {"complete": 0, complete.destination_name: 256, "incomplete": 512}
+                {
+                    "complete": 0,
+                    complete[0].destination_name: 256,
+                    complete[1].destination_name: 512,
+                    "incomplete": 768,
+                    incomplete[0].destination_name: 1024,
+                }
                 if Solver.calls == 1
                 else {"incomplete": 0}
             )
@@ -713,36 +741,46 @@ def test_lx_relayout_allocation_is_atomic_and_retries_stock_once():
             graph, solver, allocator._solve(solver)
         )[1]
 
-    allocator = ScratchpadAllocator(Solver, 1024)
-    allocator._lx_relayout_plans = {p.edge: p for p in (complete, incomplete)}
-    names = [
-        "complete",
-        complete.destination_name,
-        "incomplete",
-        incomplete.destination_name,
-    ]
+    allocator = ScratchpadAllocator(Solver, 2048)
+    plans = [*complete, *incomplete]
+    allocator._lx_relayout_plans = {plan.edge: plan for plan in plans}
+    graph = SimpleNamespace(
+        operations=[
+            SimpleNamespace(get_name=lambda name=name: name)
+            for name in ("a", "b", "c", "d")
+        ]
+    )
     buffers = [
-        LifetimeBoundBuffer(name, 128, [i, i + 1]) for i, name in enumerate(names)
+        LifetimeBoundBuffer("complete", 128, [0, 1]),
+        LifetimeBoundBuffer("incomplete", 128, [2, 3]),
     ]
-    allocation = solve(allocator, buffers, SimpleNamespace())
+    allocator._append_lx_relayout_destinations(graph, buffers)
+    allocation = solve(allocator, buffers, graph)
     by_name = {buffer.name: buffer for buffer in allocation}
     assert by_name["complete"].address == 0
-    assert by_name[complete.destination_name].address == 256
+    assert [by_name[plan.destination_name].uses for plan in complete] == [
+        [0, 1],
+        [2, 3],
+    ]
+    assert [by_name[plan.destination_name].address for plan in complete] == [256, 512]
     assert by_name["incomplete"].address is None
-    assert allocator._lx_relayout_plans == {complete.edge: complete}
+    assert all(by_name[plan.destination_name].address is None for plan in incomplete)
+    assert allocator._lx_relayout_plans == {plan.edge: plan for plan in complete}
 
     Solver.calls = 0
     allocator = ScratchpadAllocator(Solver, 1024)
-    allocator._lx_relayout_plans = {incomplete.edge: incomplete}
-    layout = SimpleNamespace(allocation={}, lx_view=None, lx_consumer_is_matmul=False)
+    allocator._lx_relayout_plans = {plan.edge: plan for plan in incomplete}
     graph = SimpleNamespace(
-        _spyre_lx_relayout_copies={},
-        get_buffer=lambda _name: SimpleNamespace(layout=layout),
+        operations=[
+            SimpleNamespace(get_name=lambda name=name: name) for name in ("c", "d")
+        ]
     )
+    buffers = [LifetimeBoundBuffer("incomplete", 128, [0, 1])]
+    allocator._append_lx_relayout_destinations(graph, buffers)
     allocator._generate_buffers = lambda _graph: [
         LifetimeBoundBuffer("incomplete", 128, [2, 3])
     ]
-    fallback = solve(allocator, buffers[2:], graph)
+    fallback = solve(allocator, buffers, graph)
     assert [(buffer.name, buffer.address) for buffer in fallback] == [("incomplete", 0)]
     assert Solver.calls == 2
 
@@ -824,14 +862,17 @@ def test_lx_relayout_scheduler_demotes_groups_but_not_ordinary_unary():
         with (
             mock_patch.object(scheduler_module, "SchedulerNode", _RelayoutNode),
             mock_patch.object(scheduler_module, "MemoryDep", SimpleNamespace),
+            mock_patch.object(scheduler_module, "FixedTiledLayout", SimpleNamespace),
             mock_patch.object(scheduler_module, "V", SimpleNamespace(graph=graph)),
             mock_patch.object(scheduler_module, "per_core_view_scheduled", view),
             config.patch({"lx_planning": True}),
         ):
             scheduler_module.demote_incoherent_lx_buffers(nodes)
         assert graph._spyre_lx_relayout_copies == {}
+        assert graph.try_get_buffer("destination") is not None
         assert "lx" not in layouts["source"].allocation
         assert "lx" not in layouts["destination"].allocation
+        assert layouts["destination"].lx_view is None
         assert "lx" not in layouts["ordinary_source"].allocation
         assert "lx" in layouts["ordinary_unary"].allocation
 
