@@ -504,7 +504,12 @@ def demote_incoherent_lx_buffers(
         names = {source_name, *copies_by_source.get(source_name, set())}
         discard_lx_relayout_group(V.graph, source_name)
         for name in names:
-            layout = getattr(V.graph.get_buffer(name), "layout")
+            buffer = V.graph.try_get_buffer(name)
+            layout = getattr(buffer, "layout", None)
+            if layout is None:
+                continue
+            if not hasattr(layout, "allocation"):
+                continue
             layout.allocation.pop("lx", None)
             layout.lx_view = None
             layout.lx_consumer_is_matmul = False

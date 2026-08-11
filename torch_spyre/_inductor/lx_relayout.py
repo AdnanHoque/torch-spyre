@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from collections.abc import Sequence
 from typing import cast
 
 import sympy
@@ -31,6 +32,7 @@ from torch._inductor.ir import (
 from . import config
 from .ir import FixedTiledLayout
 from .logging_utils import get_inductor_logger
+from .op_spec import TensorWorkDivision
 from .pass_utils import (
     PerCoreView,
     _is_matmul_op,
@@ -67,6 +69,33 @@ class LXRelayoutPlan:
     @property
     def edge(self) -> tuple[str, str]:
         return self.source_name, self.consumer_name
+
+
+def work_division_from_view(
+    view: PerCoreView | None,
+    device_coordinates: Sequence[sympy.Expr],
+    iteration_symbols: Sequence[sympy.Symbol],
+) -> TensorWorkDivision | None:
+    """Project physical per-core ownership into operation-loop symbols."""
+
+    if view is None:
+        return None
+    loop_symbols = set(iteration_symbols)
+    splits: dict[sympy.Symbol, int] = {}
+    core_map: dict[sympy.Symbol, sympy.Expr] = {}
+    for device_dim, split in view.work_slice_dims:
+        if device_dim >= len(device_coordinates):
+            raise ValueError(f"missing device coordinate {device_dim}")
+        matches = device_coordinates[device_dim].free_symbols & loop_symbols
+        if len(matches) != 1:
+            raise ValueError(f"cannot map device dimension {device_dim} to one loop")
+        dim = next(iter(matches))
+        slot = sympy.sympify(dict(view.core_to_slot).get(device_dim, 0))
+        if dim in splits and (splits[dim], core_map[dim]) != (split, slot):
+            raise ValueError(f"conflicting ownership for loop {dim}")
+        splits[dim] = split
+        core_map[dim] = slot
+    return TensorWorkDivision(splits, core_map)
 
 
 def materialized_lx_relayouts(
@@ -150,27 +179,6 @@ def _compatible_partitions(
     )
 
 
-def _views_fit_coordinates(
-    coordinates: list[sympy.Expr],
-    symbols: set[sympy.Symbol],
-    *views: PerCoreView,
-) -> bool:
-    for view in views:
-        seen: dict[sympy.Symbol, int] = {}
-        for device_dim, split in view.work_slice_dims:
-            if device_dim >= len(coordinates):
-                return False
-            matches = coordinates[device_dim].free_symbols & symbols
-            if split > 1 and len(matches) != 1:
-                return False
-            if matches:
-                dim = next(iter(matches))
-                if dim in seen and seen[dim] != split:
-                    return False
-                seen[dim] = split
-    return True
-
-
 def _single_write(op: ComputedBuffer, name: str) -> MemoryDep | None:
     writes = [
         dep
@@ -178,6 +186,25 @@ def _single_write(op: ComputedBuffer, name: str) -> MemoryDep | None:
         if isinstance(dep, MemoryDep) and dep.name == name
     ]
     return writes[0] if len(writes) == 1 and not writes[0].is_indirect() else None
+
+
+def _op_short_name(op: Operation) -> str:
+    for fx_node in (getattr(op, "origin_node", None), *getattr(op, "origins", ())):
+        target = getattr(fx_node, "target", None)
+        for attr in ("_opname", "__name__", "name"):
+            if name := getattr(target, attr, None):
+                return str(name)
+    return "None"
+
+
+def _is_activation_source(operations: dict[str, Operation], op: Operation) -> bool:
+    """Exclude restickified graph inputs and weights from activation relayout."""
+
+    return _op_short_name(op) != "restickify" or any(
+        isinstance(operations.get(dep.name), ComputedBuffer)
+        for dep in op_read_writes(op).reads
+        if isinstance(dep, MemoryDep)
+    )
 
 
 def collect_lx_relayout_plans(
@@ -260,22 +287,35 @@ def collect_lx_relayout_plans(
                 continue
             is_matmul = _is_matmul_op(consumer)
             if (not is_matmul and not isinstance(consumer.data, Pointwise)) or (
-                is_matmul and read_index not in (0, 1)
-            ):
-                break
-            coordinates = try_device_coordinates(
-                producer.layout.device_layout, dep, None
-            )
-            if (
-                not _compatible_partitions(source_view, view, num_cores)
-                or coordinates is None
-                or not _views_fit_coordinates(
-                    coordinates,
-                    set(iteration_space_from_op(consumer)),
-                    source_view,
-                    view,
+                is_matmul
+                and (
+                    not _is_activation_source(operations, producer)
+                    or read_index not in (0, 1)
                 )
             ):
+                break
+            consumer_coordinates = try_device_coordinates(
+                producer.layout.device_layout, dep, None
+            )
+            producer_coordinates = try_device_coordinates(
+                producer.layout.device_layout, write, None
+            )
+            if not _compatible_partitions(source_view, view, num_cores):
+                break
+            if consumer_coordinates is None or producer_coordinates is None:
+                break
+            try:
+                consumer_symbols = tuple(iteration_space_from_op(consumer))
+                work_division_from_view(
+                    source_view, consumer_coordinates, consumer_symbols
+                )
+                work_division_from_view(view, consumer_coordinates, consumer_symbols)
+                work_division_from_view(
+                    source_view,
+                    producer_coordinates,
+                    tuple(iteration_space_from_op(producer)),
+                )
+            except ValueError:
                 break
             source_plans.append(
                 LXRelayoutPlan(

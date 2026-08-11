@@ -17,6 +17,7 @@ import dataclasses
 
 from torch_spyre._C import encode_constant, DataFormats
 from torch_spyre._inductor.errors import Unsupported
+from torch_spyre._inductor.op_spec import TensorWorkDivision
 from torch_spyre._inductor.pass_utils import coeff_through_floor
 from sympy import Symbol, sympify
 
@@ -585,6 +586,12 @@ def generate_sdsc(
         }
         for c in range(sdsc_spec.num_cores)
     }
+    operation_work_division = TensorWorkDivision(
+        sdsc_spec.work_slices, sdsc_spec.core_id_to_work_slice
+    )
+    for tensor in sdsc_spec.args:
+        if tensor.work_division is None:
+            tensor.work_division = operation_work_division
     symbolic_dims = sdsc_spec.symbolic_dims or {}
 
     # Register dimension symbols BEFORE address symbols so their IDs never collide.
@@ -1095,18 +1102,24 @@ def generate_sdsc(
         return result
 
     def _tensor_core_map(tensor) -> dict[str, dict[str, int]]:
-        assert tensor.work_division is not None
         # DeepTools accepts custom tensor ownership only on shuffle allocations.
         if sdsc_spec.opfunc != "shuffle":
             return {}
+        assert tensor.work_division is not None
         core_id = Symbol("core_id")
-        return {
-            str(core): {
-                str(dim): int(sympify(slot).subs(core_id, core))
-                for dim, slot in tensor.work_division.core_id_to_work_slice.items()
-            }
-            for core in range(sdsc_spec.num_cores)
-        }
+        result = {}
+        for core in range(sdsc_spec.num_cores):
+            slots = {}
+            for dim, expression in tensor.work_division.core_id_to_work_slice.items():
+                slot = int(sympify(expression).subs(core_id, core))
+                split = tensor.work_division.work_slices[dim]
+                if not 0 <= slot < split:
+                    raise ValueError(
+                        f"core {core} owns invalid {dim} slot {slot} for split {split}"
+                    )
+                slots[str(dim)] = slot
+            result[str(core)] = slots
+        return result
 
     def _filter_window_dims(dims: list) -> list:
         """Drop the op's reduction-window dims (e.g. pool ki/kj) from a dim order.
