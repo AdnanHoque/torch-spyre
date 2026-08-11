@@ -26,6 +26,13 @@ exact tolerance, and the only one that pins the feature flag.
 C's cost is that it inherited B's lifetime model (`buffer.uses = [2*use + 1 ...]`)
 without A's producer-input liveness guard. Item 1 below is that guard.
 
+## Status
+
+Superseded in part by `LX_RELAYOUT_PASS2_REPORT.md`, which reviews the hardening commit
+`c60f5d81`: six of the seven blocking items below are now closed. Read that first — this
+file remains the reference for the reasoning behind each item and for the significant,
+cleanup, deletion and test sections, which are largely still open.
+
 ## How to read this
 
 Items are ordered so they can be worked in a single pass. Each carries its file:line,
