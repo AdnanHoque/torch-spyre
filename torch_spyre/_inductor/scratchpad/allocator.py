@@ -2382,6 +2382,11 @@ def select_allocator() -> ScratchpadAllocator:
                 return ScratchpadAllocator(
                     layout_planning=GreedyLayoutSolver, size=size
                 )
+            if config.lx_planner_relayout:
+                logger.warning(
+                    "LX relayout is not supported by CoOptimizingAllocator; "
+                    "using stock LX placement"
+                )
             return CoOptimizingAllocator(layout_planning=solver, size=size)
         # Placement-only CP-SAT on the pre-determined core divisions.
         if solver is None:
@@ -2399,6 +2404,11 @@ def select_allocator() -> ScratchpadAllocator:
         )
 
     if config.co_optimizing_lx_planning:
+        if config.lx_planner_relayout:
+            logger.warning(
+                "LX relayout is not supported by StrategyBCoOptimizingAllocator; "
+                "using stock LX placement"
+            )
         return StrategyBCoOptimizingAllocator(layout_planning=solver_cls, size=size)
     return ScratchpadAllocator(layout_planning=solver_cls, size=size)
 

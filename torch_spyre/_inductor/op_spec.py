@@ -25,6 +25,8 @@ from torch_spyre._C import DataFormats, ElementArrangement
 import torch
 from torch_spyre import _C
 
+from .constants import IDENTITY_OP
+
 
 class IndirectAccess(Function):
     """Sympy function: IndirectAccess(tensor_name) — runtime index read from that tensor at the current iteration point.
@@ -139,7 +141,12 @@ class DebugHandle:
 
 @dataclasses.dataclass(frozen=True)
 class TensorWorkDivision:
-    """Which tensor region each core owns."""
+    """Tensor ownership expressed in operation-loop symbols.
+
+    Both mappings have the same symbol keys. ``work_slices`` gives each loop's
+    split count and ``core_id_to_work_slice`` maps the free symbol ``core_id``
+    to that loop's owned slice.
+    """
 
     work_slices: dict[Symbol, int]
     core_id_to_work_slice: dict[Symbol, Expr]
@@ -196,7 +203,7 @@ class TensorArg:
 def is_lx_relayout_identity(op: str, args: Sequence[TensorArg]) -> bool:
     """An LX identity whose input and output have different owners."""
 
-    if op != "identity" or len(args) != 2:
+    if op != IDENTITY_OP or len(args) != 2:
         return False
     source, destination = args
     return (

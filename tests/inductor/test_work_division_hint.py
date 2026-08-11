@@ -43,15 +43,15 @@ import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec, parse_op_spec
 from torch_spyre._inductor.constants import IDENTITY_OP
-from torch_spyre._inductor.lx_relayout import LXRelayoutPlan
-from torch_spyre._inductor.op_spec import OpSpec, TensorArg
+from torch_spyre._inductor.lx_relayout import (
+    LXRelayoutPlan,
+    work_division_from_view,
+)
+from torch_spyre._inductor.op_spec import OpSpec, TensorArg, TensorWorkDivision
 from torch_spyre._inductor.pass_utils import PerCoreView
 from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
 from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
-from torch_spyre._inductor.spyre_kernel import (
-    _work_division_from_view,
-    simplify_op_spec,
-)
+from torch_spyre._inductor.spyre_kernel import _remap_work_division, simplify_op_spec
 
 _LAUNCH_JOBPLAN = "torch_spyre.execution.kernel_runner.launch_jobplan"
 _PREPARE_KERNEL = "torch_spyre.execution.kernel_runner.prepare_kernel"
@@ -571,13 +571,13 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
     args = [
         replace(
             base,
-            work_division=_work_division_from_view(source_view, coordinates, (m, n)),
+            work_division=work_division_from_view(source_view, coordinates, (m, n)),
         ),
         replace(
             base,
             is_input=False,
             allocation={"lx": 256},
-            work_division=_work_division_from_view(
+            work_division=work_division_from_view(
                 destination_view, coordinates, (m, n)
             ),
             lx_consumer_is_matmul=True,
@@ -587,6 +587,7 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
     root, allocations = _compile_spec(spec)
     assert spec.op == IDENTITY_OP
     assert set(root["dscs_"][0]) == {"shuffle"}
+    assert root["dscs_"][0]["shuffle"]["labeledDs_"][0]["dsType_"] == "KERNEL"
     assert all(arg.work_division.work_slices == {Symbol("z0"): 8} for arg in spec.args)
     maps = [node["coordinates_"]["coreIdToWkSlice_"] for node in allocations]
     assert [maps[0][str(i)]["x"] for i in range(8)] == list(range(8))
@@ -602,6 +603,19 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
         not node["coordinates_"]["coreIdToWkSlice_"] for node in ordinary_allocations
     )
 
+    old, inner, outer = Symbol("old"), Symbol("inner"), Symbol("outer")
+    remapped = replace(
+        base,
+        work_division=TensorWorkDivision({old: 16}, {old: Mod(_CORE_ID, 16)}),
+    )
+    _remap_work_division(remapped, {old: ((inner, 2), (outer, 8))})
+    assert remapped.work_division is not None
+    core_three = {
+        dim: int(slot.subs(_CORE_ID, 3))
+        for dim, slot in remapped.work_division.core_id_to_work_slice.items()
+    }
+    assert core_three == {inner: 1, outer: 1}
+
 
 @config.patch(
     {
@@ -613,39 +627,51 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
 )
 def test_lx_relayout_two_private_consumers_are_numerically_correct():
     torch.manual_seed(0)
-    x = torch.randn(128, 256, dtype=torch.float16)
-    _declare_tensor_dim("M", 128)
-    _declare_tensor_dim("N", 256)
+    x = torch.randn(8, 32, 64, dtype=torch.float16)
+    weight = torch.randn(8, 64, 32, dtype=torch.float16)
+    for name, size in (("B", 8), ("M", 32), ("K", 64), ("N", 32)):
+        _declare_tensor_dim(name, size)
 
-    def fn(x):
-        with spyre_hint(work_div={"M": 4, "N": 2}):
+    def fn(x, weight):
+        with spyre_hint(work_div={"B": 4, "M": 2}):
             hidden = torch.neg(x)
-        with spyre_hint(work_div={"M": 2, "N": 4}):
-            a = torch.relu(hidden)
-        with spyre_hint(work_div={"M": 8}):
-            b = torch.abs(hidden)
-        return a, b
+        with spyre_hint(work_div={"B": 2, "M": 4}):
+            pointwise = torch.relu(hidden)
+        with spyre_hint(work_div={"B": 8}):
+            matmul = torch.bmm(hidden, weight)
+        return pointwise, matmul
 
-    device_x = _name_tensor_dims(x.to("spyre"), ["M", "N"])
+    device_x = _name_tensor_dims(x.to("spyre"), ["B", "M", "K"])
+    device_weight = _name_tensor_dims(weight.to("spyre"), ["B", "K", "N"])
+    torch._inductor.codecache.FxGraphCache.clear()
     actual, code = run_and_get_code(
-        torch.compile(fn, dynamic=False, options={"epilogue_fusion": False}), device_x
+        torch.compile(fn, dynamic=False, options={"epilogue_fusion": False}),
+        device_x,
+        device_weight,
     )
-    for got, expected in zip(actual, fn(x)):
-        torch.testing.assert_close(got.cpu(), expected)
+    for got, expected in zip(actual, fn(x, weight)):
+        torch.testing.assert_close(got.cpu(), expected, rtol=2e-2, atol=1e-1)
     generated = "\n".join(code)
     identities = [
         block for block in generated.split("OpSpec(") if "op='identity'" in block[:100]
     ]
+    ordinary = [
+        block
+        for block in generated.split("OpSpec(")
+        if "op='" in block[:100] and "op='identity'" not in block[:100]
+    ]
+    assert all("work_division=" not in block for block in ordinary)
     divisions = [
         re.findall(r"TensorWorkDivision\(work_slices=\{([^}]*)", block)
         for block in identities
     ]
     assert len(divisions) == 2 and all(len(pair) == 2 for pair in divisions)
-    assert divisions[0][0] == divisions[1][0]
+    assert {divisions[0][0], divisions[1][0]} == {"sympify('c1'): 2, sympify('c0'): 4"}
     assert {divisions[0][1], divisions[1][1]} == {
         "sympify('c1'): 4, sympify('c0'): 2",
         "sympify('c0'): 8",
     }
+    assert sum("lx_consumer_is_matmul=True" in block for block in identities) == 1
 
 
 def test_lx_relayout_allocation_is_atomic_and_retries_stock_once():

@@ -45,8 +45,8 @@ from .constants import (
 from . import config as _spyre_config
 from .errors import Unsupported
 from .ir import FixedTiledLayout
+from .lx_relayout import work_division_from_view
 from .pass_utils import (
-    PerCoreView,
     concretize_expr,
     concretize_index,
     compute_symbolic_bounds,
@@ -66,41 +66,12 @@ from .op_spec import (
     TensorWorkDivision,
     UnimplementedOp as OpSpecUnimplementedOp,
     format_op_spec_list,
+    is_lx_relayout_identity,
 )
 from torch_spyre._inductor.provenance import build_debug_handle
 import logging
 
 logger = get_inductor_logger("spyre_kernel")
-
-
-def _work_division_from_view(
-    view: PerCoreView | None,
-    device_coordinates: Sequence[sympy.Expr],
-    iteration_symbols: Sequence[sympy.Symbol],
-) -> TensorWorkDivision | None:
-    """Project a physical per-core view into an operation's loop symbols."""
-
-    if view is None:
-        return None
-    loop_symbols = set(iteration_symbols)
-    slot_by_device_dim = dict(view.core_to_slot)
-    work_slices: dict[sympy.Symbol, int] = {}
-    core_map: dict[sympy.Symbol, sympy.Expr] = {}
-    for device_dim, split in view.work_slice_dims:
-        if device_dim >= len(device_coordinates):
-            raise ValueError(f"LX view uses missing device dimension {device_dim}")
-        loop_dims = device_coordinates[device_dim].free_symbols & loop_symbols
-        if len(loop_dims) != 1:
-            raise ValueError(
-                f"LX view dimension {device_dim} does not map to one loop symbol"
-            )
-        dim = next(iter(loop_dims))
-        slot = slot_by_device_dim.get(device_dim, sympy.S.Zero)
-        if dim in work_slices and (work_slices[dim], core_map[dim]) != (split, slot):
-            raise ValueError(f"conflicting LX ownership for loop symbol {dim}")
-        work_slices[dim] = int(split)
-        core_map[dim] = slot
-    return TensorWorkDivision(work_slices, core_map)
 
 
 class RValue(ABC):
@@ -797,7 +768,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             index,
             self.indirect_sizes,
         )
-        work_division = _work_division_from_view(
+        work_division = work_division_from_view(
             tensor.layout.lx_view if "lx" in tensor.layout.allocation else None,
             device_coords,
             tuple(it_space),
@@ -978,6 +949,11 @@ class SpyreKernel(Kernel[CSEVariable]):
             and hasattr(ir_node.data, "ranges")
             else None
         )
+
+        if not is_lx_relayout_identity(op, args):
+            for arg in args:
+                arg.work_division = None
+                arg.lx_consumer_is_matmul = False
 
         return OpSpec(
             op,
@@ -1535,9 +1511,8 @@ def _remap_work_division(arg: TensorArg, iteration_remap) -> None:
             raise ValueError(f"cannot normalize {split}-way split on {old_dim}")
 
         slot = arg.work_division.core_id_to_work_slice[old_dim]
-        slot_stride = math.prod(factor for _, factor in split_factors)
+        slot_stride = 1
         for new_dim, factor in split_factors:
-            slot_stride //= factor
             if factor == 1:
                 continue
             new_slot = sympy.Mod(sympy.floor(slot / slot_stride), factor)
@@ -1548,6 +1523,7 @@ def _remap_work_division(arg: TensorArg, iteration_remap) -> None:
                 raise ValueError(f"conflicting normalized ownership on {new_dim}")
             new_splits[new_dim] = factor
             new_core_map[new_dim] = new_slot
+            slot_stride *= factor
     arg.work_division = TensorWorkDivision(new_splits, new_core_map)
 
 

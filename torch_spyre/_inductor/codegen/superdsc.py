@@ -966,29 +966,35 @@ def _extend_matmul_k_to_padded(
 
 def _finalize_tensor_work_divisions(
     args: list[SDSCArgs],
+    mapping_dims: tuple[Symbol, ...],
     work_slices: dict[Symbol, Any],
     core_map: dict[str, Expr],
+    num_cores: int,
 ) -> None:
     """Give every tensor one effective ownership after SDSC normalization."""
 
-    dims = tuple(work_slices)
     operation = TensorWorkDivision(
-        {dim: int(work_slices[dim]) for dim in dims},
-        {dim: core_map[str(dim)] for dim in dims},
+        {dim: int(work_slices.get(dim, 1)) for dim in mapping_dims},
+        {dim: core_map[str(dim)] for dim in mapping_dims},
     )
     for arg in args:
         override = arg.work_division
-        arg.work_division = (
+        effective = (
             operation
             if override is None
             else TensorWorkDivision(
-                {dim: int(override.work_slices.get(dim, 1)) for dim in dims},
+                {dim: int(override.work_slices.get(dim, 1)) for dim in mapping_dims},
                 {
                     dim: override.core_id_to_work_slice.get(dim, Integer(0))
-                    for dim in dims
+                    for dim in mapping_dims
                 },
             )
         )
+        if math.prod(effective.work_slices.values()) != num_cores:
+            raise ValueError(
+                f"tensor ownership uses {effective.work_slices}, expected {num_cores} cores"
+            )
+        arg.work_division = effective
 
 
 def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
@@ -1262,7 +1268,9 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         num_cores,
         contiguous_dim=contiguous_dim,
     )
-    _finalize_tensor_work_divisions(args, work_slices, core_id_to_work_slice)
+    _finalize_tensor_work_divisions(
+        args, mapping_dims, work_slices, core_id_to_work_slice, num_cores
+    )
 
     # Collect index tensor indices for indirect access
     indirect_access_indices = [
