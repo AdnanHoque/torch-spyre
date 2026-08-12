@@ -24,6 +24,13 @@ The strongest opportunity is to place data in the work division required by the 
 
 The expert-weight transfer itself is primarily HBM-to-LX. Core-to-core communication becomes important when adjacent operations use different work divisions or when routed results are returned to token order.
 
+The strategic ownership decision is narrower than "MoE support": build the
+segment-aware grouped-matmul substrate that lets a runtime expert id select an
+HBM-resident weight slab for a complete activation tile without materializing
+one weight copy per routed row. Router and generic indirect-access fixes are
+dependencies; this expert-execution primitive is where our matmul expertise can
+produce the largest differentiated performance contribution.
+
 ## Why this angle matters
 
 The current multicore gather direction in PR 2699 parallelizes over the index dimension. It explicitly leaves value-dimension parallelism for small-index workloads such as MoE as future work.
@@ -85,6 +92,24 @@ consume grouped activations, segment boundaries or tile expert ids, and the
 resident expert-weight stack without materializing a routed `[N, H, F]` weight
 tensor.
 
+A deliberately narrow operation contract is preferable to a general
+data-dependent operand-selection hint:
+
+```text
+grouped_mm(
+    x_pad,          # [num_tiles, TILE, K]
+    expert_weights, # [num_experts, K, N], resident in HBM
+    tile_expert,    # [num_tiles]
+) -> [num_tiles, TILE, N]
+```
+
+For tile `t`, `tile_expert[t]` selects the HBM base of one expert weight. The
+selected slab is consumed directly by the existing PT matmul path and is never
+materialized as `[num_tiles, K, N]`. The implementation should reuse the
+existing BMM lowering, coarse-tile loop machinery, work division, and memory
+planning. The genuinely new capability is a runtime-selected RHS base whose
+lifetime and work division are tied to the consuming matmul.
+
 ### The missing planning problem
 
 The dense matmul planner scores one rectangular `(B, M, N, K)` problem. MoE
@@ -118,6 +143,33 @@ is especially important for decode: with very few routes spread across many
 experts, nearly every active segment may contain one row, so grouping adds
 bookkeeping without reducing weight loads.
 
+### Ring-native two-projection schedule
+
+The highest-value grouped implementation should co-design the gate/up and down
+projections instead of optimizing three independent matmuls:
+
+```text
+grouped activation tile in LX
+    -> RIU/LX fan-out to gate/up weight-shard owners
+    -> gate/up against N-sharded HBM weights
+    -> activation remains N-sharded in LX
+    -> same partition becomes the down-projection K partition
+    -> local down-projection partials
+    -> SFP-ring reduction to the expert-output owner
+```
+
+This assigns the two on-chip fabrics complementary roles:
+
+- RIU/LX movement distributes the smaller activation tile to stationary
+  expert-weight shards;
+- the SFP ring combines down-projection partial sums while keeping the
+  gate/up intermediate off HBM.
+
+K-split matmul reduction is not itself the new algorithm. The contribution is
+the coupled expert schedule: expert placement, activation fan-out, gate/up N
+ownership, down K ownership, and the final reduction are chosen together so
+the intermediate distribution is useful rather than repaired through HBM.
+
 ### Why tile size cannot be fixed
 
 The following numbers are model estimates under uniform random routing, not
@@ -135,6 +187,27 @@ not that tile 32 is always wrong; it is that tile selection must use the actual
 or representative route distribution. Useful candidates are likely to include
 small tiles for sparse decode and larger tiles when prefill provides enough
 rows per active expert.
+
+The corresponding weight-traffic opportunity is substantial in prefill. For
+the 128-expert, top-8, `H=2816`, `F=704` configuration, gate/up plus down contain
+about 11.9 MB of FP16 weights per expert. Under the same uniform-routing model:
+
+| Tokens | Routed rows | Per-row weight traffic | Grouped tile-32 traffic | Reduction |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 8 | 0.095 GB | 0.095 GB | 1.0x |
+| 64 | 512 | 6.09 GB | about 1.50 GB | about 4.1x |
+| 512 | 4,096 | 48.72 GB | about 2.21 GB | about 22.0x |
+
+These are analytical slab-read counts, not device measurements. They exclude
+cache effects, overlap, quantization, and compiler materializations. They show
+why the same implementation should not be expected to win identically across
+regimes:
+
+- prefill can win primarily through reuse of each expert weight across many
+  routed rows;
+- single-token decode has no within-expert weight reuse and must win through
+  parallel expert waves, efficient tiny-M matmul, LX-resident intermediates,
+  and on-ring output reduction.
 
 ## Proposed workstreams
 
@@ -181,16 +254,19 @@ Proposed outcome:
 This is the strategic matmul workstream. It determines whether MoE merely runs
 or turns expert-weight reuse into device-time savings.
 
-### 4. LX-resident expert-tile pipeline
+### 4. Dual-fabric LX-resident expert-tile pipeline
 
 Keep the compatible region from the gate/up BMM through activation and down BMM in LX.
 
 Proposed outcome:
 
-- Align adjacent work divisions where possible.
+- Place active experts in physically coherent core cohorts.
+- Use RIU/LX fan-out for activation delivery to gate/up weight shards.
+- Align gate/up N ownership with down-projection K ownership.
+- Use the SFP ring for down-projection partial-sum reduction.
 - Use LX relayout only at real ownership boundaries.
 - Allocate every source and destination with valid overlapping lifetimes.
-- Prove the emitted LX payload and absence of unintended HBM or DMA transport.
+- Prove the emitted LX and SFP payloads and absence of unintended HBM or DMA transport.
 
 This is the workstream most directly connected to our existing core-to-core relayout expertise.
 
@@ -228,13 +304,28 @@ Planner telemetry or a correct output alone is not proof that the intended trans
 1. Fix the partial-stick reshape in issue 3634.
 2. Measure the direct per-route BMM for sparse decode shapes.
 3. Use precomputed grouping tables to isolate one expert tile from router and grouping complexity.
-4. Implement the consumer-shaped expert gather for that tile.
-5. Establish the grouped expert GEMM contract and sweep row-tile candidates.
-6. Add routing-aware selection between direct BMM and grouped GEMM.
-7. Keep the grouped expert compute chain in LX and validate each ownership boundary.
-8. Implement unique inverse permutation plus fixed-K reduction.
-9. Add dynamic grouping only after the data-movement architecture is validated.
-10. Measure the complete MoE layer and then the model.
+4. Establish dense per-expert GEMMs as the grouped-compute oracle.
+5. Implement runtime expert-base selection without a selected-weight tensor.
+6. Sweep row-tile candidates and compare against the direct BMM.
+7. Implement the consumer-shaped expert gather for the selected tile schedule.
+8. Couple gate/up ownership to down-projection ownership and retain the intermediate in LX.
+9. Add RIU activation fan-out and SFP partial-sum reduction as separate ablations.
+10. Implement unique inverse permutation plus fixed-K reduction.
+11. Add routing-aware selection between direct BMM and grouped GEMM.
+12. Add dynamic grouping only after the data-movement architecture is validated.
+13. Measure the complete MoE layer and then the model.
+
+The first timed study should hold routing tables constant and compare:
+
+1. per-row selected-weight BMM;
+2. dense per-expert GEMMs with statically selected weights;
+3. grouped GEMM with runtime expert-base selection;
+4. the coupled gate/up-to-down LX schedule;
+5. identical coupled schedules with ring movement disabled and enabled.
+
+Sweep representative token counts and balanced, skewed, and captured routing
+histograms. This separates weight-reuse gains, matmul-schedule gains, and
+core-to-core communication gains.
 
 ## Suggested shipping shape
 
@@ -248,6 +339,24 @@ Organize this as one tactical contribution and one strategic track:
 The strategic track should be shipped in reviewable pieces when the grouped
 primitive, planner, indirect access, and LX ownership changes can be validated
 independently.
+
+## Success criteria
+
+The grouped path should not be called complete merely because it produces the
+right answer. Final artifacts and device measurements must show:
+
+- no materialized routed-weight tensor shaped like `[N, H, F]`;
+- expert-weight reads scale with expert tiles rather than routed rows;
+- gate/up intermediates remain in LX through the down projection when planned;
+- emitted RIU/LX fan-out and SFP reduction match the intended physical cohorts;
+- no hidden HBM round trip at the ownership boundaries under test;
+- the full candidate beats both its same-schedule no-ring control and the best
+  existing MoE formulation for the same route histogram;
+- direct execution remains available when sparse decode offers no grouping
+  reuse.
+
+The traffic table and cost model above remain hypotheses until these gates are
+met with final emitted-program evidence and repeated device-event timing.
 
 ## Areas already being handled elsewhere
 
