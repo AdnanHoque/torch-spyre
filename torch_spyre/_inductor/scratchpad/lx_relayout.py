@@ -30,6 +30,11 @@ from torch._inductor.ir import (
 )
 
 from .. import config
+from ..constants import (
+    COARSE_TILE_HOISTED_LOOP_GROUP_ATTR,
+    CORE_MAPPING_CONTIGUOUS_DIM_ATTR,
+)
+from ..core_mapping import core_to_slice_mapping
 from ..ir import FixedTiledLayout
 from ..logging_utils import get_inductor_logger
 from ..op_spec import TensorWorkDivision
@@ -192,6 +197,329 @@ def _compatible_partitions(
             math.prod(destination_splits.values()) == num_cores,
         )
     )
+
+
+def _matching_core_mapping_contiguous_dim(
+    division: TensorWorkDivision,
+    iteration_symbols: Sequence[sympy.Symbol],
+    num_cores: int,
+) -> tuple[bool, int | None]:
+    """Find the core-order choice that realizes ``division`` exactly.
+
+    ``work_division_from_view`` recovers both split factors and the physical
+    core-to-slice assignment.  Applying only the split factors is insufficient:
+    an identity defaults to its first split dimension varying fastest, whereas
+    a matmul may deliberately make K vary fastest.  Try the ordinary order and
+    each actually-split dimension, accepting only a mapping that agrees on
+    every physical core.  The boolean distinguishes a matching ordinary order
+    (``None``) from no representable order.
+    """
+
+    iteration_symbols = tuple(iteration_symbols)
+    if any(dim not in iteration_symbols for dim in division.work_slices):
+        return False, None
+    dim_splits = tuple(
+        int(division.work_slices.get(dim, 1)) for dim in iteration_symbols
+    )
+    if math.prod(dim_splits) != num_cores:
+        return False, None
+
+    core_id = sympy.Symbol("core_id")
+    candidates: list[int | None] = [None]
+    candidates.extend(i for i, split in enumerate(dim_splits) if split > 1)
+    for contiguous_dim in candidates:
+        mapping = core_to_slice_mapping(
+            iteration_symbols,
+            dim_splits,
+            num_cores,
+            contiguous_dim=contiguous_dim,
+        )
+        if all(
+            int(mapping[dim].subs(core_id, core))
+            == int(sympy.sympify(target).subs(core_id, core))
+            for dim, target in division.core_id_to_work_slice.items()
+            for core in range(num_cores)
+        ):
+            return True, contiguous_dim
+    return False, None
+
+
+def align_hoisted_invariant_copy_work_divisions(
+    graph: GraphLowering,
+) -> list[str]:
+    """Match an invariant copy to one common matmul-consumer ownership.
+
+    Coarse tiling synthesizes an activation copy before a temporal expert loop.
+    Work distribution subsequently optimizes that identity independently from
+    the matmuls in the loop.  When all matmul consumers read the copy with one
+    identical full-core view, retaining the identity's independent split would
+    require an avoidable LX shuffle (or spill the activation to HBM).  Project
+    the common consumer view back onto the copy instead.
+
+    This is deliberately fail closed.  Only marked coarse-tile read copies with
+    at least two matmul consumers are eligible; every consumer must use the same
+    core count and exact :class:`PerCoreView`, and that view must use every core
+    exactly once.  An ordinary copy, a second incompatible view, a non-matmul
+    user, partial ownership, or a projection mismatch leaves the original work
+    division untouched.
+    """
+
+    if not config.lx_planning:
+        return []
+
+    operations = {op.get_name(): op for op in graph.operations}
+    reads: dict[str, list[tuple[Operation, MemoryDep]]] = {}
+    for consumer in graph.operations:
+        for dep in op_read_writes(consumer).reads:
+            if isinstance(dep, MemoryDep):
+                reads.setdefault(dep.name, []).append((consumer, dep))
+
+    aligned = []
+    for source_name, consumer_reads in reads.items():
+        producer = operations.get(source_name)
+        if (
+            not isinstance(producer, ComputedBuffer)
+            or not isinstance(producer.layout, FixedTiledLayout)
+            or not source_name.startswith("coarse_tile_read_copy_")
+            or not getattr(producer, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR, ())
+            or (write := _single_write(producer, source_name)) is None
+        ):
+            continue
+
+        num_cores = _op_num_cores(producer)
+        common_view: PerCoreView | None = None
+        seen_consumers = set()
+        rejected = False
+        cache: dict = {}
+        for consumer, dep in consumer_reads:
+            consumer_name = consumer.get_name()
+            if (
+                consumer_name in seen_consumers
+                or not isinstance(consumer, ComputedBuffer)
+                or isinstance(consumer.layout, MutationLayoutSHOULDREMOVE)
+                or not _is_matmul_op(consumer)
+                or _op_num_cores(consumer) != num_cores
+            ):
+                rejected = True
+                break
+            seen_consumers.add(consumer_name)
+            deps = [
+                item
+                for item in op_read_writes(consumer).reads
+                if isinstance(item, MemoryDep) and item.name == source_name
+            ]
+            if len(deps) != 1:
+                rejected = True
+                break
+            view, _partial_reduction, representable = _per_core_view_on_buf(
+                consumer, dep, source_name, cache
+            )
+            # ``has_partial_reduction`` is an op-level fact.  A gate/up BMM
+            # split on K therefore reports it even though this edge is the
+            # ordinary X read whose M/K ownership is exactly what we need to
+            # match.  It is meaningful for the producer's write check below,
+            # not as a veto on this read edge.
+            if not representable:
+                rejected = True
+                break
+            if common_view is None:
+                common_view = view
+            elif view != common_view:
+                rejected = True
+                break
+
+        if rejected or common_view is None or len(seen_consumers) < 2:
+            continue
+
+        core_slices = _core_slices(common_view, num_cores)
+        unique_slices = {
+            tuple(sorted(per_core.items())) for per_core in core_slices.values()
+        }
+        if (
+            len(unique_slices) != num_cores
+            or math.prod(dict(common_view.work_slice_dims).values()) != num_cores
+        ):
+            continue
+
+        producer_coordinates = try_device_coordinates(
+            producer.layout.device_layout, write, None
+        )
+        if producer_coordinates is None:
+            continue
+        try:
+            division = work_division_from_view(
+                common_view,
+                producer_coordinates,
+                tuple(iteration_space_from_op(producer)),
+            )
+        except ValueError:
+            continue
+        if division is None or math.prod(division.work_slices.values()) != num_cores:
+            continue
+
+        mapping_matches, contiguous_dim = _matching_core_mapping_contiguous_dim(
+            division,
+            tuple(iteration_space_from_op(producer)),
+            num_cores,
+        )
+        if not mapping_matches:
+            continue
+
+        from ..work_division import TensorDep, apply_splits
+
+        had_splits = hasattr(producer, "op_it_space_splits")
+        old_splits = getattr(producer, "op_it_space_splits", ({}, {}))
+        had_mapping = hasattr(producer, CORE_MAPPING_CONTIGUOUS_DIM_ATTR)
+        old_mapping = getattr(producer, CORE_MAPPING_CONTIGUOUS_DIM_ATTR, None)
+        if contiguous_dim is None:
+            if had_mapping:
+                delattr(producer, CORE_MAPPING_CONTIGUOUS_DIM_ATTR)
+        else:
+            setattr(producer, CORE_MAPPING_CONTIGUOUS_DIM_ATTR, contiguous_dim)
+        apply_splits(
+            producer,
+            dict(division.work_slices),
+            TensorDep(write, producer.layout),
+        )
+        projected, partial, representable = _per_core_view_on_buf(
+            producer, write, source_name, {}
+        )
+        if partial or not representable or projected != common_view:
+            if had_splits:
+                producer.op_it_space_splits = old_splits
+            else:
+                delattr(producer, "op_it_space_splits")
+            if had_mapping:
+                setattr(producer, CORE_MAPPING_CONTIGUOUS_DIM_ATTR, old_mapping)
+            elif hasattr(producer, CORE_MAPPING_CONTIGUOUS_DIM_ATTR):
+                delattr(producer, CORE_MAPPING_CONTIGUOUS_DIM_ATTR)
+            continue
+
+        aligned.append(source_name)
+        logger.debug(
+            "aligned hoisted invariant copy %s to common consumers %s: %s",
+            source_name,
+            sorted(seen_consumers),
+            common_view,
+        )
+    return aligned
+
+
+def align_activation_stationary_loop_work_divisions(
+    graph: GraphLowering,
+) -> list[str]:
+    """Use one row-only ownership for a temporal shared-LHS expert loop.
+
+    The activation-stationary control deliberately keeps one full token-row
+    shard live while the expert loop advances its weights.  Independently
+    optimizing the leaves can otherwise choose M16xK2 for gate/up, M32 for
+    pointwise operations, and M8xN4 for down.  Those choices need ownership
+    redistribution between every leaf and defeat the transport-free control.
+
+    This pass is intentionally narrow and fail closed.  It requires exactly
+    two marked shared-LHS matmuls in one coarse-tile loop, both reading the same
+    marked invariant preheader, and a unique common row extent divisible by all
+    configured cores.  Only operations in that exact loop with one output
+    iteration dimension of that extent are changed.  Expert-weight copies have
+    no row dimension and remain untouched.
+    """
+
+    if not config.lx_planning or config.sencores <= 1:
+        return []
+
+    operations = {op.get_name(): op for op in graph.operations}
+    reads: dict[str, list[tuple[ComputedBuffer, MemoryDep]]] = {}
+    for consumer in graph.operations:
+        if not isinstance(consumer, ComputedBuffer):
+            continue
+        for dep in op_read_writes(consumer).reads:
+            if isinstance(dep, MemoryDep):
+                reads.setdefault(dep.name, []).append((consumer, dep))
+
+    decisions: list[tuple[ComputedBuffer, sympy.Symbol, MemoryDep]] = []
+    for source_name, consumer_reads in reads.items():
+        producer = operations.get(source_name)
+        owner = getattr(producer, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR, ())
+        if (
+            not isinstance(producer, ComputedBuffer)
+            or not source_name.startswith("coarse_tile_read_copy_")
+            or not owner
+        ):
+            continue
+
+        shared_lhs = []
+        for consumer, dep in consumer_reads:
+            op_info = getattr(consumer.data, "op_info", None) or {}
+            if (
+                _is_matmul_op(consumer)
+                and "activation_stationary_shared_lhs_mm" in op_info
+                and getattr(getattr(consumer, "loop_info", None), "loop_group_id", ())
+                == owner
+            ):
+                shared_lhs.append((consumer, dep))
+        if len(shared_lhs) != 2:
+            continue
+
+        row_extents = []
+        for consumer, x_dep in shared_lhs:
+            write = _single_write(consumer, consumer.get_name())
+            if write is None:
+                break
+            row_symbols = x_dep.index.free_symbols & write.index.free_symbols
+            if len(row_symbols) != 1:
+                break
+            row = next(iter(row_symbols))
+            extent = iteration_space_from_op(consumer).get(row)
+            if extent is None:
+                break
+            row_extents.append(extent)
+        if len(row_extents) != 2 or row_extents[0] != row_extents[1]:
+            continue
+        row_extent = sympy.sympify(row_extents[0])
+        if not row_extent.is_number or int(row_extent) % config.sencores:
+            continue
+
+        group_decisions: list[tuple[ComputedBuffer, sympy.Symbol, MemoryDep]] = []
+        for op in graph.operations:
+            if (
+                not isinstance(op, ComputedBuffer)
+                or isinstance(op.layout, MutationLayoutSHOULDREMOVE)
+                or getattr(getattr(op, "loop_info", None), "loop_group_id", ())
+                != owner
+            ):
+                continue
+            write = _single_write(op, op.get_name())
+            if write is None:
+                continue
+            it_space = iteration_space_from_op(op)
+            rows = [
+                symbol
+                for symbol, extent in it_space.items()
+                if symbol in write.index.free_symbols and extent == row_extent
+            ]
+            if len(rows) == 1:
+                group_decisions.append((op, rows[0], write))
+
+        # Both shared-LHS matmuls and the down matmul must be part of the
+        # aligned group.  Otherwise this is not the connected FFN pattern.
+        group_ops = [op for op, _, _ in group_decisions]
+        matmuls = [op for op in group_ops if _is_matmul_op(op)]
+        if len(matmuls) != 3 or any(
+            all(op is not group_op for group_op in group_ops) for op, _ in shared_lhs
+        ):
+            continue
+        decisions.extend(group_decisions)
+
+    if not decisions:
+        return []
+
+    from ..work_division import TensorDep, apply_splits
+
+    aligned = []
+    for op, row, write in decisions:
+        apply_splits(op, {row: config.sencores}, TensorDep(write, op.layout))
+        aligned.append(op.get_name())
+    return aligned
 
 
 def _single_write(op: ComputedBuffer, name: str) -> MemoryDep | None:

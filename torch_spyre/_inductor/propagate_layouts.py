@@ -839,7 +839,20 @@ def _matmul_layouts(
     #   Input2 (y): stick on generated_var (loop var present in output, absent from x)
     #   Output:     stick on generated_var
     reduction_var = find_reduction_var(x.dep, output_dep)
-    generated_var = find_matmul_generated_var(y.dep, x.dep, output_dep)
+    op_info = getattr(data, "op_info", None) or {}
+    if "activation_stationary_shared_lhs_mm" in op_info:
+        # A shared-LHS matmul has two symbols present in RHS/output but absent
+        # from LHS: the expert-batch dimension and N.  N is the final logical
+        # output coordinate by contract; selecting it explicitly avoids
+        # misclassifying the expert loop as another generated dimension.
+        generated_var = next(iter(out_coords[-1].free_symbols), None)
+        if generated_var is None:
+            raise Unsupported(
+                f"{data.reduction_type}: shared-LHS generated dimension is "
+                f"missing from final output coordinate {out_coords[-1]}"
+            )
+    else:
+        generated_var = find_matmul_generated_var(y.dep, x.dep, output_dep)
 
     x_req_stl = find_stick_compatible_input_layout(
         x, reduction_var, data.reduction_type, "x"

@@ -15,7 +15,7 @@
 
 import math
 from typing import Any, Optional
-from torch._inductor.dependencies import MemoryDep
+from torch._inductor.dependencies import MemoryDep, StarDep
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import (
     Operation,
@@ -28,7 +28,11 @@ from torch._inductor.ops_handler import WrapperHandler
 import sympy
 
 from torch_spyre._inductor import config
-from torch_spyre._inductor.ir import FixedTiledLayout
+from torch_spyre._inductor.ir import FixedTiledLayout, SpyreEmptyFallback
+from torch_spyre._inductor.constants import (
+    COARSE_TILE_FIXED_LX_ACCUM_ATTR,
+    COARSE_TILE_HOISTED_LOOP_GROUP_ATTR,
+)
 from torch_spyre._inductor.pass_utils import (
     _per_core_view_on_buf,
     concretize_expr,
@@ -79,6 +83,38 @@ def clone_at_graph_boundaries() -> bool:
     op suite), so coupling it here would silently turn on the boundary clone
     path in contexts that don't intend to exercise it."""
     return "clone" in OP_OUTPUT_GOOD_FOR_LX_REUSE
+
+
+def hoisted_loop_lifetime_end_overrides(graph: GraphLowering) -> dict[str, int]:
+    """Return exclusive allocator lifetime ends for invariant preheaders.
+
+    The static IR contains one copy and one instance of each loop-body op, so a
+    plain last-use analysis sees the final textual X consumer in iteration zero
+    and may reuse X's LX range later in that same body.  At runtime the next
+    iteration reads X again.  Keep this loop-carried interval separate from the
+    exact access list so read_count, residency decisions, and spill benefit do
+    not gain a synthetic read.
+    """
+
+    loop_end_by_outer_group: dict[int, int] = {}
+    for index, op in enumerate(graph.operations):
+        group_id = getattr(getattr(op, "loop_info", None), "loop_group_id", ())
+        if group_id:
+            loop_end_by_outer_group[group_id[0]] = index
+
+    overrides: dict[str, int] = {}
+    for op in graph.operations:
+        owner = getattr(op, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR, ())
+        if not owner:
+            continue
+        loop_end = loop_end_by_outer_group.get(owner[0])
+        if loop_end is None:
+            raise RuntimeError(
+                "hoisted coarse-tile preheader has no owning loop body: "
+                f"buffer={op.get_name()!r}, owner={owner!r}"
+            )
+        overrides[op.get_name()] = loop_end + 1
+    return overrides
 
 
 def calculate_liveness(graph: GraphLowering) -> dict[str, list[int]]:
@@ -137,18 +173,18 @@ def mem_usage_by_buf(
         num_cores = num_cores_per_op.get(buf_name, -1)
         rw = op_read_writes(op)
         layout = buf.layout
-        # Only ComputedBuffers backed by a real Spyre device layout
-        # (FixedTiledLayout, which carries ``device_layout``) can be sized for
-        # scratchpad/LX residency. Mutation aliases and plain host FixedLayout
-        # buffers (e.g. fallback / CPU-roundtrip outputs) have no device_layout,
-        # so they get the unsized sentinel below. Testing for FixedTiledLayout
-        # here — rather than the broader ``isinstance(layout, FixedLayout)`` —
-        # avoids excluding genuine device buffers, which subclass FixedLayout
-        # and must be sized (see the ``layout.device_layout`` access below).
+        # Normally only ComputedBuffers backed by a real Spyre device layout
+        # can be sized for LX.  The one intentional exception is coarse
+        # tiling's fixed-address tile accumulator: a SpyreEmptyFallback has no
+        # producer kernel, but is real storage repeatedly used by fill/combine/
+        # drain and must participate in allocation like an intermediate.
+        is_fixed_accumulator = isinstance(op, SpyreEmptyFallback) and getattr(
+            op, COARSE_TILE_FIXED_LX_ACCUM_ATTR, False
+        )
         if (
             isinstance(layout, MutationLayoutSHOULDREMOVE)
             or not isinstance(layout, FixedTiledLayout)
-            or not isinstance(op, ComputedBuffer)
+            or not (isinstance(op, ComputedBuffer) or is_fixed_accumulator)
         ):
             mem_usage[buf_name] = {
                 "size": -1,
@@ -411,6 +447,20 @@ def _get_buffer_user_deps(
     for op in graph.operations:
         rw = op_read_writes(op)
         for dep in rw.reads | rw.writes:
+            # A marked coarse-tile accumulator is allocation-only storage.  Its
+            # SpyreEmptyFallback contributes a synthetic StarDep write, but no
+            # kernel executes that write and therefore it has no physical core
+            # ownership.  Including it makes the allocator compare a bogus
+            # one-core whole-buffer view against the real multicore fill,
+            # combine, and drain users.  Ignore only this marked synthetic dep;
+            # every real indexed user below still participates in the exact-view
+            # and broadcast-read checks.
+            if (
+                isinstance(dep, StarDep)
+                and isinstance(op, SpyreEmptyFallback)
+                and getattr(op, COARSE_TILE_FIXED_LX_ACCUM_ATTR, False)
+            ):
+                continue
             buf_user_deps.setdefault(dep.name, []).append((op, dep))
     return buf_user_deps
 

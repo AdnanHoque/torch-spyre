@@ -29,6 +29,7 @@ from torch_spyre._inductor.constants import (
     CONV2D_LAYOUT_LABELS,
     CONV_DIM_LABELS,
     CONV_OPS,
+    CORE_MAPPING_CONTIGUOUS_DIM_INFO_KEY,
     IDENTITY_OP,
     INPUT_DIM_LABELS,
     LAYOUT_LABELS,
@@ -2042,12 +2043,32 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     mapping_dims = tuple(sdsc_iteration_space)
     mapping_splits = tuple(int(dim_splits[dim]) for dim in mapping_dims)
     # Generic reductions do not yet define the same physical cohort contract as
-    # matmul partial sums.
-    contiguous_dim = (
-        len(mapping_splits) - 1
-        if is_matmul and _spyre_config.core_id_k_fast_emission
+    # matmul partial sums.  A marked preheader identity is the narrow exception:
+    # LX planning has already matched it to its matmul consumers and serialized
+    # the exact physical core order into OpSpec.
+    contiguous_dim_override = (
+        op_spec.op_info.get(CORE_MAPPING_CONTIGUOUS_DIM_INFO_KEY)
+        if op_spec.op_info
         else None
     )
+    if contiguous_dim_override is not None:
+        if (
+            op_spec.op != IDENTITY_OP
+            or type(contiguous_dim_override) is not int
+            or not 0 <= contiguous_dim_override < len(mapping_splits)
+            or mapping_splits[contiguous_dim_override] <= 1
+        ):
+            raise ValueError(
+                "invalid identity core-mapping contiguous dimension "
+                f"{contiguous_dim_override!r} for rank {len(mapping_splits)}"
+            )
+        contiguous_dim = contiguous_dim_override
+    else:
+        contiguous_dim = (
+            len(mapping_splits) - 1
+            if is_matmul and _spyre_config.core_id_k_fast_emission
+            else None
+        )
     # TODO: Choose the mapping before LX planning and pass it through to codegen.
     core_id_to_work_slice = core_to_slice_mapping(
         mapping_dims,
