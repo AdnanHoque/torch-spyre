@@ -1,0 +1,226 @@
+{
+  "acceptance_gate": {
+    "all_selectors_and_modes_dense_faster_on_all_four": true,
+    "four_devices": true
+  },
+  "aggregate": {
+    "hot8": {
+      "block": {
+        "dense_inter_device_spread_percent": 0.3921741963742896,
+        "dense_median_of_device_medians_ms": 42.4653385,
+        "direction_dense_faster_on_all_four": true,
+        "grouped_median_of_device_medians_ms": 171.04702600000002,
+        "median_per_device_grouped_over_dense": 4.026786334539267
+      },
+      "single": {
+        "dense_inter_device_spread_percent": 0.33598923298343175,
+        "dense_median_of_device_medians_ms": 46.402826250000004,
+        "direction_dense_faster_on_all_four": true,
+        "grouped_median_of_device_medians_ms": 171.329804,
+        "median_per_device_grouped_over_dense": 3.6910804861424173
+      }
+    },
+    "identity": {
+      "block": {
+        "dense_inter_device_spread_percent": 0.3252886425659389,
+        "dense_median_of_device_medians_ms": 42.5061874,
+        "direction_dense_faster_on_all_four": true,
+        "grouped_median_of_device_medians_ms": 171.09679,
+        "median_per_device_grouped_over_dense": 4.0252208215372445
+      },
+      "single": {
+        "dense_inter_device_spread_percent": 0.2875990402471181,
+        "dense_median_of_device_medians_ms": 46.41601025,
+        "direction_dense_faster_on_all_four": true,
+        "grouped_median_of_device_medians_ms": 171.36185849999998,
+        "median_per_device_grouped_over_dense": 3.6905659728365756
+      }
+    },
+    "permutation": {
+      "block": {
+        "dense_inter_device_spread_percent": 0.32418810388759156,
+        "dense_median_of_device_medians_ms": 42.496500749999996,
+        "direction_dense_faster_on_all_four": true,
+        "grouped_median_of_device_medians_ms": 171.06089105,
+        "median_per_device_grouped_over_dense": 4.025621080649483
+      },
+      "single": {
+        "dense_inter_device_spread_percent": 0.3931755081221869,
+        "dense_median_of_device_medians_ms": 46.45279175,
+        "direction_dense_faster_on_all_four": true,
+        "grouped_median_of_device_medians_ms": 171.325847,
+        "median_per_device_grouped_over_dense": 3.687355607105272
+      }
+    }
+  },
+  "comparison": "D-AS-X complete weighted dense control versus kernel-only grouped G3-LX",
+  "interpretation": "Dense includes runtime top-8 post-down weighting and accumulation; grouped G3-LX excludes router weighting and combine. Dense winning is therefore a decisive one-sided loss for this grouped implementation.",
+  "non_claims": [
+    "not end-to-end model latency",
+    "not an energy comparison",
+    "not proof that all grouped schedules lose",
+    "not a same-source contemporaneous rerun of G3-LX"
+  ],
+  "per_device": {
+    "adnan-cdx-spyre-dev-pf": {
+      "hot8": {
+        "block": {
+          "dense_ms": 42.429477,
+          "grouped_ms": 170.972828,
+          "grouped_over_dense": 4.029576607790853
+        },
+        "single": {
+          "dense_ms": 46.410520500000004,
+          "grouped_ms": 171.267429,
+          "grouped_over_dense": 3.690271670191675
+        }
+      },
+      "identity": {
+        "block": {
+          "dense_ms": 42.4330355,
+          "grouped_ms": 171.0351345,
+          "grouped_over_dense": 4.030707030139288
+        },
+        "single": {
+          "dense_ms": 46.4275145,
+          "grouped_ms": 171.3174785,
+          "grouped_over_dense": 3.689998922944712
+        }
+      },
+      "permutation": {
+        "block": {
+          "dense_ms": 42.4439304,
+          "grouped_ms": 171.00300399999998,
+          "grouped_over_dense": 4.028915380560514
+        },
+        "single": {
+          "dense_ms": 46.404409,
+          "grouped_ms": 171.300277,
+          "grouped_over_dense": 3.691465545870867
+        }
+      }
+    },
+    "adnan-clc-spyre-dev-pf": {
+      "hot8": {
+        "block": {
+          "dense_ms": 42.5877996,
+          "grouped_ms": 171.0981792,
+          "grouped_over_dense": 4.017539783858662
+        },
+        "single": {
+          "dense_ms": 46.473882,
+          "grouped_ms": 171.3739165,
+          "grouped_over_dense": 3.687531773222646
+        }
+      },
+      "identity": {
+        "block": {
+          "dense_ms": 42.5713033,
+          "grouped_ms": 171.111467,
+          "grouped_over_dense": 4.019408703421115
+        },
+        "single": {
+          "dense_ms": 46.529962,
+          "grouped_ms": 171.4062385,
+          "grouped_over_dense": 3.68378204349275
+        }
+      },
+      "permutation": {
+        "block": {
+          "dense_ms": 42.581699,
+          "grouped_ms": 171.08798510000003,
+          "grouped_over_dense": 4.017875968265146
+        },
+        "single": {
+          "dense_ms": 46.477273,
+          "grouped_ms": 171.351417,
+          "grouped_over_dense": 3.68677863264482
+        }
+      }
+    },
+    "adnan-spyre-current-pf": {
+      "hot8": {
+        "block": {
+          "dense_ms": 42.5012,
+          "grouped_ms": 171.0246614,
+          "grouped_over_dense": 4.023996061287682
+        },
+        "single": {
+          "dense_ms": 46.395132,
+          "grouped_ms": 171.28569149999998,
+          "grouped_over_dense": 3.691889302093159
+        }
+      },
+      "identity": {
+        "block": {
+          "dense_ms": 42.502780400000006,
+          "grouped_ms": 171.0901456,
+          "grouped_over_dense": 4.025387139143489
+        },
+        "single": {
+          "dense_ms": 46.404506,
+          "grouped_ms": 171.2852045,
+          "grouped_over_dense": 3.6911330227284394
+        }
+      },
+      "permutation": {
+        "block": {
+          "dense_ms": 42.4889295,
+          "grouped_ms": 171.033797,
+          "grouped_over_dense": 4.02537317396994
+        },
+        "single": {
+          "dense_ms": 46.4283105,
+          "grouped_ms": 171.224479,
+          "grouped_over_dense": 3.6879325815657236
+        }
+      }
+    },
+    "adnan-spyre-dev-pf": {
+      "hot8": {
+        "block": {
+          "dense_ms": 42.4212615,
+          "grouped_ms": 171.06939060000002,
+          "grouped_over_dense": 4.0326332728224035
+        },
+        "single": {
+          "dense_ms": 46.317973499999994,
+          "grouped_ms": 171.40272199999998,
+          "grouped_over_dense": 3.700566088021964
+        }
+      },
+      "identity": {
+        "block": {
+          "dense_ms": 42.5095944,
+          "grouped_ms": 171.1034344,
+          "grouped_over_dense": 4.025054503931
+        },
+        "single": {
+          "dense_ms": 46.396469999999994,
+          "grouped_ms": 171.46185350000002,
+          "grouped_over_dense": 3.6955797175948955
+        }
+      },
+      "permutation": {
+        "block": {
+          "dense_ms": 42.504072,
+          "grouped_ms": 171.1158253,
+          "grouped_over_dense": 4.025868987329026
+        },
+        "single": {
+          "dense_ms": 46.587050000000005,
+          "grouped_ms": 171.412479,
+          "grouped_over_dense": 3.6794018724087483
+        }
+      }
+    }
+  },
+  "pods": [
+    "adnan-cdx-spyre-dev-pf",
+    "adnan-clc-spyre-dev-pf",
+    "adnan-spyre-current-pf",
+    "adnan-spyre-dev-pf"
+  ],
+  "schema_version": 1,
+  "status": "accepted"
+}

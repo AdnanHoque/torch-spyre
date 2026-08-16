@@ -1,0 +1,98 @@
+# Results
+
+## Full representative shape
+
+```text
+experts          128
+tokens           512
+hidden           2816
+intermediate     704
+cores            32
+dtype            FP16
+router profiles  balanced identity, seed-17 permutation, hot-eight reuse
+```
+
+## Structural acceptance
+
+All four runs prove:
+
+- one wrapper call and one bundle;
+- one flat 128-expert loop;
+- one `X[512,2816]` HBM-to-LX preheader;
+- exact M32 ownership shared by X, gate, and up on all 32 cores;
+- three direct HBM expert-weight operands plus runtime alpha advancing once per
+  expert;
+- all internal compute and accumulator storage in LX;
+- zero `hbm_pool` allocations;
+- zero HBM restickify operations;
+- runtime alpha applied after the down projection;
+- one fixed LX accumulator; and
+- one final HBM output.
+
+Every device emitted bundle SHA-256:
+
+```text
+976e5c8101370a6f482247652b31ec81c5be55c2419011b06746000693fd1727
+```
+
+## Correctness
+
+One compiled callable was reused for all three runtime alpha payloads.
+
+Across the cohort:
+
+```text
+worst relative L2     0.008912351
+worst maximum error   0.010508538
+required relative L2  <= 0.03
+required cosine       >= 0.999
+assert_close          rtol=0.03, atol=0.05
+```
+
+The output changes with the runtime alpha payload, closing the repeated-expert
+and constant-selector failure modes encountered during development.
+
+## Timing protocol
+
+Each of four AIUs ran:
+
+```text
+warmups                 5
+synchronized singles   50 per selector per round
+five-call blocks        10 per selector per round
+rounds                  3
+selectors               3
+raw records             540 per AIU
+measured calls          900 per AIU
+```
+
+Compilation, input copies, FP32 reference work, and artifact inspection were
+outside the samples.
+
+## Timing result
+
+Median of device medians:
+
+| Profile | Single call | Five-call block per call |
+|---|---:|---:|
+| Balanced identity | 46.416 ms | 42.506 ms |
+| Expert permutation | 46.453 ms | 42.497 ms |
+| Hot-eight reuse | 46.403 ms | 42.465 ms |
+
+For context, the retained grouped `G3-LX` implementation measured
+`171.362 ms` singles and `171.097 ms` blocks for balanced identity. The
+grouped-to-dense ratios were `3.691x` and `4.025x`.
+
+Dense includes runtime top-8 weighting and expert accumulation; grouped omits
+its weighting and combine. The result therefore rejects that grouped
+implementation for `T=512` latency on AIU 1.0.
+
+## Evidence limits
+
+- This is kernel timing, not full-model timing.
+- Router-logit computation is excluded.
+- Energy was not measured.
+- Dense and grouped came from separately pinned implementation overlays and
+  tensor generators.
+- The comparison does not establish the phase boundary for longer sequences,
+  skewed routing, or later AIU generations.

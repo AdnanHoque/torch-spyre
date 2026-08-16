@@ -1,0 +1,130 @@
+{
+  "bundle_mlir": {
+    "loop_count": 2,
+    "path": "/tmp/unit-reduction-affine-fix-device-correctness-c1-20/bundle/bundle.mlir",
+    "sha256": "977d62e74ca5f4a3ff28a89be32e4531ecb858828b77cedbf21e007c05c0c720",
+    "single_scf_for": true,
+    "single_sdsc_bundle_function": true
+  },
+  "correctness": {
+    "alpha_response_delta": {
+      "cosine": 0.9999955892562866,
+      "max_abs": 0.00013893656432628632,
+      "relative_l2": 0.004081728992688339
+    },
+    "artifact_path": "/tmp/unit-reduction-affine-fix-device-correctness-c1-20/correctness_artifact.pt",
+    "artifact_sha256": "4bcdce7ec666931c618368949fc4d31313a674612f1e6422ca4359affbfeae30",
+    "nonbinary_runtime_alpha_payloads": 2,
+    "passed": true,
+    "per_payload": {
+      "a": {
+        "cosine": 0.9999963045120239,
+        "max_abs": 0.00036729685962200165,
+        "relative_l2": 0.004143298316550255
+      },
+      "b": {
+        "cosine": 0.9999967217445374,
+        "max_abs": 0.0003626737743616104,
+        "relative_l2": 0.0040021373486434616
+      }
+    },
+    "reference_delta_l2": 0.3814401626586914,
+    "same_compiled_callable": true,
+    "same_emitted_bundle_for_two_alpha_payloads": true
+  },
+  "environment": {
+    "aiu_pci": null,
+    "pod": "adnan-cdx-spyre-dev-pf",
+    "python": "3.12.13",
+    "source": {
+      "revision": "65508a025f557663c5694e3596c49b814d87517a",
+      "status_short": [
+        " M tests/inductor/test_coarse_tiling.py",
+        " M tests/inductor/test_scratchpad_solver.py",
+        " M tests/inductor/test_work_division_hint.py",
+        " M torch_spyre/_inductor/constants.py",
+        " M torch_spyre/_inductor/customops.py",
+        " M torch_spyre/_inductor/ir.py",
+        " M torch_spyre/_inductor/loop_info.py",
+        " M torch_spyre/_inductor/lowering.py",
+        " M torch_spyre/_inductor/propagate_layouts.py",
+        " M torch_spyre/_inductor/scratchpad/allocator.py",
+        " M torch_spyre/_inductor/scratchpad/plan_solver.py",
+        " M torch_spyre/_inductor/scratchpad/utils.py",
+        " M torch_spyre/_inductor/spyre_kernel.py",
+        " M torch_spyre/_inductor/wsr/coarse_tile.py",
+        "?? experiments/"
+      ],
+      "torch_spyre_C_sha256": "9db452635696b9090da944a57a0657f9ae12f092023be886f4355edd07726325",
+      "tracked_diff_sha256": "c0d29b17614cfc8097a0afb224e945af5f4cf32d980bdc0a5fb65ac336b15b23"
+    },
+    "torch": "2.11.0+cpu",
+    "torch_spyre_file": "/tmp/unit-reduction-affine-fix-host-20260816/torch_spyre/__init__.py"
+  },
+  "finished_utc": "2026-08-16T09:30:33Z",
+  "generated_module": {
+    "path": "/tmp/unit-reduction-affine-fix-device-correctness-c1-20/generated_module.py",
+    "sha256": "172d837b9cc31c26c46ab46bb664bdb88191ff961262d8ada55612788af4d3cf",
+    "single_async_sdsc": true,
+    "single_wrapper_run": true
+  },
+  "kernel_launched_by_checker": false,
+  "reference_route_alpha": {
+    "abi": "[E,T,1]",
+    "payloads": 2,
+    "reference_output_delta_relative_l2": 0.505717220681992,
+    "singleton_squeeze_matches_expected_exactly": true
+  },
+  "schema_version": 1,
+  "scope": "reduced C1 D-AS-X same-bundle two-alpha correctness; no timing",
+  "shape": {
+    "E": 2,
+    "F": 64,
+    "H": 64,
+    "T": 64,
+    "cores": 1
+  },
+  "status": "accepted",
+  "structural": {
+    "combine_path_ops": [
+      "identity"
+    ],
+    "down_output_lx_interval_bytes": [
+      40960,
+      49152
+    ],
+    "final_hbm_outputs": 1,
+    "fixed_accumulator_lx_interval_bytes": [
+      0,
+      8192
+    ],
+    "hbm_pool_allocations": 0,
+    "internal_compute_allocations": "LX-only",
+    "no_temporal_token_loop": true,
+    "one_static_expert_loop": true,
+    "restickify_ops": 0,
+    "router_weighted_lx_interval_bytes": [
+      40960,
+      49152
+    ],
+    "router_weighting_after_down": true,
+    "runtime_alpha_hbm_arg_index": 5,
+    "runtime_alpha_logical_shape": [
+      2,
+      64,
+      1
+    ],
+    "runtime_alpha_lx_interval_bytes": [
+      49152,
+      57344
+    ],
+    "runtime_alpha_preprocess_ops": [],
+    "x_alias_free_through_loop": true,
+    "x_lx_interval_bytes": [
+      8192,
+      16384
+    ],
+    "x_preheader_hbm_to_lx_copies": 1
+  },
+  "timing_collected": false
+}
