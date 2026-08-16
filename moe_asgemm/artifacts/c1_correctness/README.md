@@ -125,4 +125,3 @@ Still open:
 - real dense all-expert latency and bandwidth;
 - grouped oracle latency and overhead;
 - the product promotion decision between dense and grouped execution.
-
