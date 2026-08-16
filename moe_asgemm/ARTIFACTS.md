@@ -12,8 +12,10 @@ Path:
 moe_asgemm/artifacts/c1_compile
 ```
 
-Contents include the generated wrapper, accepted bundle, identity contribution
-SDSC, accumulator-add SDSC, and compile result for `E=2,T=64,H=64,F=64,C=1`.
+Contents include the generated wrapper, accepted bundle, complete `sdsc_0.json`
+through `sdsc_14.json` set, and compile result for
+`E=2,T=64,H=64,F=64,C=1`. The complete SDSC set lets the strict structural
+gate independently verify every loop operation.
 
 Key bundle property:
 
