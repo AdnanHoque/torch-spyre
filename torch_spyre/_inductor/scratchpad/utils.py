@@ -29,6 +29,7 @@ import sympy
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.ir import FixedTiledLayout
+from torch_spyre._inductor.constants import COARSE_TILE_HOISTED_LOOP_GROUP_ATTR
 from torch_spyre._inductor.pass_utils import (
     _per_core_view_on_buf,
     concretize_expr,
@@ -79,6 +80,38 @@ def clone_at_graph_boundaries() -> bool:
     op suite), so coupling it here would silently turn on the boundary clone
     path in contexts that don't intend to exercise it."""
     return "clone" in OP_OUTPUT_GOOD_FOR_LX_REUSE
+
+
+def hoisted_loop_lifetime_end_overrides(graph: GraphLowering) -> dict[str, int]:
+    """Return exclusive allocator lifetime ends for invariant preheaders.
+
+    The static IR contains one copy and one instance of each loop-body op, so a
+    plain last-use analysis sees the final textual X consumer in iteration zero
+    and may reuse X's LX range later in that same body.  At runtime the next
+    iteration reads X again.  Keep this loop-carried interval separate from the
+    exact access list so read_count, residency decisions, and spill benefit do
+    not gain a synthetic read.
+    """
+
+    loop_end_by_outer_group: dict[int, int] = {}
+    for index, op in enumerate(graph.operations):
+        group_id = getattr(getattr(op, "loop_info", None), "loop_group_id", ())
+        if group_id:
+            loop_end_by_outer_group[group_id[0]] = index
+
+    overrides: dict[str, int] = {}
+    for op in graph.operations:
+        owner = getattr(op, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR, ())
+        if not owner:
+            continue
+        loop_end = loop_end_by_outer_group.get(owner[0])
+        if loop_end is None:
+            raise RuntimeError(
+                "hoisted coarse-tile preheader has no owning loop body: "
+                f"buffer={op.get_name()!r}, owner={owner!r}"
+            )
+        overrides[op.get_name()] = loop_end + 1
+    return overrides
 
 
 def calculate_liveness(graph: GraphLowering) -> dict[str, list[int]]:

@@ -665,6 +665,29 @@ class BaseLayoutSolverTests:
             LifetimeBoundBuffer("E", 20, [], first_use_is_read=True).read_count, 0
         )
 
+    def test_lifetime_end_override_changes_overlap_not_reads_or_score(self):
+        from torch_spyre._inductor.scratchpad.permutation_layout import (
+            buffer_quality,
+        )
+
+        ordinary = LifetimeBoundBuffer(
+            "ordinary", 20, [3, 5, 8], residency_reason=None
+        )
+        loop_carried = LifetimeBoundBuffer(
+            "loop_carried",
+            20,
+            [3, 5, 8],
+            residency_reason=None,
+            lifetime_end_override=20,
+        )
+
+        self.assertEqual(loop_carried.uses, [3, 5, 8])
+        self.assertEqual(loop_carried.read_count, ordinary.read_count)
+        self.assertEqual(buffer_quality(loop_carried), buffer_quality(ordinary))
+        self.assertEqual(loop_carried.residency_reason, ordinary.residency_reason)
+        self.assertEqual(ordinary.end_time, 9)
+        self.assertEqual(loop_carried.end_time, 20)
+
     def test_repeated_index_cannot_pass_as_a_read(self):
         # The in-place rule tests for a use strictly after the first rather than
         # relying on read_count, so a buffer whose uses were mutated into a
