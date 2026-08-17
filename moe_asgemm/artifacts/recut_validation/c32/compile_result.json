@@ -1,0 +1,107 @@
+{
+  "backend_compile": true,
+  "backend_core_mapping": {
+    "bundle_dir": "/tmp/moe-asgemm-recut-final5-20260817/c32-cache-01/inductor-spyre/14441864_sdsc_fused_activation_stationary_expert_mm_prepacked_activation_stationary_shared_lhs_mm_prepacked_gelu_mul_sum_0_gcb17kl4",
+    "bundle_mlir_sha256": "976e5c8101370a6f482247652b31ec81c5be55c2419011b06746000693fd1727",
+    "gate_up_core_id_to_work_slice_matches_x_all_32": true,
+    "gate_up_sdscs": [
+      "sdsc_2.json",
+      "sdsc_4.json"
+    ],
+    "sdsc_sha256": {
+      "sdsc_0.json": "539a5e9e9f3d2d35dcdce6e52644bc36deaa1eb1ae19ff6bf640fdc1b56b10e4",
+      "sdsc_1.json": "ab58c50196cae05049069328885d787a38f0d4e638d5307c25f0d32b851aea07",
+      "sdsc_10.json": "fd6cc9ef7ffb01f9d55339c6e45e0d6cca49ee3247226a94ee52079ff1523023",
+      "sdsc_11.json": "83563997331ce39f80bb5e2bba034f0136e11b25014c49e30495a9bc50e6ff16",
+      "sdsc_2.json": "eefd18075096f32c5464ce886e6baaa3744ff8367d63c9871daa51f539a348bf",
+      "sdsc_3.json": "c335804d97dffcf580ff6841cd21ae8d422a119ae655e0ba4a2d6271d71fef0f",
+      "sdsc_4.json": "756a47b27803d07304bc1abebcd64cb2356e9b484a06c22306532fbc4b4eca6c",
+      "sdsc_5.json": "26a6aa5a2c77f45cf25764fb692ffb19bce3d21d50f8821ac917c78dbecbc0d0",
+      "sdsc_6.json": "c978a9f0f6b67211d2e2302d945c579e3412d07293163650ea7d4af150f72810",
+      "sdsc_7.json": "60835f65491aacb295b41359aa36e520249209389c4786ea6efe0340c7f105f4",
+      "sdsc_8.json": "e3b7b931306bca784951d705a8b309e6c48d6a846947881b38e9c3c4dc14f80f",
+      "sdsc_9.json": "e679ba5cfe92b0a32122e197d9c17bce367076e134d5fea4c6cfd9c65c9e6394"
+    },
+    "x_core_id_to_work_slice_all_32": true,
+    "x_num_work_slices": {
+      "mb": 32,
+      "out": 1
+    },
+    "x_sdsc": "sdsc_0.json"
+  },
+  "correctness": {
+    "alpha_response_delta": {
+      "cosine": 1.0000239610671997,
+      "max_abs": 0.010508537292480469,
+      "rel_l2": 0.008860905654728413
+    },
+    "payloads": {
+      "identity": {
+        "cosine": 1.0000096559524536,
+        "max_abs": 0.008594214916229248,
+        "rel_l2": 0.008816867135465145
+      },
+      "permutation": {
+        "cosine": 1.0000089406967163,
+        "max_abs": 0.007763028144836426,
+        "rel_l2": 0.008912350982427597
+      }
+    },
+    "same_callable_two_alphas": true
+  },
+  "down_output_lx_interval_bytes": [
+    202752,
+    292864
+  ],
+  "expert_hbm_operands_advance": 4,
+  "final_hbm_outputs": 1,
+  "fixed_accumulator_lx_interval_bytes": [
+    0,
+    90112
+  ],
+  "gate_up_share_exact_x_interval": true,
+  "gate_up_x_ownership": [
+    {
+      "K": 1,
+      "M": 32
+    },
+    {
+      "K": 1,
+      "M": 32
+    }
+  ],
+  "hbm_pool_allocations": 0,
+  "internal_compute_allocations": "LX-only",
+  "launched_generated_kernel": true,
+  "one_flat_expert_loop": true,
+  "one_source_bundle": true,
+  "one_wrapper_bundle_call": true,
+  "one_x_hbm_to_lx_preheader": true,
+  "restickify_ops": 0,
+  "router_weighting_after_down": true,
+  "runtime_alpha_shape": [
+    128,
+    512,
+    1
+  ],
+  "shape": {
+    "E": 128,
+    "F": 704,
+    "H": 2816,
+    "T": 512,
+    "cores": 32
+  },
+  "source": "/tmp/moe-asgemm-recut-final5-20260817/c32-correctness-01/generated_module.py",
+  "source_sha256": "b724049b58731d4c49de316c9d12415ef16f77bafb3fd3e28fcfce37b0c7e247",
+  "x_copy_ownership": {
+    "K": 1,
+    "M": 32
+  },
+  "x_core_mapping_contiguous_dim": null,
+  "x_fanout_identities": 0,
+  "x_logical_global_bytes": 2883584,
+  "x_per_core_lx_interval_bytes": [
+    90112,
+    180224
+  ]
+}

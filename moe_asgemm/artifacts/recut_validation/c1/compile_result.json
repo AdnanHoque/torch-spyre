@@ -1,0 +1,99 @@
+{
+  "bundles": [
+    "/tmp/moe-asgemm-recut-final5-20260817/c1-correctness-01/bundle_0_f21bea91_sdsc_fused_activation_stationary_shared_lhs_mm_bmm_gelu_mul_sum_0_id68arm1.mlir"
+  ],
+  "correctness": {
+    "alpha_response_delta": {
+      "cosine": 0.9999948143959045,
+      "max_abs": 0.00020848214626312256,
+      "rel_l2": 0.004495891276746988
+    },
+    "payloads": {
+      "alpha_a": {
+        "cosine": 0.9999964833259583,
+        "max_abs": 0.0004457533359527588,
+        "rel_l2": 0.004191036336123943
+      },
+      "alpha_b": {
+        "cosine": 0.999996542930603,
+        "max_abs": 0.00031922757625579834,
+        "rel_l2": 0.004106949549168348
+      }
+    },
+    "same_callable_two_alphas": true
+  },
+  "launched_generated_kernel": true,
+  "shape": {
+    "E": 2,
+    "F": 64,
+    "H": 64,
+    "T": 64,
+    "cores": 1
+  },
+  "source": "/tmp/moe-asgemm-recut-final5-20260817/c1-correctness-01/generated_module.py",
+  "status": "passed",
+  "structural": {
+    "accumulator_alias_free": true,
+    "accumulator_lx_interval_bytes": [
+      0,
+      8192
+    ],
+    "contribution_coordinates_match_weighted_down": true,
+    "down_output_lx_interval_bytes": [
+      40960,
+      49152
+    ],
+    "expert_hbm_arg_indices": [
+      2,
+      3,
+      4,
+      5
+    ],
+    "expert_sum_lx": true,
+    "final_hbm_writes": 1,
+    "hbm_pool_allocations": 0,
+    "local_sum_op_specs": 0,
+    "local_sum_sdscs": 0,
+    "one_bundle_call": true,
+    "one_flat_expert_loop": true,
+    "one_source_bundle": true,
+    "post_down_weighting_lx": true,
+    "restickify_ops": 0,
+    "runtime_alpha_direct_hbm_to_lx": true,
+    "runtime_alpha_lx_interval_bytes": [
+      49152,
+      57344
+    ],
+    "runtime_alpha_shape": [
+      2,
+      64,
+      1
+    ],
+    "sdsc_op_keys": [
+      "0_identity",
+      "1_identity",
+      "10_identity",
+      "11_mul",
+      "12_identity",
+      "13_add",
+      "14_identity",
+      "2_identity",
+      "3_batchmatmul",
+      "4_gelufwd",
+      "5_identity",
+      "6_batchmatmul",
+      "7_mul",
+      "8_identity",
+      "9_batchmatmul"
+    ],
+    "x_accumulator_disjoint": true,
+    "x_alias_free_through_loop": true,
+    "x_has_tile_advance": false,
+    "x_hbm_sources": 1,
+    "x_loop_reads": 2,
+    "x_lx_interval_bytes": [
+      8192,
+      16384
+    ]
+  }
+}

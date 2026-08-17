@@ -1,0 +1,119 @@
+{
+  "bundle_mlir": {
+    "actual_sum_sdscs": 0,
+    "affine_map": "#map_0: s0 + 128*d0",
+    "expert_hbm_consumers": {
+      "2": "%arg_2",
+      "5": "%arg_3",
+      "8": "%arg_4",
+      "10": "%arg_5"
+    },
+    "expert_hbm_loop_advances_bytes": {
+      "%arg_2": 128,
+      "%arg_3": 128,
+      "%arg_4": 128,
+      "%arg_5": 128
+    },
+    "fixed_hbm_args": [
+      "%arg_0",
+      "%arg_1",
+      "%arg_6"
+    ],
+    "loop_count": 2,
+    "path": "/tmp/moe-asgemm-recut-final5-20260817/c1-cache-01/inductor-spyre/f21bea91_sdsc_fused_activation_stationary_shared_lhs_mm_bmm_gelu_mul_sum_0_id68arm1/bundle.mlir",
+    "sdsc_12_op": "identity",
+    "sdsc_13_op": "add",
+    "sha256": "977d62e74ca5f4a3ff28a89be32e4531ecb858828b77cedbf21e007c05c0c720",
+    "single_scf_for": true,
+    "single_sdsc_bundle_function": true
+  },
+  "correctness": {
+    "alpha_response_delta": {
+      "cosine": 0.9999948143959045,
+      "max_abs": 0.00020848214626312256,
+      "relative_l2": 0.004495891320111193
+    },
+    "artifact_path": "/tmp/moe-asgemm-recut-final5-20260817/c1-correctness-01/correctness_artifact.pt",
+    "artifact_sha256": "9c513142d9464a7568a277c6a856b313e56fe3247932ecf90fa78d3763e27d98",
+    "nonbinary_runtime_alpha_payloads": 2,
+    "passed": true,
+    "per_payload": {
+      "a": {
+        "cosine": 0.9999964833259583,
+        "max_abs": 0.0004457533359527588,
+        "relative_l2": 0.004191036539727264
+      },
+      "b": {
+        "cosine": 0.999996542930603,
+        "max_abs": 0.00031922757625579834,
+        "relative_l2": 0.0041069494139346465
+      }
+    },
+    "reference_delta_l2": 0.4172280728816986,
+    "same_compiled_callable": true,
+    "same_emitted_bundle_for_two_alpha_payloads": true
+  },
+  "generated_module": {
+    "path": "/tmp/moe-asgemm-recut-final5-20260817/c1-correctness-01/generated_module.py",
+    "sha256": "3fed6b2ef32ef6ce18664935255c0b70c49f3948ca276848c5e8748ffd31c483",
+    "single_async_sdsc": true,
+    "single_wrapper_run": true
+  },
+  "kernel_launched_by_checker": false,
+  "schema_version": 1,
+  "scope": "reduced C1 D-AS-X structure plus same-bundle two-alpha correctness",
+  "shape": {
+    "E": 2,
+    "F": 64,
+    "H": 64,
+    "T": 64,
+    "cores": 1
+  },
+  "status": "accepted",
+  "structural": {
+    "actual_local_sum_opspecs": 0,
+    "combine_path_ops": [
+      "identity"
+    ],
+    "down_output_lx_interval_bytes": [
+      40960,
+      49152
+    ],
+    "final_hbm_outputs": 1,
+    "fixed_accumulator_lx_interval_bytes": [
+      0,
+      8192
+    ],
+    "hbm_pool_allocations": 0,
+    "identity_contribution_ops": 1,
+    "internal_compute_allocations": "LX-only",
+    "no_temporal_token_loop": true,
+    "one_static_expert_loop": true,
+    "restickify_ops": 0,
+    "router_weighted_lx_interval_bytes": [
+      40960,
+      49152
+    ],
+    "router_weighting_after_down": true,
+    "runtime_alpha_hbm_arg_index": 5,
+    "runtime_alpha_logical_shape": [
+      2,
+      64,
+      1
+    ],
+    "runtime_alpha_lx_interval_bytes": [
+      49152,
+      57344
+    ],
+    "runtime_alpha_preprocess_ops": [],
+    "sdsc_12_op": "identity",
+    "sdsc_13_op": "add",
+    "x_alias_free_through_loop": true,
+    "x_lx_interval_bytes": [
+      8192,
+      16384
+    ],
+    "x_preheader_hbm_to_lx_copies": 1
+  },
+  "timing_collected": false
+}
