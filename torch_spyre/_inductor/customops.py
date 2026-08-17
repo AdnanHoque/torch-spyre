@@ -584,6 +584,95 @@ def _(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     return x.new_empty(output_shape)
 
 
+@torch.library.custom_op(
+    "spyre::activation_stationary_shared_lhs_mm",
+    mutates_args=(),
+    device_types="spyre",
+)
+def activation_stationary_shared_lhs_mm(
+    x: torch.Tensor, expert_weights: torch.Tensor
+) -> torch.Tensor:  # type: ignore[empty-body]
+    """Multiply one 2-D activation by a bank of expert weights.
+
+    This experimental operation is intentionally narrower than broadcasting
+    ``x`` to a physical expert-batched tensor.  Its lowering keeps the left
+    operand indexed as ``x[m, k]`` while the expert dimension indexes only the
+    right operand and output.
+    """
+
+    pass
+
+
+@activation_stationary_shared_lhs_mm.register_fake
+def _(x: torch.Tensor, expert_weights: torch.Tensor) -> torch.Tensor:
+    if x.ndim != 2:
+        raise RuntimeError(f"x must be 2-D [M,K], got shape {tuple(x.shape)}")
+    if expert_weights.ndim != 3:
+        raise RuntimeError(
+            "expert_weights must be 3-D [E,K,N], "
+            f"got shape {tuple(expert_weights.shape)}"
+        )
+    if x.shape[1] != expert_weights.shape[1]:
+        raise RuntimeError(
+            "shared reduction dimension mismatch: "
+            f"x.shape[1]={x.shape[1]} versus expert_weights.shape[1]="
+            f"{expert_weights.shape[1]}"
+        )
+    if x.dtype != expert_weights.dtype:
+        raise RuntimeError(
+            f"dtype mismatch: x={x.dtype}, expert_weights={expert_weights.dtype}"
+        )
+    return x.new_empty((expert_weights.shape[0], x.shape[0], expert_weights.shape[2]))
+
+
+@torch.library.custom_op(
+    "spyre::activation_stationary_shared_lhs_mm_prepacked",
+    mutates_args=(),
+    device_types="spyre",
+)
+def activation_stationary_shared_lhs_mm_prepacked(
+    x: torch.Tensor, expert_weights: torch.Tensor
+) -> torch.Tensor:  # type: ignore[empty-body]
+    """Shared-LHS matmul with weights stored logically as ``[K,E,N]``."""
+
+    pass
+
+
+@activation_stationary_shared_lhs_mm_prepacked.register_fake
+def _(x: torch.Tensor, expert_weights: torch.Tensor) -> torch.Tensor:
+    if x.ndim != 2 or expert_weights.ndim != 3:
+        raise RuntimeError("expected x[M,K] and expert_weights[K,E,N]")
+    if x.shape[1] != expert_weights.shape[0]:
+        raise RuntimeError("shared reduction dimension mismatch")
+    if x.dtype != expert_weights.dtype:
+        raise RuntimeError("dtype mismatch")
+    return x.new_empty((expert_weights.shape[1], x.shape[0], expert_weights.shape[2]))
+
+
+@torch.library.custom_op(
+    "spyre::activation_stationary_expert_mm_prepacked",
+    mutates_args=(),
+    device_types="spyre",
+)
+def activation_stationary_expert_mm_prepacked(
+    x: torch.Tensor, expert_weights: torch.Tensor
+) -> torch.Tensor:  # type: ignore[empty-body]
+    """Expert-batched matmul with weights stored logically as ``[K,E,N]``."""
+
+    pass
+
+
+@activation_stationary_expert_mm_prepacked.register_fake
+def _(x: torch.Tensor, expert_weights: torch.Tensor) -> torch.Tensor:
+    if x.ndim != 3 or expert_weights.ndim != 3:
+        raise RuntimeError("expected x[E,M,K] and expert_weights[K,E,N]")
+    if x.shape[0] != expert_weights.shape[1] or x.shape[2] != expert_weights.shape[0]:
+        raise RuntimeError("expert or reduction dimension mismatch")
+    if x.dtype != expert_weights.dtype:
+        raise RuntimeError("dtype mismatch")
+    return x.new_empty((x.shape[0], x.shape[1], expert_weights.shape[2]))
+
+
 @torch.library.custom_op("spyre::conv2d", mutates_args=(), device_types="spyre")
 def spyre_conv2d(
     input: torch.Tensor,

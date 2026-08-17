@@ -560,6 +560,150 @@ def lower_bmm(x, y):
     return result
 
 
+@register_spyre_lowering(
+    torch.ops.spyre.activation_stationary_shared_lhs_mm.default
+)
+def lower_activation_stationary_shared_lhs_mm(x, expert_weights):
+    """Lower ``[M,K] @ [E,K,N]`` without materializing ``[E,M,K]``.
+
+    The expert coordinate appears only in the RHS and output access.  When the
+    expert dimension is enclosed by a coarse-tile LoopSpec, the left operand is
+    therefore loop-invariant and can be retained in LX while expert slabs
+    advance.
+    """
+
+    x.realize()
+    expert_weights.realize()
+    x_size = x.get_size()
+    weight_size = expert_weights.get_size()
+    if len(x_size) != 2 or len(weight_size) != 3:
+        raise Unsupported(
+            "activation_stationary_shared_lhs_mm requires [M,K] and [E,K,N], "
+            f"got {x_size} and {weight_size}"
+        )
+    if x_size[1] != weight_size[1]:
+        raise Unsupported(
+            "activation_stationary_shared_lhs_mm reduction dimensions differ: "
+            f"{x_size[1]} versus {weight_size[1]}"
+        )
+
+    x_loader = x.make_loader()
+    weight_loader = expert_weights.make_loader()
+    ranges = [weight_size[0], x_size[0], weight_size[2]]
+
+    def inner_fn(index, reduction_index):
+        expert, row, column = index
+        (reduction,) = reduction_index
+        return (
+            x_loader([row, reduction]),
+            weight_loader([expert, reduction, column]),
+        )
+
+    result = SpyreReduction.create(
+        reduction_type=BATCH_MATMUL_OP,
+        input_node=[x, expert_weights],
+        device=x.get_device(),
+        dst_dtype=x.get_dtype(),
+        src_dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=ranges,
+        reduction_ranges=[x_size[1]],
+        op_info={"activation_stationary_shared_lhs_mm": {"expert_dim": 0}},
+    )
+    result.realize()
+    return result
+
+
+@register_spyre_lowering(
+    torch.ops.spyre.activation_stationary_shared_lhs_mm_prepacked.default
+)
+def lower_activation_stationary_shared_lhs_mm_prepacked(x, expert_weights):
+    """Lower ``[M,K] @ [K,E,N]`` with a directly streamable weight layout."""
+
+    x.realize()
+    expert_weights.realize()
+    x_size = x.get_size()
+    weight_size = expert_weights.get_size()
+    if len(x_size) != 2 or len(weight_size) != 3 or x_size[1] != weight_size[0]:
+        raise Unsupported(
+            "activation_stationary_shared_lhs_mm_prepacked requires "
+            f"[M,K] and [K,E,N], got {x_size} and {weight_size}"
+        )
+    x_loader = x.make_loader()
+    weight_loader = expert_weights.make_loader()
+
+    def inner_fn(index, reduction_index):
+        expert, row, column = index
+        (reduction,) = reduction_index
+        return (
+            x_loader([row, reduction]),
+            weight_loader([reduction, expert, column]),
+        )
+
+    result = SpyreReduction.create(
+        reduction_type=BATCH_MATMUL_OP,
+        input_node=[x, expert_weights],
+        device=x.get_device(),
+        dst_dtype=x.get_dtype(),
+        src_dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=[weight_size[1], x_size[0], weight_size[2]],
+        reduction_ranges=[x_size[1]],
+        op_info={
+            "activation_stationary_shared_lhs_mm": {"expert_dim": 0},
+            "activation_stationary_stream_expert_weight": True,
+        },
+    )
+    result.realize()
+    return result
+
+
+@register_spyre_lowering(
+    torch.ops.spyre.activation_stationary_expert_mm_prepacked.default
+)
+def lower_activation_stationary_expert_mm_prepacked(x, expert_weights):
+    """Lower ``[E,M,K] @ [K,E,N]`` without a weight restickify copy."""
+
+    x.realize()
+    expert_weights.realize()
+    x_size = x.get_size()
+    weight_size = expert_weights.get_size()
+    if (
+        len(x_size) != 3
+        or len(weight_size) != 3
+        or x_size[0] != weight_size[1]
+        or x_size[2] != weight_size[0]
+    ):
+        raise Unsupported(
+            "activation_stationary_expert_mm_prepacked requires "
+            f"[E,M,K] and [K,E,N], got {x_size} and {weight_size}"
+        )
+    x_loader = x.make_loader()
+    weight_loader = expert_weights.make_loader()
+
+    def inner_fn(index, reduction_index):
+        expert, row, column = index
+        (reduction,) = reduction_index
+        return (
+            x_loader([expert, row, reduction]),
+            weight_loader([reduction, expert, column]),
+        )
+
+    result = SpyreReduction.create(
+        reduction_type=BATCH_MATMUL_OP,
+        input_node=[x, expert_weights],
+        device=x.get_device(),
+        dst_dtype=x.get_dtype(),
+        src_dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=[x_size[0], x_size[1], weight_size[2]],
+        reduction_ranges=[x_size[2]],
+        op_info={"activation_stationary_stream_expert_weight": True},
+    )
+    result.realize()
+    return result
+
+
 @register_spyre_lowering(torch.ops.spyre.conv2d.default)
 def lower_depthwise_conv2d(x, w, stride, padding, dilation, groups):
     x = V.graph.get_buffer(x.realize())

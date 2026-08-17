@@ -422,7 +422,9 @@ class SpyreEmptyFallback(ir.ExternKernel):
 
     def should_allocate(self) -> bool:
         layout = self.get_layout()
-        if isinstance(layout, FixedTiledLayout) and "hbm_pool" in layout.allocation:
+        if isinstance(layout, FixedTiledLayout) and (
+            "hbm_pool" in layout.allocation or "lx" in layout.allocation
+        ):
             return False
         return True
 
