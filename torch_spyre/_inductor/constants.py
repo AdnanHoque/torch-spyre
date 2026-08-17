@@ -110,6 +110,24 @@ COPY_BACK_CANDIDATE_ATTR = "_spyre_copy_back_candidate"
 # compute mutation op from a pure-copy mutation op.
 ELIDED_COPY_BACK_ATTR = "_spyre_writes_copy_back_target"
 
+# Marker on the tile-sized accumulator synthesized for a nested coarse-tile
+# reduction.  Its fill, combine, and drain references are all fixed-address;
+# scratchpad planning may therefore keep this otherwise-mutated buffer in LX.
+# Ordinary mutation targets remain ineligible.
+COARSE_TILE_FIXED_LX_ACCUM_ATTR = "_spyre_coarse_tile_fixed_lx_accumulator"
+
+# An invariant coarse-tile read-copy deliberately has no LoopInfo because it
+# executes before the loop nest.  Preserve its owning group separately so
+# fusion and scratchpad liveness can keep the copied value live across every
+# iteration of that loop.
+COARSE_TILE_HOISTED_LOOP_GROUP_ATTR = "_spyre_coarse_tile_hoisted_loop_group_id"
+
+# Optional operation iteration-space dimension that must vary fastest in the
+# physical core mapping. The IR attribute is mirrored into OpSpec ``op_info``
+# so LX planning and SuperDSC emission use the same core-to-slice assignment.
+CORE_MAPPING_CONTIGUOUS_DIM_ATTR = "_spyre_core_mapping_contiguous_dim"
+CORE_MAPPING_CONTIGUOUS_DIM_INFO_KEY = "core_mapping_contiguous_dim"
+
 # FX ``custom`` metadata key for BMMs created from a shared 2D weight whose
 # logical batch dim is statically 1.  The downstream OpSpec key carries the same
 # fact after lowering, where FX metadata is no longer directly available.

@@ -70,7 +70,7 @@ import torch
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.ops_handler import WrapperHandler
 from torch._inductor.graph import GraphLowering
-from torch._inductor.utils import sympy_subs
+from torch._inductor.utils import sympy_index_symbol, sympy_subs
 from torch._inductor.ir import (
     ComputedBuffer,
     FixedLayout,
@@ -91,7 +91,11 @@ from torch.utils._ordered_set import OrderedSet
 from torch_spyre._C import SpyreTensorLayout
 
 from .. import config
-from ..constants import BATCH_MATMUL_OP
+from ..constants import (
+    BATCH_MATMUL_OP,
+    COARSE_TILE_FIXED_LX_ACCUM_ATTR,
+    COARSE_TILE_HOISTED_LOOP_GROUP_ATTR,
+)
 from ..errors import Unsupported
 from ..logging_utils import get_inductor_logger
 from ..loop_info import (
@@ -300,6 +304,10 @@ def plan_coarse_tile_groups(
             tiled_dims_per_read = [
                 _tiled_dims_for_dep(dep, per_level_extents) for dep in read_deps
             ]
+            host_tile_advances_per_read = [
+                _host_tile_advances_for_dep(dep, per_level_extents)
+                for dep in read_deps
+            ]
             output_tiled_dims = (
                 _tiled_dims_for_dep(write_deps[0], per_level_extents)
                 if write_deps
@@ -312,6 +320,7 @@ def plan_coarse_tile_groups(
                 loop_tiled_dims=op_tiled_dims,
                 loop_tiled_reduction_dims=op_tiled_reduction_dims,
                 tiled_dims_per_read=tiled_dims_per_read,
+                host_tile_advances_per_read=host_tile_advances_per_read,
                 output_tiled_dims=output_tiled_dims,
             )
 
@@ -885,6 +894,36 @@ def _tiled_dims_for_dep(
     ]
 
 
+def _host_tile_advances_for_dep(
+    dep: MemoryDep,
+    per_level_extents: list[dict[int, Expr]],
+) -> list[list[tuple[int, Expr]]]:
+    """Preserve each tiled dim's flat host-element advance before division.
+
+    This is deliberately parallel to ``_tiled_dims_for_dep`` and is not the
+    normal tile-advance path.  It only supplies the information that cannot
+    be reconstructed later when division turns a tiled dim into size one and
+    Inductor squeezes its symbol from the final MemoryDep.  Evaluate one dim
+    at a time (all other symbols zero) and subtract the all-zero offset so a
+    constant/window offset is not mistaken for a per-iteration advance.
+    """
+    zero_subs = {sym: sympy.Integer(0) for sym in dep.index.free_symbols}
+    zero_offset = dep.index.subs(zero_subs)
+    result: list[list[tuple[int, Expr]]] = []
+    for level in per_level_extents:
+        level_advances: list[tuple[int, Expr]] = []
+        for dim, extent in level.items():
+            dim_symbol = sympy_index_symbol(f"d{dim}")
+            if dim_symbol not in dep.index.free_symbols:
+                continue
+            subs = dict(zero_subs)
+            subs[dim_symbol] = extent
+            advance = sympy.simplify(dep.index.subs(subs) - zero_offset)
+            level_advances.append((dim, advance))
+        result.append(level_advances)
+    return result
+
+
 def _stick_host_dim(op: ComputedBuffer, device_layout) -> int | None:
     """Authoritative stick host-dim index for ``op``'s output, recovered from
     coordinate identity (issue #3116).
@@ -1444,7 +1483,7 @@ def _coarse_tile_common(
     # 1 (a tiled-reduction op may itself have needed a read copy-in) and
     # before Pass 3 -- a reduction op is never also copy_out (the plan's
     # kind routes each op to exactly one).
-    _insert_all_reduction_ops(operations)
+    _insert_all_reduction_ops(operations, pre_stickify=run_read_copies)
 
     # Pass 3: write copy-outs (full buffer + copy op + outside-consumer/
     # graph-output patching), using each op's now-stamped
@@ -2354,6 +2393,8 @@ def _insert_one_read_copy(
     copy_name: str,
     operations: list[Operation],
     insert_before_op: Operation,
+    planned_dep_levels: tuple[tuple[tuple[int, Expr], ...], ...] | None = None,
+    planned_host_advances: tuple[tuple[tuple[int, Expr], ...], ...] | None = None,
 ) -> str:
     """Build and insert one tile-sized copy op for a single full-buffer read.
 
@@ -2406,7 +2447,7 @@ def _insert_one_read_copy(
     if isinstance(full_buf, StorageBox):
         full_buf = full_buf.data
 
-    tile_ranges = list(dep.size)
+    dep_ranges = list(dep.size)
     # Derive copy buffer strides using compute_tile_stride.
     # dep.size is the full loop iteration space (output + reduction dims) and
     # may have higher rank than the tensor (e.g. for a Reduction reading
@@ -2420,25 +2461,36 @@ def _insert_one_read_copy(
     # broadcast/absent (e.g. the N dim in a Reduction reading a[M,K]).
     active_idx = [i for i, c in enumerate(full_coeff) if c != 0]
 
+    tile_ranges: list[Expr]
     tile_strides: list[Expr]
+    dep_tile_strides: list[Expr] = [sympy.Integer(0)] * len(dep_ranges)
+    compact_dep_positions: list[int]
     if not active_idx:
+        # Preserve the existing scalar/all-broadcast representation.  The
+        # D-AS-X operands all have active dims; this branch only protects
+        # legacy scalar-copy behavior.
+        tile_ranges = dep_ranges
         tile_strides = [sympy.Integer(0)] * len(tile_ranges)
+        compact_dep_positions = list(range(len(dep_ranges)))
     else:
         active_full_sizes = [dep.size[i] for i in active_idx]
         active_full_strides = [full_coeff[i] for i in active_idx]
-        active_tile_ranges = [tile_ranges[i] for i in active_idx]
-        active_tile_strides = compute_tile_stride(
-            active_full_sizes, active_full_strides, active_tile_ranges
+        tile_ranges = [dep_ranges[i] for i in active_idx]
+        tile_strides = compute_tile_stride(
+            active_full_sizes, active_full_strides, tile_ranges
         )
-        # active_tile_strides[i] corresponds to active_idx[i]: both are indexed
-        # by position in the compressed active-dims space, so zip pairs each
-        # full dep.var_names position with its computed tile stride correctly.
-        tile_strides = [sympy.Integer(0)] * len(tile_ranges)
-        for pos, ts in zip(active_idx, active_tile_strides):
-            tile_strides[pos] = ts
+        compact_dep_positions = active_idx
+        for dep_pos, stride in zip(active_idx, tile_strides):
+            dep_tile_strides[dep_pos] = stride
 
     def _copy_inner_fn(idx, _dep=dep, _full_name=full_buf.get_name()):
-        subs = dict(zip(_dep.var_names, idx))
+        # Pointwise iteration covers only dimensions the source dependency
+        # actually indexes.  Reduction output dimensions broadcast by this
+        # operand (e.g. N for X[M,K] in matmul) are not physical copy-buffer
+        # dimensions and must not inflate [Ttile,H] into [Ttile,F,H].
+        subs = {var: sympy.Integer(0) for var in _dep.var_names}
+        for compact_pos, dep_pos in enumerate(compact_dep_positions):
+            subs[_dep.var_names[dep_pos]] = idx[compact_pos]
         flat_index = sympy_subs(_dep.index, subs)
         return V.ops.load(_full_name, flat_index)
 
@@ -2632,6 +2684,10 @@ def _insert_one_read_copy(
     copy_buf.origins = sizing_op.origins
     copy_buf.operation_name = copy_name
     copy_op_metadata(sizing_op, copy_buf)
+    # _patch_consumer_to_read_copy rescales the consumer's original
+    # full-rank dependency index. Keep a full dependency-position vector
+    # even though copy_buf itself is compact-rank.
+    copy_buf._source_dep_tile_strides = dep_tile_strides  # type: ignore[attr-defined]
 
     # Fresh per-level tiled-dim decisions for copy_buf's own read/write —
     # mirroring _insert_copy_op's read/write split (see its comment), but
@@ -2654,6 +2710,13 @@ def _insert_one_read_copy(
     # SpyreKernel._general_tile_advance's positional dep-index lookup —
     # a semantic mismatch, not merely a magnitude one.
     sizing_op_info = sizing_op.loop_info  # type: ignore[attr-defined]
+    # ``tiled_dims_per_read`` was planned before range division, so it is
+    # the authoritative record of which loop levels this particular source
+    # read actually advances at.  Keep that record: post-division
+    # ``MemoryDep`` extraction squeezes unit dimensions, which is exactly
+    # what happens to the expert dimension when an E=2 expert loop is tiled
+    # down to one expert per iteration.  The shared activation is invariant
+    # at that inner level even though the consuming BMM is not.
     copy_ranges = list(copy_data.ranges)
     # sizing_op_info.loop_tiled_dims's dim keys are raw positional indices
     # into sizing_op.data.ranges (see CoarseTileInfo's docstring), which
@@ -2675,15 +2738,70 @@ def _insert_one_read_copy(
     read_level_extents: list[dict[int, Expr]] = [
         {} for _ in sizing_op_info.loop_tiled_dims
     ]
+    preserved_unit_dim_advances: list[Expr] = [
+        sympy.Integer(0) for _ in sizing_op_info.loop_tiled_dims
+    ]
+
+    def _preserve_unit_dim_advance(level_idx: int, dim: int) -> None:
+        if planned_host_advances is None:
+            raise Unsupported(
+                f"coarse_tile: read copy of {dep.name!r} for "
+                f"{sizing_op.get_name()!r} needs the pre-division base stride "
+                f"for squeezed tiled dim {dim}, but no planning-time host "
+                "advance was preserved"
+            )
+        advance_by_dim = dict(planned_host_advances[level_idx])
+        if dim not in advance_by_dim:
+            raise Unsupported(
+                f"coarse_tile: read copy of {dep.name!r} for "
+                f"{sizing_op.get_name()!r} advances along squeezed tiled dim "
+                f"{dim}, but its planning-time host advance is missing"
+            )
+        preserved_unit_dim_advances[level_idx] += advance_by_dim[dim]
+
     for d in {d for level in sizing_op_info.loop_tiled_dims for d in level}:
         levels_tiling_d = [
             i for i, dims in enumerate(sizing_op_info.loop_tiled_dims) if d in dims
         ]
+        if planned_dep_levels is not None:
+            levels_tiling_d = [
+                level_idx
+                for level_idx in levels_tiling_d
+                if any(
+                    planned_dim == d
+                    for planned_dim, _extent in planned_dep_levels[level_idx]
+                )
+            ]
+        if not levels_tiling_d:
+            continue
         # The dict key must be a raw positional index into copy_buf's own
         # data.ranges (what SpyreKernel._host_dim_to_index_symbol will
         # later squeeze again when it runs against copy_buf) -- i.e. the
         # squeezed position computed above, not sizing_op's raw d.
-        copy_dim = squeeze_pos[d]
+        dep_dim = squeeze_pos.get(d)
+        copy_dim = (
+            compact_dep_positions.index(dep_dim)
+            if dep_dim in compact_dep_positions
+            else None
+        )
+        if copy_dim is None:
+            # A unit post-division dimension disappears from dep.size.  It
+            # is safe to omit only when planning already proved this source
+            # read invariant at every level tiling that dimension (the
+            # shared-LHS activation's expert dimension).  If the source read
+            # itself advances there (an expert weight bank), silently
+            # dropping it would reload expert zero on every iteration; that
+            # needs a separate preserved-base-stride mechanism.
+            if planned_dep_levels is None:
+                _preserve_unit_dim_advance(levels_tiling_d[-1], d)
+            else:
+                for level_idx in levels_tiling_d:
+                    if any(
+                        planned_dim == d
+                        for planned_dim, _extent in planned_dep_levels[level_idx]
+                    ):
+                        _preserve_unit_dim_advance(level_idx, d)
+            continue
         running = sympy.sympify(copy_ranges[copy_dim])
         for level_idx in reversed(levels_tiling_d):
             read_level_extents[level_idx][copy_dim] = running
@@ -2701,7 +2819,41 @@ def _insert_one_read_copy(
             for i, dims in enumerate(sizing_op_info.loop_tiled_reduction_dims)
             if d in dims
         ]
-        copy_dim_key = it_idx + reduction_squeeze_pos[d]
+        planned_dim_key = len(sizing_op.data.ranges) + d
+        if planned_dep_levels is not None:
+            levels_tiling_d = [
+                level_idx
+                for level_idx in levels_tiling_d
+                if any(
+                    planned_dim == planned_dim_key
+                    for planned_dim, _extent in planned_dep_levels[level_idx]
+                )
+            ]
+        if not levels_tiling_d:
+            continue
+        reduction_copy_dim = reduction_squeeze_pos.get(d)
+        if reduction_copy_dim is None:
+            if planned_dep_levels is None:
+                _preserve_unit_dim_advance(levels_tiling_d[-1], planned_dim_key)
+            else:
+                for level_idx in levels_tiling_d:
+                    if any(
+                        planned_dim == planned_dim_key
+                        for planned_dim, _extent in planned_dep_levels[level_idx]
+                    ):
+                        _preserve_unit_dim_advance(level_idx, planned_dim_key)
+            continue
+        dep_dim_key = it_idx + reduction_copy_dim
+        copy_dim_key = (
+            compact_dep_positions.index(dep_dim_key)
+            if dep_dim_key in compact_dep_positions
+            else None
+        )
+        if copy_dim_key is None:
+            raise Unsupported(
+                f"coarse_tile: tiled reduction dim {d} of read {dep.name!r} "
+                "has no active compact copy-buffer dimension"
+            )
         running = sympy.sympify(copy_ranges[copy_dim_key])
         for level_idx in reversed(levels_tiling_d):
             read_level_extents[level_idx][copy_dim_key] = running
@@ -2718,6 +2870,26 @@ def _insert_one_read_copy(
     output_tiled_dims = (
         _tiled_dims_for_dep(copy_writes[0], write_level_extents) if copy_writes else []
     )
+    # A copy-in follows the source read, not the consuming op's output.  In
+    # particular, a shared-LHS BMM has an inner expert loop while its 2-D X
+    # operand is invariant there.  Give the copy only the source-dependent
+    # loop prefix: it is emitted once immediately before the first nested
+    # level at which the source stops advancing.  Scheduler nesting then
+    # produces ``outer { copy X; inner expert { ... } }`` rather than
+    # reloading X in every expert iteration.
+    if planned_dep_levels is None:
+        # Legacy/hand-built CoarseTileInfo (including older unit fixtures)
+        # has no per-read planning record. Preserve the prior behavior and
+        # keep the copy in the full consumer nest. Unit-dim hoisting remains
+        # fail-closed above because invariance cannot be proven without the
+        # planning record.
+        loop_depth = len(sizing_op_info.loop_count)
+    else:
+        active_levels = [i for i, level in enumerate(planned_dep_levels) if level]
+        loop_depth = max(active_levels) + 1 if active_levels else 0
+    copy_loop_tiled_dims = [
+        sorted(level_extents) for level_extents in read_level_extents[:loop_depth]
+    ]
     # copy_buf is its own op, not sizing_op under another name -- it must
     # not inherit sizing_op_info.propagation. That plan was computed for
     # sizing_op's own boundary-crossing decision (kind may be "reduction"
@@ -2727,12 +2899,38 @@ def _insert_one_read_copy(
     # a "reduction"-kind plan leak onto this Pointwise passthrough buffer,
     # causing Pass 2 (_insert_all_reduction_ops) to misdispatch it into
     # _propagate_tiled_reduction_op.
-    copy_buf.loop_info = dataclasses.replace(  # type: ignore[attr-defined]
-        sizing_op_info,
-        tiled_dims_per_read=tiled_dims_per_read,
-        output_tiled_dims=output_tiled_dims,
-        propagation=PropagationPlan(kind="loop_internal"),
-    )
+    if loop_depth:
+        copy_buf.loop_info = dataclasses.replace(  # type: ignore[attr-defined]
+            sizing_op_info,
+            loop_group_id=sizing_op_info.loop_group_id[:loop_depth],
+            loop_count=sizing_op_info.loop_count[:loop_depth],
+            loop_tiled_dims=copy_loop_tiled_dims,
+            loop_tiled_reduction_dims=[[] for _ in range(loop_depth)],
+            tiled_dims_per_read=[
+                per_level[:loop_depth] for per_level in tiled_dims_per_read
+            ],
+            host_tile_advances_per_read=[[] for _ in copy_reads],
+            output_tiled_dims=output_tiled_dims[:loop_depth],
+            propagation=PropagationPlan(kind="loop_internal"),
+        )
+        if any(advance != 0 for advance in preserved_unit_dim_advances[:loop_depth]):
+            copy_buf._unit_dim_read_host_advances = [  # type: ignore[attr-defined]
+                list(preserved_unit_dim_advances[:loop_depth])
+            ]
+    else:
+        # copy_op_metadata copied sizing_op.loop_info above.  A read that is
+        # invariant at every level belongs outside the entire loop nest.
+        delattr(copy_buf, "loop_info")
+        # Retain the owning loop group even though this operation deliberately
+        # has no LoopInfo.  Flat-reduction setup inserted by Pass 2 must be
+        # ordered before this copy; otherwise its wrapper-only constant/empty
+        # nodes split the copy from the CountedLoop kernel and scratchpad
+        # planning can reuse the copy's LX address inside the loop.
+        setattr(
+            copy_buf,
+            COARSE_TILE_HOISTED_LOOP_GROUP_ATTR,
+            sizing_op_info.loop_group_id,
+        )
 
     V.graph.name_to_buffer[copy_name] = copy_buf
     operations.insert(insert_idx, copy_buf)
@@ -2771,7 +2969,14 @@ def _patch_consumer_to_read_copy(
         for op in operations
         if isinstance(op, ComputedBuffer) and op.get_name() == copy_name
     )
-    tile_strides = list(copy_buf.layout.stride)
+    # The copy buffer may deliberately drop iteration dimensions the source
+    # dependency broadcasts over (for example N in X[M,K] @ W[K,N]).  The
+    # consumer index is still expressed in the source dependency's full
+    # variable space, so use the full-position stride vector recorded when
+    # the compact copy was built rather than the compact layout stride.
+    tile_strides = list(
+        getattr(copy_buf, "_source_dep_tile_strides", copy_buf.layout.stride)
+    )
     name_map: dict[str, tuple[str, list[Expr], list[Expr]]] = {
         dep.name: (copy_name, full_strides, tile_strides)
     }
@@ -2897,6 +3102,101 @@ def _plan_read_copies(
             op_deps.sort(key=lambda pair: op_position[pair[0].get_operation_name()])
             sizing_op, sizing_dep = op_deps[0]
             sizing_info = sizing_op.loop_info  # type: ignore[attr-defined]
+            sizing_reads = [
+                dep
+                for dep in sizing_op.get_read_writes().reads
+                if isinstance(dep, MemoryDep)
+            ]
+            try:
+                sizing_dep_idx = sizing_reads.index(sizing_dep)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"_plan_read_copies: cannot match {sizing_dep!r} to a read "
+                    f"of sizing op {sizing_op.get_name()!r}"
+                ) from exc
+            planned_dep_levels = (
+                tuple(
+                    tuple((dim, extent) for dim, extent in level)
+                    for level in sizing_info.tiled_dims_per_read[sizing_dep_idx]
+                )
+                if sizing_dep_idx < len(sizing_info.tiled_dims_per_read)
+                else None
+            )
+            planned_host_advances = (
+                tuple(
+                    tuple((dim, advance) for dim, advance in level)
+                    for level in sizing_info.host_tile_advances_per_read[
+                        sizing_dep_idx
+                    ]
+                )
+                if sizing_dep_idx < len(sizing_info.host_tile_advances_per_read)
+                else None
+            )
+            source = V.graph.get_buffer(sizing_dep.name)
+            if isinstance(source, TensorBox):
+                source = source.data
+            if isinstance(source, StorageBox):
+                source = source.data
+            op_info = getattr(sizing_op.data, "op_info", None) or {}
+            direct_streamed_expert_weight = (
+                isinstance(source, InputBuffer)
+                and op_info.get("activation_stationary_stream_expert_weight") is True
+                and planned_dep_levels is not None
+                and any(planned_dep_levels)
+                and planned_host_advances is not None
+                and any(planned_host_advances)
+                and all(
+                    (getattr(op.data, "op_info", None) or {}).get(
+                        "activation_stationary_stream_expert_weight"
+                    )
+                    is True
+                    for op, _dep in op_deps
+                )
+            )
+            if direct_streamed_expert_weight:
+                # The explicit prepacked ABI already has the BMM kernel's
+                # stick layout.  Keep the original HBM dependency on the
+                # consumer and let its preserved unit-expert host advance
+                # become the LoopSpec affine base update.  Inserting the
+                # ordinary tile copy here would add an HBM-to-HBM weight
+                # materialization on every expert iteration.
+                for consumer, consumer_dep in op_deps:
+                    consumer_reads = [
+                        dep
+                        for dep in consumer.get_read_writes().reads
+                        if isinstance(dep, MemoryDep)
+                    ]
+                    consumer_dep_idx = consumer_reads.index(consumer_dep)
+                    consumer_info = consumer.loop_info  # type: ignore[attr-defined]
+                    planned = consumer_info.host_tile_advances_per_read[
+                        consumer_dep_idx
+                    ]
+                    per_level = [
+                        sum(
+                            (sympy.sympify(advance) for _dim, advance in level),
+                            sympy.Integer(0),
+                        )
+                        for level in planned
+                    ]
+                    if not any(per_level):
+                        raise Unsupported(
+                            "coarse_tile: direct streamed expert weight has no "
+                            f"preserved loop advance for {consumer.get_name()!r}"
+                        )
+                    preserved = [
+                        [] for _ in consumer_reads
+                    ]
+                    existing = getattr(
+                        consumer, "_unit_dim_read_host_advances", None
+                    )
+                    if existing is not None:
+                        preserved = [list(levels) for levels in existing]
+                        preserved.extend(
+                            [] for _ in range(len(consumer_reads) - len(preserved))
+                        )
+                    preserved[consumer_dep_idx] = per_level
+                    consumer._unit_dim_read_host_advances = preserved  # type: ignore[attr-defined]
+                continue
             for other_op, _dep in op_deps[1:]:
                 other_info = other_op.loop_info  # type: ignore[attr-defined]
                 # Only loop_count (the per-level trip counts) is a genuine
@@ -2936,6 +3236,8 @@ def _plan_read_copies(
                     consumer_op_names=tuple(
                         op.get_operation_name() for op, _dep in op_deps
                     ),
+                    planned_dep_levels=planned_dep_levels,
+                    planned_host_advances=planned_host_advances,
                 )
             )
         if entries:
@@ -2973,6 +3275,8 @@ def _insert_all_read_copy_ops(
                 entry.copy_name,
                 operations,
                 insert_before_op=insert_before_op,
+                planned_dep_levels=entry.planned_dep_levels,
+                planned_host_advances=entry.planned_host_advances,
             )
             for consumer_name in entry.consumer_op_names:
                 consumer = name_to_op[consumer_name]

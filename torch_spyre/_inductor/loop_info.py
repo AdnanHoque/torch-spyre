@@ -25,6 +25,11 @@ from typing import TYPE_CHECKING, Literal
 
 import sympy
 
+from .constants import (
+    COARSE_TILE_HOISTED_LOOP_GROUP_ATTR,
+    CORE_MAPPING_CONTIGUOUS_DIM_ATTR,
+)
+
 if TYPE_CHECKING:
     from torch._inductor.dependencies import MemoryDep
     from torch._inductor.ir import ComputedBuffer
@@ -152,6 +157,16 @@ class ReadCopyEntry:
     consumer_op_names:
         Names of every op in the group that must have this dep's buffer
         name patched (via _NameSwapHandler) to load from copy_name instead.
+    planned_dep_levels:
+        Planning-time, pre-range-division per-level tiled-dim metadata for
+        this exact source read.  Captured on the entry because earlier
+        entries may rebuild/patch the sizing op before this one executes.
+        ``None`` preserves legacy behavior for hand-built plans that do not
+        carry per-read metadata.
+    planned_host_advances:
+        Parallel planning-time ``(dim, flat host-element advance)`` values.
+        Used only when a tiled dimension becomes unit-sized and its symbol
+        is squeezed out of the final dependency index.
     """
 
     copy_name: str
@@ -159,6 +174,8 @@ class ReadCopyEntry:
     insert_before_op_name: str
     sizing_op_name: str
     consumer_op_names: tuple[str, ...]
+    planned_dep_levels: tuple[tuple[tuple[int, sympy.Expr], ...], ...] | None = None
+    planned_host_advances: tuple[tuple[tuple[int, sympy.Expr], ...], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -220,6 +237,12 @@ class CoarseTileInfo:
         (possibly later-rewritten) index expression happens in
         spyre_kernel.py at OpSpec/TensorArg construction time, when the
         index is guaranteed final.
+    host_tile_advances_per_read:
+        Planning-time flat host-element advances parallel to
+        ``tiled_dims_per_read``. Normally codegen derives these from the
+        final dependency index. The preserved value is a fallback when
+        range division makes a tiled dimension size one and Inductor
+        squeezes that dimension's symbol out of the final index.
     output_tiled_dims:
         The analogous per-level ``(op_dim_index, extent)`` list for this
         op's own write dependency. Defaults to ``[]`` (no levels tiled).
@@ -234,6 +257,9 @@ class CoarseTileInfo:
     loop_tiled_dims: list[list[int]]
     loop_tiled_reduction_dims: list[list[int]] = field(default_factory=list)
     tiled_dims_per_read: list[list[list[tuple[int, sympy.Expr]]]] = field(
+        default_factory=list
+    )
+    host_tile_advances_per_read: list[list[list[tuple[int, sympy.Expr]]]] = field(
         default_factory=list
     )
     output_tiled_dims: list[list[tuple[int, sympy.Expr]]] = field(default_factory=list)
@@ -255,6 +281,17 @@ _SPYRE_METADATA_ATTRS = (
     # coarse_tile._propagate_tiled_reduction_op, read by finalize_layouts in
     # insert_restickify.py to overwrite accum_full's generic layout.
     "_tiled_reduction_accum_name",
+    # A direct-streamed expert weight may lose its unit expert symbol during
+    # range division.  Preserve the planning-time HBM base advance through
+    # later ComputedBuffer reconstructions so codegen can emit the LoopSpec
+    # affine address update without inserting a tile copy.
+    "_unit_dim_read_host_advances",
+    # An invariant read-copy has no loop_info, so this separate owner marker
+    # must survive every ComputedBuffer reconstruction (including restickify).
+    COARSE_TILE_HOISTED_LOOP_GROUP_ATTR,
+    # Matched invariant copies carry a physical core-order choice as well as
+    # split factors; both must survive reconstruction.
+    CORE_MAPPING_CONTIGUOUS_DIM_ATTR,
 )
 
 
