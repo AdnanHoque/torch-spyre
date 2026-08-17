@@ -40,7 +40,11 @@ from torch_spyre._inductor.op_spec import IndirectAccess
 
 from . import config
 from .core_mapping import core_to_slice_mapping
-from .constants import ELIDED_COPY_BACK_ATTR, MATMUL_REDUCTION_OPS
+from .constants import (
+    CORE_MAPPING_CONTIGUOUS_DIM_ATTR,
+    ELIDED_COPY_BACK_ATTR,
+    MATMUL_REDUCTION_OPS,
+)
 from .ir import FixedTiledLayout, SpyreConstantFallback, SpyreEmptyFallback
 from .logging_utils import get_inductor_logger
 from .loop_info import copy_op_metadata
@@ -1473,6 +1477,7 @@ class _ViewPrep(NamedTuple):
     num_stick: int
     num_stick_stride: int
     is_matmul: bool
+    core_mapping_contiguous_dim: Optional[int] = None
 
 
 def _prepare_per_core_view(
@@ -1551,6 +1556,7 @@ def _prepare_per_core_view(
         num_stick=num_stick,
         num_stick_stride=num_stick_stride,
         is_matmul=_is_matmul_op(op),
+        core_mapping_contiguous_dim=getattr(op, CORE_MAPPING_CONTIGUOUS_DIM_ATTR, None),
     )
 
 
@@ -1676,11 +1682,11 @@ def _per_core_view_from_prep(
     num_cores = int(math.prod(per_sym.values()))
     iter_symbols = tuple(iter_space)
     dim_splits = tuple(int(per_sym[sym]) for sym in iter_symbols)
-    contiguous_dim = (
-        len(dim_splits) - 1
-        if prep.is_matmul and config.core_id_k_fast_emission
-        else None
-    )
+    contiguous_dim = prep.core_mapping_contiguous_dim
+    if contiguous_dim is not None and not 0 <= contiguous_dim < len(dim_splits):
+        return unrepresentable
+    if contiguous_dim is None and prep.is_matmul and config.core_id_k_fast_emission:
+        contiguous_dim = len(dim_splits) - 1
     core_to_slot = core_to_slice_mapping(
         iter_symbols,
         dim_splits,
