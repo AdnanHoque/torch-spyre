@@ -36,6 +36,10 @@ static expert loop and twelve SDSCs. It is not one monolithic native DDL.
   and matmul proxies.
 - `moe_asgemm/NATIVE_DDL_PREDICTION.md`: preregistered native-kernel prediction
   and falsification gate.
+- `moe_asgemm/CONTRIBUTION_CHARTER.md`: attribution, reuse, and ownership
+  boundary.
+- `moe_asgemm/EXECUTION_PHASE_MODEL.md`: measured dense/grouped/per-route
+  decision framework.
 - `moe_asgemm/ARTIFACTS.md`: retained files and validation identities.
 - `moe_asgemm/LINEAGE_AND_SCOPE.md`: prior work, attribution, and our delta.
 - `moe_asgemm/NEXT_STEPS.md`: upstreaming and product work.
