@@ -82,9 +82,11 @@ from torch_spyre._inductor.scratchpad.utils import (
     _get_buffer_user_deps,
     _would_produce_lx_back_gap,
     OP_OUTPUT_GOOD_FOR_LX_REUSE,
+    hoisted_loop_lifetime_end_overrides,
 )
 from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
-from torch_spyre._inductor.ir import FixedTiledLayout
+from torch_spyre._inductor.ir import FixedTiledLayout, SpyreEmptyFallback
+from torch_spyre._inductor.constants import COARSE_TILE_FIXED_LX_ACCUM_ATTR
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
@@ -299,6 +301,13 @@ class ScratchpadAllocator:
         return op_short_name(op)
 
     def _op_output_good_for_lx_reuse(self, op: Any) -> bool:
+        if getattr(op, COARSE_TILE_FIXED_LX_ACCUM_ATTR, False):
+            # Coarse tiling applies this marker only to its tile-sized
+            # SpyreEmptyFallback reduction state.  It has no producer kernel,
+            # but fill/combine/drain all address the same committed layout.
+            return isinstance(op, SpyreEmptyFallback) and isinstance(
+                op.layout, FixedTiledLayout
+            )
         if not isinstance(op, ComputedBuffer):
             return False
         if isinstance(op.layout, MutationLayoutSHOULDREMOVE):
@@ -403,7 +412,9 @@ class ScratchpadAllocator:
             # MultiOutputLayout tuple op). There is nothing to place, and the
             # checks below would raise.
             return "unsized (no device layout)"
-        if name in mutated_buffers:
+        if name in mutated_buffers and not getattr(
+            op, COARSE_TILE_FIXED_LX_ACCUM_ATTR, False
+        ):
             return "mutation target"
         if _is_tiled_advancing(op) or _is_read_advancing_anywhere(name, buf_user_deps):
             # LX addresses cannot be expressed as affine.apply symbols today (see
@@ -417,7 +428,11 @@ class ScratchpadAllocator:
         restickify = self._restickify_barrier(graph, name, uses)
         if restickify is not None:
             return restickify
-        if any(isinstance(graph.operations[u], ExternKernel) for u in uses):
+        if any(
+            isinstance(graph.operations[u], ExternKernel)
+            and graph.operations[u] is not op
+            for u in uses
+        ):
             return "extern kernel user"
         if self._is_index_or_indirectly_accessed(graph, name, uses, op):
             # Index tensors and the value tensors they index into are read via
@@ -598,6 +613,7 @@ class ScratchpadAllocator:
         lifetimes: dict[str, list[int]],
         ncores: dict[str, int],
         ncores_reasons: dict[str, str],
+        lifetime_end_overrides: Optional[dict[str, int]] = None,
     ) -> list[LifetimeBoundBuffer]:
         """Build one :class:`LifetimeBoundBuffer` per buffer, barred or not.
 
@@ -612,11 +628,17 @@ class ScratchpadAllocator:
         :meth:`_input_residency_reason` and their footprint is computed
         here rather than read off ``mem_usage`` (which covers ops only).
         """
+        lifetime_end_overrides = lifetime_end_overrides or {}
         buffers: list[LifetimeBoundBuffer] = []
         for output_name, info in mem_usage.items():
             uses = lifetimes.get(output_name, [])
             if not uses:
                 continue
+            parents = [
+                parent
+                for parent in in_place.get(output_name, [])
+                if lifetime_end_overrides.get(parent, uses[0] + 1) == uses[0] + 1
+            ]
             buffers.append(
                 LifetimeBoundBuffer(
                     output_name,
@@ -630,8 +652,9 @@ class ScratchpadAllocator:
                     # to a consumer's in_place_parents, which would otherwise mutate
                     # this list inside the shared ``in_place`` dict (matches the copy
                     # in ``_build_cd_bound_buffers``).
-                    in_place_parents=list(in_place.get(output_name, [])),
+                    in_place_parents=parents,
                     residency_reason=reasons.get(output_name),
+                    lifetime_end_override=lifetime_end_overrides.get(output_name),
                 )
             )
 
@@ -836,6 +859,7 @@ class ScratchpadAllocator:
         t0 = time.perf_counter()
         if lifetimes is None:
             lifetimes = calculate_liveness(graph)
+        lifetime_end_overrides = hoisted_loop_lifetime_end_overrides(graph)
         ncores, ncores_reasons = get_ncores_for_buffers(graph)
         t1 = time.perf_counter()
         mem_usage = mem_usage_by_buf(graph, cache)
@@ -873,6 +897,7 @@ class ScratchpadAllocator:
             lifetimes=lifetimes,
             ncores=ncores,
             ncores_reasons=ncores_reasons,
+            lifetime_end_overrides=lifetime_end_overrides,
         )
 
     def _append_lx_relayout_destinations(
@@ -906,6 +931,8 @@ class ScratchpadAllocator:
             return
         for buffer in buffers:
             buffer.uses = [2 * use + 1 for use in buffer.uses]
+            if buffer.lifetime_end_override is not None:
+                buffer.lifetime_end_override *= 2
 
         # Adjacent half-ticks rely on DSCs within a bundle executing serially;
         # otherwise the allocator's lifetime reuse is unsound beyond relayout too.
@@ -1044,6 +1071,15 @@ class ScratchpadAllocator:
 
             else:
                 self._set_one_allocation(buf, b.address)
+                if isinstance(buf, SpyreEmptyFallback) and getattr(
+                    buf, COARSE_TILE_FIXED_LX_ACCUM_ATTR, False
+                ):
+                    # Like an HBM-pool-backed SpyreEmptyFallback, this buffer
+                    # has no Python allocation statement.  Keep Inductor's
+                    # generic free path from emitting ``del name`` for an
+                    # undefined wrapper local; the OpSpecs still address the
+                    # committed LX allocation directly.
+                    graph.removed_buffers.add(b.name)
 
         # Keep graph mutation last and in pre-scheduling: solver retries require
         # the original graph, and post-grad no-op elimination has already run.
@@ -1931,6 +1967,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         all buffers are on the same total scale, ``in_place_parents`` need no
         filtering."""
         lifetimes = calculate_liveness(graph)
+        lifetime_end_overrides = hoisted_loop_lifetime_end_overrides(graph)
         mem_usage = mem_usage_by_buf(graph)
         in_place = {} if in_place is None else in_place
         op_by_name = {op.name: op for op in graph.operations}
@@ -1992,7 +2029,11 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             residency_reason = residency_by_buf[output_name]
 
             buf_divisions = divisions[output_name]
-            parents = list(in_place.get(output_name, []))
+            parents = [
+                parent
+                for parent in in_place.get(output_name, [])
+                if lifetime_end_overrides.get(parent, uses[0] + 1) == uses[0] + 1
+            ]
             size = info["size"]  # total footprint; solver divides per chosen cd
             parent_proj = info["op_inputs"].copy()
             cd_parent_matches = self._cd_parent_matches(
@@ -2055,6 +2096,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                     parents=parent_proj,
                     cd_parent_matches=cd_parent_matches,
                     residency_reason=residency_reason,
+                    lifetime_end_override=lifetime_end_overrides.get(output_name),
                     boundary=BufferType.Output
                     if output_name in graph_output_names
                     else BufferType.Intermediate,
