@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass, field
 import math
-from typing import Any, Callable, Self, Sequence, Tuple, Union
+from typing import Any, Callable, Literal, Self, Sequence, Tuple, Union
 from abc import ABC
 
 import torch
@@ -44,6 +44,8 @@ from .constants import (
     SEGMENT_OFFSETS,
     DEPTHWISE_CONV2D_OP,
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
+    CORE_MAPPING_CONTIGUOUS_DIM_ATTR,
+    CORE_MAPPING_CONTIGUOUS_DIM_INFO_KEY,
 )
 from . import config as _spyre_config
 from .errors import Unsupported
@@ -52,6 +54,7 @@ from .scratchpad.lx_relayout import work_division_from_view
 from .pass_utils import (
     concretize_expr,
     concretize_index,
+    coeff_through_floor,
     compute_symbolic_bounds,
     finite_upper_or_none,
     apply_splits_from_index_coeff,
@@ -75,6 +78,45 @@ from torch_spyre._inductor.provenance import build_debug_handle
 import logging
 
 logger = get_inductor_logger("spyre_kernel")
+
+
+@dataclass(frozen=True)
+class LoopOperandBinding:
+    """How one runtime operand is rebound for each enclosing loop step.
+
+    This is the strategy boundary between loop formation and device argument
+    addressing.  The implementation supported today is ``sequential_affine``:
+    a compile-time device-element offset expression whose symbols correspond
+    to enclosing counted-loop induction variables.  Dense all-expert execution
+    uses that form to stream successive expert slabs without materializing a
+    selected-weight tensor.
+
+    A future indexed/table binding or data-dependent trip count must extend
+    this contract explicitly.  It must not be encoded by overloading the
+    affine expression or silently falling back to a fixed base address.
+    """
+
+    kind: Literal["sequential_affine"]
+    device_element_offset: sympy.Expr
+
+
+def _tensor_args_advance_by_symbol(
+    args: Sequence["TensorArg"], symbol: sympy.Symbol
+) -> bool:
+    """Whether any argument has a nonzero device advance for ``symbol``.
+
+    A coarse-tiled unit host dimension can disappear from
+    ``loop_tiled_dims`` after range division while its required source
+    advance survives in ``TensorArg.device_tile_advance_expr``.  That
+    argument-level expression is authoritative for bundle addressing, and
+    floor-wrapped stick-layout advances must count too.
+    """
+
+    return any(
+        arg.device_tile_advance_expr is not None
+        and coeff_through_floor(arg.device_tile_advance_expr, symbol) != 0
+        for arg in args
+    )
 
 
 class RValue(ABC):
@@ -690,6 +732,10 @@ class SpyreKernel(Kernel[CSEVariable]):
                 return None
             dep = read_deps[dep_idx]
             per_level_dims = loop_info.tiled_dims_per_read[dep_idx]
+            preserved_by_read = getattr(ir_node, "_unit_dim_read_host_advances", [])
+            preserved_per_level = (
+                preserved_by_read[dep_idx] if dep_idx < len(preserved_by_read) else []
+            )
         else:
             write_deps = [
                 dep
@@ -700,16 +746,26 @@ class SpyreKernel(Kernel[CSEVariable]):
                 return None
             dep = write_deps[0]
             per_level_dims = loop_info.output_tiled_dims
+            preserved_per_level = []
 
-        if not per_level_dims:
+        if not per_level_dims and not preserved_per_level:
             return None
 
         device_size = tensor.layout.device_layout.device_size
         stride_map = tensor.layout.device_layout.stride_map
 
         total_device_expr: "sympy.Expr | None" = None
-        for level_idx, dim_extent_pairs in enumerate(per_level_dims):
-            if not dim_extent_pairs:
+        n_levels = max(len(per_level_dims), len(preserved_per_level))
+        for level_idx in range(n_levels):
+            dim_extent_pairs = (
+                per_level_dims[level_idx] if level_idx < len(per_level_dims) else []
+            )
+            preserved_host_advance = (
+                preserved_per_level[level_idx]
+                if level_idx < len(preserved_per_level)
+                else sympy.Integer(0)
+            )
+            if not dim_extent_pairs and preserved_host_advance == 0:
                 continue
             level_symbol = self._get_or_mint_level_symbol(level_idx, op_name)
             tiled_dim_extents = {
@@ -725,6 +781,8 @@ class SpyreKernel(Kernel[CSEVariable]):
                 }
             )
             host_expr = dep.index.subs(subs)
+            if preserved_host_advance != 0:
+                host_expr += preserved_host_advance * level_symbol
             device_expr = tiling_expr_to_device_expr(device_size, stride_map, host_expr)
             total_device_expr = (
                 device_expr
@@ -733,6 +791,22 @@ class SpyreKernel(Kernel[CSEVariable]):
             )
 
         return total_device_expr
+
+    def _resolve_loop_operand_binding(
+        self, tensor: TensorAccess, is_input: bool, name: str
+    ) -> "LoopOperandBinding | None":
+        """Resolve the supported binding for one operand.
+
+        Keep this boundary strategy-neutral even though the only supported
+        representation is currently sequential affine rebinding.  Callers
+        serialize the returned device-element offset; adding a different
+        binding kind requires an explicit OpSpec/SuperDSC contract.
+        """
+
+        device_offset = self._general_tile_advance(tensor, is_input, name)
+        if device_offset is None:
+            return None
+        return LoopOperandBinding("sequential_affine", device_offset)
 
     def create_tensor_arg(
         self,
@@ -777,7 +851,9 @@ class SpyreKernel(Kernel[CSEVariable]):
             device_coords,
             tuple(it_space),
         )
-        device_tile_advance_expr = self._general_tile_advance(tensor, is_input, name)
+        loop_operand_binding = self._resolve_loop_operand_binding(
+            tensor, is_input, name
+        )
         tensor_arg = TensorArg(
             is_input,
             -1,
@@ -787,7 +863,11 @@ class SpyreKernel(Kernel[CSEVariable]):
             tensor.layout.allocation,
             element_arrangement=tensor.layout.device_layout.element_arrangement,
             name=opspec_name,
-            device_tile_advance_expr=device_tile_advance_expr,
+            device_tile_advance_expr=(
+                loop_operand_binding.device_element_offset
+                if loop_operand_binding is not None
+                else None
+            ),
             work_division=work_division,
         )
         if (
@@ -827,6 +907,17 @@ class SpyreKernel(Kernel[CSEVariable]):
         it_space = iteration_space(self.current_node)
 
         ir_node = self.current_node.node  # ComputedBuffer
+        contiguous_dim = getattr(ir_node, CORE_MAPPING_CONTIGUOUS_DIM_ATTR, None)
+        if contiguous_dim is not None:
+            if op != IDENTITY_OP or type(contiguous_dim) is not int:
+                raise Unsupported(
+                    "core-mapping contiguous-dimension override is supported "
+                    "only on identity ops"
+                )
+            # ``op_info`` may be shared with the lowering value.  Keep this
+            # physical scheduling choice local to the emitted OpSpec.
+            op_info = dict(op_info)
+            op_info[CORE_MAPPING_CONTIGUOUS_DIM_INFO_KEY] = contiguous_dim
         work_division: dict[sympy.Symbol, int] = {}
         if hasattr(ir_node, "op_it_space_splits"):
             write_index = next(iter(self.current_node.read_writes.writes)).index
@@ -866,13 +957,20 @@ class SpyreKernel(Kernel[CSEVariable]):
         # nesting level), so max() is just a safety net; in practice both
         # lists have the same length and the per-level loop below never
         # silently drops an entry from the shorter one.
-        n_levels = max(len(raw_tiled_dims), len(raw_tiled_red_dims))
+        loop_count = li.loop_count if li is not None else []
+        # loop_count is the authoritative enclosing-loop depth.  In
+        # particular, a unit host dimension may leave both raw tiled-dim
+        # lists literally empty while _general_tile_advance has already
+        # preserved and minted an argument-only advance at that level.
+        n_levels = max(
+            len(raw_tiled_dims),
+            len(raw_tiled_red_dims),
+            len(loop_count),
+        )
 
         tiled_symbol_trip_counts: dict = {}
         tiled_syms: list[list] = []
         if n_levels > 0:
-            loop_count = li.loop_count if li is not None else []
-
             op_name = ir_node.get_operation_name()
             tiled_syms_per_level_outermost: list[list] = []
             for lvl in range(n_levels):
@@ -880,10 +978,31 @@ class SpyreKernel(Kernel[CSEVariable]):
                 has_any_tiled_dim = (
                     lvl < len(raw_tiled_dims) and raw_tiled_dims[lvl]
                 ) or (lvl < len(raw_tiled_red_dims) and raw_tiled_red_dims[lvl])
-                if has_any_tiled_dim:
-                    level_syms.append(self._get_or_mint_level_symbol(lvl, op_name))
+                # _general_tile_advance may already have minted this level's
+                # symbol for an input whose tiled host dimension was divided
+                # to extent one and squeezed out of loop_tiled_dims.  The
+                # surviving TensorArg advance is still required: without
+                # serializing its symbol here, generate_sdsc cannot produce an
+                # affine stride and bundle.mlir reuses the iteration-0 HBM
+                # address on every loop trip.
+                minted_level_symbol = self._tile_advance_symbols.get(lvl)
+                has_arg_advance = (
+                    minted_level_symbol is not None
+                    and _tensor_args_advance_by_symbol(args, minted_level_symbol)
+                )
+                if has_any_tiled_dim or has_arg_advance:
+                    level_syms.append(
+                        minted_level_symbol
+                        if minted_level_symbol is not None
+                        else self._get_or_mint_level_symbol(lvl, op_name)
+                    )
                 tiled_syms_per_level_outermost.append(level_syms)
-                if lvl < len(loop_count):
+                if level_syms:
+                    if lvl >= len(loop_count):
+                        raise Unsupported(
+                            "coarse-tile symbol has no enclosing loop trip count: "
+                            f"op={op_name!r}, level={lvl}, symbols={level_syms}"
+                        )
                     trip_count = int(loop_count[lvl])
                     for sym in level_syms:
                         tiled_symbol_trip_counts[sym] = trip_count
@@ -1560,6 +1679,54 @@ def _remap_work_division(arg: TensorArg, work_division_remap) -> None:
     arg.work_division = TensorWorkDivision(new_splits, new_core_map)
 
 
+def _remap_core_mapping_contiguous_dim(
+    op_spec: OpSpec,
+    old_iteration_space: dict,
+    new_iteration_space: dict,
+    work_division_remap: dict,
+) -> None:
+    """Carry a marked identity's physical core-order axis through normalize.
+
+    The IR/OpSpec boundary stores the selected dimension as an iteration-space
+    position. ``align_tensors`` may reorder symbols or split one old symbol into
+    several new ones, so reusing that integer after normalization is unsafe.
+    A one-to-one surviving symbol is remapped to its new position; decomposition
+    is rejected because no single contiguous dimension can express it.
+    """
+
+    contiguous_dim = op_spec.op_info.get(CORE_MAPPING_CONTIGUOUS_DIM_INFO_KEY)
+    if contiguous_dim is None:
+        return
+    old_symbols = tuple(old_iteration_space)
+    if (
+        op_spec.op != IDENTITY_OP
+        or type(contiguous_dim) is not int
+        or not 0 <= contiguous_dim < len(old_symbols)
+    ):
+        raise Unsupported(
+            "invalid identity core-mapping contiguous dimension before "
+            f"normalization: {contiguous_dim!r} for rank {len(old_symbols)}"
+        )
+    old_symbol = old_symbols[contiguous_dim]
+    new_dims = work_division_remap.get(old_symbol)
+    if new_dims is None or len(new_dims) != 1:
+        raise Unsupported(
+            "identity core-mapping contiguous dimension must survive "
+            f"normalization one-to-one, got {old_symbol}: {new_dims!r}"
+        )
+    new_symbol = new_dims[0][0]
+    new_symbols = tuple(new_iteration_space)
+    if new_symbol not in new_symbols:
+        raise Unsupported(
+            "identity core-mapping contiguous dimension disappeared during "
+            f"normalization: {old_symbol} -> {new_symbol}"
+        )
+    op_spec.op_info = dict(op_spec.op_info)
+    op_spec.op_info[CORE_MAPPING_CONTIGUOUS_DIM_INFO_KEY] = new_symbols.index(
+        new_symbol
+    )
+
+
 def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     # Both parameters must be provided together for gather kernels — indirect_sizes
     # decomposes symbols in align_tensors; indirect_access_subs replaces them with IndirectAccess.
@@ -1572,6 +1739,12 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
             for arg in op_spec.args
         ],
         indirect_sizes,
+    )
+    _remap_core_mapping_contiguous_dim(
+        op_spec,
+        it_space,
+        new_op_space_splits,
+        work_division_remap,
     )
     op_spec.iteration_space = new_op_space_splits
 

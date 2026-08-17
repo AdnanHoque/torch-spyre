@@ -96,9 +96,11 @@ from torch_spyre._inductor.scheduler import (
     build_loop_scheduler_nodes,
 )
 from torch_spyre._inductor.spyre_kernel import (
+    SpyreKernel,
     _codegen_op_spec_list,
     _iter_op_specs,
     _preserve_shared_weight_unit_bmm_dim,
+    _tensor_args_advance_by_symbol,
 )
 from torch_spyre._inductor.temp_passes import (
     _mark_static_unit_batch_bmm,
@@ -7825,6 +7827,185 @@ class TestCopyOpMetadataAttrCoverage(unittest.TestCase):
         dst = SimpleNamespace()
         copy_op_metadata(src, dst)
         self.assertFalse(hasattr(dst, "_coarse_tile_dim_advance"))
+
+    def test_copy_op_metadata_preserves_hoisted_loop_owner(self):
+        from torch_spyre._inductor.constants import (
+            COARSE_TILE_HOISTED_LOOP_GROUP_ATTR,
+            CORE_MAPPING_CONTIGUOUS_DIM_ATTR,
+        )
+
+        src = SimpleNamespace()
+        setattr(src, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR, (3, 1))
+        setattr(src, CORE_MAPPING_CONTIGUOUS_DIM_ATTR, 1)
+        dst = SimpleNamespace()
+
+        copy_op_metadata(src, dst)
+
+        self.assertEqual(getattr(dst, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR), (3, 1))
+        self.assertEqual(getattr(dst, CORE_MAPPING_CONTIGUOUS_DIM_ATTR), 1)
+
+
+class TestUnitDimArgumentAdvanceSymbols(unittest.TestCase):
+    """A squeezed unit tile must still drive the enclosing-loop address."""
+
+    @staticmethod
+    def _arg(expr):
+        return TensorArg(
+            is_input=True,
+            arg_index=0,
+            device_dtype=_FP16,
+            device_size=[1, 64],
+            device_coordinates=[Integer(0), Integer(0)],
+            allocation={"hbm": 0},
+            device_tile_advance_expr=expr,
+        )
+
+    def test_argument_advance_detects_plain_and_floor_wrapped_symbols(self):
+        level = Symbol("_tile_adv_copy_lvl0")
+        other = Symbol("_tile_adv_copy_lvl1")
+
+        self.assertTrue(_tensor_args_advance_by_symbol([self._arg(64 * level)], level))
+        self.assertTrue(
+            _tensor_args_advance_by_symbol([self._arg(floor(64 * level))], level)
+        )
+        self.assertFalse(_tensor_args_advance_by_symbol([self._arg(64 * other)], level))
+        self.assertFalse(_tensor_args_advance_by_symbol([self._arg(None)], level))
+
+    def test_loop_operand_binding_names_the_affine_strategy_boundary(self):
+        from torch_spyre._inductor.spyre_kernel import LoopOperandBinding
+
+        level = Symbol("_tile_adv_copy_lvl0")
+        binding = LoopOperandBinding("sequential_affine", 64 * level)
+
+        self.assertEqual(binding.kind, "sequential_affine")
+        self.assertEqual(binding.device_element_offset, 64 * level)
+
+    def test_create_op_spec_serializes_arg_only_level_symbol(self):
+        """Empty tiled dims cannot hide an already-minted HBM advance."""
+        level = Symbol("_tile_adv_copy_lvl0")
+        ir_node = SimpleNamespace(
+            loop_info=CoarseTileInfo(
+                loop_group_id=(0,),
+                loop_count=[Integer(2)],
+                loop_tiled_dims=[],
+                loop_tiled_reduction_dims=[],
+            ),
+            get_operation_name=lambda: "identity",
+        )
+        kernel = SpyreKernel()
+        kernel.current_node = SimpleNamespace(node=ir_node)
+        kernel._tile_advance_symbols = {0: level}
+
+        with (
+            patch(
+                "torch_spyre._inductor.spyre_kernel.iteration_space",
+                return_value={},
+            ),
+            patch(
+                "torch_spyre._inductor.spyre_kernel.build_debug_handle",
+                return_value=None,
+            ),
+        ):
+            op = kernel.create_op_spec(
+                "identity",
+                False,
+                [self._arg(floor(64 * level))],
+                {},
+            )
+
+        self.assertEqual(op.tiled_symbols, [[level]])
+        self.assertEqual(op.tiled_symbol_trip_counts, {level: 2})
+
+    def test_create_op_spec_serializes_identity_core_mapping(self):
+        from torch_spyre._inductor.constants import (
+            CORE_MAPPING_CONTIGUOUS_DIM_ATTR,
+            CORE_MAPPING_CONTIGUOUS_DIM_INFO_KEY,
+        )
+
+        m, k = Symbol("m"), Symbol("k")
+        ir_node = SimpleNamespace(get_operation_name=lambda: "identity")
+        setattr(ir_node, CORE_MAPPING_CONTIGUOUS_DIM_ATTR, 1)
+        kernel = SpyreKernel()
+        kernel.current_node = SimpleNamespace(node=ir_node)
+        caller_info = {}
+
+        with (
+            patch(
+                "torch_spyre._inductor.spyre_kernel.iteration_space",
+                return_value={m: Integer(512), k: Integer(2816)},
+            ),
+            patch(
+                "torch_spyre._inductor.spyre_kernel.build_debug_handle",
+                return_value=None,
+            ),
+        ):
+            op = kernel.create_op_spec(
+                "identity", False, [self._arg(None)], caller_info
+            )
+
+        self.assertEqual(op.op_info[CORE_MAPPING_CONTIGUOUS_DIM_INFO_KEY], 1)
+        self.assertEqual(caller_info, {})
+
+    def test_create_op_spec_keeps_invariant_empty_level(self):
+        """No raw tiled dim and no argument advance must remain invariant."""
+        level = Symbol("_tile_adv_copy_lvl0")
+        ir_node = SimpleNamespace(
+            loop_info=CoarseTileInfo(
+                loop_group_id=(0,),
+                loop_count=[Integer(2)],
+                loop_tiled_dims=[],
+                loop_tiled_reduction_dims=[],
+            ),
+            get_operation_name=lambda: "identity",
+        )
+        kernel = SpyreKernel()
+        kernel.current_node = SimpleNamespace(node=ir_node)
+        kernel._tile_advance_symbols = {0: level}
+
+        with (
+            patch(
+                "torch_spyre._inductor.spyre_kernel.iteration_space",
+                return_value={},
+            ),
+            patch(
+                "torch_spyre._inductor.spyre_kernel.build_debug_handle",
+                return_value=None,
+            ),
+        ):
+            op = kernel.create_op_spec("identity", False, [self._arg(None)], {})
+
+        self.assertEqual(op.tiled_symbols, [[]])
+        self.assertEqual(op.tiled_symbol_trip_counts, {})
+
+    def test_create_op_spec_rejects_symbol_without_loop_trip_count(self):
+        """An emitted affine symbol must never default to an implicit trip one."""
+        ir_node = SimpleNamespace(
+            loop_info=CoarseTileInfo(
+                loop_group_id=(0,),
+                loop_count=[],
+                loop_tiled_dims=[[0]],
+                loop_tiled_reduction_dims=[[]],
+            ),
+            get_operation_name=lambda: "identity",
+        )
+        kernel = SpyreKernel()
+        kernel.current_node = SimpleNamespace(node=ir_node)
+        kernel._tile_advance_symbols = {}
+
+        with (
+            patch(
+                "torch_spyre._inductor.spyre_kernel.iteration_space",
+                return_value={},
+            ),
+            patch(
+                "torch_spyre._inductor.spyre_kernel.build_debug_handle",
+                return_value=None,
+            ),
+            self.assertRaisesRegex(
+                Unsupported, "coarse-tile symbol has no enclosing loop trip count"
+            ),
+        ):
+            kernel.create_op_spec("identity", False, [self._arg(None)], {})
 
 
 class TestCoeffThroughFloor(unittest.TestCase):
