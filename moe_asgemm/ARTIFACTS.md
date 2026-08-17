@@ -73,6 +73,30 @@ experiments/dasx_shared_lhs_c32_schedule_probe.py
 SHA-256 c634b030197f27cbd75bc7a37b9fd12b0fbce5e66de42b99dded6a7695a33a7a
 ```
 
+## Clean-source reproduction
+
+Paths:
+
+```text
+moe_asgemm/artifacts/clean_reproduction/cdx
+moe_asgemm/artifacts/clean_reproduction/clc
+```
+
+Each directory contains:
+
+```text
+compile_result.json
+generated_module.py
+bundle.mlir
+sdsc_0.json through sdsc_11.json
+```
+
+These were generated from a clean checkout of branch head `6dd7132b`. Both
+AIUs emitted the representative bundle hash above, completed 540 timing
+records and 900 measured calls, and passed all structure and correctness
+checks. The tensor payloads and backend binaries are intentionally not stored
+in Git.
+
 ## Original retained run roots
 
 These are plain paths, not hyperlinks:
@@ -88,7 +112,8 @@ moe-execution-proof/local_runs/dense_shared_lhs_ddl_overlay_c1_20260816_01
 ## Integrity
 
 `moe_asgemm/SHA256SUMS` covers the compact branch-owned artifact set and the
-three probes. Run from the repository root:
+three probes, including the clean-source reproduction. Run from the repository
+root:
 
 ```text
 shasum -a 256 -c moe_asgemm/SHA256SUMS

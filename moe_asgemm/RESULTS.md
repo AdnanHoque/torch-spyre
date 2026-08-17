@@ -87,6 +87,26 @@ Dense includes runtime top-8 weighting and expert accumulation; grouped omits
 its weighting and combine. The result therefore rejects that grouped
 implementation for `T=512` latency on AIU 1.0.
 
+## Clean-source confirmation
+
+The evidence above was subsequently reproduced from a clean checkout of the
+exact branch rather than a staged Python-source overlay. The reduced C1 gate
+and full representative correctness gate passed, and the full-shape bundle was
+byte-identical to the earlier accepted bundle.
+
+The clean timing confirmation was intentionally stopped after two completed
+AIUs:
+
+| AIU | Identity single | Identity block |
+|---|---:|---:|
+| cdx | 46.318 ms | 42.408 ms |
+| clc | 46.611 ms | 42.592 ms |
+
+Each AIU produced 540 timing records and 900 measured calls. Both passed all
+three runtime payloads, emitted the same bundle, and retained zero HBM-pool and
+zero restickify structure. Details and hashes are in
+`moe_asgemm/CLEAN_REPRODUCTION.md`.
+
 ## Evidence limits
 
 - This is kernel timing, not full-model timing.
@@ -94,5 +114,7 @@ implementation for `T=512` latency on AIU 1.0.
 - Energy was not measured.
 - Dense and grouped came from separately pinned implementation overlays and
   tensor generators.
+- The clean-source confirmation used two AIUs by explicit scope decision; the
+  earlier retained cohort used four.
 - The comparison does not establish the phase boundary for longer sequences,
   skewed routing, or later AIU generations.
