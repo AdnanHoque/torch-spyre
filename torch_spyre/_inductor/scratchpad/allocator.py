@@ -89,7 +89,8 @@ from torch_spyre._inductor.scratchpad.utils import (
     hoisted_loop_lifetime_end_overrides,
 )
 from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
-from torch_spyre._inductor.ir import FixedTiledLayout
+from torch_spyre._inductor.ir import FixedTiledLayout, SpyreEmptyFallback
+from torch_spyre._inductor.constants import COARSE_TILE_FIXED_LX_ACCUM_ATTR
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
@@ -331,6 +332,13 @@ class ScratchpadAllocator:
         return op_short_name(op)
 
     def _op_output_good_for_lx_reuse(self, op: Any) -> bool:
+        if getattr(op, COARSE_TILE_FIXED_LX_ACCUM_ATTR, False):
+            # Coarse tiling applies this marker only to its tile-sized
+            # SpyreEmptyFallback reduction state.  It has no producer kernel,
+            # but fill/combine/drain all address the same committed layout.
+            return isinstance(op, SpyreEmptyFallback) and isinstance(
+                op.layout, FixedTiledLayout
+            )
         if not isinstance(op, ComputedBuffer):
             return False
         if isinstance(op.layout, MutationLayoutSHOULDREMOVE):
@@ -435,7 +443,9 @@ class ScratchpadAllocator:
             # MultiOutputLayout tuple op). There is nothing to place, and the
             # checks below would raise.
             return "unsized (no device layout)"
-        if name in mutated_buffers:
+        if name in mutated_buffers and not getattr(
+            op, COARSE_TILE_FIXED_LX_ACCUM_ATTR, False
+        ):
             return "mutation target"
         if _is_tiled_advancing(op) or _is_read_advancing_anywhere(name, buf_user_deps):
             # LX addresses cannot be expressed as affine.apply symbols today (see
@@ -449,7 +459,19 @@ class ScratchpadAllocator:
         restickify = self._restickify_barrier(graph, name, uses)
         if restickify is not None:
             return restickify
-        if _extern_kernel_in_live_range(graph, uses):
+        extern_guard_uses = uses
+        if (
+            getattr(op, COARSE_TILE_FIXED_LX_ACCUM_ATTR, False)
+            and uses
+            and graph.operations[uses[0]] is op
+        ):
+            # The marked SpyreEmptyFallback is allocation-only state: its
+            # synthetic producer node launches no kernel and therefore cannot
+            # clobber its own LX range.  Exclude only that first synthetic use;
+            # any other opaque extern inside the remaining live interval stays
+            # fatal through the ordinary guard.
+            extern_guard_uses = uses[1:]
+        if _extern_kernel_in_live_range(graph, extern_guard_uses):
             return "extern kernel user or live across extern kernel"
         if self._is_index_or_indirectly_accessed(graph, name, uses, op):
             # Index tensors and the value tensors they index into are read via
@@ -1090,6 +1112,15 @@ class ScratchpadAllocator:
 
             else:
                 self._set_one_allocation(buf, b.address)
+                if isinstance(buf, SpyreEmptyFallback) and getattr(
+                    buf, COARSE_TILE_FIXED_LX_ACCUM_ATTR, False
+                ):
+                    # Like an HBM-pool-backed SpyreEmptyFallback, this buffer
+                    # has no Python allocation statement.  Keep Inductor's
+                    # generic free path from emitting ``del name`` for an
+                    # undefined wrapper local; the OpSpecs still address the
+                    # committed LX allocation directly.
+                    graph.removed_buffers.add(b.name)
 
         # Keep graph mutation last and in pre-scheduling: solver retries require
         # the original graph, and post-grad no-op elimination has already run.

@@ -4888,6 +4888,193 @@ def _make_two_op_shared_read_fixture():
     return op_a, op_b, full_buf, operations
 
 
+def _make_nested_shared_lhs_read_fixture():
+    """Model the D-AS-X shared activation read after E/T range division.
+
+    The consuming ops have post-division ranges [1, 64, 64]: the raw expert
+    dim was tiled E=2 -> 1 by the inner loop and was squeezed from the X
+    MemoryDep, while the outer token loop advances through a full [128, 64]
+    activation.  Planning-time metadata records that X advances at the
+    outer token level and is invariant at the inner expert level.
+    """
+    from torch._inductor.ir import (
+        ComputedBuffer,
+        FixedLayout,
+        Pointwise,
+        StorageBox,
+        TensorBox,
+    )
+
+    from torch_spyre._inductor.ir import SpyreEmptyFallback
+
+    device = torch.device("cpu")
+    dtype = torch.float32
+
+    shared_x = SpyreEmptyFallback(
+        torch.ops.spyre.empty.default, [128, 64], device, dtype
+    )
+    shared_x.layout = FixedLayout(device, dtype, [128, 64], [64, 1])
+    x_box = TensorBox(StorageBox(shared_x))
+
+    def _make_reader(name):
+        def inner_fn(index):
+            _expert, token, hidden = index
+            return x_box.make_loader()([token, hidden])
+
+        pw = Pointwise.create(
+            device=device,
+            dtype=dtype,
+            inner_fn=inner_fn,
+            ranges=[Integer(1), Integer(64), Integer(64)],
+        )
+        op = ComputedBuffer(
+            name=name,
+            layout=FixedLayout(
+                device,
+                dtype,
+                [Integer(1), Integer(64), Integer(64)],
+                None,
+            ),
+            data=pw.data.data,
+        )
+        op.operation_name = name
+        op.origins = OrderedSet()
+        op.loop_info = CoarseTileInfo(
+            loop_group_id=(0, 0),
+            loop_count=[Integer(2), Integer(2)],
+            loop_tiled_dims=[[1], [0]],
+            loop_tiled_reduction_dims=[[], []],
+            # Pre-division decision: X follows token tiles, not experts.
+            tiled_dims_per_read=[[[((1), Integer(64))], []]],
+            output_tiled_dims=[[(1, Integer(64))], [(0, Integer(1))]],
+        )
+        V.graph.name_to_buffer[name] = op
+        return op
+
+    gate = _make_reader("shared_lhs_gate")
+    up = _make_reader("shared_lhs_up")
+    operations = [shared_x, gate, up]
+    return gate, up, shared_x, operations
+
+
+def _make_nested_unit_expert_read_fixture():
+    """Model one expert-weight slab read after E=2 is tiled to E_tile=1."""
+    from torch._inductor.ir import (
+        ComputedBuffer,
+        FixedLayout,
+        Pointwise,
+        StorageBox,
+        TensorBox,
+    )
+
+    from torch_spyre._inductor.ir import SpyreEmptyFallback
+
+    device = torch.device("cpu")
+    dtype = torch.float32
+    weights = SpyreEmptyFallback(
+        torch.ops.spyre.empty.default, [2, 64, 64], device, dtype
+    )
+    weights.layout = FixedLayout(device, dtype, [2, 64, 64], [4096, 64, 1])
+    weights_box = TensorBox(StorageBox(weights))
+
+    def inner_fn(index):
+        expert, row, column = index
+        return weights_box.make_loader()([expert, row, column])
+
+    pw = Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=[Integer(1), Integer(64), Integer(64)],
+    )
+    op = ComputedBuffer(
+        name="unit_expert_reader",
+        layout=FixedLayout(
+            device,
+            dtype,
+            [Integer(1), Integer(64), Integer(64)],
+            None,
+        ),
+        data=pw.data.data,
+    )
+    op.operation_name = "unit_expert_reader"
+    op.origins = OrderedSet()
+    op.loop_info = CoarseTileInfo(
+        loop_group_id=(0, 0),
+        loop_count=[Integer(2), Integer(2)],
+        loop_tiled_dims=[[1], [0]],
+        loop_tiled_reduction_dims=[[], []],
+        # The weight bank is token-invariant and advances one 64x64 slab
+        # at the inner expert level.  This was captured before E became 1.
+        tiled_dims_per_read=[[[], [(0, Integer(1))]]],
+        host_tile_advances_per_read=[[[], [(0, Integer(4096))]]],
+        output_tiled_dims=[[(1, Integer(64))], [(0, Integer(1))]],
+    )
+    V.graph.name_to_buffer["unit_expert_reader"] = op
+    operations = [weights, op]
+    return op, weights, operations
+
+
+def _make_broadcast_dim_shared_read_fixture():
+    """Model X[T,H] read from an op iterating [T,F,H].
+
+    The middle F dimension is a consumer/reduction iteration dimension, not
+    an X storage dimension.  A read copy must therefore allocate [T,H], while
+    retaining a zero stride at F when the consumer's full-rank index is
+    redirected to that compact copy.
+    """
+    from torch._inductor.ir import (
+        ComputedBuffer,
+        FixedLayout,
+        Pointwise,
+        StorageBox,
+        TensorBox,
+    )
+
+    from torch_spyre._inductor.ir import SpyreEmptyFallback
+
+    device = torch.device("cpu")
+    dtype = torch.float32
+    shared_x = SpyreEmptyFallback(
+        torch.ops.spyre.empty.default, [128, 64], device, dtype
+    )
+    shared_x.layout = FixedLayout(device, dtype, [128, 64], [64, 1])
+    x_box = TensorBox(StorageBox(shared_x))
+
+    def inner_fn(index):
+        token, _ffn, hidden = index
+        return x_box.make_loader()([token, hidden])
+
+    pw = Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=[Integer(64), Integer(64), Integer(64)],
+    )
+    op = ComputedBuffer(
+        name="broadcast_dim_reader",
+        layout=FixedLayout(
+            device,
+            dtype,
+            [Integer(64), Integer(64), Integer(64)],
+            None,
+        ),
+        data=pw.data.data,
+    )
+    op.operation_name = "broadcast_dim_reader"
+    op.origins = OrderedSet()
+    op.loop_info = CoarseTileInfo(
+        loop_group_id=(0,),
+        loop_count=[Integer(2)],
+        loop_tiled_dims=[[0]],
+        loop_tiled_reduction_dims=[[]],
+        tiled_dims_per_read=[[[(0, Integer(64))]]],
+        output_tiled_dims=[[(0, Integer(64))]],
+    )
+    V.graph.name_to_buffer["broadcast_dim_reader"] = op
+    return op, shared_x, [shared_x, op]
+
+
 class TestPlanReadCopies(unittest.TestCase):
     """_plan_read_copies groups equivalent cross-group reads within a group."""
 
@@ -5145,6 +5332,365 @@ class TestInsertAllReadCopyOps(unittest.TestCase):
         self.assertEqual(loaded_by_b, [copy_buf.get_name()])
         self.assertNotIn(full_buf.get_name(), loaded_by_a)
         self.assertNotIn(full_buf.get_name(), loaded_by_b)
+
+    def test_nested_shared_lhs_copy_is_hoisted_before_expert_loop(self):
+        """One X tile copy belongs to the outer T loop, not inner E loop.
+
+        This is the source-only D-AS-X mechanism proof: two nested consumers
+        share one [T_tile,H] read copy even though their raw expert dimension
+        was tiled down to one and squeezed from X's MemoryDep.
+        """
+        from torch._inductor.ir import ComputedBuffer
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _insert_all_read_copy_ops,
+            _plan_read_copies,
+        )
+
+        gate, up, shared_x, operations = _make_nested_shared_lhs_read_fixture()
+        retiled_infos_by_group = [((0, 0), [gate, up], {})]
+        plans = _plan_read_copies(operations, retiled_infos_by_group)
+
+        self.assertEqual(len(plans[(0, 0)].entries), 1)
+        _insert_all_read_copy_ops(operations, plans)
+
+        # shared_x, exactly one copy, then the two inner expert-loop ops.
+        self.assertEqual(len(operations), 4)
+        copy_buf = operations[1]
+        self.assertIsInstance(copy_buf, ComputedBuffer)
+        self.assertIs(operations[0], shared_x)
+
+        copy_info = copy_buf.loop_info
+        self.assertEqual(copy_info.loop_group_id, (0,))
+        self.assertEqual(copy_info.loop_count, [Integer(2)])
+        self.assertEqual(copy_info.loop_tiled_dims, [[0]])
+        self.assertEqual(copy_info.loop_tiled_reduction_dims, [[]])
+        self.assertEqual(copy_info.tiled_dims_per_read, [[[(0, Integer(64))]]])
+        self.assertEqual(copy_info.output_tiled_dims, [[]])
+
+        # Consumers remain in the nested expert loop.  Existing scheduler
+        # topology tests establish that (0,) followed by (0,0) serializes as
+        # outer { copy; inner { consumers } }.
+        new_gate = next(
+            op
+            for op in operations
+            if isinstance(op, ComputedBuffer) and op.get_name() == "shared_lhs_gate"
+        )
+        new_up = next(
+            op
+            for op in operations
+            if isinstance(op, ComputedBuffer) and op.get_name() == "shared_lhs_up"
+        )
+        self.assertEqual(new_gate.loop_info.loop_group_id, (0, 0))
+        self.assertEqual(new_up.loop_info.loop_group_id, (0, 0))
+
+        class _Recorder(list):
+            def load(self, name, index):
+                self.append(name)
+                return 0.0
+
+        for consumer in (new_gate, new_up):
+            loaded = _Recorder()
+            with V.set_ops_handler(loaded):
+                consumer.data.inner_fn([sympy.Integer(0) for _ in consumer.data.ranges])
+            self.assertEqual(loaded, [copy_buf.get_name()])
+            self.assertNotIn(shared_x.get_name(), loaded)
+
+    def test_unit_expert_read_preserves_full_buffer_slab_advance(self):
+        """E=2 -> 1 keeps the lost 4096-element expert base stride."""
+        from torch._inductor.ir import ComputedBuffer
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _insert_all_read_copy_ops,
+            _plan_read_copies,
+        )
+
+        reader, weights, operations = _make_nested_unit_expert_read_fixture()
+        plans = _plan_read_copies(operations, [((0, 0), [reader], {})])
+        entry = plans[(0, 0)].entries[0]
+        self.assertEqual(entry.planned_dep_levels, ((), ((0, Integer(1)),)))
+        self.assertEqual(entry.planned_host_advances, ((), ((0, Integer(4096)),)))
+
+        _insert_all_read_copy_ops(operations, plans)
+        copy_buf = next(
+            op
+            for op in operations
+            if isinstance(op, ComputedBuffer)
+            and op.get_name().startswith("coarse_tile_read_copy")
+        )
+        copy_info = copy_buf.loop_info
+        self.assertEqual(copy_info.loop_group_id, (0, 0))
+        self.assertEqual(copy_info.loop_tiled_dims, [[], []])
+        self.assertEqual(copy_info.tiled_dims_per_read, [[[], []]])
+        self.assertEqual(
+            copy_buf._unit_dim_read_host_advances,
+            [[Integer(0), Integer(4096)]],
+        )
+
+        new_reader = next(
+            op
+            for op in operations
+            if isinstance(op, ComputedBuffer) and op.get_name() == "unit_expert_reader"
+        )
+
+        class _Recorder(list):
+            def load(self, name, index):
+                self.append(name)
+                return 0.0
+
+        loaded = _Recorder()
+        with V.set_ops_handler(loaded):
+            new_reader.data.inner_fn([sympy.Integer(0) for _ in new_reader.data.ranges])
+        self.assertEqual(loaded, [copy_buf.get_name()])
+        self.assertNotIn(weights.get_name(), loaded)
+
+    def test_flat_shared_lhs_copy_carries_preheader_owner(self):
+        """An X read invariant to the sole E loop retains its group owner."""
+        from torch._inductor.ir import ComputedBuffer
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _insert_all_read_copy_ops,
+            _plan_read_copies,
+        )
+
+        gate, up, _shared_x, operations = _make_nested_shared_lhs_read_fixture()
+        for op in (gate, up):
+            op.loop_info = CoarseTileInfo(
+                loop_group_id=(0,),
+                loop_count=[Integer(2)],
+                loop_tiled_dims=[[0]],
+                loop_tiled_reduction_dims=[[]],
+                # X is invariant to the only (expert) loop level.
+                tiled_dims_per_read=[[[]]],
+                output_tiled_dims=[[(0, Integer(1))]],
+            )
+
+        plans = _plan_read_copies(operations, [((0,), [gate, up], {})])
+        _insert_all_read_copy_ops(operations, plans)
+
+        copy_buf = next(
+            op
+            for op in operations
+            if isinstance(op, ComputedBuffer)
+            and op.get_name().startswith("coarse_tile_read_copy")
+        )
+        self.assertFalse(hasattr(copy_buf, "loop_info"))
+        from torch_spyre._inductor.constants import (
+            COARSE_TILE_HOISTED_LOOP_GROUP_ATTR,
+        )
+
+        self.assertEqual(getattr(copy_buf, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR), (0,))
+
+    def test_hoisted_lifetime_overrides_are_outer_group_scoped(self):
+        """Two outer groups and a nested owner get independent exclusive ends."""
+        from torch_spyre._inductor.constants import (
+            COARSE_TILE_HOISTED_LOOP_GROUP_ATTR,
+        )
+        from torch_spyre._inductor.scratchpad.utils import (
+            hoisted_loop_lifetime_end_overrides,
+        )
+
+        preheader_0 = SimpleNamespace(get_name=lambda: "x_copy_0")
+        setattr(preheader_0, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR, (0, 0))
+        outer_body_0 = SimpleNamespace(loop_info=SimpleNamespace(loop_group_id=(0,)))
+        nested_body_0 = SimpleNamespace(loop_info=SimpleNamespace(loop_group_id=(0, 0)))
+        preheader_1 = SimpleNamespace(get_name=lambda: "x_copy_1")
+        setattr(preheader_1, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR, (1,))
+        outer_body_1 = SimpleNamespace(loop_info=SimpleNamespace(loop_group_id=(1,)))
+        after_loop = SimpleNamespace()
+        graph = SimpleNamespace(
+            operations=[
+                preheader_0,
+                outer_body_0,
+                nested_body_0,
+                preheader_1,
+                outer_body_1,
+                after_loop,
+            ]
+        )
+
+        self.assertEqual(
+            hoisted_loop_lifetime_end_overrides(graph),
+            {"x_copy_0": 3, "x_copy_1": 5},
+        )
+
+    def test_broadcast_iteration_dim_does_not_inflate_physical_read_copy(self):
+        """X[T,H] remains a 2-D copy when its consumer iterates [T,F,H]."""
+        from torch._inductor.ir import ComputedBuffer
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _insert_all_read_copy_ops,
+            _plan_read_copies,
+        )
+
+        reader, shared_x, operations = _make_broadcast_dim_shared_read_fixture()
+        plans = _plan_read_copies(operations, [((0,), [reader], {})])
+        _insert_all_read_copy_ops(operations, plans)
+
+        copy_buf = next(
+            op
+            for op in operations
+            if isinstance(op, ComputedBuffer)
+            and op.get_name().startswith("coarse_tile_read_copy")
+        )
+        self.assertEqual(list(copy_buf.data.ranges), [Integer(64), Integer(64)])
+        self.assertEqual(list(copy_buf.layout.size), [Integer(64), Integer(64)])
+        self.assertEqual(
+            list(copy_buf._source_dep_tile_strides),
+            [Integer(64), Integer(0), Integer(1)],
+        )
+
+        new_reader = next(
+            op
+            for op in operations
+            if isinstance(op, ComputedBuffer)
+            and op.get_name() == "broadcast_dim_reader"
+        )
+
+        class _Recorder(list):
+            def load(self, name, index):
+                self.append((name, sympy.expand(index)))
+                return 0.0
+
+        token, ffn, hidden = sympy.symbols("token ffn hidden", integer=True)
+        loaded = _Recorder()
+        with V.set_ops_handler(loaded):
+            new_reader.data.inner_fn([token, ffn, hidden])
+        self.assertEqual(loaded, [(copy_buf.get_name(), 64 * token + hidden)])
+        self.assertNotIn(ffn, loaded[0][1].free_symbols)
+        self.assertNotEqual(copy_buf.get_name(), shared_x.get_name())
+
+    def test_only_marked_fixed_accumulator_bypasses_mutation_lx_barrier(self):
+        """The coarse-tile accumulator exception is narrow and allocation-safe."""
+        from torch._inductor.ir import ComputedBuffer, Pointwise
+
+        from torch_spyre._C import SpyreTensorLayout
+        from torch_spyre._inductor.constants import (
+            COARSE_TILE_FIXED_LX_ACCUM_ATTR,
+        )
+        from torch_spyre._inductor.ir import FixedTiledLayout, SpyreEmptyFallback
+        from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
+        from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
+        from torch_spyre._inductor.scratchpad.utils import mem_usage_by_buf
+
+        device = torch.device("cpu")
+        dtype = torch.float16
+        stl = SpyreTensorLayout([64, 64], dtype)
+        layout = FixedTiledLayout(
+            device, dtype, [Integer(64), Integer(64)], [Integer(64), Integer(1)], stl
+        )
+
+        accum = SpyreEmptyFallback(
+            torch.ops.spyre.empty.default, [64, 64], device, dtype
+        )
+        accum.layout = layout
+        setattr(accum, COARSE_TILE_FIXED_LX_ACCUM_ATTR, True)
+
+        # The marked ExternKernel is a real, sized allocator candidate even
+        # though ordinary ExternKernel outputs are not.
+        fake_mem_graph = SimpleNamespace(
+            operations=[accum],
+            get_buffer=lambda _name: accum,
+        )
+        with patch(
+            "torch_spyre._inductor.scratchpad.utils.get_ncores_for_buffers",
+            return_value=({accum.get_name(): 1}, {}),
+        ):
+            usage = mem_usage_by_buf(fake_mem_graph)
+        self.assertGreater(usage[accum.get_name()]["size"], 0)
+
+        allocator = ScratchpadAllocator(GreedyLayoutSolver, size=2 << 20)
+        self.assertTrue(allocator._op_output_good_for_lx_reuse(accum))
+
+        # Include the SpyreEmpty producer itself at uses[0], matching real
+        # liveness, followed by two ordinary compute users.  The producer is
+        # not an "extern kernel user" of its own storage.
+        fake_users = [accum, MagicMock(), MagicMock()]
+        fake_graph = SimpleNamespace(operations=fake_users)
+        other_extern = SpyreEmptyFallback(
+            torch.ops.spyre.empty.default, [64, 64], device, dtype
+        )
+        other_extern.layout = layout
+        with (
+            patch.object(allocator, "_restickify_barrier", return_value=None),
+            patch.object(
+                allocator, "_is_index_or_indirectly_accessed", return_value=False
+            ),
+            patch(
+                "torch_spyre._inductor.scratchpad.allocator.buffer_not_read_in_full",
+                return_value=False,
+            ),
+            patch(
+                "torch_spyre._inductor.scratchpad.allocator._is_read_advancing_anywhere",
+                return_value=False,
+            ),
+            patch(
+                "torch_spyre._inductor.scratchpad.allocator._would_produce_lx_back_gap",
+                return_value=False,
+            ),
+        ):
+            reason = allocator._buffer_residency_reason(
+                fake_graph,
+                accum.get_name(),
+                [0, 1, 2],
+                accum,
+                mutated_buffers={accum.get_name()},
+                graph_output_names=set(),
+                reinterpret_output_names=set(),
+                ncores={accum.get_name(): 1},
+                ncores_reasons={},
+                division_is_fixed=True,
+                buf_user_deps={},
+            )
+            fake_graph.operations[1] = other_extern
+            unrelated_extern_reason = allocator._buffer_residency_reason(
+                fake_graph,
+                accum.get_name(),
+                [0, 1, 2],
+                accum,
+                mutated_buffers={accum.get_name()},
+                graph_output_names=set(),
+                reinterpret_output_names=set(),
+                ncores={accum.get_name(): 1},
+                ncores_reasons={},
+                division_is_fixed=True,
+                buf_user_deps={},
+            )
+        self.assertIsNone(reason)
+        self.assertEqual(
+            unrelated_extern_reason,
+            "extern kernel user or live across extern kernel",
+        )
+
+        # An ordinary ComputedBuffer mutation target remains barred.
+        normal_data = Pointwise(
+            device=device,
+            dtype=dtype,
+            inner_fn=lambda index: 0.0,
+            ranges=[Integer(64), Integer(64)],
+        )
+        normal = ComputedBuffer(
+            name="normal_mutation_target", layout=layout, data=normal_data
+        )
+        with config.patch({"allow_all_ops_in_lx_planning": True}):
+            normal_reason = allocator._buffer_residency_reason(
+                SimpleNamespace(operations=[normal, MagicMock()]),
+                normal.get_name(),
+                [0, 1],
+                normal,
+                mutated_buffers={normal.get_name()},
+                graph_output_names=set(),
+                reinterpret_output_names=set(),
+                ncores={normal.get_name(): 1},
+                ncores_reasons={},
+                division_is_fixed=True,
+                buf_user_deps={},
+            )
+        self.assertEqual(normal_reason, "mutation target")
+
+        self.assertTrue(accum.should_allocate())
+        accum.layout.allocation["lx"] = 0
+        self.assertFalse(accum.should_allocate())
 
     def test_transposed_read_gets_its_own_copy(self):
         """a+b+a.t()-style: two reads of the same buffer with different

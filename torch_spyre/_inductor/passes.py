@@ -82,6 +82,10 @@ from .pass_utils import format_operations
 from .scratchpad.allocator import (
     scratchpad_planning,
 )
+from .scratchpad.lx_relayout import (
+    align_activation_stationary_loop_work_divisions,
+    align_hoisted_invariant_copy_work_divisions,
+)
 from .fusion import spyre_fuse_nodes
 from .scheduler import (
     align_lx_producer_loop_order,
@@ -481,6 +485,8 @@ class CustomPreSchedulingPasses:
             # Core Division
             span_reduction,
             _distribute_work,
+            align_activation_stationary_loop_work_divisions,
+            align_hoisted_invariant_copy_work_divisions,
             #
             # LX Planning
             _maybe_scratchpad_planning,
