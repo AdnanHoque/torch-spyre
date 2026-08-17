@@ -1,9 +1,31 @@
 # Next steps
 
-## 1. Split the prototype into reviewable changes
+## 0. Freeze prototype-v0 — completed
 
-The branch is an evidence branch containing the integrated prototype. Prepare
-a clean upstream series with explicit dependencies:
+The prototype source and evidence are protected by signed tags.  Exact
+identities, artifact hashes, and oracle rules are recorded in
+`moe_asgemm/PROTOTYPE_V0_FREEZE.md` and
+`moe_asgemm/prototype_v0_manifest.json`.
+
+No further production-oriented refactoring belongs on the prototype source.
+
+## 1. Cross-sign the architecture contracts — in progress
+
+The docs-only Phase 1 proposal is:
+
+```text
+moe_asgemm/architecture/EXPERT_EXECUTION_CONTRACTS_V1.md
+moe_asgemm/architecture/PHASE1_REVIEW_AND_SIGNOFF.md
+moe_asgemm/architecture/IMPLEMENTATION_BASE_DECISION.md
+```
+
+Implementation remains unauthorized until the semantic, work-division,
+allocator, codegen/runtime, backend, and model-path roles approve the same
+contract revision and select an implementation base.
+
+## 2. Preserve the old review split as prototype history
+
+The frozen prototype used the following dependency split:
 
 1. Shared-LHS and prepacked expert-matmul schemas and lowering.
 2. Compact invariant read copies and flat expert LoopSpec formation.
@@ -12,10 +34,11 @@ a clean upstream series with explicit dependencies:
 5. C32 ownership alignment and SuperDSC core-map preservation.
 6. Full-shape structural and correctness tests.
 
-Each change should retain ordinary matmul, reduction, and scratchpad negative
-controls. Do not submit the integrated branch as one review unit.
+This list documents how the proof was assembled.  It is not the production
+review plan.  The contract-driven implementation will retain sound general
+mechanisms and rewrite the condemned policy paths after Phase 1 sign-off.
 
-## 2. Clean-source reproduction — completed
+## 3. Clean-source reproduction — completed
 
 Completed from a clean checkout of the exact branch with an exact compatible
 base native extension:
@@ -31,7 +54,7 @@ See `moe_asgemm/CLEAN_REPRODUCTION.md`.
 
 This closes the present overlay provenance boundary.
 
-## 3. Integrate with the team Step 2 model path — completed
+## 4. Integrate with the team Step 2 model path — completed
 
 Keep ownership explicit. Antoni and Swagath's model integration can invoke the
 activation-stationary compiler contract without replacing their host and model
@@ -63,14 +86,14 @@ Completed against retained hf-adapters revision
 The measured amortized improvement was `372.887 / 42.444 = 8.785x`.  See
 `moe_asgemm/MODEL_PATH_INTEGRATION.md`.
 
-## 4. Measure end-to-end and energy
+## 5. Measure end-to-end and energy
 
 - Add router-logit computation.
 - Measure the complete MoE layer and full model.
 - Measure or estimate AIU energy for dense versus grouped execution.
 - Separate first-token compile effects from steady execution.
 
-## 5. Establish the execution phase boundary
+## 6. Establish the execution phase boundary
 
 Sweep:
 
@@ -86,7 +109,7 @@ The product outcome should be a selector among per-route,
 activation-stationary dense, active-dense, and grouped execution rather than a
 universal kernel.
 
-## 6. Decomposition and native-DDL prediction — completed
+## 7. Decomposition and native-DDL prediction — completed
 
 A monolithic custom DDL is not required for the accepted result. Consider it
 only after the compiler-generated program is upstreamed and profiled.

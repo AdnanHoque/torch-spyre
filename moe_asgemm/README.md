@@ -31,6 +31,18 @@ static expert loop and twelve SDSCs. It is not one monolithic native DDL.
 
 ## Contents
 
+- `moe_asgemm/PROTOTYPE_V0_FREEZE.md`: signed prototype source/evidence freeze,
+  oracle identities, and immutability rules.
+- `moe_asgemm/prototype_v0_manifest.json`: machine-readable prototype freeze.
+- `moe_asgemm/PHASE0_PHASE1_SHA256SUMS`: integrity manifest for the freeze and
+  proposed contract package.
+- `moe_asgemm/architecture/EXPERT_EXECUTION_CONTRACTS_V1.md`: proposed staged
+  semantic, planning, placement, binding, backend, failure, and provenance
+  contracts.
+- `moe_asgemm/architecture/PHASE1_REVIEW_AND_SIGNOFF.md`: named review roles,
+  pending decisions, and the human sign-off gate.
+- `moe_asgemm/architecture/IMPLEMENTATION_BASE_DECISION.md`: priced main,
+  beta-fork, and prototype-refactor options.
 - `moe_asgemm/IMPLEMENTATION.md`: compiler and execution mechanisms.
 - `moe_asgemm/RESULTS.md`: correctness, structure, and timing.
 - `moe_asgemm/CLEAN_REPRODUCTION.md`: clean-checkout compiler, correctness,

@@ -1,0 +1,53 @@
+{
+  "status": "frozen",
+  "version": "prototype-v0",
+  "freeze_date": "2026-08-17",
+  "source": {
+    "branch": "moe-asgemm-review-series",
+    "tag": "moe-asgemm-prototype-v0-source",
+    "tag_object": "1f5ef138d0349c6237622e4720cd5cf5ebda31c2",
+    "validation_commit": "31bc00d4ca74f7e74ded656fb9c6432399690194",
+    "validation_tree": "1060877a31dbfb04985b1112f57d423f577cbce4",
+    "production_commit": "dffd639fdcbb8e69db29a380d1644eb95ebda3a0",
+    "production_tree": "0063ed3c0c824d0c264c7c64b0f8f298f6cbdc45",
+    "base_commit": "3fd7a0f954a84817a417b6b45639b0d5f3499575"
+  },
+  "evidence": {
+    "branch": "moe-asgemm",
+    "tag": "moe-asgemm-prototype-v0-evidence",
+    "tag_object": "7d83fd8ec0f8ad751e4fd8a8074a4f2e889a38b0",
+    "commit": "06c9389dab1ccb462bc422831db142a8f53d1e7a",
+    "tree": "2587e9cebd5cdbfd040bb21745815ea84432b09c",
+    "root_manifest_sha256": "87c7d30f8bb8cd4bb52704822e317117a049e01a0812c865e5a49482f1720d12"
+  },
+  "model_adapter": {
+    "base_commit": "672b2fc8b5f017a08c6b43b928deb3ccd0560761",
+    "commit": "fc5198f9f0ffd1a9e458526ba7e9e9010b37092d",
+    "tree": "0ffb2609969637c03dce373e4925165fe92dc7e4",
+    "patch": "moe_asgemm/patches/0001-Integrate-activation-stationary-expert-compiler-path.patch",
+    "patch_sha256": "a86fee8d96d9fd238e524def21431ae072fb9eae4646f3feecebf4fcd63a1f30"
+  },
+  "oracles": {
+    "c1_bundle_sha256": "977d62e74ca5f4a3ff28a89be32e4531ecb858828b77cedbf21e007c05c0c720",
+    "c1_correctness_sha256": "06e9ed0206a22707e73adb0a0177fc711bd4813179913ec86d987a342e3a7bfd",
+    "representative_bundle_sha256": "976e5c8101370a6f482247652b31ec81c5be55c2419011b06746000693fd1727",
+    "four_aiu_comparison_sha256": "140da8c60971f22033d6a4858f72a3f672a444e39e9244fd4057e19a118d5ec4",
+    "decomposition_sha256": "e5aed198d250f5827b2aa84c2e1075d8f65c0750a9d46914653e3f32b26e939e",
+    "model_baseline_bundle_sha256": "6bcf466e6a9ac74f7eef3265750a55545dbeba220df4d1828bbfdfa4bfa12f43",
+    "model_asgemm_bundle_sha256": "976e5c8101370a6f482247652b31ec81c5be55c2419011b06746000693fd1727",
+    "model_comparison_sha256": "d2fdc28d15f5238df7cb04c94e8df8e5b26c1e2e27c7bf4f301bb4595fc4d028"
+  },
+  "measurement_reference": {
+    "shape": {
+      "E": 128,
+      "T": 512,
+      "H": 2816,
+      "F": 704,
+      "C": 32
+    },
+    "baseline_block_median_ms": 372.8872414,
+    "prototype_block_median_ms": 42.4441442,
+    "matched_speedup_x": 8.785363645051419,
+    "literal_latency_is_a_permanent_gate": false
+  }
+}
