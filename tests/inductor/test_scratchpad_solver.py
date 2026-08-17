@@ -20,7 +20,9 @@ import subprocess
 import sys
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import patch
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.scratchpad.allocator import _lx_planning_size
@@ -32,6 +34,9 @@ from torch_spyre._inductor.scratchpad.plan_solver import (
     LifetimeBoundBuffer,
 )
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
+import torch_spyre._inductor.scratchpad.utils as scratchpad_utils
+from torch_spyre._inductor.constants import COARSE_TILE_FIXED_LX_ACCUM_ATTR
+from torch_spyre._inductor.pass_utils import PerCoreView
 
 try:
     from ortools.sat.python import cp_model  # noqa: F401
@@ -81,6 +86,106 @@ class TestLxPlanningContract(TestCase):
                         ValueError, "DXP_LX_FRAC_AVAIL must be >=0 and <=1"
                     ):
                         _lx_planning_size()
+
+
+class TestFixedAccumulatorOwnership(TestCase):
+    """The allocation-only accumulator must not claim one-core ownership."""
+
+    class _Dep:
+        def __init__(self, name):
+            self.name = name
+
+    class _StarDep(_Dep):
+        pass
+
+    class _Accumulator:
+        def __init__(self, name="accum", marked=True):
+            self.name = name
+            if marked:
+                setattr(self, COARSE_TILE_FIXED_LX_ACCUM_ATTR, True)
+
+        def get_name(self):
+            return self.name
+
+    class _Op:
+        def __init__(self, name, cores=32):
+            self.name = name
+            self.op_it_space_splits = ({0: cores}, {})
+
+        def get_name(self):
+            return self.name
+
+    def _run(self, *, mismatched_real_user=False, marked=True):
+        accum = self._Accumulator(marked=marked)
+        fill = self._Op("fill")
+        combine = self._Op("combine")
+        drain = self._Op("drain")
+        star = self._StarDep("accum")
+        fill_write = self._Dep("accum")
+        combine_read = self._Dep("accum")
+        combine_write = self._Dep("accum")
+        drain_read = self._Dep("accum")
+        read_writes = {
+            accum: SimpleNamespace(reads=set(), writes={star}),
+            fill: SimpleNamespace(reads=set(), writes={fill_write}),
+            combine: SimpleNamespace(
+                reads={combine_read}, writes={combine_write}
+            ),
+            drain: SimpleNamespace(reads={drain_read}, writes=set()),
+        }
+        graph = SimpleNamespace(operations=[accum, fill, combine, drain])
+        aligned = PerCoreView(((0, 32),), ((0, 0),))
+        mismatch = PerCoreView(((0, 32),), ((0, 1),))
+        synthetic_whole = PerCoreView((), ())
+
+        def per_core_view(op, _dep, _name, _cache):
+            return (
+                synthetic_whole
+                if op is accum
+                else mismatch
+                if mismatched_real_user and op is drain
+                else aligned,
+                False,
+                True,
+            )
+
+        with (
+            config.patch({"sencores": 32}),
+            patch.object(scratchpad_utils, "StarDep", self._StarDep),
+            patch.object(
+                scratchpad_utils, "SpyreEmptyFallback", self._Accumulator
+            ),
+            patch.object(
+                scratchpad_utils,
+                "op_read_writes",
+                side_effect=lambda op: read_writes[op],
+            ),
+            patch.object(
+                scratchpad_utils,
+                "_per_core_view_on_buf",
+                side_effect=per_core_view,
+            ),
+        ):
+            users = scratchpad_utils._get_buffer_user_deps(graph)["accum"]
+            result, reasons = scratchpad_utils.get_ncores_for_buffers(graph)
+        return users, result["accum"], reasons.get("accum")
+
+    def test_marked_synthetic_writer_is_ignored_and_real_m32_users_win(self):
+        users, cores, reason = self._run()
+        self.assertEqual(len(users), 4)
+        self.assertEqual(cores, 32)
+        self.assertIsNone(reason)
+
+    def test_mismatched_real_user_still_fails_closed(self):
+        _, cores, reason = self._run(mismatched_real_user=True)
+        self.assertEqual(cores, -1)
+        self.assertIn("ref", reason)
+
+    def test_unmarked_fallback_keeps_its_synthetic_writer(self):
+        users, cores, reason = self._run(marked=False)
+        self.assertEqual(len(users), 5)
+        self.assertEqual(cores, -1)
+        self.assertIn("ref", reason)
 
 
 def _two_gap_buffers():
@@ -663,6 +768,29 @@ class BaseLayoutSolverTests:
         self.assertEqual(
             LifetimeBoundBuffer("E", 20, [], first_use_is_read=True).read_count, 0
         )
+
+    def test_lifetime_end_override_changes_overlap_not_reads_or_score(self):
+        from torch_spyre._inductor.scratchpad.permutation_layout import (
+            buffer_quality,
+        )
+
+        ordinary = LifetimeBoundBuffer(
+            "ordinary", 20, [3, 5, 8], residency_reason=None
+        )
+        loop_carried = LifetimeBoundBuffer(
+            "loop_carried",
+            20,
+            [3, 5, 8],
+            residency_reason=None,
+            lifetime_end_override=20,
+        )
+
+        self.assertEqual(loop_carried.uses, [3, 5, 8])
+        self.assertEqual(loop_carried.read_count, ordinary.read_count)
+        self.assertEqual(buffer_quality(loop_carried), buffer_quality(ordinary))
+        self.assertEqual(loop_carried.residency_reason, ordinary.residency_reason)
+        self.assertEqual(ordinary.end_time, 9)
+        self.assertEqual(loop_carried.end_time, 20)
 
     def test_repeated_index_cannot_pass_as_a_read(self):
         # The in-place rule tests for a use strictly after the first rather than

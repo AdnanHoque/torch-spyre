@@ -43,7 +43,11 @@ import torch_spyre._inductor.work_division as _wd
 import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec, parse_op_spec
-from torch_spyre._inductor.constants import IDENTITY_OP
+from torch_spyre._inductor.constants import (
+    COARSE_TILE_HOISTED_LOOP_GROUP_ATTR,
+    CORE_MAPPING_CONTIGUOUS_DIM_ATTR,
+    IDENTITY_OP,
+)
 from torch_spyre._inductor.scratchpad.lx_relayout import (
     LXRelayoutPlan,
     work_division_from_view,
@@ -567,6 +571,307 @@ def _relayout_plan(source="source", consumers="consumer"):
     return LXRelayoutPlan(source, consumers, _SOURCE_VIEW, _DESTINATION_VIEW, 8)
 
 
+def _run_hoisted_copy_alignment(
+    consumer_views,
+    *,
+    incompatible_extra=False,
+    marked=True,
+    projected_view=None,
+    consumer_partial_reduction=False,
+):
+    """Run the matched-preheader pass over a small, device-free fake graph."""
+
+    m, k = Symbol("m"), Symbol("k")
+    source_name = "coarse_tile_read_copy_0_arg0_1_0"
+
+    class FakeOp:
+        def __init__(self, name, reads=(), writes=()):
+            self.name = name
+            self.reads = list(reads)
+            self.writes = list(writes)
+            self.layout = SimpleNamespace(device_layout=object())
+            self.op_it_space_splits = ({m: 32}, {})
+
+        def get_name(self):
+            return self.name
+
+    write = SimpleNamespace(name=source_name)
+    producer = FakeOp(source_name, writes=(write,))
+    if marked:
+        setattr(producer, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR, (0,))
+    consumers = [
+        FakeOp(f"consumer_{index}", reads=(SimpleNamespace(name=source_name),))
+        for index in range(len(consumer_views))
+    ]
+    if incompatible_extra:
+        consumers.append(
+            FakeOp("incompatible_extra", reads=(SimpleNamespace(name=source_name),))
+        )
+    graph = SimpleNamespace(operations=[producer, *consumers])
+    views_by_name = {
+        consumer.get_name(): view for consumer, view in zip(consumers, consumer_views)
+    }
+
+    def read_writes(op):
+        return SimpleNamespace(reads=op.reads, writes=op.writes)
+
+    def per_core_view(op, _dep, _name, _cache):
+        if op is producer:
+            if projected_view is not None:
+                return projected_view, False, True
+            # An identity with the same M16/K2 split as a BMM is still
+            # physically different unless K is explicitly selected as the
+            # contiguous core-map dimension.  Make the fake preserve that
+            # distinction so this test cannot pass on split factors alone.
+            if getattr(producer, CORE_MAPPING_CONTIGUOUS_DIM_ATTR, None) == 1:
+                return consumer_views[0], False, True
+            return (
+                PerCoreView(
+                    ((0, 2), (1, 16)),
+                    ((0, floor(_CORE_ID / 16)), (1, Mod(_CORE_ID, 16))),
+                ),
+                False,
+                True,
+            )
+        return (
+            views_by_name[op.get_name()],
+            consumer_partial_reduction,
+            True,
+        )
+
+    applied = []
+
+    def apply_splits(op, splits, _output_td):
+        applied.append(dict(splits))
+        op.op_it_space_splits = (dict(splits), {})
+
+    with (
+        config.patch({"lx_planning": True}),
+        mock_patch.object(lx_relayout_module, "ComputedBuffer", FakeOp),
+        mock_patch.object(lx_relayout_module, "FixedTiledLayout", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "MemoryDep", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "op_read_writes", read_writes),
+        mock_patch.object(lx_relayout_module, "_single_write", return_value=write),
+        mock_patch.object(lx_relayout_module, "_op_num_cores", return_value=32),
+        mock_patch.object(
+            lx_relayout_module,
+            "_is_matmul_op",
+            side_effect=lambda op: op.get_name() != "incompatible_extra",
+        ),
+        mock_patch.object(
+            lx_relayout_module, "_per_core_view_on_buf", side_effect=per_core_view
+        ),
+        mock_patch.object(
+            lx_relayout_module,
+            "try_device_coordinates",
+            return_value=[floor(k / 64), m, Mod(k, 64)],
+        ),
+        mock_patch.object(
+            lx_relayout_module,
+            "iteration_space_from_op",
+            return_value={m: 512, k: 2816},
+        ),
+        mock_patch(
+            "torch_spyre._inductor.work_division.TensorDep",
+            side_effect=lambda dep, layout: SimpleNamespace(dep=dep, layout=layout),
+        ),
+        mock_patch(
+            "torch_spyre._inductor.work_division.apply_splits",
+            side_effect=apply_splits,
+        ),
+    ):
+        aligned = lx_relayout_module.align_hoisted_invariant_copy_work_divisions(graph)
+    return (
+        aligned,
+        producer.op_it_space_splits,
+        applied,
+        getattr(producer, CORE_MAPPING_CONTIGUOUS_DIM_ATTR, None),
+    )
+
+
+def test_hoisted_invariant_copy_adopts_identical_matmul_consumer_view():
+    m16_k2 = PerCoreView(
+        ((0, 2), (1, 16)),
+        ((0, Mod(_CORE_ID, 2)), (1, floor(_CORE_ID / 2))),
+    )
+    # K2 makes the BMM an op-level partial reduction.  That fact must not veto
+    # matching the ownership of its ordinary X read edge.
+    aligned, splits, applied, contiguous_dim = _run_hoisted_copy_alignment(
+        [m16_k2, m16_k2], consumer_partial_reduction=True
+    )
+
+    assert aligned == ["coarse_tile_read_copy_0_arg0_1_0"]
+    assert len(applied) == 1
+    assert sorted(applied[0].values()) == [2, 16]
+    assert splits == (applied[0], {})
+    assert contiguous_dim == 1
+
+
+def test_activation_stationary_loop_uses_one_row_only_ownership():
+    """The dense control aligns activations without touching weight copies."""
+
+    m, n, k = Symbol("m"), Symbol("n"), Symbol("k")
+    owner = (0,)
+    source_name = "coarse_tile_read_copy_0_arg0_1_0"
+
+    class FakeOp:
+        def __init__(
+            self,
+            name,
+            ranges,
+            *,
+            reads=(),
+            shared=False,
+            loop=True,
+            write_symbols=(),
+        ):
+            self.name = name
+            self.ranges = ranges
+            self.reads = list(reads)
+            self.write = SimpleNamespace(name=name, index=sum(write_symbols))
+            self.writes = [self.write]
+            self.layout = object()
+            self.data = SimpleNamespace(
+                op_info={"activation_stationary_shared_lhs_mm": {}}
+                if shared
+                else {}
+            )
+            if loop:
+                self.loop_info = SimpleNamespace(loop_group_id=owner)
+
+        def get_name(self):
+            return self.name
+
+    x_dep = SimpleNamespace(name=source_name, index=m + k)
+    producer = FakeOp(
+        source_name, {m: 512, k: 2816}, loop=False, write_symbols=(m, k)
+    )
+    setattr(producer, COARSE_TILE_HOISTED_LOOP_GROUP_ATTR, owner)
+    gate = FakeOp(
+        "gate",
+        {m: 512, n: 704, k: 2816},
+        reads=(x_dep,),
+        shared=True,
+        write_symbols=(m, n),
+    )
+    up = FakeOp(
+        "up",
+        {m: 512, n: 704, k: 2816},
+        reads=(x_dep,),
+        shared=True,
+        write_symbols=(m, n),
+    )
+    down = FakeOp("down", {m: 512, n: 2816, k: 704}, write_symbols=(m, n))
+    gelu = FakeOp("gelu", {m: 512, n: 704}, write_symbols=(m, n))
+    weight = FakeOp(
+        "gate_weight_copy", {k: 2816, n: 704}, write_symbols=(k, n)
+    )
+    graph = SimpleNamespace(operations=[producer, gate, up, down, gelu, weight])
+
+    def read_writes(op):
+        return SimpleNamespace(reads=op.reads, writes=op.writes)
+
+    applied = {}
+
+    def apply_splits(op, splits, _output_td):
+        applied[op.get_name()] = dict(splits)
+
+    with (
+        config.patch({"lx_planning": True, "sencores": 32}),
+        mock_patch.object(lx_relayout_module, "ComputedBuffer", FakeOp),
+        mock_patch.object(lx_relayout_module, "MemoryDep", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "op_read_writes", read_writes),
+        mock_patch.object(
+            lx_relayout_module,
+            "_single_write",
+            side_effect=lambda op, _name: op.write,
+        ),
+        mock_patch.object(
+            lx_relayout_module,
+            "iteration_space_from_op",
+            side_effect=lambda op: op.ranges,
+        ),
+        mock_patch.object(
+            lx_relayout_module,
+            "_is_matmul_op",
+            side_effect=lambda op: op.get_name() in {"gate", "up", "down"},
+        ),
+        mock_patch(
+            "torch_spyre._inductor.work_division.TensorDep",
+            side_effect=lambda dep, layout: SimpleNamespace(dep=dep, layout=layout),
+        ),
+        mock_patch(
+            "torch_spyre._inductor.work_division.apply_splits",
+            side_effect=apply_splits,
+        ),
+    ):
+        aligned = (
+            lx_relayout_module.align_activation_stationary_loop_work_divisions(
+                graph
+            )
+        )
+
+    assert set(aligned) == {"gate", "up", "down", "gelu"}
+    assert set(applied) == set(aligned)
+    assert all(splits == {m: 32} for splits in applied.values())
+    assert "gate_weight_copy" not in applied
+
+
+def test_hoisted_invariant_copy_rejects_consumer_disagreement_and_extra_user():
+    m16_k2 = PerCoreView(
+        ((0, 2), (1, 16)),
+        ((0, Mod(_CORE_ID, 2)), (1, floor(_CORE_ID / 2))),
+    )
+    m32 = PerCoreView(((1, 32),), ((1, _CORE_ID),))
+
+    for views, incompatible_extra in (
+        ([m16_k2, m32], False),
+        ([m16_k2, m16_k2], True),
+    ):
+        aligned, splits, applied, contiguous_dim = _run_hoisted_copy_alignment(
+            views, incompatible_extra=incompatible_extra
+        )
+        assert aligned == []
+        assert splits == ({Symbol("m"): 32}, {})
+        assert applied == []
+        assert contiguous_dim is None
+
+
+def test_hoisted_invariant_copy_rolls_back_split_and_mapping_on_projection_mismatch():
+    k_fast = PerCoreView(
+        ((0, 2), (1, 16)),
+        ((0, Mod(_CORE_ID, 2)), (1, floor(_CORE_ID / 2))),
+    )
+    m_fast = PerCoreView(
+        ((0, 2), (1, 16)),
+        ((0, floor(_CORE_ID / 16)), (1, Mod(_CORE_ID, 16))),
+    )
+
+    aligned, splits, applied, contiguous_dim = _run_hoisted_copy_alignment(
+        [k_fast, k_fast], projected_view=m_fast
+    )
+
+    assert aligned == []
+    assert len(applied) == 1  # The mismatch is detected after mutation.
+    assert splits == ({Symbol("m"): 32}, {})
+    assert contiguous_dim is None
+
+
+def test_hoisted_invariant_copy_leaves_ordinary_copy_unchanged():
+    m16_k2 = PerCoreView(
+        ((0, 2), (1, 16)),
+        ((0, Mod(_CORE_ID, 2)), (1, floor(_CORE_ID / 2))),
+    )
+    aligned, splits, applied, contiguous_dim = _run_hoisted_copy_alignment(
+        [m16_k2, m16_k2], marked=False
+    )
+
+    assert aligned == []
+    assert splits == ({Symbol("m"): 32}, {})
+    assert applied == []
+    assert contiguous_dim is None
+
+
 def test_lx_relayout_activation_policy_is_source_wide():
     dep = SimpleNamespace(name="input")
     producer = SimpleNamespace()
@@ -778,12 +1083,13 @@ def test_lx_relayout_allocation_is_atomic_in_one_greedy_solve(caplog):
             )
         ]
     )
-    source = LifetimeBoundBuffer("source", 128, [0, 1, 2, 3])
+    source = LifetimeBoundBuffer("source", 128, [0, 1, 2, 3], lifetime_end_override=5)
     ordinary = LifetimeBoundBuffer("ordinary", 128, [0, 4])
     buffers = [source, ordinary]
     allocator._append_lx_relayout_destinations(graph, buffers)
 
     assert source.uses == [1, 2, 6]
+    assert source.lifetime_end_override == 10
     assert [buffer.uses for buffer in source.paired_with] == [[2, 3, 5], [6, 7]]
 
     solver = allocator._build_solver(buffers)
