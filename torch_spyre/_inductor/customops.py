@@ -20,6 +20,11 @@ from torch_spyre.ops.eager import compile_once
 from torch_spyre.ops.fallbacks import warn_fallback
 
 from .errors import Unsupported
+from .expert_execution.custom_op import (  # noqa: F401
+    dense_expert_persistent_ffn,
+    expert_shared_lhs_mm,
+    moe_ffn,
+)
 
 aten = torch.ops.aten
 

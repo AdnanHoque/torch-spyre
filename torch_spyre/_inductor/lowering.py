@@ -31,6 +31,7 @@ from .constants import (
     COPY_BACK_CANDIDATE_ATTR,
     BATCH_MATMUL_FP8_OP,
     DEPTHWISE_CONV2D_OP,
+    PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY,
     SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY,
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
 )
@@ -558,6 +559,62 @@ def lower_bmm(x, y):
             f"bmm: x{list(x_size)} @ y{list(y_size)} -> {list(result_buf.get_size())}"
         )
 
+    return result
+
+
+@register_spyre_lowering(torch.ops.spyre.expert_shared_lhs_mm.default)
+def lower_expert_shared_lhs_mm(x, expert_weights):
+    """Lower ``[T,K] @ [E,K,N]`` without expanding X over E.
+
+    The expert coordinate indexes only the weight and output tensors. This is
+    the logical projection needed by a later persistent expert loop: tiling E
+    to one changes the streamed weight address while leaving the X address
+    invariant.
+    """
+    x.realize()
+    expert_weights.realize()
+    x_size = x.get_size()
+    weight_size = expert_weights.get_size()
+    if len(x_size) != 2 or len(weight_size) != 3:
+        raise Unsupported(
+            "expert_shared_lhs_mm requires [T,K] and [E,K,N], "
+            f"got {x_size} and {weight_size}"
+        )
+    if x_size[1] != weight_size[1]:
+        raise Unsupported(
+            "expert_shared_lhs_mm reduction dimensions differ: "
+            f"{x_size[1]} versus {weight_size[1]}"
+        )
+    if x.get_dtype() != expert_weights.get_dtype():
+        raise Unsupported("expert_shared_lhs_mm inputs must have the same dtype")
+
+    x_loader = x.make_loader()
+    weight_loader = expert_weights.make_loader()
+    ranges = [weight_size[0], x_size[0], weight_size[2]]
+
+    def inner_fn(index, reduction_index):
+        expert, row, column = index
+        (reduction,) = reduction_index
+        return (
+            x_loader([row, reduction]),
+            weight_loader([expert, reduction, column]),
+        )
+
+    result = SpyreReduction.create(
+        reduction_type=BATCH_MATMUL_OP,
+        input_node=[x, expert_weights],
+        device=x.get_device(),
+        dst_dtype=x.get_dtype(),
+        src_dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=ranges,
+        reduction_ranges=[x_size[1]],
+        op_info={
+            "persistent_expert_shared_lhs": {"expert_dim": 0},
+            PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY: True,
+        },
+    )
+    result.realize()
     return result
 
 

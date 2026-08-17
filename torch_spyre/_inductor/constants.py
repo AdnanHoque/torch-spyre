@@ -110,6 +110,10 @@ COPY_BACK_CANDIDATE_ATTR = "_spyre_copy_back_candidate"
 # compute mutation op from a pure-copy mutation op.
 ELIDED_COPY_BACK_ATTR = "_spyre_writes_copy_back_target"
 
+# OpSpec marker for a persistent expert projection whose expert weight remains
+# a graph HBM operand and is rebound once per counted-loop iteration.
+PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY = "persistent_expert_stream_weight"
+
 # FX ``custom`` metadata key for BMMs created from a shared 2D weight whose
 # logical batch dim is statically 1.  The downstream OpSpec key carries the same
 # fact after lowering, where FX metadata is no longer directly available.

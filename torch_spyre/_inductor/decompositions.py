@@ -113,6 +113,71 @@ def register_spyre_decompositions(ops: OpOrOps):
     return decomp.register_decomposition(ops, spyre_decompositions)
 
 
+@register_spyre_decompositions(torch.ops.spyre.moe_ffn.default)
+def decompose_moe_ffn(
+    x: torch.Tensor,
+    gate_weight: torch.Tensor,
+    up_weight: torch.Tensor,
+    down_weight: torch.Tensor,
+    routing_weight: torch.Tensor,
+    top_k: int,
+    activation: str,
+) -> torch.Tensor:
+    """Lower the semantic operation through the ordinary dense device path."""
+    from .expert_execution.semantics import moe_ffn_reference
+
+    return moe_ffn_reference(
+        x,
+        gate_weight,
+        up_weight,
+        down_weight,
+        routing_weight,
+        top_k,
+        activation,
+    )
+
+
+@register_spyre_decompositions(torch.ops.spyre.dense_expert_persistent_ffn.default)
+def decompose_dense_expert_persistent_ffn(
+    x: torch.Tensor,
+    gate_weight: torch.Tensor,
+    up_weight: torch.Tensor,
+    down_weight: torch.Tensor,
+    routing_weight: torch.Tensor,
+    top_k: int,
+    activation: str,
+    region_id: str,
+) -> torch.Tensor:
+    """Materialize one logical body for a static persistent expert loop.
+
+    This decomposition does not iterate over experts in Python. The expert
+    dimension remains in the logical tensors and is tiled to one by the
+    compiler, which turns it into one counted device loop around a single
+    gate/up/down body.
+    """
+    del top_k, region_id  # Routing weights already encode top-k selection.
+    experts = gate_weight.shape[0]
+    with spyre_hint(num_tiles_per_dim={"E": experts}):
+        with spyre_hint(named_dims=["E", "T", "F"]):
+            gate = torch.ops.spyre.expert_shared_lhs_mm(x, gate_weight)
+            up = torch.ops.spyre.expert_shared_lhs_mm(x, up_weight)
+            if activation == "gelu_tanh":
+                activated_gate = torch.nn.functional.gelu(gate, approximate="tanh")
+            elif activation == "silu":
+                activated_gate = torch.nn.functional.silu(gate)
+            else:
+                raise Unsupported(f"unsupported MoE activation {activation!r}")
+            hidden = activated_gate * up
+        with spyre_hint(named_dims=["E", "T", "H"]):
+            down = torch.bmm(hidden, down_weight)
+        with spyre_hint(named_dims=["E", "T", "route"]):
+            route_by_expert = routing_weight.permute(1, 0, 2)
+        with spyre_hint(named_dims=["E", "T", "H"]):
+            weighted_down = down * route_by_expert
+        with spyre_hint(named_dims=["T", "H"], expected_reduction_dims=["E"]):
+            return torch.sum(weighted_down, dim=0)
+
+
 def get_spyre_decomp_table() -> dict[Any, Callable[..., Any]]:
     """Return the decomposition table Inductor sees when compiling for Spyre.
 

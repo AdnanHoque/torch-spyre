@@ -138,6 +138,27 @@ def enable_spyre_compile_fx_wrapper():
             try:
                 if uses_spyre:
                     torch.spyre._impl._lazy_init()
+                    from torch_spyre._inductor.expert_execution.custom_op import (
+                        moe_ffn,
+                    )
+
+                    if any(
+                        node.op == "call_function"
+                        and node.target == moe_ffn._opoverload
+                        for node in gm.graph.nodes
+                    ):
+                        from torch_spyre._inductor.expert_execution.planner import (
+                            prepare_expert_execution_graph,
+                        )
+
+                        gm, expert_plan = prepare_expert_execution_graph(gm)
+                        logger.debug(
+                            "planned %d semantic MoE nodes; selected %d persistent",
+                            len(expert_plan.nodes),
+                            sum(
+                                node.schedule is not None for node in expert_plan.nodes
+                            ),
+                        )
                     # AOTAutograd uses the dict passed via ``decompositions=``
                     # to decompose the joint graph; Spyre-specific
                     # decompositions must be applied at this stage so ops like
