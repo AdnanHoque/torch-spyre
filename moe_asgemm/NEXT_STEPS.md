@@ -72,7 +72,7 @@ The product outcome should be a selector among per-route,
 activation-stationary dense, active-dense, and grouped execution rather than a
 universal kernel.
 
-## 6. Decompose before an optional native DDL
+## 6. Decomposition and native-DDL prediction — completed
 
 A monolithic custom DDL is not required for the accepted result. Consider it
 only after the compiler-generated program is upstreamed and profiled.
@@ -82,9 +82,16 @@ schedule for three matmuls, GELU, two multiplies, and accumulation. It should be
 judged against the clean measured `42.408-42.592 ms` identity block range, not
 assumed faster.
 
-Before implementing it:
+Completed before implementing it:
 
-1. decompose the generated bundle into per-SDSC device costs;
-2. measure loop and bundle sequencing overhead separately;
-3. publish a preregistered upper bound for plausible DDL improvement; and
-4. use the native DDL only to test that prediction.
+1. measured a five-point expert sweep with `R²=0.999949`;
+2. measured full-graph pointwise substitutions without changing matmul count or
+   residency;
+3. measured M32 gate/down matmul proxies and recorded their extra HBM traffic;
+4. preregistered an expected native-DDL gain of at most five percent and a
+   falsification threshold of at least ten percent.
+
+AIUPTI exposes one device job rather than internal SDSC timestamps, so the
+decomposition is explicitly experimental rather than a fabricated per-SDSC
+trace. See `moe_asgemm/DECOMPOSITION.md` and
+`moe_asgemm/NATIVE_DDL_PREDICTION.md`.

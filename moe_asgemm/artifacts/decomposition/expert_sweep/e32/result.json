@@ -1,0 +1,4460 @@
+{
+  "backend_compile": true,
+  "backend_core_mapping": {
+    "bundle_dir": "/tmp/moe_asgemm_review_decomp_e32/inductor-spyre/132b606a_sdsc_fused_activation_stationary_expert_mm_prepacked_activation_stationary_shared_lhs_mm_prepacked_gelu_mul_sum_0_3fso4jwr",
+    "bundle_mlir_sha256": "3fc876e86d5be37ae323be8fcd5d973f734403bdbb4dc46d9b12b3cd1d6a51b0",
+    "gate_up_core_id_to_work_slice_matches_x_all_32": true,
+    "gate_up_sdscs": [
+      "sdsc_2.json",
+      "sdsc_4.json"
+    ],
+    "sdsc_sha256": {
+      "sdsc_0.json": "1f01eda9bf01a8b16b345860d1a6da9d1853563d66c127006bb7c657d821dba7",
+      "sdsc_1.json": "e013f75bb89ccca253e026949f5c8128dbdb487e2fc45ff0cbcad37a4c5fd939",
+      "sdsc_10.json": "b98c592c827c18ebfccf9607324e1e20e3b6c77b390fd758bae640937f1d6e33",
+      "sdsc_11.json": "78087a9cbdaad89a3bd48d46b18d84f17653c17fe3f57087e551443d722da60a",
+      "sdsc_2.json": "b3ed935e1c32fa3f41dee25a8004b547a18b5e0f84d3416e46bf0dd7a985efbf",
+      "sdsc_3.json": "fe4719152206c68adb9f1ee5e694bd47f055254bac89b0343a9f0359c8cdbeec",
+      "sdsc_4.json": "81ed37e0b260b66d66a07049e2a4d5d7732a0b9a895de1605b6791c4e9fd875b",
+      "sdsc_5.json": "a77ccac43c48fcaae25773d158de2e777c29ddcd61491f70ebd6f9b8e1a2b822",
+      "sdsc_6.json": "5b74475c43dbc218598bcad9c566dd4c712bb119ac0910641fa2a9908e51dd2e",
+      "sdsc_7.json": "75c3da17bf58477bbdb49f348631b225f9e12e1c585a78849b0e94bac0268256",
+      "sdsc_8.json": "550f6147b6327505b81a286334a40d89fd4f46e5d01022f1b58e803c9299215a",
+      "sdsc_9.json": "f04f5b7896ee394d07f8fcca741c965d5d5f871aaa6428ab091c9b9789b1185b"
+    },
+    "x_core_id_to_work_slice_all_32": true,
+    "x_num_work_slices": {
+      "mb": 32,
+      "out": 1
+    },
+    "x_sdsc": "sdsc_0.json"
+  },
+  "correctness": {
+    "alpha_response_delta": {
+      "cosine": 1.0000206232070923,
+      "max_abs": 0.009520173072814941,
+      "rel_l2": 0.008878225460648537
+    },
+    "payloads": {
+      "hot8": {
+        "cosine": 1.0000075101852417,
+        "max_abs": 0.007869958877563477,
+        "rel_l2": 0.008832322433590889
+      },
+      "identity": {
+        "cosine": 1.0000085830688477,
+        "max_abs": 0.007869958877563477,
+        "rel_l2": 0.008842653594911098
+      },
+      "permutation": {
+        "cosine": 1.0000075101852417,
+        "max_abs": 0.0075566768646240234,
+        "rel_l2": 0.008886116556823254
+      }
+    },
+    "same_callable_two_alphas": true
+  },
+  "down_output_lx_interval_bytes": [
+    202752,
+    292864
+  ],
+  "expert_hbm_operands_advance": 4,
+  "final_hbm_outputs": 1,
+  "fixed_accumulator_lx_interval_bytes": [
+    0,
+    90112
+  ],
+  "gate_up_share_exact_x_interval": true,
+  "gate_up_x_ownership": [
+    {
+      "K": 1,
+      "M": 32
+    },
+    {
+      "K": 1,
+      "M": 32
+    }
+  ],
+  "hbm_pool_allocations": 0,
+  "internal_compute_allocations": "LX-only",
+  "launched_generated_kernel": true,
+  "one_flat_expert_loop": true,
+  "one_source_bundle": true,
+  "one_wrapper_bundle_call": true,
+  "one_x_hbm_to_lx_preheader": true,
+  "restickify_ops": 0,
+  "router_weighting_after_down": true,
+  "runtime_alpha_shape": [
+    32,
+    512,
+    1
+  ],
+  "shape": {
+    "E": 32,
+    "F": 704,
+    "H": 2816,
+    "T": 512,
+    "cores": 32
+  },
+  "source": "/home/adnan/codex-isolated/moe_asgemm_review_series_20260816/decomposition/e32/generated_module.py",
+  "source_sha256": "a1b13e5df3c7ddefe103964ed6539beed90bc9b4ef4fad5424f3cc84c9fb9e06",
+  "timing": {
+    "orders": [
+      [
+        "identity",
+        "permutation",
+        "hot8"
+      ],
+      [
+        "hot8",
+        "identity",
+        "permutation"
+      ],
+      [
+        "permutation",
+        "hot8",
+        "identity"
+      ]
+    ],
+    "protocol": {
+      "block_iters": 5,
+      "blocks": 10,
+      "rounds": 3,
+      "singles": 50,
+      "warmups": 5
+    },
+    "samples": [
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.205489,
+        "round": 0,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.168045,
+        "round": 0,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.231398,
+        "round": 0,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.203123,
+        "round": 0,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.08701,
+        "round": 0,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.074866,
+        "round": 0,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.030199,
+        "round": 0,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.003961,
+        "round": 0,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.181837,
+        "round": 0,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.324082,
+        "round": 0,
+        "sample": 9,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.262625,
+        "round": 0,
+        "sample": 10,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.065631,
+        "round": 0,
+        "sample": 11,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.972026,
+        "round": 0,
+        "sample": 12,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.195251,
+        "round": 0,
+        "sample": 13,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.319705,
+        "round": 0,
+        "sample": 14,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.082146,
+        "round": 0,
+        "sample": 15,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.055241,
+        "round": 0,
+        "sample": 16,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.885529,
+        "round": 0,
+        "sample": 17,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.902732,
+        "round": 0,
+        "sample": 18,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.224259,
+        "round": 0,
+        "sample": 19,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.334501,
+        "round": 0,
+        "sample": 20,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.181433,
+        "round": 0,
+        "sample": 21,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.111509,
+        "round": 0,
+        "sample": 22,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.453162,
+        "round": 0,
+        "sample": 23,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.222305,
+        "round": 0,
+        "sample": 24,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.494758,
+        "round": 0,
+        "sample": 25,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.175188,
+        "round": 0,
+        "sample": 26,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.96242,
+        "round": 0,
+        "sample": 27,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.041674,
+        "round": 0,
+        "sample": 28,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.251887,
+        "round": 0,
+        "sample": 29,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.463672,
+        "round": 0,
+        "sample": 30,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.216761,
+        "round": 0,
+        "sample": 31,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.062544,
+        "round": 0,
+        "sample": 32,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.940981,
+        "round": 0,
+        "sample": 33,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.180288,
+        "round": 0,
+        "sample": 34,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.33615,
+        "round": 0,
+        "sample": 35,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.354921,
+        "round": 0,
+        "sample": 36,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.235008,
+        "round": 0,
+        "sample": 37,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.383121,
+        "round": 0,
+        "sample": 38,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.212657,
+        "round": 0,
+        "sample": 39,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.164282,
+        "round": 0,
+        "sample": 40,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.27778,
+        "round": 0,
+        "sample": 41,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.274534,
+        "round": 0,
+        "sample": 42,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.037126,
+        "round": 0,
+        "sample": 43,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.057886,
+        "round": 0,
+        "sample": 44,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.263183,
+        "round": 0,
+        "sample": 45,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.353338,
+        "round": 0,
+        "sample": 46,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.234703,
+        "round": 0,
+        "sample": 47,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.03278,
+        "round": 0,
+        "sample": 48,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.91324,
+        "round": 0,
+        "sample": 49,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0192874,
+        "round": 0,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0761272,
+        "round": 0,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0310464,
+        "round": 0,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0024036,
+        "round": 0,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0303686,
+        "round": 0,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.080983,
+        "round": 0,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.039772000000001,
+        "round": 0,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0847104,
+        "round": 0,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0630606,
+        "round": 0,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.134056,
+        "round": 0,
+        "sample": 9,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.248655,
+        "round": 0,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.049692,
+        "round": 0,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.984051,
+        "round": 0,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.273687,
+        "round": 0,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.488944,
+        "round": 0,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.222854,
+        "round": 0,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.200677,
+        "round": 0,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.161449,
+        "round": 0,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.263091,
+        "round": 0,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.443247,
+        "round": 0,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.578592,
+        "round": 0,
+        "sample": 10,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.286082,
+        "round": 0,
+        "sample": 11,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.91205,
+        "round": 0,
+        "sample": 12,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.92715,
+        "round": 0,
+        "sample": 13,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.151949,
+        "round": 0,
+        "sample": 14,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.20139,
+        "round": 0,
+        "sample": 15,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.889511,
+        "round": 0,
+        "sample": 16,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.886983,
+        "round": 0,
+        "sample": 17,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.017906,
+        "round": 0,
+        "sample": 18,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.038125,
+        "round": 0,
+        "sample": 19,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.415913,
+        "round": 0,
+        "sample": 20,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.202131,
+        "round": 0,
+        "sample": 21,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.029663,
+        "round": 0,
+        "sample": 22,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.984068,
+        "round": 0,
+        "sample": 23,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.242425,
+        "round": 0,
+        "sample": 24,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.355788,
+        "round": 0,
+        "sample": 25,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.156241,
+        "round": 0,
+        "sample": 26,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.080257,
+        "round": 0,
+        "sample": 27,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.877939,
+        "round": 0,
+        "sample": 28,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.939801,
+        "round": 0,
+        "sample": 29,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.060354,
+        "round": 0,
+        "sample": 30,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.1762,
+        "round": 0,
+        "sample": 31,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.27245,
+        "round": 0,
+        "sample": 32,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.067052,
+        "round": 0,
+        "sample": 33,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.181501,
+        "round": 0,
+        "sample": 34,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.153492,
+        "round": 0,
+        "sample": 35,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.300749,
+        "round": 0,
+        "sample": 36,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.099027,
+        "round": 0,
+        "sample": 37,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.953781,
+        "round": 0,
+        "sample": 38,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.869784,
+        "round": 0,
+        "sample": 39,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.123813,
+        "round": 0,
+        "sample": 40,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.415983,
+        "round": 0,
+        "sample": 41,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.136923,
+        "round": 0,
+        "sample": 42,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.989657,
+        "round": 0,
+        "sample": 43,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.096196,
+        "round": 0,
+        "sample": 44,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.092383,
+        "round": 0,
+        "sample": 45,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.135665,
+        "round": 0,
+        "sample": 46,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.157254,
+        "round": 0,
+        "sample": 47,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.074782,
+        "round": 0,
+        "sample": 48,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.125461,
+        "round": 0,
+        "sample": 49,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.072658800000001,
+        "round": 0,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0700688,
+        "round": 0,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0712164,
+        "round": 0,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 10.977415,
+        "round": 0,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1052812,
+        "round": 0,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.060615,
+        "round": 0,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.053233,
+        "round": 0,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.146509,
+        "round": 0,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1044582,
+        "round": 0,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1622918,
+        "round": 0,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.212108,
+        "round": 0,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.120646,
+        "round": 0,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.07855,
+        "round": 0,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.231005,
+        "round": 0,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.429209,
+        "round": 0,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.232831,
+        "round": 0,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.999919,
+        "round": 0,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.694366,
+        "round": 0,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.987993,
+        "round": 0,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.313645,
+        "round": 0,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.4066,
+        "round": 0,
+        "sample": 10,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.190933,
+        "round": 0,
+        "sample": 11,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.110834,
+        "round": 0,
+        "sample": 12,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.161752,
+        "round": 0,
+        "sample": 13,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.262463,
+        "round": 0,
+        "sample": 14,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.458405,
+        "round": 0,
+        "sample": 15,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.14831,
+        "round": 0,
+        "sample": 16,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.050461,
+        "round": 0,
+        "sample": 17,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.170094,
+        "round": 0,
+        "sample": 18,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.386104,
+        "round": 0,
+        "sample": 19,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.410977,
+        "round": 0,
+        "sample": 20,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.231779,
+        "round": 0,
+        "sample": 21,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.192088,
+        "round": 0,
+        "sample": 22,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.161443,
+        "round": 0,
+        "sample": 23,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.06871,
+        "round": 0,
+        "sample": 24,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.246492,
+        "round": 0,
+        "sample": 25,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.227476,
+        "round": 0,
+        "sample": 26,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.202664,
+        "round": 0,
+        "sample": 27,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.191221,
+        "round": 0,
+        "sample": 28,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.181907,
+        "round": 0,
+        "sample": 29,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.292612,
+        "round": 0,
+        "sample": 30,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.33996,
+        "round": 0,
+        "sample": 31,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.135815,
+        "round": 0,
+        "sample": 32,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.151179,
+        "round": 0,
+        "sample": 33,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.03791,
+        "round": 0,
+        "sample": 34,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.089791,
+        "round": 0,
+        "sample": 35,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.467415,
+        "round": 0,
+        "sample": 36,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.295282,
+        "round": 0,
+        "sample": 37,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.374188,
+        "round": 0,
+        "sample": 38,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.166994,
+        "round": 0,
+        "sample": 39,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.231892,
+        "round": 0,
+        "sample": 40,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.292102,
+        "round": 0,
+        "sample": 41,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.167647,
+        "round": 0,
+        "sample": 42,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.063489,
+        "round": 0,
+        "sample": 43,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.061135,
+        "round": 0,
+        "sample": 44,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.04925,
+        "round": 0,
+        "sample": 45,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.159051,
+        "round": 0,
+        "sample": 46,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.333481,
+        "round": 0,
+        "sample": 47,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.160966,
+        "round": 0,
+        "sample": 48,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.057375,
+        "round": 0,
+        "sample": 49,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.076611,
+        "round": 0,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.115225599999999,
+        "round": 0,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 10.98308,
+        "round": 0,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0034634,
+        "round": 0,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.079549400000001,
+        "round": 0,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.056543999999999,
+        "round": 0,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1004516,
+        "round": 0,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0949146,
+        "round": 0,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.083312,
+        "round": 0,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0341318,
+        "round": 0,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.157126,
+        "round": 1,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.858308,
+        "round": 1,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.916691,
+        "round": 1,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.088313,
+        "round": 1,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.21309,
+        "round": 1,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.356022,
+        "round": 1,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.222066,
+        "round": 1,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.140504,
+        "round": 1,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.169778,
+        "round": 1,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.18898,
+        "round": 1,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.286727,
+        "round": 1,
+        "sample": 10,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.238317,
+        "round": 1,
+        "sample": 11,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.064167,
+        "round": 1,
+        "sample": 12,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.984745,
+        "round": 1,
+        "sample": 13,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.243501,
+        "round": 1,
+        "sample": 14,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.448601,
+        "round": 1,
+        "sample": 15,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.274004,
+        "round": 1,
+        "sample": 16,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.202539,
+        "round": 1,
+        "sample": 17,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.159977,
+        "round": 1,
+        "sample": 18,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.150006,
+        "round": 1,
+        "sample": 19,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.576502,
+        "round": 1,
+        "sample": 20,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.14915,
+        "round": 1,
+        "sample": 21,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.047633,
+        "round": 1,
+        "sample": 22,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.152117,
+        "round": 1,
+        "sample": 23,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.149856,
+        "round": 1,
+        "sample": 24,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.539606,
+        "round": 1,
+        "sample": 25,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.498541,
+        "round": 1,
+        "sample": 26,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.253747,
+        "round": 1,
+        "sample": 27,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.190889,
+        "round": 1,
+        "sample": 28,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.202867,
+        "round": 1,
+        "sample": 29,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.294436,
+        "round": 1,
+        "sample": 30,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.440704,
+        "round": 1,
+        "sample": 31,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.137308,
+        "round": 1,
+        "sample": 32,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.061158,
+        "round": 1,
+        "sample": 33,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.141048,
+        "round": 1,
+        "sample": 34,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.263251,
+        "round": 1,
+        "sample": 35,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.508309,
+        "round": 1,
+        "sample": 36,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.294636,
+        "round": 1,
+        "sample": 37,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.210883,
+        "round": 1,
+        "sample": 38,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.164803,
+        "round": 1,
+        "sample": 39,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.132392,
+        "round": 1,
+        "sample": 40,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.229735,
+        "round": 1,
+        "sample": 41,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.366127,
+        "round": 1,
+        "sample": 42,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.19135,
+        "round": 1,
+        "sample": 43,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.131003,
+        "round": 1,
+        "sample": 44,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.243701,
+        "round": 1,
+        "sample": 45,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.313438,
+        "round": 1,
+        "sample": 46,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.436772,
+        "round": 1,
+        "sample": 47,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.295216,
+        "round": 1,
+        "sample": 48,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.043529,
+        "round": 1,
+        "sample": 49,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1056996,
+        "round": 1,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.142165199999999,
+        "round": 1,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1624424,
+        "round": 1,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0947632,
+        "round": 1,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1256746,
+        "round": 1,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0703884,
+        "round": 1,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.092918000000001,
+        "round": 1,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.072337600000001,
+        "round": 1,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1646822,
+        "round": 1,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1133976,
+        "round": 1,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.235858,
+        "round": 1,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.171139,
+        "round": 1,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.162049,
+        "round": 1,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.222433,
+        "round": 1,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.448648,
+        "round": 1,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.29302,
+        "round": 1,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.242959,
+        "round": 1,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.171842,
+        "round": 1,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.140235,
+        "round": 1,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.302738,
+        "round": 1,
+        "sample": 9,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.366633,
+        "round": 1,
+        "sample": 10,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.314949,
+        "round": 1,
+        "sample": 11,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.49754,
+        "round": 1,
+        "sample": 12,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.207562,
+        "round": 1,
+        "sample": 13,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.313948,
+        "round": 1,
+        "sample": 14,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.437701,
+        "round": 1,
+        "sample": 15,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.232916,
+        "round": 1,
+        "sample": 16,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.140791,
+        "round": 1,
+        "sample": 17,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.191308,
+        "round": 1,
+        "sample": 18,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.283679,
+        "round": 1,
+        "sample": 19,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.479376,
+        "round": 1,
+        "sample": 20,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.253067,
+        "round": 1,
+        "sample": 21,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.170612,
+        "round": 1,
+        "sample": 22,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.140182,
+        "round": 1,
+        "sample": 23,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.28512,
+        "round": 1,
+        "sample": 24,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.477208,
+        "round": 1,
+        "sample": 25,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.212519,
+        "round": 1,
+        "sample": 26,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.129144,
+        "round": 1,
+        "sample": 27,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.191546,
+        "round": 1,
+        "sample": 28,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.220606,
+        "round": 1,
+        "sample": 29,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.262623,
+        "round": 1,
+        "sample": 30,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.148457,
+        "round": 1,
+        "sample": 31,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.225431,
+        "round": 1,
+        "sample": 32,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.150989,
+        "round": 1,
+        "sample": 33,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.202072,
+        "round": 1,
+        "sample": 34,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.283648,
+        "round": 1,
+        "sample": 35,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.452328,
+        "round": 1,
+        "sample": 36,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.253155,
+        "round": 1,
+        "sample": 37,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.151472,
+        "round": 1,
+        "sample": 38,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.141215,
+        "round": 1,
+        "sample": 39,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.333907,
+        "round": 1,
+        "sample": 40,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.46947,
+        "round": 1,
+        "sample": 41,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.252128,
+        "round": 1,
+        "sample": 42,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.190946,
+        "round": 1,
+        "sample": 43,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.162232,
+        "round": 1,
+        "sample": 44,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.262799,
+        "round": 1,
+        "sample": 45,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.406632,
+        "round": 1,
+        "sample": 46,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.303993,
+        "round": 1,
+        "sample": 47,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.201515,
+        "round": 1,
+        "sample": 48,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.049876,
+        "round": 1,
+        "sample": 49,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1950114,
+        "round": 1,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1984642,
+        "round": 1,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1440542,
+        "round": 1,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.088778600000001,
+        "round": 1,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0140528,
+        "round": 1,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.099689,
+        "round": 1,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1171098,
+        "round": 1,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0562386,
+        "round": 1,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1923758,
+        "round": 1,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1791856,
+        "round": 1,
+        "sample": 9,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.232252,
+        "round": 1,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.16663,
+        "round": 1,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.267051,
+        "round": 1,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.323715,
+        "round": 1,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.417432,
+        "round": 1,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.212335,
+        "round": 1,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.170929,
+        "round": 1,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.233225,
+        "round": 1,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.314317,
+        "round": 1,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.477191,
+        "round": 1,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.263361,
+        "round": 1,
+        "sample": 10,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.162114,
+        "round": 1,
+        "sample": 11,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.160734,
+        "round": 1,
+        "sample": 12,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.143249,
+        "round": 1,
+        "sample": 13,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.300099,
+        "round": 1,
+        "sample": 14,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.207796,
+        "round": 1,
+        "sample": 15,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.037095,
+        "round": 1,
+        "sample": 16,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.150833,
+        "round": 1,
+        "sample": 17,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.262619,
+        "round": 1,
+        "sample": 18,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.386411,
+        "round": 1,
+        "sample": 19,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.334783,
+        "round": 1,
+        "sample": 20,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.213114,
+        "round": 1,
+        "sample": 21,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.063384,
+        "round": 1,
+        "sample": 22,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.0523,
+        "round": 1,
+        "sample": 23,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.263952,
+        "round": 1,
+        "sample": 24,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.32021,
+        "round": 1,
+        "sample": 25,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.12426,
+        "round": 1,
+        "sample": 26,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.16023,
+        "round": 1,
+        "sample": 27,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.201865,
+        "round": 1,
+        "sample": 28,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.253673,
+        "round": 1,
+        "sample": 29,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.498308,
+        "round": 1,
+        "sample": 30,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.264488,
+        "round": 1,
+        "sample": 31,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.191005,
+        "round": 1,
+        "sample": 32,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.151158,
+        "round": 1,
+        "sample": 33,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.24205,
+        "round": 1,
+        "sample": 34,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.46938,
+        "round": 1,
+        "sample": 35,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.334945,
+        "round": 1,
+        "sample": 36,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.201001,
+        "round": 1,
+        "sample": 37,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.171394,
+        "round": 1,
+        "sample": 38,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.3781,
+        "round": 1,
+        "sample": 39,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.690833,
+        "round": 1,
+        "sample": 40,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.381156,
+        "round": 1,
+        "sample": 41,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.263653,
+        "round": 1,
+        "sample": 42,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.06178,
+        "round": 1,
+        "sample": 43,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.013665,
+        "round": 1,
+        "sample": 44,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.303946,
+        "round": 1,
+        "sample": 45,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.48932,
+        "round": 1,
+        "sample": 46,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.144149,
+        "round": 1,
+        "sample": 47,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.042868,
+        "round": 1,
+        "sample": 48,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.064734,
+        "round": 1,
+        "sample": 49,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0667668,
+        "round": 1,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0911514,
+        "round": 1,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.128816,
+        "round": 1,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1011056,
+        "round": 1,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.152217199999999,
+        "round": 1,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1482834,
+        "round": 1,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1997502,
+        "round": 1,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.163672,
+        "round": 1,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1210722,
+        "round": 1,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.2108016,
+        "round": 1,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.058945,
+        "round": 2,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.07608,
+        "round": 2,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.280205,
+        "round": 2,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.314855,
+        "round": 2,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.263664,
+        "round": 2,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.243011,
+        "round": 2,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.140944,
+        "round": 2,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.243277,
+        "round": 2,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.405781,
+        "round": 2,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.194414,
+        "round": 2,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.01488,
+        "round": 2,
+        "sample": 10,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.149159,
+        "round": 2,
+        "sample": 11,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.171485,
+        "round": 2,
+        "sample": 12,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.30411,
+        "round": 2,
+        "sample": 13,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.416623,
+        "round": 2,
+        "sample": 14,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.202424,
+        "round": 2,
+        "sample": 15,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.145893,
+        "round": 2,
+        "sample": 16,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.145464,
+        "round": 2,
+        "sample": 17,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.152597,
+        "round": 2,
+        "sample": 18,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.362429,
+        "round": 2,
+        "sample": 19,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.304994,
+        "round": 2,
+        "sample": 20,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.159997,
+        "round": 2,
+        "sample": 21,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.171047,
+        "round": 2,
+        "sample": 22,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.213948,
+        "round": 2,
+        "sample": 23,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.476968,
+        "round": 2,
+        "sample": 24,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.297148,
+        "round": 2,
+        "sample": 25,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.556717,
+        "round": 2,
+        "sample": 26,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.167741,
+        "round": 2,
+        "sample": 27,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.222441,
+        "round": 2,
+        "sample": 28,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.621583,
+        "round": 2,
+        "sample": 29,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.424198,
+        "round": 2,
+        "sample": 30,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.324055,
+        "round": 2,
+        "sample": 31,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.445631,
+        "round": 2,
+        "sample": 32,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.275109,
+        "round": 2,
+        "sample": 33,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.242389,
+        "round": 2,
+        "sample": 34,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.29667,
+        "round": 2,
+        "sample": 35,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.264511,
+        "round": 2,
+        "sample": 36,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.119637,
+        "round": 2,
+        "sample": 37,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.181179,
+        "round": 2,
+        "sample": 38,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.366173,
+        "round": 2,
+        "sample": 39,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.55185,
+        "round": 2,
+        "sample": 40,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.205672,
+        "round": 2,
+        "sample": 41,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.025025,
+        "round": 2,
+        "sample": 42,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.079135,
+        "round": 2,
+        "sample": 43,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.232424,
+        "round": 2,
+        "sample": 44,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.309145,
+        "round": 2,
+        "sample": 45,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.094743,
+        "round": 2,
+        "sample": 46,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.10206,
+        "round": 2,
+        "sample": 47,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.027742,
+        "round": 2,
+        "sample": 48,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.170918,
+        "round": 2,
+        "sample": 49,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.113184200000001,
+        "round": 2,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.097072,
+        "round": 2,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1683552,
+        "round": 2,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.168868,
+        "round": 2,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1194716,
+        "round": 2,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 10.988376200000001,
+        "round": 2,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1009686,
+        "round": 2,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.081923,
+        "round": 2,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1423038,
+        "round": 2,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.076546,
+        "round": 2,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.031299,
+        "round": 2,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.08691,
+        "round": 2,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.297105,
+        "round": 2,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.437785,
+        "round": 2,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.304381,
+        "round": 2,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.007168,
+        "round": 2,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.046997,
+        "round": 2,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.283323,
+        "round": 2,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.312859,
+        "round": 2,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.090774,
+        "round": 2,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.057966,
+        "round": 2,
+        "sample": 10,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.069045,
+        "round": 2,
+        "sample": 11,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.1716,
+        "round": 2,
+        "sample": 12,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.397062,
+        "round": 2,
+        "sample": 13,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.320008,
+        "round": 2,
+        "sample": 14,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.074451,
+        "round": 2,
+        "sample": 15,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.010286,
+        "round": 2,
+        "sample": 16,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.221649,
+        "round": 2,
+        "sample": 17,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.376859,
+        "round": 2,
+        "sample": 18,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.376321,
+        "round": 2,
+        "sample": 19,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.221988,
+        "round": 2,
+        "sample": 20,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.046171,
+        "round": 2,
+        "sample": 21,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.910096,
+        "round": 2,
+        "sample": 22,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.998058,
+        "round": 2,
+        "sample": 23,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.297583,
+        "round": 2,
+        "sample": 24,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.124496,
+        "round": 2,
+        "sample": 25,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.011676,
+        "round": 2,
+        "sample": 26,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.171674,
+        "round": 2,
+        "sample": 27,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.176916,
+        "round": 2,
+        "sample": 28,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.441058,
+        "round": 2,
+        "sample": 29,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.129265,
+        "round": 2,
+        "sample": 30,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.945312,
+        "round": 2,
+        "sample": 31,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.981933,
+        "round": 2,
+        "sample": 32,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.000359,
+        "round": 2,
+        "sample": 33,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.386187,
+        "round": 2,
+        "sample": 34,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.215856,
+        "round": 2,
+        "sample": 35,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.983099,
+        "round": 2,
+        "sample": 36,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.059149,
+        "round": 2,
+        "sample": 37,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.077612,
+        "round": 2,
+        "sample": 38,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.30514,
+        "round": 2,
+        "sample": 39,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.322672,
+        "round": 2,
+        "sample": 40,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.160983,
+        "round": 2,
+        "sample": 41,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.04624,
+        "round": 2,
+        "sample": 42,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.988508,
+        "round": 2,
+        "sample": 43,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.273988,
+        "round": 2,
+        "sample": 44,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.467978,
+        "round": 2,
+        "sample": 45,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.2745,
+        "round": 2,
+        "sample": 46,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.171349,
+        "round": 2,
+        "sample": 47,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.161706,
+        "round": 2,
+        "sample": 48,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.273054,
+        "round": 2,
+        "sample": 49,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1135474,
+        "round": 2,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1208238,
+        "round": 2,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1606266,
+        "round": 2,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0847938,
+        "round": 2,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0876142,
+        "round": 2,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.029801,
+        "round": 2,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 10.9797776,
+        "round": 2,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 10.9664176,
+        "round": 2,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.021944000000001,
+        "round": 2,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.0644034,
+        "round": 2,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.468515,
+        "round": 2,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.120068,
+        "round": 2,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.252085,
+        "round": 2,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.277182,
+        "round": 2,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.064147,
+        "round": 2,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.046717,
+        "round": 2,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.956194,
+        "round": 2,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.299196,
+        "round": 2,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.351231,
+        "round": 2,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.174945,
+        "round": 2,
+        "sample": 9,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.051482,
+        "round": 2,
+        "sample": 10,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.992079,
+        "round": 2,
+        "sample": 11,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.234254,
+        "round": 2,
+        "sample": 12,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.341558,
+        "round": 2,
+        "sample": 13,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.294716,
+        "round": 2,
+        "sample": 14,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.058553,
+        "round": 2,
+        "sample": 15,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.975464,
+        "round": 2,
+        "sample": 16,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.123678,
+        "round": 2,
+        "sample": 17,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.181195,
+        "round": 2,
+        "sample": 18,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.186033,
+        "round": 2,
+        "sample": 19,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.071945,
+        "round": 2,
+        "sample": 20,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.911237,
+        "round": 2,
+        "sample": 21,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.180139,
+        "round": 2,
+        "sample": 22,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.291546,
+        "round": 2,
+        "sample": 23,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.492376,
+        "round": 2,
+        "sample": 24,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.072422,
+        "round": 2,
+        "sample": 25,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.950554,
+        "round": 2,
+        "sample": 26,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.979037,
+        "round": 2,
+        "sample": 27,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.937836,
+        "round": 2,
+        "sample": 28,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.265862,
+        "round": 2,
+        "sample": 29,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.140622,
+        "round": 2,
+        "sample": 30,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.08879,
+        "round": 2,
+        "sample": 31,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.110241,
+        "round": 2,
+        "sample": 32,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.211978,
+        "round": 2,
+        "sample": 33,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.426651,
+        "round": 2,
+        "sample": 34,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.238969,
+        "round": 2,
+        "sample": 35,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.092193,
+        "round": 2,
+        "sample": 36,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.069869,
+        "round": 2,
+        "sample": 37,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.097413,
+        "round": 2,
+        "sample": 38,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.199271,
+        "round": 2,
+        "sample": 39,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.308886,
+        "round": 2,
+        "sample": 40,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.541333,
+        "round": 2,
+        "sample": 41,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.19,
+        "round": 2,
+        "sample": 42,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.190261,
+        "round": 2,
+        "sample": 43,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.307744,
+        "round": 2,
+        "sample": 44,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.469172,
+        "round": 2,
+        "sample": 45,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.27381,
+        "round": 2,
+        "sample": 46,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.062178,
+        "round": 2,
+        "sample": 47,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 11.915837,
+        "round": 2,
+        "sample": 48,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 12.072372,
+        "round": 2,
+        "sample": 49,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1029528,
+        "round": 2,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1227308,
+        "round": 2,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1691712,
+        "round": 2,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.191120600000001,
+        "round": 2,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1311672,
+        "round": 2,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1484994,
+        "round": 2,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1191452,
+        "round": 2,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1524732,
+        "round": 2,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.1668414,
+        "round": 2,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 11.2183948,
+        "round": 2,
+        "sample": 9,
+        "selector": "identity"
+      }
+    ]
+  },
+  "x_copy_ownership": {
+    "K": 1,
+    "M": 32
+  },
+  "x_core_mapping_contiguous_dim": null,
+  "x_fanout_identities": 0,
+  "x_logical_global_bytes": 2883584,
+  "x_per_core_lx_interval_bytes": [
+    90112,
+    180224
+  ]
+}

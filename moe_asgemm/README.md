@@ -32,6 +32,10 @@ static expert loop and twelve SDSCs. It is not one monolithic native DDL.
 - `moe_asgemm/RESULTS.md`: correctness, structure, and timing.
 - `moe_asgemm/CLEAN_REPRODUCTION.md`: clean-checkout compiler, correctness,
   structure, and two-AIU timing confirmation.
+- `moe_asgemm/DECOMPOSITION.md`: measured expert slope, component controls,
+  and matmul proxies.
+- `moe_asgemm/NATIVE_DDL_PREDICTION.md`: preregistered native-kernel prediction
+  and falsification gate.
 - `moe_asgemm/ARTIFACTS.md`: retained files and validation identities.
 - `moe_asgemm/LINEAGE_AND_SCOPE.md`: prior work, attribution, and our delta.
 - `moe_asgemm/NEXT_STEPS.md`: upstreaming and product work.

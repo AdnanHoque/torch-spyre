@@ -1,0 +1,4460 @@
+{
+  "backend_compile": true,
+  "backend_core_mapping": {
+    "bundle_dir": "/tmp/moe_asgemm_review_decomp_e8/inductor-spyre/df00ee56_sdsc_fused_activation_stationary_expert_mm_prepacked_activation_stationary_shared_lhs_mm_prepacked_gelu_mul_sum_0_jq4df29k",
+    "bundle_mlir_sha256": "39931d4b67904bd756679ef0f41b191702ddf50ebcccfcd9661cccd2ef27a5ef",
+    "gate_up_core_id_to_work_slice_matches_x_all_32": true,
+    "gate_up_sdscs": [
+      "sdsc_2.json",
+      "sdsc_4.json"
+    ],
+    "sdsc_sha256": {
+      "sdsc_0.json": "1f01eda9bf01a8b16b345860d1a6da9d1853563d66c127006bb7c657d821dba7",
+      "sdsc_1.json": "e013f75bb89ccca253e026949f5c8128dbdb487e2fc45ff0cbcad37a4c5fd939",
+      "sdsc_10.json": "b98c592c827c18ebfccf9607324e1e20e3b6c77b390fd758bae640937f1d6e33",
+      "sdsc_11.json": "78087a9cbdaad89a3bd48d46b18d84f17653c17fe3f57087e551443d722da60a",
+      "sdsc_2.json": "f1f535a77c9e9eb642eb33b47a27233ad19d72853d0c94b72ff34b1430e97f0a",
+      "sdsc_3.json": "fe4719152206c68adb9f1ee5e694bd47f055254bac89b0343a9f0359c8cdbeec",
+      "sdsc_4.json": "31a835430077e4c8791d83a95d0b96725e2c109de1eb26b51f3f24d6993ef883",
+      "sdsc_5.json": "a77ccac43c48fcaae25773d158de2e777c29ddcd61491f70ebd6f9b8e1a2b822",
+      "sdsc_6.json": "8ee26380fb8cc97456426b6847b78723f0cd8d4c3a90088c63436ac626e9ba68",
+      "sdsc_7.json": "5dac08556b010de379736bc98567bcbfb2d133fe0a0f0a514b2ea195d35ec222",
+      "sdsc_8.json": "550f6147b6327505b81a286334a40d89fd4f46e5d01022f1b58e803c9299215a",
+      "sdsc_9.json": "f04f5b7896ee394d07f8fcca741c965d5d5f871aaa6428ab091c9b9789b1185b"
+    },
+    "x_core_id_to_work_slice_all_32": true,
+    "x_num_work_slices": {
+      "mb": 32,
+      "out": 1
+    },
+    "x_sdsc": "sdsc_0.json"
+  },
+  "correctness": {
+    "alpha_response_delta": {
+      "cosine": 0.9999978542327881,
+      "max_abs": 0.005060315132141113,
+      "rel_l2": 0.009414497762918472
+    },
+    "payloads": {
+      "hot8": {
+        "cosine": 1.0000083446502686,
+        "max_abs": 0.007652401924133301,
+        "rel_l2": 0.00882262084633112
+      },
+      "identity": {
+        "cosine": 1.0000083446502686,
+        "max_abs": 0.007652401924133301,
+        "rel_l2": 0.00882262084633112
+      },
+      "permutation": {
+        "cosine": 1.0000061988830566,
+        "max_abs": 0.008082389831542969,
+        "rel_l2": 0.008911101147532463
+      }
+    },
+    "same_callable_two_alphas": true
+  },
+  "down_output_lx_interval_bytes": [
+    202752,
+    292864
+  ],
+  "expert_hbm_operands_advance": 4,
+  "final_hbm_outputs": 1,
+  "fixed_accumulator_lx_interval_bytes": [
+    0,
+    90112
+  ],
+  "gate_up_share_exact_x_interval": true,
+  "gate_up_x_ownership": [
+    {
+      "K": 1,
+      "M": 32
+    },
+    {
+      "K": 1,
+      "M": 32
+    }
+  ],
+  "hbm_pool_allocations": 0,
+  "internal_compute_allocations": "LX-only",
+  "launched_generated_kernel": true,
+  "one_flat_expert_loop": true,
+  "one_source_bundle": true,
+  "one_wrapper_bundle_call": true,
+  "one_x_hbm_to_lx_preheader": true,
+  "restickify_ops": 0,
+  "router_weighting_after_down": true,
+  "runtime_alpha_shape": [
+    8,
+    512,
+    1
+  ],
+  "shape": {
+    "E": 8,
+    "F": 704,
+    "H": 2816,
+    "T": 512,
+    "cores": 32
+  },
+  "source": "/home/adnan/codex-isolated/moe_asgemm_review_series_20260816/decomposition/e8/generated_module.py",
+  "source_sha256": "574a9f2c57cc4517e102b86237fd59d36a82d62358799475f993799cec5bdde1",
+  "timing": {
+    "orders": [
+      [
+        "identity",
+        "permutation",
+        "hot8"
+      ],
+      [
+        "hot8",
+        "identity",
+        "permutation"
+      ],
+      [
+        "permutation",
+        "hot8",
+        "identity"
+      ]
+    ],
+    "protocol": {
+      "block_iters": 5,
+      "blocks": 10,
+      "rounds": 3,
+      "singles": 50,
+      "warmups": 5
+    },
+    "samples": [
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.258022,
+        "round": 0,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.249238,
+        "round": 0,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.254266,
+        "round": 0,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.288651,
+        "round": 0,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.284432,
+        "round": 0,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.25829,
+        "round": 0,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.261656,
+        "round": 0,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.309752,
+        "round": 0,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.319064,
+        "round": 0,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.34847,
+        "round": 0,
+        "sample": 9,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.298179,
+        "round": 0,
+        "sample": 10,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.288415,
+        "round": 0,
+        "sample": 11,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.262979,
+        "round": 0,
+        "sample": 12,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.26498,
+        "round": 0,
+        "sample": 13,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.290386,
+        "round": 0,
+        "sample": 14,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.271492,
+        "round": 0,
+        "sample": 15,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.271174,
+        "round": 0,
+        "sample": 16,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.251813,
+        "round": 0,
+        "sample": 17,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.277792,
+        "round": 0,
+        "sample": 18,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.241598,
+        "round": 0,
+        "sample": 19,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.262337,
+        "round": 0,
+        "sample": 20,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.251301,
+        "round": 0,
+        "sample": 21,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.251563,
+        "round": 0,
+        "sample": 22,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.294829,
+        "round": 0,
+        "sample": 23,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.298859,
+        "round": 0,
+        "sample": 24,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.281587,
+        "round": 0,
+        "sample": 25,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.267343,
+        "round": 0,
+        "sample": 26,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.331848,
+        "round": 0,
+        "sample": 27,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.336858,
+        "round": 0,
+        "sample": 28,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.317937,
+        "round": 0,
+        "sample": 29,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.294891,
+        "round": 0,
+        "sample": 30,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.282615,
+        "round": 0,
+        "sample": 31,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.282267,
+        "round": 0,
+        "sample": 32,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.338742,
+        "round": 0,
+        "sample": 33,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.288468,
+        "round": 0,
+        "sample": 34,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.263805,
+        "round": 0,
+        "sample": 35,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.260954,
+        "round": 0,
+        "sample": 36,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.25514,
+        "round": 0,
+        "sample": 37,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.254607,
+        "round": 0,
+        "sample": 38,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.242503,
+        "round": 0,
+        "sample": 39,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.280538,
+        "round": 0,
+        "sample": 40,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.309244,
+        "round": 0,
+        "sample": 41,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.263249,
+        "round": 0,
+        "sample": 42,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.281259,
+        "round": 0,
+        "sample": 43,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.298305,
+        "round": 0,
+        "sample": 44,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.275215,
+        "round": 0,
+        "sample": 45,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.295075,
+        "round": 0,
+        "sample": 46,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.336853,
+        "round": 0,
+        "sample": 47,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.392305,
+        "round": 0,
+        "sample": 48,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.366445,
+        "round": 0,
+        "sample": 49,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9580698,
+        "round": 0,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9212651999999997,
+        "round": 0,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9301248,
+        "round": 0,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9693777999999997,
+        "round": 0,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9672714,
+        "round": 0,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9150758,
+        "round": 0,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9285956,
+        "round": 0,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9378319999999998,
+        "round": 0,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.982653,
+        "round": 0,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9331262,
+        "round": 0,
+        "sample": 9,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.275592,
+        "round": 0,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.242021,
+        "round": 0,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.212594,
+        "round": 0,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.221596,
+        "round": 0,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.221049,
+        "round": 0,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.217338,
+        "round": 0,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.226211,
+        "round": 0,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.246772,
+        "round": 0,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.261929,
+        "round": 0,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.261642,
+        "round": 0,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.26274,
+        "round": 0,
+        "sample": 10,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.278079,
+        "round": 0,
+        "sample": 11,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.320078,
+        "round": 0,
+        "sample": 12,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.309077,
+        "round": 0,
+        "sample": 13,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.269174,
+        "round": 0,
+        "sample": 14,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.249838,
+        "round": 0,
+        "sample": 15,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.267053,
+        "round": 0,
+        "sample": 16,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.235217,
+        "round": 0,
+        "sample": 17,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.273845,
+        "round": 0,
+        "sample": 18,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.2092,
+        "round": 0,
+        "sample": 19,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.242979,
+        "round": 0,
+        "sample": 20,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.294164,
+        "round": 0,
+        "sample": 21,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.230355,
+        "round": 0,
+        "sample": 22,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.215265,
+        "round": 0,
+        "sample": 23,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.224475,
+        "round": 0,
+        "sample": 24,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.215306,
+        "round": 0,
+        "sample": 25,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.229512,
+        "round": 0,
+        "sample": 26,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.259553,
+        "round": 0,
+        "sample": 27,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.259086,
+        "round": 0,
+        "sample": 28,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.256223,
+        "round": 0,
+        "sample": 29,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264006,
+        "round": 0,
+        "sample": 30,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.301388,
+        "round": 0,
+        "sample": 31,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.294927,
+        "round": 0,
+        "sample": 32,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.317335,
+        "round": 0,
+        "sample": 33,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.286681,
+        "round": 0,
+        "sample": 34,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.269284,
+        "round": 0,
+        "sample": 35,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.248903,
+        "round": 0,
+        "sample": 36,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264333,
+        "round": 0,
+        "sample": 37,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.246689,
+        "round": 0,
+        "sample": 38,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.249925,
+        "round": 0,
+        "sample": 39,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.272421,
+        "round": 0,
+        "sample": 40,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.252256,
+        "round": 0,
+        "sample": 41,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.248385,
+        "round": 0,
+        "sample": 42,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.223868,
+        "round": 0,
+        "sample": 43,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.227514,
+        "round": 0,
+        "sample": 44,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.268736,
+        "round": 0,
+        "sample": 45,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.28219,
+        "round": 0,
+        "sample": 46,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.417879,
+        "round": 0,
+        "sample": 47,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.428415,
+        "round": 0,
+        "sample": 48,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.438354,
+        "round": 0,
+        "sample": 49,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9964842000000003,
+        "round": 0,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9577282,
+        "round": 0,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9239414,
+        "round": 0,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.936248,
+        "round": 0,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9634768,
+        "round": 0,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9662574,
+        "round": 0,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.936445,
+        "round": 0,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9333408,
+        "round": 0,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9947792,
+        "round": 0,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 3.0254362,
+        "round": 0,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.416962,
+        "round": 0,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.373519,
+        "round": 0,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.409528,
+        "round": 0,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.430967,
+        "round": 0,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.372213,
+        "round": 0,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.3941,
+        "round": 0,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.3952,
+        "round": 0,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.345068,
+        "round": 0,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.340323,
+        "round": 0,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.319993,
+        "round": 0,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.348258,
+        "round": 0,
+        "sample": 10,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.343011,
+        "round": 0,
+        "sample": 11,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.378101,
+        "round": 0,
+        "sample": 12,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.393335,
+        "round": 0,
+        "sample": 13,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.351569,
+        "round": 0,
+        "sample": 14,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.337146,
+        "round": 0,
+        "sample": 15,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.360058,
+        "round": 0,
+        "sample": 16,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.301655,
+        "round": 0,
+        "sample": 17,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.283507,
+        "round": 0,
+        "sample": 18,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.27673,
+        "round": 0,
+        "sample": 19,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.267369,
+        "round": 0,
+        "sample": 20,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.258996,
+        "round": 0,
+        "sample": 21,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.257592,
+        "round": 0,
+        "sample": 22,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264242,
+        "round": 0,
+        "sample": 23,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264944,
+        "round": 0,
+        "sample": 24,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.279005,
+        "round": 0,
+        "sample": 25,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.303181,
+        "round": 0,
+        "sample": 26,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.25928,
+        "round": 0,
+        "sample": 27,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.29933,
+        "round": 0,
+        "sample": 28,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.318442,
+        "round": 0,
+        "sample": 29,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.276877,
+        "round": 0,
+        "sample": 30,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.27495,
+        "round": 0,
+        "sample": 31,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.295464,
+        "round": 0,
+        "sample": 32,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.316811,
+        "round": 0,
+        "sample": 33,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.315733,
+        "round": 0,
+        "sample": 34,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.347912,
+        "round": 0,
+        "sample": 35,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.346266,
+        "round": 0,
+        "sample": 36,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.453626,
+        "round": 0,
+        "sample": 37,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.360422,
+        "round": 0,
+        "sample": 38,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.325362,
+        "round": 0,
+        "sample": 39,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.273232,
+        "round": 0,
+        "sample": 40,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.274313,
+        "round": 0,
+        "sample": 41,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.261062,
+        "round": 0,
+        "sample": 42,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.268478,
+        "round": 0,
+        "sample": 43,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.263747,
+        "round": 0,
+        "sample": 44,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.2752,
+        "round": 0,
+        "sample": 45,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.31979,
+        "round": 0,
+        "sample": 46,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264886,
+        "round": 0,
+        "sample": 47,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.267833,
+        "round": 0,
+        "sample": 48,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.251206,
+        "round": 0,
+        "sample": 49,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.954619,
+        "round": 0,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9864284000000003,
+        "round": 0,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.942132,
+        "round": 0,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9351436,
+        "round": 0,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9505424000000002,
+        "round": 0,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9973441999999997,
+        "round": 0,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9595086,
+        "round": 0,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.926602,
+        "round": 0,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9375122,
+        "round": 0,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9770206000000003,
+        "round": 0,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.346343,
+        "round": 1,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.286472,
+        "round": 1,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.278006,
+        "round": 1,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.253703,
+        "round": 1,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.270307,
+        "round": 1,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.244545,
+        "round": 1,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.252025,
+        "round": 1,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.276473,
+        "round": 1,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.396056,
+        "round": 1,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.404202,
+        "round": 1,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.40756,
+        "round": 1,
+        "sample": 10,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.38149,
+        "round": 1,
+        "sample": 11,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.289453,
+        "round": 1,
+        "sample": 12,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.268101,
+        "round": 1,
+        "sample": 13,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.254812,
+        "round": 1,
+        "sample": 14,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.260785,
+        "round": 1,
+        "sample": 15,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.272282,
+        "round": 1,
+        "sample": 16,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.29378,
+        "round": 1,
+        "sample": 17,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.304809,
+        "round": 1,
+        "sample": 18,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.367217,
+        "round": 1,
+        "sample": 19,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.3338,
+        "round": 1,
+        "sample": 20,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.304964,
+        "round": 1,
+        "sample": 21,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.266804,
+        "round": 1,
+        "sample": 22,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.262623,
+        "round": 1,
+        "sample": 23,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.259128,
+        "round": 1,
+        "sample": 24,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.244257,
+        "round": 1,
+        "sample": 25,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.274054,
+        "round": 1,
+        "sample": 26,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.254853,
+        "round": 1,
+        "sample": 27,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.246928,
+        "round": 1,
+        "sample": 28,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.250603,
+        "round": 1,
+        "sample": 29,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.26169,
+        "round": 1,
+        "sample": 30,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.248416,
+        "round": 1,
+        "sample": 31,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.252826,
+        "round": 1,
+        "sample": 32,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.297397,
+        "round": 1,
+        "sample": 33,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.301941,
+        "round": 1,
+        "sample": 34,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.270187,
+        "round": 1,
+        "sample": 35,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.292497,
+        "round": 1,
+        "sample": 36,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.308118,
+        "round": 1,
+        "sample": 37,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.354956,
+        "round": 1,
+        "sample": 38,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.360833,
+        "round": 1,
+        "sample": 39,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.343218,
+        "round": 1,
+        "sample": 40,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.311582,
+        "round": 1,
+        "sample": 41,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.263878,
+        "round": 1,
+        "sample": 42,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264206,
+        "round": 1,
+        "sample": 43,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264367,
+        "round": 1,
+        "sample": 44,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.257375,
+        "round": 1,
+        "sample": 45,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.258423,
+        "round": 1,
+        "sample": 46,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.28199,
+        "round": 1,
+        "sample": 47,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.25727,
+        "round": 1,
+        "sample": 48,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.231155,
+        "round": 1,
+        "sample": 49,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9280304,
+        "round": 1,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9668952,
+        "round": 1,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9982908,
+        "round": 1,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9390518,
+        "round": 1,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9294242,
+        "round": 1,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9423369999999998,
+        "round": 1,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9821222,
+        "round": 1,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9358504,
+        "round": 1,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9556443999999997,
+        "round": 1,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9549472000000003,
+        "round": 1,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.381474,
+        "round": 1,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.316178,
+        "round": 1,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.332547,
+        "round": 1,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.348119,
+        "round": 1,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.346785,
+        "round": 1,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.283826,
+        "round": 1,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.272915,
+        "round": 1,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.275899,
+        "round": 1,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.274428,
+        "round": 1,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.245829,
+        "round": 1,
+        "sample": 9,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.233664,
+        "round": 1,
+        "sample": 10,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.23912,
+        "round": 1,
+        "sample": 11,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.257497,
+        "round": 1,
+        "sample": 12,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.275537,
+        "round": 1,
+        "sample": 13,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.249836,
+        "round": 1,
+        "sample": 14,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.241291,
+        "round": 1,
+        "sample": 15,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.271129,
+        "round": 1,
+        "sample": 16,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.234368,
+        "round": 1,
+        "sample": 17,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.239192,
+        "round": 1,
+        "sample": 18,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.287916,
+        "round": 1,
+        "sample": 19,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.277471,
+        "round": 1,
+        "sample": 20,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.268373,
+        "round": 1,
+        "sample": 21,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.286056,
+        "round": 1,
+        "sample": 22,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.319974,
+        "round": 1,
+        "sample": 23,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.329345,
+        "round": 1,
+        "sample": 24,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.267132,
+        "round": 1,
+        "sample": 25,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.269954,
+        "round": 1,
+        "sample": 26,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.245764,
+        "round": 1,
+        "sample": 27,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.244274,
+        "round": 1,
+        "sample": 28,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.225664,
+        "round": 1,
+        "sample": 29,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.221303,
+        "round": 1,
+        "sample": 30,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.254578,
+        "round": 1,
+        "sample": 31,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.201339,
+        "round": 1,
+        "sample": 32,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.19818,
+        "round": 1,
+        "sample": 33,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.199577,
+        "round": 1,
+        "sample": 34,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.214488,
+        "round": 1,
+        "sample": 35,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.259461,
+        "round": 1,
+        "sample": 36,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.208837,
+        "round": 1,
+        "sample": 37,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.21338,
+        "round": 1,
+        "sample": 38,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.227548,
+        "round": 1,
+        "sample": 39,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.254206,
+        "round": 1,
+        "sample": 40,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.277401,
+        "round": 1,
+        "sample": 41,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.297224,
+        "round": 1,
+        "sample": 42,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.341706,
+        "round": 1,
+        "sample": 43,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.304312,
+        "round": 1,
+        "sample": 44,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.266822,
+        "round": 1,
+        "sample": 45,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.288261,
+        "round": 1,
+        "sample": 46,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.280197,
+        "round": 1,
+        "sample": 47,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.262509,
+        "round": 1,
+        "sample": 48,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.243782,
+        "round": 1,
+        "sample": 49,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9265534,
+        "round": 1,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9155311999999998,
+        "round": 1,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9608414,
+        "round": 1,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 3.0091296,
+        "round": 1,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 3.0087038,
+        "round": 1,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9313314,
+        "round": 1,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.940118,
+        "round": 1,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9741969999999998,
+        "round": 1,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9325116,
+        "round": 1,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9343774,
+        "round": 1,
+        "sample": 9,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.234788,
+        "round": 1,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.253951,
+        "round": 1,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.279971,
+        "round": 1,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.253251,
+        "round": 1,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.268299,
+        "round": 1,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.249555,
+        "round": 1,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.297677,
+        "round": 1,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.32675,
+        "round": 1,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.369089,
+        "round": 1,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.296151,
+        "round": 1,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.292651,
+        "round": 1,
+        "sample": 10,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.265401,
+        "round": 1,
+        "sample": 11,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.265919,
+        "round": 1,
+        "sample": 12,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.253986,
+        "round": 1,
+        "sample": 13,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.23762,
+        "round": 1,
+        "sample": 14,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264545,
+        "round": 1,
+        "sample": 15,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.242839,
+        "round": 1,
+        "sample": 16,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.259409,
+        "round": 1,
+        "sample": 17,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.267541,
+        "round": 1,
+        "sample": 18,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.235815,
+        "round": 1,
+        "sample": 19,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.282095,
+        "round": 1,
+        "sample": 20,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.253925,
+        "round": 1,
+        "sample": 21,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.290738,
+        "round": 1,
+        "sample": 22,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.291299,
+        "round": 1,
+        "sample": 23,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.298161,
+        "round": 1,
+        "sample": 24,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.258167,
+        "round": 1,
+        "sample": 25,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.333149,
+        "round": 1,
+        "sample": 26,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.352616,
+        "round": 1,
+        "sample": 27,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.326146,
+        "round": 1,
+        "sample": 28,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.262774,
+        "round": 1,
+        "sample": 29,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.282657,
+        "round": 1,
+        "sample": 30,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.277325,
+        "round": 1,
+        "sample": 31,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.28284,
+        "round": 1,
+        "sample": 32,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.28659,
+        "round": 1,
+        "sample": 33,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.238601,
+        "round": 1,
+        "sample": 34,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.240579,
+        "round": 1,
+        "sample": 35,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.239184,
+        "round": 1,
+        "sample": 36,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.253887,
+        "round": 1,
+        "sample": 37,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.21193,
+        "round": 1,
+        "sample": 38,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.215541,
+        "round": 1,
+        "sample": 39,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.23828,
+        "round": 1,
+        "sample": 40,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.271624,
+        "round": 1,
+        "sample": 41,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.274953,
+        "round": 1,
+        "sample": 42,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.327612,
+        "round": 1,
+        "sample": 43,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.323402,
+        "round": 1,
+        "sample": 44,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.284047,
+        "round": 1,
+        "sample": 45,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.329412,
+        "round": 1,
+        "sample": 46,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.343226,
+        "round": 1,
+        "sample": 47,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.310881,
+        "round": 1,
+        "sample": 48,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.281014,
+        "round": 1,
+        "sample": 49,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9321936,
+        "round": 1,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9167394,
+        "round": 1,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9395796,
+        "round": 1,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.980722,
+        "round": 1,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9447904,
+        "round": 1,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9189876000000003,
+        "round": 1,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9198494,
+        "round": 1,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9517148,
+        "round": 1,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9800158,
+        "round": 1,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9419931999999998,
+        "round": 1,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.250138,
+        "round": 2,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.24937,
+        "round": 2,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.229802,
+        "round": 2,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.234635,
+        "round": 2,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.22804,
+        "round": 2,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.258396,
+        "round": 2,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.259365,
+        "round": 2,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.270583,
+        "round": 2,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.2867,
+        "round": 2,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.266075,
+        "round": 2,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.285905,
+        "round": 2,
+        "sample": 10,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.346696,
+        "round": 2,
+        "sample": 11,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.304746,
+        "round": 2,
+        "sample": 12,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.295848,
+        "round": 2,
+        "sample": 13,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.286287,
+        "round": 2,
+        "sample": 14,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.242559,
+        "round": 2,
+        "sample": 15,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.232686,
+        "round": 2,
+        "sample": 16,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.246944,
+        "round": 2,
+        "sample": 17,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.212768,
+        "round": 2,
+        "sample": 18,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.247346,
+        "round": 2,
+        "sample": 19,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.201819,
+        "round": 2,
+        "sample": 20,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.198329,
+        "round": 2,
+        "sample": 21,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.224553,
+        "round": 2,
+        "sample": 22,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.254109,
+        "round": 2,
+        "sample": 23,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.260782,
+        "round": 2,
+        "sample": 24,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.293794,
+        "round": 2,
+        "sample": 25,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.276341,
+        "round": 2,
+        "sample": 26,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.283125,
+        "round": 2,
+        "sample": 27,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.253783,
+        "round": 2,
+        "sample": 28,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.254437,
+        "round": 2,
+        "sample": 29,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.296085,
+        "round": 2,
+        "sample": 30,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.485953,
+        "round": 2,
+        "sample": 31,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.496667,
+        "round": 2,
+        "sample": 32,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.40915,
+        "round": 2,
+        "sample": 33,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.303503,
+        "round": 2,
+        "sample": 34,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.281673,
+        "round": 2,
+        "sample": 35,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.250004,
+        "round": 2,
+        "sample": 36,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.252452,
+        "round": 2,
+        "sample": 37,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.259204,
+        "round": 2,
+        "sample": 38,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.256221,
+        "round": 2,
+        "sample": 39,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.245984,
+        "round": 2,
+        "sample": 40,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.245268,
+        "round": 2,
+        "sample": 41,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.217532,
+        "round": 2,
+        "sample": 42,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.269995,
+        "round": 2,
+        "sample": 43,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.252601,
+        "round": 2,
+        "sample": 44,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.250108,
+        "round": 2,
+        "sample": 45,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.260078,
+        "round": 2,
+        "sample": 46,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.257618,
+        "round": 2,
+        "sample": 47,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.250888,
+        "round": 2,
+        "sample": 48,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.260876,
+        "round": 2,
+        "sample": 49,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9814134,
+        "round": 2,
+        "sample": 0,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.92097,
+        "round": 2,
+        "sample": 1,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9121652,
+        "round": 2,
+        "sample": 2,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.916792,
+        "round": 2,
+        "sample": 3,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9679374,
+        "round": 2,
+        "sample": 4,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9444136,
+        "round": 2,
+        "sample": 5,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9187702,
+        "round": 2,
+        "sample": 6,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9209176,
+        "round": 2,
+        "sample": 7,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9587209999999997,
+        "round": 2,
+        "sample": 8,
+        "selector": "permutation"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9835508,
+        "round": 2,
+        "sample": 9,
+        "selector": "permutation"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.282393,
+        "round": 2,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264611,
+        "round": 2,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264194,
+        "round": 2,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.225424,
+        "round": 2,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.223755,
+        "round": 2,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.225592,
+        "round": 2,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.251961,
+        "round": 2,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.271706,
+        "round": 2,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.274886,
+        "round": 2,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.256198,
+        "round": 2,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.292818,
+        "round": 2,
+        "sample": 10,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.298715,
+        "round": 2,
+        "sample": 11,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.288783,
+        "round": 2,
+        "sample": 12,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.2718,
+        "round": 2,
+        "sample": 13,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.268629,
+        "round": 2,
+        "sample": 14,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.326255,
+        "round": 2,
+        "sample": 15,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.352151,
+        "round": 2,
+        "sample": 16,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.273786,
+        "round": 2,
+        "sample": 17,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.283554,
+        "round": 2,
+        "sample": 18,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.275482,
+        "round": 2,
+        "sample": 19,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.269465,
+        "round": 2,
+        "sample": 20,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.273417,
+        "round": 2,
+        "sample": 21,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.234492,
+        "round": 2,
+        "sample": 22,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.227168,
+        "round": 2,
+        "sample": 23,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.240095,
+        "round": 2,
+        "sample": 24,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.247971,
+        "round": 2,
+        "sample": 25,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.230988,
+        "round": 2,
+        "sample": 26,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.229365,
+        "round": 2,
+        "sample": 27,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.230632,
+        "round": 2,
+        "sample": 28,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.230779,
+        "round": 2,
+        "sample": 29,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.256489,
+        "round": 2,
+        "sample": 30,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.276283,
+        "round": 2,
+        "sample": 31,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.268023,
+        "round": 2,
+        "sample": 32,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.292797,
+        "round": 2,
+        "sample": 33,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.330263,
+        "round": 2,
+        "sample": 34,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.326903,
+        "round": 2,
+        "sample": 35,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.320073,
+        "round": 2,
+        "sample": 36,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.308862,
+        "round": 2,
+        "sample": 37,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.254101,
+        "round": 2,
+        "sample": 38,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.318973,
+        "round": 2,
+        "sample": 39,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.287574,
+        "round": 2,
+        "sample": 40,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.270372,
+        "round": 2,
+        "sample": 41,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.23716,
+        "round": 2,
+        "sample": 42,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.264948,
+        "round": 2,
+        "sample": 43,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.244886,
+        "round": 2,
+        "sample": 44,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.233898,
+        "round": 2,
+        "sample": 45,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.273761,
+        "round": 2,
+        "sample": 46,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.238572,
+        "round": 2,
+        "sample": 47,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.242683,
+        "round": 2,
+        "sample": 48,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.261686,
+        "round": 2,
+        "sample": 49,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9421026,
+        "round": 2,
+        "sample": 0,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9810744,
+        "round": 2,
+        "sample": 1,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9182680000000003,
+        "round": 2,
+        "sample": 2,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.895377,
+        "round": 2,
+        "sample": 3,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9176224,
+        "round": 2,
+        "sample": 4,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9699348,
+        "round": 2,
+        "sample": 5,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9320152,
+        "round": 2,
+        "sample": 6,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9047322,
+        "round": 2,
+        "sample": 7,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9487842,
+        "round": 2,
+        "sample": 8,
+        "selector": "hot8"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9970714000000003,
+        "round": 2,
+        "sample": 9,
+        "selector": "hot8"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.343201,
+        "round": 2,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.309568,
+        "round": 2,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.310646,
+        "round": 2,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.25526,
+        "round": 2,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.280857,
+        "round": 2,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.278581,
+        "round": 2,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.250255,
+        "round": 2,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.251292,
+        "round": 2,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.238894,
+        "round": 2,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.236021,
+        "round": 2,
+        "sample": 9,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.229884,
+        "round": 2,
+        "sample": 10,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.242369,
+        "round": 2,
+        "sample": 11,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.289397,
+        "round": 2,
+        "sample": 12,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.257457,
+        "round": 2,
+        "sample": 13,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.246501,
+        "round": 2,
+        "sample": 14,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.270682,
+        "round": 2,
+        "sample": 15,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.305673,
+        "round": 2,
+        "sample": 16,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.251262,
+        "round": 2,
+        "sample": 17,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.328074,
+        "round": 2,
+        "sample": 18,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.416539,
+        "round": 2,
+        "sample": 19,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.433818,
+        "round": 2,
+        "sample": 20,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.431435,
+        "round": 2,
+        "sample": 21,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.37437,
+        "round": 2,
+        "sample": 22,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.390884,
+        "round": 2,
+        "sample": 23,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.381676,
+        "round": 2,
+        "sample": 24,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.359608,
+        "round": 2,
+        "sample": 25,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.385361,
+        "round": 2,
+        "sample": 26,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.366659,
+        "round": 2,
+        "sample": 27,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.352165,
+        "round": 2,
+        "sample": 28,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.357504,
+        "round": 2,
+        "sample": 29,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.360015,
+        "round": 2,
+        "sample": 30,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.233047,
+        "round": 2,
+        "sample": 31,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.250087,
+        "round": 2,
+        "sample": 32,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.272017,
+        "round": 2,
+        "sample": 33,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.254723,
+        "round": 2,
+        "sample": 34,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.244659,
+        "round": 2,
+        "sample": 35,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.266874,
+        "round": 2,
+        "sample": 36,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.297528,
+        "round": 2,
+        "sample": 37,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.281169,
+        "round": 2,
+        "sample": 38,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.299865,
+        "round": 2,
+        "sample": 39,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.462062,
+        "round": 2,
+        "sample": 40,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.534761,
+        "round": 2,
+        "sample": 41,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.431465,
+        "round": 2,
+        "sample": 42,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.396853,
+        "round": 2,
+        "sample": 43,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.323953,
+        "round": 2,
+        "sample": 44,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.298372,
+        "round": 2,
+        "sample": 45,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.265247,
+        "round": 2,
+        "sample": 46,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.306647,
+        "round": 2,
+        "sample": 47,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.27886,
+        "round": 2,
+        "sample": 48,
+        "selector": "identity"
+      },
+      {
+        "calls": 1,
+        "kind": "single",
+        "per_call_ms": 3.248117,
+        "round": 2,
+        "sample": 49,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9546432,
+        "round": 2,
+        "sample": 0,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9887568,
+        "round": 2,
+        "sample": 1,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.968375,
+        "round": 2,
+        "sample": 2,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.937286,
+        "round": 2,
+        "sample": 3,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9317288,
+        "round": 2,
+        "sample": 4,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9395502000000002,
+        "round": 2,
+        "sample": 5,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9808132,
+        "round": 2,
+        "sample": 6,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.9356684,
+        "round": 2,
+        "sample": 7,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.925203,
+        "round": 2,
+        "sample": 8,
+        "selector": "identity"
+      },
+      {
+        "calls": 5,
+        "kind": "block",
+        "per_call_ms": 2.937795,
+        "round": 2,
+        "sample": 9,
+        "selector": "identity"
+      }
+    ]
+  },
+  "x_copy_ownership": {
+    "K": 1,
+    "M": 32
+  },
+  "x_core_mapping_contiguous_dim": null,
+  "x_fanout_identities": 0,
+  "x_logical_global_bytes": 2883584,
+  "x_per_core_lx_interval_bytes": [
+    90112,
+    180224
+  ]
+}

@@ -97,6 +97,21 @@ records and 900 measured calls, and passed all structure and correctness
 checks. The tensor payloads and backend binaries are intentionally not stored
 in Git.
 
+## Decomposition controls
+
+Path:
+
+```text
+moe_asgemm/artifacts/decomposition
+```
+
+Contents include the five-point expert sweep, matched E2/E32 full-graph
+component substitutions, standalone gate/down matmul proxies, generated source
+for every retained control, and `analysis.json`.
+
+The controls are deliberately compact. Correctness tensors, backend binaries,
+and failed HBM-spilling leaf attempts remain outside Git.
+
 ## Original retained run roots
 
 These are plain paths, not hyperlinks:

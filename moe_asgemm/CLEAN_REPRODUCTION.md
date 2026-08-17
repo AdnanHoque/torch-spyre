@@ -19,8 +19,8 @@ git status                  clean
 git bundle                  6a9342d7ce57b8c73693d24f961275ef08e8cbd5b99c663b2aead13845c0ba86
 torch_spyre/_C.so           9db452635696b9090da944a57a0657f9ae12f092023be886f4355edd07726325
 L3 scheduler               67f49291120d3dcd4a6796d174125cb045685f874019a4027fe9285dce396f2b
-dxp_standalone              2b181457...
-private bmm.ddl             e453b889...
+dxp_standalone              2b1814572c3fc402db094030d8dcb82327c7a959fbe7372c98c57537b840ff6b
+private bmm.ddl             e453b889440cf8f9aaf779f87ea99e98b9891a4fb7eadba4c8ea0ac74afcb4ea
 ```
 
 The private BMM template removes the INPUT mapping requirement that is invalid

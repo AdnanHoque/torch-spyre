@@ -1,0 +1,131 @@
+{
+  "component_controls": {
+    "full": {
+      "intercept_ms": 0.30814302000000016,
+      "points": [
+        {
+          "experts": 2,
+          "median_ms": 0.985217
+        },
+        {
+          "experts": 32,
+          "median_ms": 11.1413267
+        }
+      ],
+      "r_squared": 1.0,
+      "slope_ms_per_expert": 0.33853699000000004
+    },
+    "hidden_add": {
+      "intercept_ms": 0.31024987999999976,
+      "points": [
+        {
+          "experts": 2,
+          "median_ms": 0.9856939
+        },
+        {
+          "experts": 32,
+          "median_ms": 11.1173542
+        }
+      ],
+      "r_squared": 1.0,
+      "slope_ms_per_expert": 0.33772200999999996
+    },
+    "no_gelu": {
+      "intercept_ms": 0.31050778666666634,
+      "points": [
+        {
+          "experts": 2,
+          "median_ms": 0.9845341
+        },
+        {
+          "experts": 32,
+          "median_ms": 11.0949288
+        }
+      ],
+      "r_squared": 1.0,
+      "slope_ms_per_expert": 0.33701315666666665
+    },
+    "route_add": {
+      "intercept_ms": 0.3068603799999998,
+      "points": [
+        {
+          "experts": 2,
+          "median_ms": 0.9818912
+        },
+        {
+          "experts": 32,
+          "median_ms": 11.1073535
+        }
+      ],
+      "r_squared": 1.0,
+      "slope_ms_per_expert": 0.33751541
+    }
+  },
+  "expert_scaling": {
+    "intercept_ms": 0.40811220029376116,
+    "points": [
+      {
+        "experts": 2,
+        "median_ms": 0.9915874
+      },
+      {
+        "experts": 8,
+        "median_ms": 2.9378135
+      },
+      {
+        "experts": 32,
+        "median_ms": 11.1181275
+      },
+      {
+        "experts": 64,
+        "median_ms": 21.4768893
+      },
+      {
+        "experts": 128,
+        "median_ms": 42.4079076
+      }
+    ],
+    "r_squared": 0.9999490752811069,
+    "slope_ms_per_expert": 0.3285972833270564
+  },
+  "important_limits": [
+    "AIUPTI exposes the program as one device job, not per-SDSC timestamps",
+    "standalone matmul leaves include extra HBM traffic and a separate job launch",
+    "the 150 GB/s adjustment is a calibrated proxy, not bus telemetry",
+    "pointwise controls measure substitution deltas, not absolute pointwise latency"
+  ],
+  "instrument_sha256": {
+    "component": "1a8e71126ac0a4f1602b670a7ce85ff1e18814da5894c8d3122637d8b5624ae0",
+    "matmul_leaf": "ba2467c2b17debb5046c89707b30f9e9751b74d7b2d45e4cfe24a5d597d4d522"
+  },
+  "measurement_scope": "one AIU; amortized synchronized block calls",
+  "native_ddl_prediction": {
+    "clean_full_block_ms": 42.4079076,
+    "fixed_plus_residual_proxy_ms_at_e128": 2.0540237789612483,
+    "non_matmul_and_sequence_residual_proxy_ms_per_expert": 0.012858684208339743,
+    "preregistered_expected_gain_percent_at_most": 5.0,
+    "preregistered_falsification_gain_percent": 10.0,
+    "proxy_fraction_of_full_percent": 4.843492393765847,
+    "three_matmul_adjusted_proxy_ms_per_expert": 0.31573859911871666
+  },
+  "pointwise_substitution_deltas": {
+    "gelu_us_per_expert": 1.5238333333333909,
+    "hidden_mul_minus_add_us_per_expert": 0.8149800000000762,
+    "route_mul_minus_add_us_per_expert": 1.021580000000022
+  },
+  "standalone_matmul_proxies": {
+    "down": {
+      "extra_hbm_bytes_vs_loop": 3604480,
+      "extra_hbm_time_at_150GBps_ms": 0.024029866666666667,
+      "fixed_and_peak_extra_adjusted_proxy_ms": 0.03707913303957218,
+      "median_ms": 0.4692212
+    },
+    "gate": {
+      "extra_hbm_bytes_vs_loop": 3604480,
+      "extra_hbm_time_at_150GBps_ms": 0.024029866666666667,
+      "fixed_and_peak_extra_adjusted_proxy_ms": 0.13932973303957225,
+      "median_ms": 0.5714718000000001
+    }
+  },
+  "status": "accepted"
+}
