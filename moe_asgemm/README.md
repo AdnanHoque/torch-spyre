@@ -25,6 +25,9 @@ static expert loop and twelve SDSCs. It is not one monolithic native DDL.
 - Identity five-call-block median: `42.506 ms` per call
 - Representative bundle SHA-256:
   `976e5c8101370a6f482247652b31ec81c5be55c2419011b06746000693fd1727`
+- Exact PR293 model-path baseline on cdx: `372.887 ms` block median
+- Integrated model-path AS-GEMM on cdx: `42.444 ms` block median
+- Matched model-path improvement: `8.785x`
 
 ## Contents
 
@@ -33,7 +36,10 @@ static expert loop and twelve SDSCs. It is not one monolithic native DDL.
 - `moe_asgemm/CLEAN_REPRODUCTION.md`: clean-checkout compiler, correctness,
   structure, and two-AIU timing confirmation.
 - `moe_asgemm/DECOMPOSITION.md`: measured expert slope, component controls,
-  and matmul proxies.
+  explicit SDSC map, and matmul proxies.
+- `moe_asgemm/MODEL_PATH_INTEGRATION.md`: exact PR293 integration and matched
+  one-AIU baseline-versus-AS-GEMM measurement.
+- `moe_asgemm/patches`: portable exact model-path integration patch.
 - `moe_asgemm/NATIVE_DDL_PREDICTION.md`: preregistered native-kernel prediction
   and falsification gate.
 - `moe_asgemm/CONTRIBUTION_CHARTER.md`: attribution, reuse, and ownership

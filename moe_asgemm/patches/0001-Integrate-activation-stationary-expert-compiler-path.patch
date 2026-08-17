@@ -1,0 +1,354 @@
+From fc5198f9f0ffd1a9e458526ba7e9e9010b37092d Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Mon, 17 Aug 2026 02:03:35 -0400
+Subject: [PATCH] Integrate activation-stationary expert compiler path
+
+---
+ hf_adapters/hf_gemma4_moe.py | 216 +++++++++++++++++++++++++++++++++--
+ tests/test_gemma4_moe_ffn.py |  39 +++++++
+ 2 files changed, 244 insertions(+), 11 deletions(-)
+
+diff --git a/hf_adapters/hf_gemma4_moe.py b/hf_adapters/hf_gemma4_moe.py
+index ee25dd3..9cb8804 100644
+--- a/hf_adapters/hf_gemma4_moe.py
++++ b/hf_adapters/hf_gemma4_moe.py
+@@ -23,7 +23,14 @@ all attention-side Spyre prep (RMSNorm patch, per-type RoPE, KV shapes,
+ LM-head padding) are shared with the dense adapter ``hf_gemma4`` — this module
+ only adds the sparse FFN and the surrounding block/prepare/forward wiring.
+ 
+-The FFN has three selectable formulations (module flags, mutually exclusive):
++The FFN has four selectable formulations (module flags, mutually exclusive):
++
++  * ``_MOE_ASGEMM_ONDEVICE`` -- the full dense all-expert FFN is expressed as
++    one activation-stationary compiler contract.  One ``[T,H]`` activation is
++    retained across a static expert loop; prepacked gate, up, and down expert
++    banks advance once per iteration; runtime ``[E,T,1]`` route weights are
++    applied after down; and one ``[T,H]`` accumulator is returned.  This is the
++    compiler-integrated successor to the chunked Step-2 formulation below.
+ 
+   * ``_MOE_CHUNKED_ONDEVICE`` (Gate-A5-PROVEN, mean_rel=0.028) -- the WHOLE FFN
+     runs on the device; host does only chunk-loop glue. Sidesteps the routing
+@@ -66,6 +73,9 @@ split / loop bmm paths -- the chunked path uses plain 2D matmuls):
+ 
+ import torch
+ import torch.nn.functional as F
++from torch_spyre._inductor import config as spyre_config
++from torch_spyre._inductor import spyre_hint
++import torch_spyre._inductor.wsr.propagate_named_dims as pnd
+ 
+ from hf_adapters.hf_common import text_config
+ from hf_adapters.hf_gemma4 import (
+@@ -143,6 +153,13 @@ _MOE_LOOP_ON_TOPK = False
+ # exclusive with _MOE_LOOP_ON_TOPK (asserted in prepare_for_spyre).
+ _MOE_CHUNKED_ONDEVICE = False
+ 
++# Activation-stationary dense all-expert formulation.  This mode requires the
++# Torch-Spyre compiler contract introduced by the moe-asgemm compiler series.
++# It deliberately preserves the existing router semantics while replacing the
++# four host-dispatched Ec=32 expert programs with one static E=128 program.
++_MOE_ASGEMM_ONDEVICE = False
++_MOE_ASGEMM_E = 128
++
+ # Experts per compiled chunk for the all-device path. >32 expert GEMM-chains in
+ # one fused sdsc program crashes the DDC scheduler (Incorrect chunk size); <=32
+ # compiles clean. E must be divisible by _MOE_EC.
+@@ -743,6 +760,137 @@ def _moe_expert_chunk(x_expert, w, acc, gate_c, up_c, down_c, onehot_c):
+     return acc
+ 
+ 
++def _moe_route_padded_asgemm(x_router, router_proj_w, router_scale,
++                             router_scalar_root_size, per_expert_scale, K, eps,
++                             pad_w, pad_neg):
++    """Return the existing dense router result in the AS-GEMM alpha ABI.
++
++    The underlying routing algorithm is unchanged.  The explicit singleton is
++    load-bearing for the compiler contract: ``[E,T,1]`` broadcasts directly in
++    the down-projection output layout, whereas squeezing it to ``[E,T]`` can
++    force the full ``[E,T,H]`` activation through an HBM restickify.
++    """
++
++    weights = _moe_route_padded(
++        x_router,
++        router_proj_w,
++        router_scale,
++        router_scalar_root_size,
++        per_expert_scale,
++        K,
++        eps,
++        pad_w,
++        pad_neg,
++    )
++    return weights.transpose(0, 1).unsqueeze(-1).contiguous()
++
++
++def _moe_expert_asgemm(x_expert, alpha, gate_w, up_w, down_w):
++    """Dense all-expert FFN expressed through the compiler AS-GEMM contract.
++
++    Args:
++        x_expert: Expert input ``[T,H]``.
++        alpha: Runtime post-down router weights ``[E,T,1]``.
++        gate_w: Prepacked gate bank ``[H,E,F]``.
++        up_w: Prepacked up bank ``[H,E,F]``.
++        down_w: Prepacked down bank ``[F,E,H]``.
++    """
++
++    if gate_w.shape[1] != _MOE_ASGEMM_E:
++        raise ValueError(
++            f"AS-GEMM is specialized for {_MOE_ASGEMM_E} experts, "
++            f"got {gate_w.shape[1]}"
++        )
++    with spyre_hint(num_tiles_per_dim={"E": _MOE_ASGEMM_E}):
++        gate = torch.ops.spyre.activation_stationary_shared_lhs_mm_prepacked(
++            x_expert, gate_w
++        )
++        up = torch.ops.spyre.activation_stationary_shared_lhs_mm_prepacked(
++            x_expert, up_w
++        )
++        hidden = F.gelu(gate, approximate="tanh") * up
++        down = torch.ops.spyre.activation_stationary_expert_mm_prepacked(
++            hidden, down_w
++        )
++        return (down * alpha).sum(dim=0)
++
++
++def _moe_ffn_asgemm(x_router, x_expert, router, compiled_route,
++                    compiled_expert, gate_w, up_w, down_w, K, eps):
++    """Run the existing router and one compiler-generated AS-GEMM program."""
++
++    alpha = compiled_route(
++        x_router,
++        router.proj.weight,
++        router.scale,
++        router.scalar_root_size,
++        router.per_expert_scale,
++        K,
++        eps,
++        _MOE_PADW,
++        _MOE_PAD_NEG,
++    )
++    _name_asgemm_contract_inputs(x_expert, alpha, gate_w, up_w, down_w)
++    with _asgemm_compile_config():
++        return compiled_expert(x_expert, alpha, gate_w, up_w, down_w)
++
++
++def _asgemm_compile_config():
++    """Return the narrow compiler-policy context validated by AS-GEMM."""
++
++    return spyre_config.patch(
++        {
++            "sencores": 32,
++            "lx_planning": True,
++            "allow_all_ops_in_lx_planning": True,
++        }
++    )
++
++
++def _name_asgemm_contract_inputs(x_expert, alpha, gate_w, up_w, down_w):
++    """Attach the semantic dimension names consumed by ``spyre_hint``.
++
++    This runs in the eager model orchestrator before the expert callable's
++    first compilation.  Naming the real device tensors is part of the compiler
++    contract; a hint scope without these names is intentionally inert.
++    """
++
++    T, H = x_expert.shape
++    H_w, E, Fdim = gate_w.shape
++    if H_w != H or up_w.shape != gate_w.shape:
++        raise ValueError("gate/up AS-GEMM bank shape does not match x")
++    if down_w.shape != (Fdim, E, H) or alpha.shape != (E, T, 1):
++        raise ValueError("down/alpha AS-GEMM bank shape mismatch")
++    for name, size in {"E": E, "T": T, "H": H, "F": Fdim, "K": 1}.items():
++        pnd.declare_tensor_dim(name, size)
++    for tensor, dims in (
++        (x_expert, ["T", "H"]),
++        (gate_w, ["H", "E", "F"]),
++        (up_w, ["H", "E", "F"]),
++        (down_w, ["F", "E", "H"]),
++        (alpha, ["E", "T", "K"]),
++    ):
++        pnd.name_tensor_dims(tensor, dims)
++
++
++def _prepack_asgemm_weights(gate_up_t, down_t):
++    """Convert PR293's expert-major banks to directly streamed AS-GEMM banks."""
++
++    E, H, two_f = gate_up_t.shape
++    if two_f % 2:
++        raise ValueError(f"gate/up width must be even, got {two_f}")
++    if down_t.shape != (E, two_f // 2, H):
++        raise ValueError(
++            "down bank must have shape [E,F,H], got "
++            f"{tuple(down_t.shape)} for gate/up {tuple(gate_up_t.shape)}"
++        )
++    Fdim = two_f // 2
++    gate_w = gate_up_t[:, :, :Fdim].permute(1, 0, 2).contiguous()
++    up_w = gate_up_t[:, :, Fdim:].permute(1, 0, 2).contiguous()
++    down_w = down_t.permute(1, 0, 2).contiguous()
++    return gate_w, up_w, down_w
++
++
+ def _moe_ffn_chunked(x_router, x_expert, router, compiled_route,
+                      compiled_chunk, chunks, K, eps):
+     """All-device chunked MoE FFN orchestrator (spec Approach A).
+@@ -865,6 +1013,8 @@ def _make_moe_block(layer, num_q_heads, num_kv_heads, head_dim, is_kv_eq_v):
+     # accumulator across chunks.
+     compiled_route = torch.compile(_moe_route_padded, dynamic=False)
+     compiled_chunk = torch.compile(_moe_expert_chunk, dynamic=False)
++    compiled_asgemm_route = torch.compile(_moe_route_padded_asgemm, dynamic=False)
++    compiled_asgemm_expert = torch.compile(_moe_expert_asgemm, dynamic=False)
+     compiled_attn = torch.compile(_gemma4_attention, dynamic=False)
+ 
+     def block_forward(
+@@ -918,7 +1068,20 @@ def _make_moe_block(layer, num_q_heads, num_kv_heads, head_dim, is_kv_eq_v):
+         # fresh from ``layer`` at call time (like the dense block's layer_scalar).
+         flat = residual.reshape(-1, hidden)  # [T,H] RAW -> router
+         x_moe = pre_ff_ln_2(flat)  # [T,H] normed -> experts
+-        if _MOE_CHUNKED_ONDEVICE:
++        if _MOE_ASGEMM_ONDEVICE:
++            moe_out = _moe_ffn_asgemm(
++                flat,
++                x_moe,
++                router,
++                compiled_asgemm_route,
++                compiled_asgemm_expert,
++                layer._spyre_asgemm_gate_w,
++                layer._spyre_asgemm_up_w,
++                layer._spyre_asgemm_down_w,
++                K,
++                moe_rms_eps,
++            )
++        elif _MOE_CHUNKED_ONDEVICE:
+             # ALL-DEVICE: router + expert GEMMs + weight + sum-over-experts all
+             # lower; host does only the chunk-loop glue (inside _moe_ffn_chunked)
+             # threading a device-resident accumulator. Per-chunk offset-0 expert
+@@ -981,6 +1144,9 @@ def prepare_for_spyre(model):
+         pre-transposed** (``gate_up`` ``[E,2M,H]`` -> ``[E,H,2M]``, ``down``
+         ``[E,H,M]`` -> ``[E,M,H]``; shape rule 2 + spec §3.5). The layout THEN
+         depends on the active FFN mode:
++          - ``_MOE_ASGEMM_ONDEVICE``: de-fuse and prepack gate/up as
++            ``[H,E,M]`` and down as ``[M,E,H]`` for direct affine expert-bank
++            streaming by one activation-stationary compiled program;
+           - ``_MOE_CHUNKED_ONDEVICE``: de-fuse gate_up into gate/up ``[E,H,M]``
+             halves, slice into ``ceil(E/_MOE_EC)`` chunks, move each chunk +
+             its one-hot rows to the device as OFFSET-0 contiguous tensors
+@@ -1019,16 +1185,29 @@ def prepare_for_spyre(model):
+     # The three FFN modes lay experts out differently and are mutually
+     # exclusive; guard so a mis-set pair fails loudly at load rather than
+     # reading a stack the active mode's forward never populated.
+-    assert not (_MOE_CHUNKED_ONDEVICE and _MOE_LOOP_ON_TOPK), (
+-        "_MOE_CHUNKED_ONDEVICE and _MOE_LOOP_ON_TOPK are mutually exclusive "
+-        "FFN modes; enable at most one."
++    enabled_device_modes = sum(
++        bool(mode)
++        for mode in (
++            _MOE_ASGEMM_ONDEVICE,
++            _MOE_CHUNKED_ONDEVICE,
++            _MOE_LOOP_ON_TOPK,
++        )
++    )
++    assert enabled_device_modes <= 1, (
++        "_MOE_ASGEMM_ONDEVICE, _MOE_CHUNKED_ONDEVICE, and "
++        "_MOE_LOOP_ON_TOPK are mutually exclusive FFN modes"
+     )
+-    if _MOE_CHUNKED_ONDEVICE:
++    if _MOE_ASGEMM_ONDEVICE or _MOE_CHUNKED_ONDEVICE:
+         E = cfg.num_experts
+-        assert E % _MOE_EC == 0, (
+-            f"all-device chunked MoE needs num_experts ({E}) divisible by "
+-            f"_MOE_EC ({_MOE_EC})."
+-        )
++        if _MOE_ASGEMM_ONDEVICE:
++            assert E == _MOE_ASGEMM_E, (
++                f"AS-GEMM is specialized for {_MOE_ASGEMM_E} experts; got {E}"
++            )
++        if _MOE_CHUNKED_ONDEVICE:
++            assert E % _MOE_EC == 0, (
++                f"all-device chunked MoE needs num_experts ({E}) divisible by "
++                f"_MOE_EC ({_MOE_EC})."
++            )
+         assert _MOE_PADW > E and (_MOE_PADW & (_MOE_PADW - 1)) != 0, (
+             f"_MOE_PADW ({_MOE_PADW}) must exceed num_experts ({E}) and be "
+             "non-power-of-two (topk-pad fix)."
+@@ -1069,7 +1248,22 @@ def prepare_for_spyre(model):
+         down_t = experts.down_proj.data.transpose(1, 2).contiguous()
+         del experts.gate_up_proj
+         del experts.down_proj
+-        if _MOE_CHUNKED_ONDEVICE:
++        if _MOE_ASGEMM_ONDEVICE:
++            gate_w, up_w, down_w = _prepack_asgemm_weights(gate_up_t, down_t)
++            layer._spyre_asgemm_gate_w = gate_w.to("spyre")
++            layer._spyre_asgemm_up_w = up_w.to("spyre")
++            layer._spyre_asgemm_down_w = down_w.to("spyre")
++            router = layer.router
++            router.proj.weight = torch.nn.Parameter(
++                router.proj.weight.data.to("spyre"), requires_grad=False
++            )
++            router.scale = torch.nn.Parameter(
++                router.scale.data.to("spyre"), requires_grad=False
++            )
++            router.per_expert_scale = torch.nn.Parameter(
++                router.per_expert_scale.data.to("spyre"), requires_grad=False
++            )
++        elif _MOE_CHUNKED_ONDEVICE:
+             # ALL-DEVICE chunked path (spec Approach A, "nothing but glue on
+             # host"). De-fuse the packed gate_up [E,H,2M] into separate gate /
+             # up [E,H,M] halves (matching x@Wg (gate) and x@Wu (up) in
+diff --git a/tests/test_gemma4_moe_ffn.py b/tests/test_gemma4_moe_ffn.py
+index 2d17e8d..b5c503b 100644
+--- a/tests/test_gemma4_moe_ffn.py
++++ b/tests/test_gemma4_moe_ffn.py
+@@ -22,8 +22,11 @@ from hf_adapters.hf_gemma4_moe import (
+     _moe_ffn,
+     _moe_ffn_loop,
+     _moe_ffn_loop_ref,
++    _moe_route_padded,
++    _moe_route_padded_asgemm,
+     _moe_permute,
+     _moe_route,
++    _prepack_asgemm_weights,
+ )
+ 
+ 
+@@ -40,6 +43,42 @@ def test_route_shapes_and_renorm():
+     )
+ 
+ 
++def test_asgemm_route_abi_preserves_dense_router_weights():
++    torch.manual_seed(11)
++    T, H, E, K = 4, 16, 8, 2
++    args = (
++        torch.randn(T, H),
++        torch.randn(E, H),
++        torch.rand(H) + 0.5,
++        H ** -0.5,
++        torch.rand(E) + 0.5,
++        K,
++        1e-6,
++        12,
++        -30000.0,
++    )
++    dense = _moe_route_padded(*args)
++    alpha = _moe_route_padded_asgemm(*args)
++    assert alpha.shape == (E, T, 1)
++    assert alpha.is_contiguous()
++    torch.testing.assert_close(alpha[..., 0].transpose(0, 1), dense)
++
++
++def test_asgemm_weight_prepack_preserves_expert_values():
++    E, H, Fdim = 3, 5, 7
++    gate_up = torch.arange(E * H * 2 * Fdim).reshape(E, H, 2 * Fdim)
++    down = torch.arange(E * Fdim * H).reshape(E, Fdim, H)
++    gate_w, up_w, down_w = _prepack_asgemm_weights(gate_up, down)
++    assert gate_w.shape == (H, E, Fdim)
++    assert up_w.shape == (H, E, Fdim)
++    assert down_w.shape == (Fdim, E, H)
++    assert gate_w.is_contiguous() and up_w.is_contiguous() and down_w.is_contiguous()
++    for expert in range(E):
++        torch.testing.assert_close(gate_w[:, expert], gate_up[expert, :, :Fdim])
++        torch.testing.assert_close(up_w[:, expert], gate_up[expert, :, Fdim:])
++        torch.testing.assert_close(down_w[:, expert], down[expert])
++
++
+ def test_permute_roundtrip():
+     T, H, E, K = 4, 16, 8, 2
+     x = torch.randn(T, H)

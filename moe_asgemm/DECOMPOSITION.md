@@ -14,10 +14,11 @@ The retained decomposition uses three measurable controls instead:
 3. standalone M32 gate/down matmuls, reported as proxies because they include
    an extra job launch and extra HBM traffic.
 
-All measurements below are synchronized five-call block medians on cdx. Every
-accepted control passed correctness and proved three BMMs, direct expert-weight
-streaming, all internal compute in LX, zero HBM-pool allocations, zero HBM
-restickify operations, and one final HBM output.
+All measurements below are synchronized five-call block medians on cdx. The
+expert-count and pointwise controls passed correctness and retained the full
+three-BMM, direct-weight-streaming, zero-spill execution contract. The
+standalone leaf controls passed their projection-specific structural gates but
+necessarily add a job boundary and HBM activation traffic.
 
 ## Expert-count sweep
 
@@ -83,6 +84,42 @@ residual proxy     0.012859 ms per expert
 
 At E128, fixed cost plus that residual is 2.054 ms, or 4.843 percent of the
 42.408 ms clean block baseline.
+
+## Per-SDSC map and calibrated attribution
+
+The accepted bundle contains twelve SDSCs.  SDSCs 2 through 10 execute once
+per expert inside the static 128-trip loop; SDSCs 0, 1, and 11 execute once per
+logical FFN call.
+
+| SDSC | Role | Frequency | Storage | Timing attribution at E128 |
+|---:|---|---:|---|---:|
+| 0 | X preheader copy | once | HBM to LX | included in fixed/residual |
+| 1 | accumulator fill | once | LX | included in fixed/residual |
+| 2 | gate matmul | 128 | HBM weight, LX activation/output | 17.834 ms proxy |
+| 3 | tanh GELU | 128 | LX | substitution delta 0.195 ms total |
+| 4 | up matmul | 128 | HBM weight, LX activation/output | 17.834 ms proxy |
+| 5 | gate-times-up | 128 | LX | multiply-minus-add delta 0.104 ms total |
+| 6 | down matmul | 128 | HBM weight, LX activation/output | 4.746 ms proxy |
+| 7 | runtime alpha copy | 128 | HBM to LX | included in fixed/residual |
+| 8 | post-down alpha multiply | 128 | LX | multiply-minus-add delta 0.131 ms total |
+| 9 | unit local contribution identity | 128 | LX | included in fixed/residual |
+| 10 | expert accumulator add | 128 | LX | included in fixed/residual |
+| 11 | final output drain | once | LX to HBM | included in fixed/residual |
+
+The three adjusted matmul proxies sum to 40.415 ms.  The expert-fit intercept
+plus non-matmul residual is 2.054 ms.  Because these are independently fitted
+controls, they are not an exact additive partition of the observed 42.408 ms;
+the resulting overage is about 0.061 ms.  The defensible rounded attribution
+is therefore:
+
+```text
+matmul work                         about 40.4 ms, about 95 percent
+fixed + sequencing + pointwise     about  2.1 ms, about  5 percent
+```
+
+The three pointwise rows report matched substitution deltas, not standalone
+operation latency.  No exact time is assigned to SDSCs 0, 1, 7, 9, 10, or 11
+because the runtime does not timestamp those calls independently.
 
 ## Interpretation
 

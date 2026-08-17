@@ -31,7 +31,7 @@ See `moe_asgemm/CLEAN_REPRODUCTION.md`.
 
 This closes the present overlay provenance boundary.
 
-## 3. Integrate with the team Step 2 model path
+## 3. Integrate with the team Step 2 model path — completed
 
 Keep ownership explicit. Antoni and Swagath's model integration can invoke the
 activation-stationary compiler contract without replacing their host and model
@@ -48,6 +48,20 @@ alpha   [128,512,1]
 ```
 
 Validate weight packing and router semantics against the real checkpoint.
+
+Completed against retained hf-adapters revision
+`672b2fc8b5f017a08c6b43b928deb3ccd0560761`:
+
+- the existing dense router math is preserved;
+- `[T,E]` router weights are exposed as load-bearing `[E,T,1]` alpha;
+- expert weights are prepacked into the three directly streamed banks;
+- the eager model orchestrator registers semantic tensor dimensions and the
+  validated LX compiler policy before first compilation;
+- the patched model helper emits the byte-identical accepted AS-GEMM bundle;
+- exact PR293 and integrated AS-GEMM expert paths passed matched one-AIU timing.
+
+The measured amortized improvement was `372.887 / 42.444 = 8.785x`.  See
+`moe_asgemm/MODEL_PATH_INTEGRATION.md`.
 
 ## 4. Measure end-to-end and energy
 

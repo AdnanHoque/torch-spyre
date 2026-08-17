@@ -118,3 +118,20 @@ zero restickify structure. Details and hashes are in
   earlier retained cohort used four.
 - The comparison does not establish the phase boundary for longer sequences,
   skewed routing, or later AIU generations.
+
+## Exact Step-2 model-path comparison
+
+After the standalone proof, the compiler contract was integrated into the
+retained Antoni and Swagath Step-2 model source.  A matched cdx measurement
+used the same deterministic full-shape tensors for both expert callables:
+
+| Path | Single median | Five-call-block median |
+|---|---:|---:|
+| Exact PR293 Ec32 callable invoked four times | 377.641 ms | 372.887 ms |
+| Integrated AS-GEMM E128 callable invoked once | 46.438 ms | 42.444 ms |
+| Baseline divided by AS-GEMM | 8.132x | 8.785x |
+
+The optimized model function emitted the same accepted bundle hash as the
+standalone proof.  Both arms passed pre/post FP32 checks.  Router-logit
+computation remained outside the measured boundary.  Full details are in
+`moe_asgemm/MODEL_PATH_INTEGRATION.md`.

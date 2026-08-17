@@ -1,0 +1,43 @@
+{
+  "baseline": {
+    "block_median_ms": 372.8872414,
+    "bundle_sha256": "6bcf466e6a9ac74f7eef3265750a55545dbeba220df4d1828bbfdfa4bfa12f43",
+    "result_sha256": "285e5d503843e3569b957a64a5344a7c5674c2bb9969bc7813265014a5cfc977",
+    "runtime_invocations_per_logical_call": 4,
+    "single_median_ms": 377.6411535,
+    "source": "exact PR293 _moe_expert_chunk at hf-adapters 672b2fc8b5f017a08c6b43b928deb3ccd0560761",
+    "static_bmms_per_compiled_program": 96
+  },
+  "comparison": {
+    "block_latency_reduction_percent": 88.61743189693377,
+    "block_speedup_x": 8.785363645051419,
+    "single_latency_reduction_percent": 87.7030614726157,
+    "single_speedup_x": 8.132105383572338
+  },
+  "optimized": {
+    "block_median_ms": 42.4441442,
+    "bundle_sha256": "976e5c8101370a6f482247652b31ec81c5be55c2419011b06746000693fd1727",
+    "result_sha256": "97c9eb606200f1ca1da4746d0b7b4b5185ab1bb3b3d69ba05941eac0f0709da1",
+    "runtime_invocations_per_logical_call": 1,
+    "single_median_ms": 46.4383005,
+    "source": "PR293 model helper integrated with moe-asgemm compiler contract",
+    "static_bmms_inside_expert_loop": 3
+  },
+  "protocol": {
+    "block_iters": 5,
+    "blocks_per_round": 10,
+    "rounds": 3,
+    "singles_per_round": 50,
+    "warmups": 5
+  },
+  "scope": "matched one-AIU expert-FFN kernel comparison; router logits and full-model work excluded",
+  "shape": {
+    "E": 128,
+    "F": 704,
+    "H": 2816,
+    "K": 8,
+    "T": 512,
+    "cores": 32
+  },
+  "status": "accepted"
+}
