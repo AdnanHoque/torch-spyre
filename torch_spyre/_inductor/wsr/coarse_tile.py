@@ -3744,6 +3744,8 @@ def _is_unit_tiled_sum_contribution(
 
     data = tiled_op.data
     info = getattr(tiled_op, "loop_info", None)
+    if info is None:
+        return False
     propagation = getattr(info, "propagation", None)
     reduction_plan = getattr(propagation, "reduction", None)
     if not (
@@ -3846,6 +3848,8 @@ def _collapse_unit_tiled_sum_contribution(
 
     data = tiled_op.data
     info = getattr(tiled_op, "loop_info", None)
+    if info is None:
+        return tiled_op
     if not _is_unit_tiled_sum_contribution(tiled_op, pre_stickify=pre_stickify):
         return tiled_op
 

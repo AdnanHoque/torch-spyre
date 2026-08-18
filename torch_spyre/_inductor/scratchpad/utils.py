@@ -144,6 +144,8 @@ def is_persistent_loop_body(op: Operation) -> bool:
     """Whether the counted plan requires this loop-body result in LX."""
 
     info = getattr(op, "loop_info", None)
+    if info is None:
+        return False
     plan = getattr(info, "counted_loop_plan", None)
     return (
         isinstance(op, ComputedBuffer)
