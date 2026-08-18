@@ -447,6 +447,7 @@ def plan_coarse_tile_groups(
                 output_tiled_dims=output_tiled_dims,
                 counted_loop_plan=counted_loop_plan,
                 work_div_row_dim=_planned_work_div_row_dim(op, counted_loop_plan),
+                execution_role="loop_body" if counted_loop_plan is not None else None,
             )
 
             logger.debug(
@@ -3257,6 +3258,7 @@ def _insert_one_read_copy(
             output_tiled_dims=[],
             preheader_for_group=sizing_op_info.loop_group_id,
             work_div_row_dim=copy_work_div_row_dim,
+            execution_role="invariant_preheader",
             propagation=PropagationPlan(kind="loop_internal"),
         )
 
@@ -4092,6 +4094,8 @@ def _insert_flat_reduction_copy_op(
         loop_tiled_dims=[],
         counted_loop_plan=counted_plan,
         work_div_row_dim=tiled_op.loop_info.work_div_row_dim,  # type: ignore[attr-defined]
+        execution_role="output_drain",
+        preheader_for_group=tiled_op.loop_info.loop_group_id,  # type: ignore[attr-defined]
     )
     copy_buf._coarse_tile_force_live = True  # type: ignore[attr-defined]
     V.graph.name_to_buffer[copy_name] = copy_buf
@@ -4324,6 +4328,8 @@ def _propagate_tiled_reduction_op(
             loop_tiled_dims=[],
             counted_loop_plan=counted_plan,
             work_div_row_dim=loop_info.work_div_row_dim,
+            execution_role="accumulator_fill",
+            preheader_for_group=loop_group_id,
         )
     elif fill_loop_info is not None:
         fill_buf.loop_info = fill_loop_info  # type: ignore[attr-defined]

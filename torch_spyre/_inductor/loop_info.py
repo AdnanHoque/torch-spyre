@@ -356,6 +356,10 @@ class CoarseTileInfo:
     counted_loop_plan: CountedLoopPlan | None = None
     preheader_for_group: tuple[int, ...] | None = None
     work_div_row_dim: int | None = None
+    execution_role: (
+        Literal["loop_body", "invariant_preheader", "accumulator_fill", "output_drain"]
+        | None
+    ) = None
     propagation: "PropagationPlan | None" = None
 
 

@@ -68,6 +68,7 @@ class PlannedExpertNode:
     expert_count: int
     minimum_lx_bytes: int
     schedule: PersistentExpertSchedule | None
+    selection_reason: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -179,11 +180,20 @@ def _has_persistent_routing_layout(
     }
 
 
+def _dtype(node: torch.fx.Node, name: str) -> torch.dtype:
+    value = _tensor_metadata(node, name)
+    if value is None or not hasattr(value, "dtype"):
+        raise ValueError(f"{name} has no tensor dtype metadata")
+    return value.dtype
+
+
 def _plan_node(
     node: torch.fx.Node,
     *,
     persistent_available: bool,
     available_lx_bytes: int,
+    row_divisor: int,
+    required_expert_count: int | None,
 ) -> PlannedExpertNode:
     if len(node.args) != 7:
         raise ValueError("spyre::moe_ffn expects exactly seven arguments")
@@ -215,7 +225,8 @@ def _plan_node(
     if activation not in {"gelu_tanh", "silu"}:
         raise ValueError(f"unsupported activation {activation!r}")
 
-    # Conservative feasibility check. Placement remains authoritative.
+    # Initial source-level estimate. Physical division and placement remain
+    # authoritative and fail visibly if this optimistic check proves insufficient.
     minimum_lx_bytes = _element_size(x, "x") * (
         2 * tokens * hidden + 2 * tokens * intermediate
     )
@@ -248,12 +259,30 @@ def _plan_node(
         tokens=tokens,
         experts=experts,
     )
-    use_persistent = (
-        persistent_available
-        and packed_weights
-        and packed_routing
-        and minimum_lx_bytes <= available_lx_bytes
-    )
+    decline_reasons = []
+    if not persistent_available:
+        decline_reasons.append("persistent strategy disabled")
+    if _dtype(x, "x") is not torch.float16:
+        decline_reasons.append("persistent strategy currently requires float16")
+    if tokens % row_divisor:
+        decline_reasons.append(
+            f"token count {tokens} is not divisible by {row_divisor} cores"
+        )
+    if hidden % 64 or intermediate % 64:
+        decline_reasons.append("hidden dimensions must be 64-element aligned")
+    if not 1 < experts <= 128:
+        decline_reasons.append("expert count must be in [2,128]")
+    if required_expert_count is not None and experts != required_expert_count:
+        decline_reasons.append(
+            f"persistent adoption currently requires E={required_expert_count}"
+        )
+    if minimum_lx_bytes > available_lx_bytes:
+        decline_reasons.append("initial LX capacity estimate failed")
+    if not packed_weights:
+        decline_reasons.append("expert weights do not have packed [K,E,N] backing")
+    if not packed_routing:
+        decline_reasons.append("routing weights do not have packed [E,T,1] backing")
+    use_persistent = not decline_reasons
     return PlannedExpertNode(
         node_name=node.name,
         strategy=(
@@ -264,6 +293,11 @@ def _plan_node(
         expert_count=experts,
         minimum_lx_bytes=minimum_lx_bytes,
         schedule=PersistentExpertSchedule() if use_persistent else None,
+        selection_reason=(
+            "persistent envelope satisfied"
+            if use_persistent
+            else "; ".join(decline_reasons)
+        ),
     )
 
 
@@ -272,6 +306,8 @@ def plan_expert_execution_graph(
     *,
     persistent_available: bool,
     available_lx_bytes: int,
+    row_divisor: int = 1,
+    required_expert_count: int | None = None,
 ) -> ExpertGraphPlan:
     """Select strategies without modifying graph structure or metadata."""
     before = graph_structure(graph_module.graph)
@@ -280,6 +316,8 @@ def plan_expert_execution_graph(
             node,
             persistent_available=persistent_available,
             available_lx_bytes=available_lx_bytes,
+            row_divisor=row_divisor,
+            required_expert_count=required_expert_count,
         )
         for node in graph_module.graph.nodes
         if node.op == "call_function" and node.target == moe_ffn._opoverload
@@ -346,7 +384,26 @@ def prepare_expert_execution_graph(
 
     plan = plan_expert_execution_graph(
         graph_module,
-        persistent_available=config.enable_dense_expert_persistent,
+        persistent_available=(
+            config.enable_dense_expert_persistent
+            and config.lx_planning
+            and config.sencores == 32
+        ),
         available_lx_bytes=config.sencores * _lx_planning_size(),
+        row_divisor=config.sencores,
+        required_expert_count=128,
     )
+    unsafe_fallbacks = [
+        node
+        for node in plan.nodes
+        if node.strategy is ExpertStrategy.ORDINARY_DENSE and node.expert_count > 32
+    ]
+    if config.enable_dense_expert_persistent and unsafe_fallbacks:
+        details = ", ".join(
+            f"{node.node_name}: {node.selection_reason}" for node in unsafe_fallbacks
+        )
+        raise ExpertPlanningError(
+            "persistent expert planning declined and ordinary dense is only "
+            f"validated through 32 experts ({details})"
+        )
     return materialize_expert_execution_graph(graph_module, plan), plan

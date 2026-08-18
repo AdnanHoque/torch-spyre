@@ -67,9 +67,8 @@ dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
-# Internal development gate.  This is deliberately not environment-controlled:
-# the persistent strategy is not selectable until its physical schedule lands.
-# Tests may monkeypatch it while exercising the pure planner/materializer.
+# Internal model-adoption gate. It remains a plain default-off compiler option;
+# tests and controlled integrations enable it through config patching.
 enable_dense_expert_persistent: bool = False
 
 # Symbolic-dim knobs consumed by compute_granularity in pass_utils.py.

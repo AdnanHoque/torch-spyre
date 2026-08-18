@@ -31,14 +31,14 @@ from torch_spyre._inductor.expert_execution.custom_op import (
 )
 
 
-def _graph_module():
+def _graph_module(*, experts=2):
     graph = torch.fx.Graph()
     specs = (
         ("x", (64, 64), None),
-        ("gate", (2, 64, 64), (64, 128, 1)),
-        ("up", (2, 64, 64), (64, 128, 1)),
-        ("down", (2, 64, 64), (64, 128, 1)),
-        ("routing", (64, 2, 1), (1, 64, 1)),
+        ("gate", (experts, 64, 64), (64, experts * 64, 1)),
+        ("up", (experts, 64, 64), (64, experts * 64, 1)),
+        ("down", (experts, 64, 64), (64, experts * 64, 1)),
+        ("routing", (64, experts, 1), (1, 64, 1)),
     )
     args = []
     for name, shape, stride in specs:
@@ -84,6 +84,7 @@ def test_planning_is_pure_and_selects_persistent_schedule():
     assert selected.schedule.routing_layout == "logical_token_major"
     assert selected.schedule.preheader == ("stage_x", "fill_accumulator")
     assert selected.schedule.drain == ("drain_output",)
+    assert selected.selection_reason == "persistent envelope satisfied"
 
 
 def test_conservative_feasibility_selects_ordinary_dense():
@@ -93,6 +94,18 @@ def test_conservative_feasibility_selects_ordinary_dense():
 
     assert plan.nodes[0].strategy is ExpertStrategy.ORDINARY_DENSE
     assert plan.nodes[0].schedule is None
+    assert "LX capacity" in plan.nodes[0].selection_reason
+
+
+def test_row_divisibility_is_checked_before_materialization():
+    plan = plan_expert_execution_graph(
+        _graph_module(),
+        persistent_available=True,
+        available_lx_bytes=1_000_000,
+        row_divisor=128,
+    )
+    assert plan.nodes[0].strategy is ExpertStrategy.ORDINARY_DENSE
+    assert "not divisible" in plan.nodes[0].selection_reason
 
 
 def test_materialization_rewrites_only_an_isolated_clone():
@@ -183,11 +196,12 @@ def test_failed_materialization_does_not_change_the_source():
 
 
 def test_prepare_uses_configured_lx_budget(monkeypatch):
-    source = _graph_module()
+    source = _graph_module(experts=128)
     monkeypatch.setattr(
         "torch_spyre._inductor.config.enable_dense_expert_persistent", True
     )
     monkeypatch.setattr("torch_spyre._inductor.config.sencores", 32)
+    monkeypatch.setattr("torch_spyre._inductor.config.lx_planning", True)
     monkeypatch.setattr(
         "torch_spyre._inductor.scratchpad.allocator._lx_planning_size",
         lambda: 1_000_000,
@@ -198,6 +212,38 @@ def test_prepare_uses_configured_lx_budget(monkeypatch):
     assert len(plan.nodes) == 1
     assert _call_target(source) == moe_ffn._opoverload
     assert _call_target(candidate) == dense_expert_persistent_ffn._opoverload
+
+
+def test_default_off_e128_preserves_ordinary_dense(monkeypatch):
+    source = _graph_module(experts=128)
+    monkeypatch.setattr(
+        "torch_spyre._inductor.config.enable_dense_expert_persistent", False
+    )
+    monkeypatch.setattr("torch_spyre._inductor.config.sencores", 32)
+
+    candidate, plan = prepare_expert_execution_graph(source)
+
+    assert plan.nodes[0].strategy is ExpertStrategy.ORDINARY_DENSE
+    assert candidate is source
+    assert _call_target(candidate) == moe_ffn._opoverload
+
+
+def test_enabled_e128_decline_fails_visibly(monkeypatch):
+    source = _graph_module(experts=128)
+    monkeypatch.setattr(
+        "torch_spyre._inductor.config.enable_dense_expert_persistent", True
+    )
+    monkeypatch.setattr("torch_spyre._inductor.config.sencores", 32)
+    monkeypatch.setattr("torch_spyre._inductor.config.lx_planning", True)
+    monkeypatch.setattr(
+        "torch_spyre._inductor.scratchpad.allocator._lx_planning_size",
+        lambda: 1,
+    )
+
+    with pytest.raises(
+        ExpertPlanningError, match="persistent expert planning declined"
+    ):
+        prepare_expert_execution_graph(source)
 
 
 def test_persistent_strategy_is_not_user_enabled():

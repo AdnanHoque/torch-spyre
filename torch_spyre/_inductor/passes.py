@@ -34,6 +34,7 @@ except ImportError:
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Operation
 from torch._inductor.scheduler import BaseSchedulerNode
+from torch._inductor.virtualized import V
 
 from .logging_utils import get_inductor_logger
 from .provenance import SpyreGraphTransformObserver, reset_provenance_warnings
@@ -101,6 +102,7 @@ from .dump_cost_model import dump_cost_model
 from . import cost_model_pass as cost_model_pass_module
 from .cost_model_pass import CostReport, cost_model_pass
 from .split_multi_ops import split_multi_ops, validate_ops
+from .expert_execution.physical_plan import verify_persistent_expert_physical_plan
 
 
 logger = get_inductor_logger("passes")
@@ -296,7 +298,12 @@ class CustomPostFusionPasses(_SpyreNodePassPipeline):
         # hbm_pool_planning runs after spyre_fuse_nodes so it can compute
         # bundle-scoped live ranges.
         super().__init__(
-            [demote_incoherent_lx_buffers, spyre_fuse_nodes, hbm_pool_planning]
+            [
+                demote_incoherent_lx_buffers,
+                spyre_fuse_nodes,
+                hbm_pool_planning,
+                _verify_persistent_expert_post_fusion,
+            ]
         )
 
 
@@ -316,6 +323,15 @@ def _runs(*passes: Callable) -> Callable[[Callable], Callable]:
         return wrapper
 
     return annotate
+
+
+def _verify_persistent_expert_post_fusion(
+    nodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
+    """Accept persistence only after final LX demotion and HBM-pool planning."""
+
+    verify_persistent_expert_physical_plan(V.graph)
+    return nodes
 
 
 @_runs(
