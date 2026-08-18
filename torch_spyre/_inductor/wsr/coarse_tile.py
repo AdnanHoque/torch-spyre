@@ -177,6 +177,37 @@ def _counted_loop_plan_for_group(
     )
 
 
+def _planned_work_div_row_dim(
+    op: ComputedBuffer, counted_loop_plan: CountedLoopPlan | None
+) -> int | None:
+    """Resolve the plan's logical row name to one stable output-axis position."""
+
+    if counted_loop_plan is None or not counted_loop_plan.transport_free:
+        return None
+    named_dims = getattr(op, "work_div_loop_info", {})
+    row_symbols = {
+        sym for sym, names in named_dims.items() if counted_loop_plan.row_dim in names
+    }
+    if len(row_symbols) != 1:
+        raise Unsupported(
+            f"{op.get_name()}: persistent expert planning requires one named "
+            f"{counted_loop_plan.row_dim!r} row symbol, found "
+            f"{sorted(map(str, row_symbols))}"
+        )
+    row_symbol = next(iter(row_symbols))
+    row_dims = [
+        dim
+        for dim, coordinate in enumerate(op_out_coords(op))
+        if row_symbol in coordinate.free_symbols
+    ]
+    if len(row_dims) != 1:
+        raise Unsupported(
+            f"{op.get_name()}: persistent expert row symbol {row_symbol} must "
+            f"identify one output dimension, found {row_dims}"
+        )
+    return row_dims[0]
+
+
 class _RetiledBufferInfo(NamedTuple):
     """Host strides before and after a buffer is resized for a coarse tile."""
 
@@ -415,6 +446,7 @@ def plan_coarse_tile_groups(
                 loop_operand_bindings=loop_operand_bindings,
                 output_tiled_dims=output_tiled_dims,
                 counted_loop_plan=counted_loop_plan,
+                work_div_row_dim=_planned_work_div_row_dim(op, counted_loop_plan),
             )
 
             logger.debug(
@@ -2679,6 +2711,26 @@ def _insert_one_read_copy(
     # broadcast/absent (e.g. the N dim in a Reduction reading a[M,K]).
     active_idx = [i for i, c in enumerate(full_coeff) if c != 0]
 
+    copy_work_div_row_dim: int | None = None
+    if persistent_copy and sizing_loop_info.work_div_row_dim is not None:
+        output_coords = op_out_coords(sizing_op)
+        row_dim = sizing_loop_info.work_div_row_dim
+        if row_dim >= len(output_coords):
+            raise Unsupported(
+                f"{sizing_op.get_name()}: persistent expert row dimension "
+                f"{row_dim} is outside output rank {len(output_coords)}"
+            )
+        row_symbols = output_coords[row_dim].free_symbols
+        row_dep_positions = [
+            i for i, var in enumerate(dep.var_names) if var in row_symbols
+        ]
+        if len(row_dep_positions) != 1 or row_dep_positions[0] not in active_idx:
+            raise Unsupported(
+                f"{sizing_op.get_name()}: persistent read copy {dep.name!r} "
+                "does not preserve exactly one active row dimension"
+            )
+        copy_work_div_row_dim = active_idx.index(row_dep_positions[0])
+
     tile_ranges: list[Expr]
     tile_strides: list[Expr]
     dep_tile_strides: list[Expr] = [sympy.Integer(0)] * len(dep_ranges)
@@ -3187,6 +3239,7 @@ def _insert_one_read_copy(
             ),
             loop_operand_bindings=[copy_binding_requirement for _ in copy_reads],
             output_tiled_dims=output_tiled_dims[:loop_depth],
+            work_div_row_dim=copy_work_div_row_dim,
             propagation=PropagationPlan(kind="loop_internal"),
         )
     else:
@@ -3203,6 +3256,7 @@ def _insert_one_read_copy(
             loop_operand_bindings=[None for _ in copy_reads],
             output_tiled_dims=[],
             preheader_for_group=sizing_op_info.loop_group_id,
+            work_div_row_dim=copy_work_div_row_dim,
             propagation=PropagationPlan(kind="loop_internal"),
         )
 
@@ -4031,6 +4085,14 @@ def _insert_flat_reduction_copy_op(
     )
     copy_buf.origins = tiled_op.origins
     copy_buf.operation_name = copy_name
+    counted_plan = tiled_op.loop_info.counted_loop_plan  # type: ignore[attr-defined]
+    copy_buf.loop_info = CoarseTileInfo(  # type: ignore[attr-defined]
+        loop_group_id=(),
+        loop_count=[],
+        loop_tiled_dims=[],
+        counted_loop_plan=counted_plan,
+        work_div_row_dim=tiled_op.loop_info.work_div_row_dim,  # type: ignore[attr-defined]
+    )
     copy_buf._coarse_tile_force_live = True  # type: ignore[attr-defined]
     V.graph.name_to_buffer[copy_name] = copy_buf
 
@@ -4255,7 +4317,15 @@ def _propagate_tiled_reduction_op(
     )
     fill_buf.origins = op.origins
     fill_buf.operation_name = fill_name
-    if fill_loop_info is not None:
+    if persistent:
+        fill_buf.loop_info = CoarseTileInfo(  # type: ignore[attr-defined]
+            loop_group_id=(),
+            loop_count=[],
+            loop_tiled_dims=[],
+            counted_loop_plan=counted_plan,
+            work_div_row_dim=loop_info.work_div_row_dim,
+        )
+    elif fill_loop_info is not None:
         fill_buf.loop_info = fill_loop_info  # type: ignore[attr-defined]
     # else: no loop_info — fill runs once before all loops (flat reduction case).
     # fill_buf's write is only ever "read" by the NEXT loop iteration's use of

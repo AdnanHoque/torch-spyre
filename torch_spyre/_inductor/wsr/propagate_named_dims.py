@@ -598,7 +598,15 @@ def _assign_dim_hints_impl(operations: list[Operation]) -> None:
             continue
 
         assert dp is not None  # guaranteed by op_hints check above
-        if any(hint_dict.get("work_div") for hint_dict in op_hints.values()):
+        # Work division normally needs named-loop metadata only for an explicit
+        # work_div hint.  A compiler-owned expert plan also carries a logical
+        # row name into a later phase, so preserve the same mapping for it even
+        # though the plan deliberately leaves the split decision to the
+        # divider.
+        if any(
+            hint_dict.get("work_div") or hint_dict.get("expert_execution")
+            for hint_dict in op_hints.values()
+        ):
             op.work_div_loop_info = {  # type: ignore[attr-defined]
                 sym: list(names) for sym, names in dp.loop_var_dims.items()
             }

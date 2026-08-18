@@ -46,7 +46,10 @@ from torch_spyre._inductor.pass_utils import (
     _per_core_view_from_prep,
     op_short_name,
 )
-from torch_spyre._inductor.work_division import enumerate_work_division_candidates
+from torch_spyre._inductor.work_division import (
+    enumerate_work_division_candidates,
+    has_fully_pinned_work_division,
+)
 from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.scratchpad.plan_solver import (
     CoreDivision,
@@ -1673,6 +1676,12 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         result = {}
         for op in graph.operations:
             if op.name in fixed_division_ops:
+                divs = [_fixed_core_division(op)]
+            elif isinstance(op, ComputedBuffer) and has_fully_pinned_work_division(op):
+                # A fully pinned result is the divider's complete answer.  In
+                # particular, do not let the pruned co-optimizer's abbreviated
+                # candidate generator invent alternatives that bypass the
+                # shared constraint collector.
                 divs = [_fixed_core_division(op)]
             elif self.prune:
                 divs = [

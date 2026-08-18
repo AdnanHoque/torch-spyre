@@ -28,6 +28,8 @@ from torch_spyre._inductor.ir import FixedTiledLayout
 from torch_spyre._inductor.work_division import (
     TensorDep,
     _default_split,
+    enumerate_work_division_candidates,
+    has_fully_pinned_work_division,
     multi_dim_iteration_space_split,
     span_reduction_pass,
 )
@@ -38,9 +40,11 @@ from torch_spyre._inductor.work_division_constraints import (
     conv_spatial_blocked_vars,
     coordinate_mask_blocked_vars,
     indirect_access_pinned_vars,
+    persistent_expert_equal_rows,
     qfp8wt_matmul_k_pinned,
     qfp8wt_pinned_vars,
 )
+from torch_spyre._inductor.loop_info import CountedLoopPlan, CoarseTileInfo
 
 
 def _isym(name):
@@ -336,6 +340,74 @@ class TestQfp8wtConstraints(unittest.TestCase):
         self.assertEqual(result.pinned, {})
 
 
+class TestPersistentExpertConstraints(unittest.TestCase):
+    def _marked_op(self, shape, name):
+        op = _computed_buffer(shape, name=name)
+        op.loop_info = CoarseTileInfo(
+            loop_group_id=(0,),
+            loop_count=[128],
+            loop_tiled_dims=[[]],
+            counted_loop_plan=CountedLoopPlan(
+                kind="persistent_dense_expert", trip_count=128
+            ),
+            work_div_row_dim=0,
+        )
+        return op
+
+    def test_transport_free_plan_pins_one_common_row_split(self):
+        row, out, red = _isym("row"), _isym("out"), _isym("red")
+        op = self._marked_op((64, 128), "persistent")
+        output = _tensor_dep("persistent", (64, 128), (row, out))
+        ctx = _make_context(
+            op,
+            output,
+            it_space={row: 64, out: 128, red: 64},
+            it_space_adjusted={row: 64, out: 2, red: 64},
+            stick_vars={out: 64},
+            reduction_vars=[red],
+        )
+        with (
+            patch("torch_spyre._inductor.config.sencores", 32),
+            patch(
+                "torch_spyre._inductor.work_division_constraints.op_out_coords",
+                return_value=[row, out],
+            ),
+        ):
+            result = persistent_expert_equal_rows(ctx)
+        self.assertEqual(result.pinned, {row: 32, out: 1, red: 1})
+
+    def test_unmarked_op_is_unchanged(self):
+        row, out = _isym("row"), _isym("out")
+        op = _computed_buffer((64, 128), name="ordinary")
+        output = _tensor_dep("ordinary", (64, 128), (row, out))
+        ctx = _make_context(op, output, it_space={row: 64, out: 128})
+        self.assertEqual(persistent_expert_equal_rows(ctx), ConstraintResult())
+
+    def test_non_divisible_row_extent_fails(self):
+        row, out = _isym("row"), _isym("out")
+        op = self._marked_op((44, 128), "persistent_bad")
+        output = _tensor_dep("persistent_bad", (44, 128), (row, out))
+        ctx = _make_context(op, output, it_space={row: 44, out: 128})
+        with (
+            patch("torch_spyre._inductor.config.sencores", 32),
+            patch(
+                "torch_spyre._inductor.work_division_constraints.op_out_coords",
+                return_value=[row, out],
+            ),
+        ):
+            with self.assertRaisesRegex(Unsupported, "not divisible"):
+                persistent_expert_equal_rows(ctx)
+
+    def test_missing_planned_row_does_not_fall_back_to_shape_inference(self):
+        row, out = _isym("row"), _isym("out")
+        op = self._marked_op((64, 128), "persistent_missing_row")
+        op.loop_info.work_div_row_dim = None
+        output = _tensor_dep("persistent_missing_row", (64, 128), (row, out))
+        ctx = _make_context(op, output, it_space={row: 64, out: 128})
+        with self.assertRaisesRegex(Unsupported, "no planned output dimension"):
+            persistent_expert_equal_rows(ctx)
+
+
 class TestCollectWorkDivisionConstraints(unittest.TestCase):
     _PATCH_TARGET = "torch_spyre._inductor.work_division_constraints"
     _PLACEHOLDER_OP = _computed_buffer((128,), name="constraint_placeholder_buf")
@@ -345,6 +417,7 @@ class TestCollectWorkDivisionConstraints(unittest.TestCase):
 
     def _collect(self, results, **context_kwargs):
         rules = (
+            "persistent_expert_equal_rows",
             "coordinate_mask_blocked_vars",
             "conv_spatial_blocked_vars",
             "qfp8wt_pinned_vars",
@@ -369,6 +442,7 @@ class TestCollectWorkDivisionConstraints(unittest.TestCase):
         r0 = _isym("r0")
         result = self._collect(
             (
+                ConstraintResult(),
                 ConstraintResult(blocked={r0}),
                 ConstraintResult(),
                 ConstraintResult(),
@@ -384,6 +458,7 @@ class TestCollectWorkDivisionConstraints(unittest.TestCase):
         with self.assertRaisesRegex(Unsupported, "conflicting pinned split"):
             self._collect(
                 (
+                    ConstraintResult(),
                     ConstraintResult(pinned={r0: 2}),
                     ConstraintResult(pinned={r0: 1}),
                     ConstraintResult(),
@@ -397,6 +472,7 @@ class TestCollectWorkDivisionConstraints(unittest.TestCase):
         with self.assertRaisesRegex(Unsupported, "hardware memory-span limit"):
             self._collect(
                 (
+                    ConstraintResult(),
                     ConstraintResult(),
                     ConstraintResult(),
                     ConstraintResult(),
@@ -415,6 +491,7 @@ class TestCollectWorkDivisionConstraints(unittest.TestCase):
                     ConstraintResult(),
                     ConstraintResult(),
                     ConstraintResult(),
+                    ConstraintResult(),
                     ConstraintResult(pinned={i0: 1}),
                 ),
                 committed_splits={i0: 2},
@@ -424,6 +501,7 @@ class TestCollectWorkDivisionConstraints(unittest.TestCase):
         r0, r1, r2, r3 = (_isym(f"r{i}") for i in range(4))
         result = self._collect(
             (
+                ConstraintResult(),
                 ConstraintResult(blocked={r0}, pinned={r2: 1}),
                 ConstraintResult(blocked={r1}, pinned={r3: 2}),
                 ConstraintResult(blocked={r1}),
@@ -433,6 +511,111 @@ class TestCollectWorkDivisionConstraints(unittest.TestCase):
         )
         self.assertEqual(result.blocked, {r0, r1})
         self.assertEqual(result.pinned, {r2: 1, r3: 2})
+
+    def test_merges_persistent_row_pins_with_other_rules(self):
+        row, out = _isym("row"), _isym("out")
+        result = self._collect(
+            (
+                ConstraintResult(pinned={row: 32, out: 1}),
+                ConstraintResult(),
+                ConstraintResult(),
+                ConstraintResult(),
+                ConstraintResult(),
+                ConstraintResult(),
+            )
+        )
+        self.assertEqual(result.pinned, {row: 32, out: 1})
+
+
+class TestPersistentExpertCandidates(unittest.TestCase):
+    _PATCH_TARGET = "torch_spyre._inductor.work_division"
+
+    def test_complete_pins_leave_one_candidate(self):
+        row, out = _isym("row"), _isym("out")
+        op = _computed_buffer((64, 128), name="persistent_candidates")
+        output = _tensor_dep("persistent_candidates", (64, 128), (row, out))
+        with (
+            patch(
+                f"{self._PATCH_TARGET}.iteration_space_from_op",
+                return_value={row: 64, out: 128},
+            ),
+            patch(f"{self._PATCH_TARGET}.op_read_writes", return_value=MagicMock()),
+            patch(
+                f"{self._PATCH_TARGET}.collect_tensor_deps",
+                return_value=([], output),
+            ),
+            patch(f"{self._PATCH_TARGET}._collect_symbol_metadata", return_value={}),
+            patch(
+                f"{self._PATCH_TARGET}.adjust_it_space_for_sticks",
+                return_value=({row: 64, out: 2}, {out: 64}),
+            ),
+            patch(
+                f"{self._PATCH_TARGET}.collect_work_division_constraints",
+                return_value=ConstraintResult(pinned={row: 32, out: 1}),
+            ),
+            patch(f"{self._PATCH_TARGET}.get_per_core_span", return_value=0),
+        ):
+            candidates = enumerate_work_division_candidates(op, 32)
+        self.assertEqual(candidates, [{row: 32, out: 1}])
+
+    def test_fully_pinned_query_uses_shared_constraint_collector(self):
+        row, out = _isym("row"), _isym("out")
+        op = _computed_buffer((64, 128), name="persistent_complete")
+        op.loop_info = MagicMock(counted_loop_plan=object())
+        output = _tensor_dep("persistent_complete", (64, 128), (row, out))
+        ctx = _make_context(
+            op,
+            output,
+            it_space={row: 64, out: 128},
+            it_space_adjusted={row: 64, out: 2},
+        )
+        with (
+            patch(
+                f"{self._PATCH_TARGET}._constraint_context_for_op",
+                return_value=(ctx, MagicMock()),
+            ),
+            patch(
+                f"{self._PATCH_TARGET}.collect_work_division_constraints",
+                return_value=ConstraintResult(pinned={row: 32, out: 1}),
+            ),
+        ):
+            self.assertTrue(has_fully_pinned_work_division(op))
+
+    def test_unplanned_query_skips_constraint_context(self):
+        op = _computed_buffer((64, 128), name="ordinary_unplanned")
+        with patch(f"{self._PATCH_TARGET}._constraint_context_for_op") as build_context:
+            self.assertFalse(has_fully_pinned_work_division(op))
+        build_context.assert_not_called()
+
+    def test_pruned_allocator_keeps_fully_pinned_seed(self):
+        from torch_spyre._inductor.scratchpad import allocator as allocator_module
+        from torch_spyre._inductor.scratchpad.allocator import CoOptimizingAllocator
+
+        op = _computed_buffer((64, 128), name="persistent_pruned")
+        op.op_it_space_splits = ({128: 32}, {})
+        graph = MagicMock()
+        graph.operations = [op]
+        allocator = object.__new__(CoOptimizingAllocator)
+        allocator.prune = True
+        with (
+            patch.object(
+                allocator_module, "ops_in_offset_mutation_component", return_value=set()
+            ),
+            patch.object(
+                allocator_module,
+                "_find_distinct_matmul_splits",
+                return_value=((), ()),
+            ),
+            patch.object(
+                allocator_module,
+                "has_fully_pinned_work_division",
+                return_value=True,
+            ),
+            patch.object(allocator_module, "_enum_split_options") as enumerate_pruned,
+        ):
+            division_map = allocator._division_map(graph)
+        enumerate_pruned.assert_not_called()
+        self.assertEqual(division_map[op.name][0].output_splits, {128: 32})
 
 
 class TestSpanReductionConstraints(unittest.TestCase):
@@ -455,7 +638,9 @@ class TestSpanReductionConstraints(unittest.TestCase):
                 f"{self._PATCH_TARGET}.adjust_it_space_for_sticks",
                 return_value=({o: 8, r0: 8, r1: 8}, {}),
             ),
-            patch(f"{self._PATCH_TARGET}.must_split_vars", return_value={}),
+            patch(
+                f"{self._PATCH_TARGET}.must_split_vars", return_value={}
+            ) as must_split,
             patch(
                 f"{self._PATCH_TARGET}.collect_work_division_constraints",
                 return_value=ConstraintResult(pinned={r0: 1, r1: 1}),
@@ -463,6 +648,7 @@ class TestSpanReductionConstraints(unittest.TestCase):
             patch(f"{self._PATCH_TARGET}.apply_splits") as apply_splits,
         ):
             span_reduction_pass(op, [], 32)
+        self.assertEqual(must_split.call_args.kwargs["pinned_splits"], {r0: 1, r1: 1})
         self.assertEqual(apply_splits.call_args.args[1], {r0: 1, r1: 1})
 
 

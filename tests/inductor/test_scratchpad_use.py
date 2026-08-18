@@ -71,6 +71,27 @@ def test_nested_spyre_context_runs_pre_scheduling_once():
     assert calls == [graph]
 
 
+def test_persistent_division_is_verified_after_scratchpad_planning():
+    graph = SimpleNamespace()
+    calls = []
+    with (
+        ts_inductor_config.patch(lx_planning=True),
+        patch.object(
+            passes,
+            "scratchpad_planning",
+            lambda current: calls.append(("scratchpad", current)),
+        ),
+        patch.object(
+            passes,
+            "verify_persistent_expert_divisions",
+            lambda current: calls.append(("verify", current)),
+        ),
+    ):
+        passes._maybe_scratchpad_planning(graph)
+
+    assert calls == [("scratchpad", graph), ("verify", graph)]
+
+
 class CustomPreSchedulingPassesWithOurPasses(CustomPreSchedulingPasses):
     """torch_spyre._inductor.patches.enable_spyre_context sets
     torch._inductor.config._post_fusion_custom_pass to

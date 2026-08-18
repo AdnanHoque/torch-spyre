@@ -72,7 +72,11 @@ from torch_spyre._inductor.constants import (
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
 )
 from torch_spyre._inductor.errors import Unsupported
-from torch_spyre._inductor.loop_info import CoarseTileInfo, copy_op_metadata
+from torch_spyre._inductor.loop_info import (
+    CoarseTileInfo,
+    CountedLoopPlan,
+    copy_op_metadata,
+)
 from torch_spyre._inductor.pass_utils import coeff_through_floor
 from torch_spyre._inductor.wsr.coarse_tile import (
     _LOOPS_FREE_SYMS_KEY,
@@ -84,6 +88,7 @@ from torch_spyre._inductor.wsr.coarse_tile import (
     _divide_ranges,
     _full_buffer_read_deps,
     _index_var_prefix,
+    _planned_work_div_row_dim,
     _replace_group_op,
     _rescale_index,
     _retile_load_index,
@@ -5980,6 +5985,31 @@ def _make_tiled_reduction_op(
     op.get_read_writes.return_value = _make_rw_with_reads()
     op.origins = OrderedSet()
     return op
+
+
+class TestPersistentExpertWorkDivisionMetadata(unittest.TestCase):
+    def test_named_token_dim_becomes_stable_output_axis(self):
+        token, hidden = sympy.symbols("token hidden")
+        op = MagicMock()
+        op.work_div_loop_info = {token: ["T"], hidden: ["H"]}
+        op.get_name.return_value = "persistent_gate"
+        plan = CountedLoopPlan(kind="persistent_dense_expert", trip_count=128)
+
+        with patch(
+            "torch_spyre._inductor.wsr.coarse_tile.op_out_coords",
+            return_value=[token, hidden],
+        ):
+            self.assertEqual(_planned_work_div_row_dim(op, plan), 0)
+
+    def test_missing_named_token_dim_fails_closed(self):
+        hidden = sympy.Symbol("hidden")
+        op = MagicMock()
+        op.work_div_loop_info = {hidden: ["H"]}
+        op.get_name.return_value = "persistent_gate"
+        plan = CountedLoopPlan(kind="persistent_dense_expert", trip_count=128)
+
+        with self.assertRaisesRegex(Unsupported, "requires one named 'T'"):
+            _planned_work_div_row_dim(op, plan)
 
 
 class TestUnitTiledSumContributionCollapse(unittest.TestCase):

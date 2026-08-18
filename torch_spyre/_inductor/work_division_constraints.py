@@ -35,7 +35,12 @@ from torch_spyre._C import ElementArrangement
 
 from .constants import BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP
 from .errors import Unsupported
-from .pass_utils import concretize_expr, indirect_info_from_op, op_read_writes
+from .pass_utils import (
+    concretize_expr,
+    indirect_info_from_op,
+    op_out_coords,
+    op_read_writes,
+)
 from .logging_utils import get_inductor_logger
 from . import config
 
@@ -92,6 +97,7 @@ def collect_work_division_constraints(
     blocked: set[Symbol] = set()
     pinned: dict[Symbol, int] = {}
     for constraint in (
+        persistent_expert_equal_rows,
         coordinate_mask_blocked_vars,
         conv_spatial_blocked_vars,
         qfp8wt_pinned_vars,
@@ -128,6 +134,61 @@ def collect_work_division_constraints(
             pinned[sym] = split
 
     return ConstraintResult(blocked=blocked, pinned=pinned)
+
+
+def persistent_expert_equal_rows(
+    ctx: WorkDivConstraintContext,
+) -> ConstraintResult:
+    """Give every persistent expert op the same row-only core ownership.
+
+    The counted-loop plan asks for transport-free execution. The divider owns
+    the answer: it splits the single output row dimension across all Sen cores
+    and pins every other dimension to one. Placement verifies this result; it
+    never rewrites it later.
+    """
+
+    loop_info = getattr(ctx.op, "loop_info", None)
+    plan = getattr(loop_info, "counted_loop_plan", None)
+    if plan is None:
+        return ConstraintResult()
+    if not plan.transport_free:
+        return ConstraintResult()
+
+    row_dim = getattr(loop_info, "work_div_row_dim", None)
+    if row_dim is None:
+        raise Unsupported(
+            f"{ctx.op.get_name()}: persistent expert row ownership has no "
+            "planned output dimension"
+        )
+    output_coords = op_out_coords(ctx.op)
+    if not 0 <= row_dim < len(output_coords):
+        raise Unsupported(
+            f"{ctx.op.get_name()}: persistent expert row ownership has no "
+            "planned output dimension"
+        )
+    rows = [
+        sym
+        for sym in output_coords[row_dim].free_symbols
+        if sym in ctx.it_space_adjusted
+    ]
+    if len(rows) != 1:
+        raise Unsupported(
+            f"{ctx.op.get_name()}: persistent expert row ownership requires "
+            f"one row dimension, found {sorted(map(str, rows))}"
+        )
+
+    row = rows[0]
+    extent = concretize_expr(ctx.it_space_adjusted[row])
+    if extent % config.sencores:
+        raise Unsupported(
+            f"{ctx.op.get_name()}: persistent expert row extent {extent} is "
+            f"not divisible by {config.sencores} Sen cores"
+        )
+    return ConstraintResult(
+        pinned={
+            sym: config.sencores if sym == row else 1 for sym in ctx.it_space_adjusted
+        }
+    )
 
 
 def coordinate_mask_blocked_vars(ctx: WorkDivConstraintContext) -> ConstraintResult:

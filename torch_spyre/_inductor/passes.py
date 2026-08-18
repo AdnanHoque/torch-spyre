@@ -75,6 +75,7 @@ from .enforce_indirect_access_layout import enforce_indirect_access_layout
 from .hbm_pool_planning import hbm_pool_planning
 from .work_division import (
     span_reduction,
+    verify_persistent_expert_divisions,
     work_distribution,
     cost_model_matmul_division,
 )
@@ -405,13 +406,17 @@ def _distribute_work(graph: GraphLowering) -> None:
     work_distribution(graph, preassigned_ops)
 
 
-@_runs(scratchpad_planning)
+@_runs(scratchpad_planning, verify_persistent_expert_divisions)
 def _maybe_scratchpad_planning(graph: GraphLowering) -> None:
     if not config.lx_planning:
         return
     # The allocator (and its layout solver) is selected from config by
     # scratchpad_planning -> select_allocator; no allocator wiring here.
     scratchpad_planning(graph)
+    # Placement may co-optimize core divisions while solving LX.  Verify the
+    # divider-owned transport-free constraint at the common post-placement
+    # boundary, after every allocator implementation has finished.
+    verify_persistent_expert_divisions(graph)
 
 
 class CustomPreSchedulingPasses:

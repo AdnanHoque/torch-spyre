@@ -167,3 +167,22 @@ def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contig
     }
     assert representable
     assert dict(planner_view.core_to_slot) == sdsc_output_mapping
+
+
+def test_row_only_32_core_division_reaches_sdsc_mapping():
+    op_spec = _bmm_op_spec(BATCH_MATMUL_OP)
+    dims = tuple(op_spec.iteration_space)
+    op_spec.iteration_space = {
+        dim: (extent, 32 if dim == dims[0] else 1)
+        for dim, (extent, _split) in op_spec.iteration_space.items()
+    }
+
+    sdsc_spec, renamed = parse_op_spec(op_spec)
+    core_id = sympy.Symbol("core_id")
+    row_mapping = sdsc_spec.core_id_to_work_slice[renamed[dims[0]]]
+    assert [int(row_mapping.subs(core_id, core)) for core in range(32)] == list(
+        range(32)
+    )
+    for dim in dims[1:]:
+        mapping = sdsc_spec.core_id_to_work_slice[renamed[dim]]
+        assert all(int(mapping.subs(core_id, core)) == 0 for core in range(32))

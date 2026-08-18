@@ -324,6 +324,12 @@ class CoarseTileInfo:
         own write dependency, parallel to ``output_tiled_dims`` the same way
         ``squeezed_advance_per_read`` is parallel to ``tiled_dims_per_read``.
         Defaults to ``[]`` (no levels tiled).
+    work_div_row_dim:
+        Raw output-host-dimension position carrying the persistent plan's
+        logical row dimension.  Temporal planning resolves the logical name
+        once, before tiling can squeeze or rename loop symbols; work division
+        later maps this stable position onto its current iteration symbol.
+        ``None`` for graphs without an exact row-ownership requirement.
     propagation:
         Planned decision for how this op's result crosses its loop
         boundary, computed by ``_plan_tiling_propagation``. ``None`` until
@@ -349,6 +355,7 @@ class CoarseTileInfo:
     )
     counted_loop_plan: CountedLoopPlan | None = None
     preheader_for_group: tuple[int, ...] | None = None
+    work_div_row_dim: int | None = None
     propagation: "PropagationPlan | None" = None
 
 

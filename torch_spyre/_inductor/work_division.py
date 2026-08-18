@@ -36,7 +36,7 @@ from torch._inductor.ir import (
     Reduction,
 )
 
-from torch._inductor.dependencies import MemoryDep
+from torch._inductor.dependencies import MemoryDep, ReadWrites
 from torch._inductor.graph import GraphLowering
 from torch_spyre._C import ElementArrangement
 
@@ -76,6 +76,82 @@ logger = get_inductor_logger("work_division")
 # 4096 bytes. Therefore, the maximum addressable offset is:
 # 65535 * 4096 = 268431360 bytes (255.996 MiB).
 MAX_SPAN_BYTES = 65535 * 4096
+
+
+def _constraint_context_for_op(
+    op: ComputedBuffer,
+) -> tuple[WorkDivConstraintContext, ReadWrites]:
+    """Build the canonical constraint context and retain the traced deps."""
+
+    it_space = iteration_space_from_op(op)
+    rw = op_read_writes(op)
+    input_tds, output_td = collect_tensor_deps(op, get_mem_deps_from_rw(rw))
+    symbol_meta = _collect_symbol_metadata(it_space)
+    adjusted, stick_vars = adjust_it_space_for_sticks(
+        it_space, input_tds + [output_td], symbol_meta
+    )
+    output_vars = {
+        var for coord in output_td.device_coords[:-1] for var in coord.free_symbols
+    }
+    reduction_vars = [var for var in adjusted if var not in output_vars]
+    return (
+        WorkDivConstraintContext(
+            op=op,
+            it_space=it_space,
+            it_space_adjusted=adjusted,
+            output_td=output_td,
+            input_tds=input_tds,
+            stick_vars=stick_vars,
+            reduction_vars=reduction_vars,
+            committed_splits={},
+        ),
+        rw,
+    )
+
+
+def has_fully_pinned_work_division(op: ComputedBuffer) -> bool:
+    """Whether constraints give every current iteration dimension one answer.
+
+    The co-optimizing allocator uses this generic query to keep a divider-owned
+    exact decision fixed.  Otherwise its pruned candidate generator could
+    invent axis-flipped alternatives that never passed through the constraint
+    collector.
+    """
+
+    loop_info = getattr(op, "loop_info", None)
+    if loop_info is None or loop_info.counted_loop_plan is None:
+        return False
+
+    ctx, _rw = _constraint_context_for_op(op)
+    pinned = collect_work_division_constraints(ctx).pinned
+    return bool(ctx.it_space_adjusted) and set(pinned) == set(ctx.it_space_adjusted)
+
+
+def verify_persistent_expert_divisions(graph: GraphLowering) -> None:
+    """Fail if placement changed a transport-free row-only division."""
+
+    for op in graph.operations:
+        if not isinstance(op, ComputedBuffer):
+            continue
+        loop_info = getattr(op, "loop_info", None)
+        plan = getattr(loop_info, "counted_loop_plan", None)
+        if plan is None or not plan.transport_free:
+            continue
+
+        ctx, rw = _constraint_context_for_op(op)
+        expected = collect_work_division_constraints(ctx).pinned
+        write_index = next(iter(rw.writes)).index
+        read_index = next((dep.index for dep in rw.reads), write_index)
+        encoded = getattr(op, "op_it_space_splits", ({}, {}))
+        actual = apply_splits_from_index_coeff(
+            encoded, write_index, read_index, ctx.it_space
+        )
+        actual = {var: actual.get(var, 1) for var in ctx.it_space_adjusted}
+        if actual != expected:
+            raise Unsupported(
+                f"{op.get_name()}: persistent expert division does not conform; "
+                f"expected {expected}, got {actual}"
+            )
 
 
 @dataclasses.dataclass
@@ -441,6 +517,7 @@ def must_split_vars(
     stick_vars: dict[Symbol, int],
     max_cores: int,
     symbol_meta: SymbolMeta,
+    pinned_splits: dict[Symbol, int] | None = None,
 ) -> dict[Symbol, int]:
     """Return the minimum splits per iteration variable to keep each tensor's
     memory span within MAX_SPAN_BYTES.
@@ -472,7 +549,8 @@ def must_split_vars(
     """
     # TODO: use compute_max_size(...) / compute_granularity(...) from pass_utils.py
     # for symbolic path. Refer to #2287 for details.
-    accumulated_splits: dict[Symbol, int] = {}
+    pinned_splits = pinned_splits or {}
+    accumulated_splits: dict[Symbol, int] = dict(pinned_splits)
 
     for td in tensor_deps:
         if (
@@ -496,6 +574,8 @@ def must_split_vars(
                 continue
 
             def valid_splits(v: Symbol) -> list[int]:
+                if v in pinned_splits:
+                    return [pinned_splits[v]]
                 current_min = accumulated_splits.get(v, 1)
                 if v in symbol_meta:
                     # Symbolic dim: split must divide granularity for the
@@ -938,21 +1018,35 @@ def span_reduction_pass(
     it_space_adjusted, stick_vars = adjust_it_space_for_sticks(
         it_space, all_tds, symbol_meta
     )
-    min_splits = must_split_vars(
-        all_tds, it_space, it_space_adjusted, stick_vars, max_cores, symbol_meta
-    )
-
     coord_vars = {v for e in output_td.device_coords[:-1] for v in e.free_symbols}
     reduction_vars = [v for v in it_space_adjusted if v not in coord_vars]
+    base_constraint_context = WorkDivConstraintContext(
+        op=op,
+        it_space=it_space,
+        it_space_adjusted=it_space_adjusted,
+        output_td=output_td,
+        input_tds=input_tds,
+        stick_vars=stick_vars,
+        reduction_vars=reduction_vars,
+        committed_splits={},
+    )
+    # Exact pins constrain the span search itself.  Searching first and
+    # rejecting an incompatible result afterward makes a required physical
+    # schedule look infeasible when a legal pinned answer exists.
+    initial_constraints = collect_work_division_constraints(base_constraint_context)
+    min_splits = must_split_vars(
+        all_tds,
+        it_space,
+        it_space_adjusted,
+        stick_vars,
+        max_cores,
+        symbol_meta,
+        pinned_splits=initial_constraints.pinned,
+    )
+
     constraint_result = collect_work_division_constraints(
-        WorkDivConstraintContext(
-            op=op,
-            it_space=it_space,
-            it_space_adjusted=it_space_adjusted,
-            output_td=output_td,
-            input_tds=input_tds,
-            stick_vars=stick_vars,
-            reduction_vars=reduction_vars,
+        dataclasses.replace(
+            base_constraint_context,
             committed_splits=min_splits,
         )
     )
