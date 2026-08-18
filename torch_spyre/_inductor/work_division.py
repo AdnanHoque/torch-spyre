@@ -142,7 +142,7 @@ def verify_persistent_expert_divisions(graph: GraphLowering) -> None:
         expected = collect_work_division_constraints(ctx).pinned
         write_index = next(iter(rw.writes)).index
         read_index = next((dep.index for dep in rw.reads), write_index)
-        encoded = getattr(op, "op_it_space_splits", ({}, {}))
+        encoded: tuple[dict, dict] = getattr(op, "op_it_space_splits", ({}, {}))
         actual = apply_splits_from_index_coeff(
             encoded, write_index, read_index, ctx.it_space
         )
