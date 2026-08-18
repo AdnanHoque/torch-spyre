@@ -29,7 +29,7 @@ import sympy
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.ir import FixedTiledLayout, SpyreEmptyFallback
-from torch_spyre._inductor.loop_info import LoopStoragePlan
+from torch_spyre._inductor.loop_info import CountedLoopPlan, LoopStoragePlan
 from torch_spyre._inductor.pass_utils import (
     _per_core_view_on_buf,
     concretize_expr,
@@ -101,9 +101,10 @@ def hoisted_loop_lifetime_end_overrides(graph: GraphLowering) -> dict[str, int]:
 
     overrides: dict[str, int] = {}
     for op in graph.operations:
-        owner = getattr(getattr(op, "loop_info", None), "preheader_for_group", None)
-        if not owner:
+        storage = getattr(op, "loop_storage_plan", None)
+        if not isinstance(storage, LoopStoragePlan) or storage.kind != "loop_invariant":
             continue
+        owner = storage.owner_group
         loop_end = loop_end_by_outer_group.get(owner[0])
         if loop_end is None:
             raise RuntimeError(
@@ -122,7 +123,48 @@ def is_loop_carried_lx_storage(op: Operation) -> bool:
         isinstance(op, SpyreEmptyFallback)
         and isinstance(plan, LoopStoragePlan)
         and plan.kind == "loop_carried_accumulator"
+        and plan.execution_role == "output_accumulator"
         and plan.memory_kind == "lx"
+    )
+
+
+def is_persistent_loop_preheader(op: Operation) -> bool:
+    """Whether ``op`` is typed invariant storage for a persistent loop."""
+
+    plan = getattr(op, "loop_storage_plan", None)
+    return (
+        isinstance(plan, LoopStoragePlan)
+        and plan.kind == "loop_invariant"
+        and plan.execution_role == "input_activation"
+        and plan.memory_kind == "lx"
+    )
+
+
+def is_persistent_loop_body(op: Operation) -> bool:
+    """Whether the counted plan requires this loop-body result in LX."""
+
+    info = getattr(op, "loop_info", None)
+    plan = getattr(info, "counted_loop_plan", None)
+    return (
+        isinstance(op, ComputedBuffer)
+        and isinstance(plan, CountedLoopPlan)
+        and bool(info.loop_group_id)
+        and plan.body_memory_kind == "lx"
+    )
+
+
+def required_loop_lx_storage_names(graph: GraphLowering) -> frozenset[str]:
+    """Storage owners whose typed loop plan requires physical LX residency.
+
+    Loop-body operations may write through a ``MutationLayout`` into one of
+    these owners and therefore do not necessarily receive their own allocation
+    record. Their LX-only contract is verified on the final physical graph.
+    """
+
+    return frozenset(
+        op.get_name()
+        for op in graph.operations
+        if isinstance(getattr(op, "loop_storage_plan", None), LoopStoragePlan)
     )
 
 

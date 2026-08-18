@@ -88,6 +88,9 @@ from torch_spyre._inductor.scratchpad.utils import (
     OP_OUTPUT_GOOD_FOR_LX_REUSE,
     hoisted_loop_lifetime_end_overrides,
     is_loop_carried_lx_storage,
+    is_persistent_loop_body,
+    is_persistent_loop_preheader,
+    required_loop_lx_storage_names,
 )
 from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
 from torch_spyre._inductor.ir import FixedTiledLayout, SpyreEmptyFallback
@@ -102,6 +105,47 @@ from torch_spyre._inductor.scratchpad.lx_relayout import (
 from torch_spyre._inductor.pass_utils import _is_matmul_op
 
 logger = get_inductor_logger("scratchpad.allocator")
+
+
+def _safe_in_place_parents(
+    parents: Sequence[str], lifetime_end_overrides: dict[str, int]
+) -> list[str]:
+    """Drop alias edges whose parent must survive a counted loop."""
+
+    return [parent for parent in parents if parent not in lifetime_end_overrides]
+
+
+def _reject_required_loop_lx_relayouts(
+    plans: Sequence[LXRelayoutPlan], required_names: frozenset[str]
+) -> None:
+    """Fail closed until loop-lifetime facts compose with LX relayouts."""
+
+    touched = sorted(
+        (plan.source_name, plan.destination_name)
+        for plan in plans
+        if plan.source_name in required_names or plan.destination_name in required_names
+    )
+    if touched:
+        raise Unsupported(
+            f"scratchpad: LX relayout cannot touch persistent-loop storage: {touched}"
+        )
+
+
+def _validate_required_loop_lx_allocation(
+    required_names: frozenset[str], allocation: Sequence[LifetimeBoundBuffer]
+) -> None:
+    """Required persistent state must have a realized LX address."""
+
+    by_name = {buffer.name: buffer for buffer in allocation}
+    missing = sorted(
+        name
+        for name in required_names
+        if name not in by_name or by_name[name].address is None
+    )
+    if missing:
+        raise Unsupported(
+            f"scratchpad: persistent-loop LX storage was not realized: {missing}"
+        )
 
 
 # Keep these values synchronized with Deeptools' LX memory tracker:
@@ -231,6 +275,9 @@ class ScratchpadAllocator:
         solver = self._build_solver(buffers)
         allocation = self._solve(solver)
         accepted_lx_relayouts = self._finalize_lx_relayout_allocation(allocation)
+        _validate_required_loop_lx_allocation(
+            required_loop_lx_storage_names(graph), allocation
+        )
         self._post_solve(graph, allocation)
         reasons = self._get_spill_reasons(solver, allocation)
         self._push_allocation(graph, allocation, accepted_lx_relayouts)
@@ -328,7 +375,11 @@ class ScratchpadAllocator:
     def _op_output_good_for_lx_reuse(
         self, op: Any, planned_lx_buffers: frozenset[str] = frozenset()
     ) -> bool:
-        if is_loop_carried_lx_storage(op):
+        if (
+            is_loop_carried_lx_storage(op)
+            or is_persistent_loop_preheader(op)
+            or is_persistent_loop_body(op)
+        ):
             return isinstance(op.layout, FixedTiledLayout)
         if not isinstance(op, ComputedBuffer):
             return False
@@ -656,11 +707,9 @@ class ScratchpadAllocator:
             uses = lifetimes.get(output_name, [])
             if not uses:
                 continue
-            parents = [
-                parent
-                for parent in in_place.get(output_name, [])
-                if lifetime_end_overrides.get(parent, uses[0] + 1) == uses[0] + 1
-            ]
+            parents = _safe_in_place_parents(
+                in_place.get(output_name, []), lifetime_end_overrides
+            )
             buffers.append(
                 LifetimeBoundBuffer(
                     output_name,
@@ -882,6 +931,9 @@ class ScratchpadAllocator:
         t0 = time.perf_counter()
         if lifetimes is None:
             lifetimes = calculate_liveness(graph)
+        _reject_required_loop_lx_relayouts(
+            lx_relayout_plans, required_loop_lx_storage_names(graph)
+        )
         lifetime_end_overrides = hoisted_loop_lifetime_end_overrides(graph)
         ncores, ncores_reasons = get_ncores_for_buffers(graph)
         t1 = time.perf_counter()
@@ -1869,11 +1921,9 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             residency_reason = residency_by_buf[output_name]
 
             buf_divisions = divisions[output_name]
-            parents = [
-                parent
-                for parent in in_place.get(output_name, [])
-                if lifetime_end_overrides.get(parent, uses[0] + 1) == uses[0] + 1
-            ]
+            parents = _safe_in_place_parents(
+                in_place.get(output_name, []), lifetime_end_overrides
+            )
             size = info["size"]  # total footprint; solver divides per chosen cd
             parent_proj = info["op_inputs"].copy()
             cd_parent_matches = self._cd_parent_matches(

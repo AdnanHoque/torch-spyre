@@ -68,8 +68,8 @@ struct StaticData {
   int n = 0;
   int64_t capacity = 0;
   int64_t alignment = kDefaultAlignment;
-  std::vector<int64_t> start;  // start_time == uses.front()
-  std::vector<int64_t> end;    // end_time == uses.back() + 1
+  std::vector<int64_t> start;  // LifetimeBoundBuffer.start_time
+  std::vector<int64_t> end;    // LifetimeBoundBuffer.end_time
   std::vector<double> weight;  // len(uses) + (first_use_is_read ? 0.0 : 0.5)
   // Time-overlap members of each buffer (order-independent, lifetimes only).
   std::vector<std::vector<int>> overlap;
@@ -181,8 +181,8 @@ class NativePermutationLayoutSolver {
         bool first_read = b.attr("first_use_is_read").cast<bool>();
         parent_names[i] =
             b.attr("in_place_parents").cast<std::vector<std::string>>();
-        st->start[i] = uses.front();
-        st->end[i] = uses.back() + 1;
+        st->start[i] = b.attr("start_time").cast<int64_t>();
+        st->end[i] = b.attr("end_time").cast<int64_t>();
         st->weight[i] =
             static_cast<double>(uses.size()) + (first_read ? 0.0 : 0.5);
       }
@@ -193,8 +193,8 @@ class NativePermutationLayoutSolver {
         // ValueError, so restate it as one and name the offending buffer.
         throw std::invalid_argument(
             "buffer " + std::to_string(i) +
-            ": could not read fields (name, size, uses, first_use_is_read, "
-            "in_place_parents)");
+            ": could not read fields (name, size, uses, start_time, end_time, "
+            "first_use_is_read, in_place_parents)");
       }
     }
 

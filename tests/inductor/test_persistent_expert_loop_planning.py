@@ -20,14 +20,25 @@ from torch._inductor.dependencies import MemoryDep
 from torch._inductor.utils import sympy_index_symbol
 
 from torch_spyre._inductor.loop_info import (
+    CountedLoopPlan,
     CoarseTileInfo,
     LoopOperandBindingRequirement,
+    LoopStoragePlan,
     copy_op_metadata,
 )
 from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.pass_utils import coeff_through_floor
+from torch_spyre._inductor import ir as spyre_ir
+from torch_spyre._inductor.ir import SpyreEmptyFallback
+from torch_spyre._inductor.scratchpad.allocator import (
+    _reject_required_loop_lx_relayouts,
+    _safe_in_place_parents,
+    _validate_required_loop_lx_allocation,
+)
+from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
 from torch_spyre._inductor.scratchpad.utils import (
     hoisted_loop_lifetime_end_overrides,
+    required_loop_lx_storage_names,
 )
 from torch_spyre._inductor.spyre_kernel import SpyreKernel, TensorAccess
 from torch_spyre._inductor.wsr.coarse_tile import _host_tile_advances_for_dep
@@ -100,7 +111,7 @@ def _fully_squeezed_read_advance(binding):
 
     advance = kernel._general_tile_advance(tensor, True, "weight")
     level = kernel._tile_advance_symbols[0]
-    return sympy.expand(advance).coeff(level)
+    return coeff_through_floor(advance, level)
 
 
 def test_persistent_binding_and_ordinary_squeezed_advance_coexist():
@@ -209,6 +220,12 @@ def test_hoisted_copy_lifetime_ends_after_its_own_loop_group():
             loop_tiled_dims=[[] for _ in group],
             preheader_for_group=preheader_for_group,
         )
+        if preheader_for_group is not None:
+            value.loop_storage_plan = LoopStoragePlan(
+                kind="loop_invariant",
+                owner_group=preheader_for_group,
+                execution_role="input_activation",
+            )
         return value
 
     graph = type("Graph", (), {})()
@@ -220,3 +237,93 @@ def test_hoisted_copy_lifetime_ends_after_its_own_loop_group():
     ]
 
     assert hoisted_loop_lifetime_end_overrides(graph) == {"x_copy": 3}
+
+
+def test_typed_loop_storage_is_required_in_lx():
+    def op(name):
+        return type("Op", (), {"get_name": lambda self: name})()
+
+    x_copy = op("x_copy")
+    x_copy.loop_info = CoarseTileInfo(
+        loop_group_id=(),
+        loop_count=[],
+        loop_tiled_dims=[],
+        preheader_for_group=(2,),
+        counted_loop_plan=CountedLoopPlan(
+            kind="persistent_dense_expert", trip_count=128
+        ),
+    )
+    x_copy.loop_storage_plan = LoopStoragePlan(
+        kind="loop_invariant",
+        owner_group=(2,),
+        execution_role="input_activation",
+    )
+    accumulator = op("accumulator")
+    accumulator.loop_storage_plan = LoopStoragePlan(
+        kind="loop_carried_accumulator",
+        owner_group=(2,),
+        execution_role="output_accumulator",
+    )
+    body = op("body")
+    body.loop_info = CoarseTileInfo(
+        loop_group_id=(2,),
+        loop_count=[128],
+        loop_tiled_dims=[[]],
+        counted_loop_plan=CountedLoopPlan(
+            kind="persistent_dense_expert",
+            trip_count=128,
+            body_memory_kind="lx",
+        ),
+    )
+    graph = SimpleNamespace(operations=[x_copy, accumulator, body])
+
+    assert required_loop_lx_storage_names(graph) == frozenset({"x_copy", "accumulator"})
+
+
+def test_only_typed_loop_empty_skips_wrapper_allocation_for_lx(monkeypatch):
+    class Layout:
+        def __init__(self, allocation):
+            self.allocation = allocation
+
+    monkeypatch.setattr(spyre_ir, "FixedTiledLayout", Layout)
+
+    ordinary = SimpleNamespace(
+        get_layout=lambda: Layout({"lx": 0}),
+        loop_storage_plan=None,
+    )
+    persistent = SimpleNamespace(
+        get_layout=lambda: Layout({"lx": 0}),
+        loop_storage_plan=LoopStoragePlan(
+            kind="loop_carried_accumulator",
+            owner_group=(2,),
+            execution_role="output_accumulator",
+        ),
+    )
+
+    assert SpyreEmptyFallback.should_allocate(ordinary)
+    assert not SpyreEmptyFallback.should_allocate(persistent)
+
+
+def test_required_loop_storage_rejects_relayout_and_spill():
+    plan = SimpleNamespace(source_name="x_copy", destination_name="x_relayout")
+    try:
+        _reject_required_loop_lx_relayouts([plan], frozenset({"x_copy"}))
+    except Unsupported:
+        pass
+    else:
+        raise AssertionError("persistent loop storage relayout must fail closed")
+
+    spilled = LifetimeBoundBuffer("x_copy", 128, [0, 1])
+    try:
+        _validate_required_loop_lx_allocation(frozenset({"x_copy"}), [spilled])
+    except Unsupported:
+        pass
+    else:
+        raise AssertionError("required persistent loop storage may not spill")
+
+    spilled.address = 0
+    _validate_required_loop_lx_allocation(frozenset({"x_copy"}), [spilled])
+
+
+def test_loop_lifetime_disables_in_place_handoff():
+    assert _safe_in_place_parents(["x_copy", "ordinary"], {"x_copy": 8}) == ["ordinary"]

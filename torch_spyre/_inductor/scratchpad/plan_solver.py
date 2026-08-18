@@ -67,8 +67,9 @@ class LifetimeBoundBuffer:
     buffer written and read by the same op, i.e. with a single live tick, and
     would let such a buffer pass as an in-place parent.
 
-    ``start_time`` and ``end_time`` are convenience properties derived from
-    ``uses``: ``uses[0]`` and ``uses[-1] + 1`` respectively.
+    ``start_time`` is ``uses[0]``. ``end_time`` is normally ``uses[-1] + 1``;
+    a loop-carried buffer may extend address overlap with
+    ``lifetime_end_override`` without adding a synthetic read to ``uses``.
     """
 
     name: str

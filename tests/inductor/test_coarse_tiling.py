@@ -5446,6 +5446,44 @@ class TestInsertAllReadCopyOps(unittest.TestCase):
         self.assertNotIn(full_buf.get_name(), loaded_by_a)
         self.assertNotIn(full_buf.get_name(), loaded_by_b)
 
+    def test_persistent_invariant_copy_is_typed_as_preheader_storage(self):
+        from dataclasses import replace
+
+        from torch._inductor.ir import ComputedBuffer
+
+        from torch_spyre._inductor.loop_info import CountedLoopPlan
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _insert_all_read_copy_ops,
+            _plan_read_copies,
+        )
+
+        op_a, op_b, _, operations = _make_two_op_shared_read_fixture()
+        for op in (op_a, op_b):
+            op.loop_info = replace(
+                op.loop_info,
+                loop_tiled_dims=[[]],
+                tiled_dims_per_read=[[[]]],
+                counted_loop_plan=CountedLoopPlan(
+                    kind="persistent_dense_expert",
+                    trip_count=8,
+                ),
+            )
+
+        plans = _plan_read_copies(operations, [((0,), [op_a, op_b], {})])
+        _insert_all_read_copy_ops(operations, plans)
+
+        copy_buf = next(
+            op
+            for op in operations
+            if isinstance(op, ComputedBuffer)
+            and op.get_name().startswith("coarse_tile_read_copy_")
+        )
+        self.assertEqual(copy_buf.loop_info.loop_group_id, ())
+        self.assertEqual(copy_buf.loop_info.preheader_for_group, (0,))
+        self.assertEqual(copy_buf.loop_storage_plan.kind, "loop_invariant")
+        self.assertEqual(copy_buf.loop_storage_plan.owner_group, (0,))
+        self.assertEqual(copy_buf.loop_storage_plan.execution_role, "input_activation")
+
     def test_transposed_read_gets_its_own_copy(self):
         """a+b+a.t()-style: two reads of the same buffer with different
         index expressions must NOT share a copy."""
@@ -6082,7 +6120,9 @@ class TestUnitTiledSumContributionCollapse(unittest.TestCase):
         )
         accum.operation_name = "accum"
         accum.loop_storage_plan = LoopStoragePlan(
-            kind="loop_carried_accumulator", owner_group=(0,)
+            kind="loop_carried_accumulator",
+            owner_group=(0,),
+            execution_role="output_accumulator",
         )
         V.graph.name_to_buffer[tiled_sum.get_name()] = tiled_sum
         V.graph.name_to_buffer[accum.get_name()] = accum
@@ -6201,6 +6241,30 @@ class TestUnitTiledSumContributionCollapse(unittest.TestCase):
         self.assertIs(result, tiled_sum)
         self.assertIsInstance(tiled_sum.data, Reduction)
 
+    def test_persistent_accumulator_contract_is_source_dtype(self):
+        from dataclasses import replace
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _preflight_persistent_reduction,
+        )
+
+        tiled_sum, _, operations = self._fixture(Integer(1), insert_combine=False)
+        counted_plan = tiled_sum.loop_info.counted_loop_plan
+        tiled_sum.loop_info.counted_loop_plan = replace(
+            counted_plan,
+            carried_reduction=replace(
+                counted_plan.carried_reduction,
+                accumulation_dtype="fp32",
+            ),
+        )
+
+        with self.assertRaisesRegex(Unsupported, "source contribution dtype"):
+            _preflight_persistent_reduction(
+                tiled_sum,
+                operations,
+                pre_stickify=True,
+            )
+
     def test_multiple_read_contributions_stay_a_reduction(self):
         from torch._inductor.ir import Reduction
 
@@ -6217,6 +6281,39 @@ class TestUnitTiledSumContributionCollapse(unittest.TestCase):
 
         self.assertIs(result, tiled_sum)
         self.assertIsInstance(tiled_sum.data, Reduction)
+
+    def test_persistent_reduction_rejects_consumer_before_mutation(self):
+        from torch._inductor.ir import ComputedBuffer, FixedLayout, Pointwise
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _propagate_tiled_reduction_op,
+        )
+
+        tiled_sum, _, operations = self._fixture(Integer(1), insert_combine=False)
+        consumer = ComputedBuffer(
+            name="same_loop_consumer",
+            layout=FixedLayout(
+                torch.device("cpu"), torch.float32, [Integer(4)], [Integer(1)]
+            ),
+            data=Pointwise(
+                device=torch.device("cpu"),
+                dtype=torch.float32,
+                inner_fn=tiled_sum.make_loader(),
+                ranges=[Integer(4)],
+            ),
+        )
+        consumer.operation_name = consumer.get_name()
+        consumer.loop_info = tiled_sum.loop_info
+        V.graph.name_to_buffer[consumer.get_name()] = consumer
+        operations.append(consumer)
+        before_operations = list(operations)
+        before_names = set(V.graph.name_to_buffer)
+
+        with self.assertRaisesRegex(Unsupported, "must be terminal"):
+            _propagate_tiled_reduction_op(tiled_sum, operations, pre_stickify=True)
+
+        self.assertEqual(operations, before_operations)
+        self.assertEqual(set(V.graph.name_to_buffer), before_names)
 
     def test_later_retile_patch_rewrites_collapsed_pointwise_load(self):
         from torch._inductor.ir import Pointwise

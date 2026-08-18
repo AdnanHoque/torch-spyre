@@ -32,6 +32,7 @@ from torch_spyre._inductor.scratchpad.plan_solver import (
     LifetimeBoundBuffer,
 )
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
+from torch_spyre._inductor.scratchpad.exhaustive_search import ExhaustiveSearchSolver
 
 try:
     from ortools.sat.python import cp_model  # noqa: F401
@@ -707,6 +708,31 @@ class BaseLayoutSolverTests:
             AssertionError, "computed buffer that is never read"
         ):
             _assert_in_place_relationships([p, c])
+
+
+class TestExhaustiveLifetimeOverride(TestCase):
+    def test_leaf_solver_preserves_lifetime_end_override(self):
+        observed = []
+
+        def inner_factory(buffers, size):
+            observed.append({b.name: b.lifetime_end_override for b in buffers})
+            return GreedyLayoutSolver(buffers, size, alignment=1)
+
+        held = CoreDivisionBuffer(
+            "held",
+            64,
+            [0],
+            lifetime_end_override=4,
+            core_divisions=[CoreDivision()],
+        )
+        solver = ExhaustiveSearchSolver(
+            [held], 256, inner_factory=inner_factory, alignment=1
+        )
+
+        solver.plan_layout_and_core_divisions()
+
+        self.assertTrue(observed)
+        self.assertTrue(all(item["held"] == 4 for item in observed))
 
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

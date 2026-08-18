@@ -35,6 +35,7 @@ class CarriedReductionPlan:
     """One reduction state that remains at a fixed address across a loop."""
 
     kind: Literal["terminal_sum"] = "terminal_sum"
+    accumulation_dtype: Literal["source"] = "source"
     memory_kind: Literal["lx"] = "lx"
     fill_once: bool = True
     drain_once: bool = True
@@ -44,8 +45,9 @@ class CarriedReductionPlan:
 class LoopStoragePlan:
     """Typed storage intent consumed by scratchpad placement."""
 
-    kind: Literal["loop_carried_accumulator"]
+    kind: Literal["loop_invariant", "loop_carried_accumulator"]
     owner_group: tuple[int, ...]
+    execution_role: Literal["input_activation", "output_accumulator"]
     memory_kind: Literal["lx"] = "lx"
 
 
@@ -65,6 +67,7 @@ class CountedLoopPlan:
         "routing_weight",
     )
     transport_free: bool = True
+    body_memory_kind: Literal["lx"] = "lx"
     carried_reduction: CarriedReductionPlan = field(
         default_factory=CarriedReductionPlan
     )

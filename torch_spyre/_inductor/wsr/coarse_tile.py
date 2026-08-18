@@ -3206,6 +3206,13 @@ def _insert_one_read_copy(
             propagation=PropagationPlan(kind="loop_internal"),
         )
 
+    if sizing_op_info.counted_loop_plan is not None and loop_depth == 0:
+        copy_buf.loop_storage_plan = LoopStoragePlan(
+            kind="loop_invariant",
+            owner_group=sizing_op_info.loop_group_id,
+            execution_role="input_activation",
+        )
+
     V.graph.name_to_buffer[copy_name] = copy_buf
     operations.insert(insert_idx, copy_buf)
 
@@ -3730,6 +3737,90 @@ def _insert_combine_op(
     return combine_name
 
 
+def _is_unit_tiled_sum_contribution(
+    tiled_op: ComputedBuffer, *, pre_stickify: bool
+) -> bool:
+    """Whether a persistent sum can be materialized as one loop contribution."""
+
+    data = tiled_op.data
+    info = getattr(tiled_op, "loop_info", None)
+    propagation = getattr(info, "propagation", None)
+    reduction_plan = getattr(propagation, "reduction", None)
+    if not (
+        pre_stickify
+        and isinstance(data, Reduction)
+        and data.reduction_type == "sum"
+        and data.src_dtype == data.dtype
+        and getattr(propagation, "kind", None) == "reduction"
+        and reduction_plan is not None
+        and reduction_plan.reduction_type == "sum"
+        and not reduction_plan.is_nested
+        and len(info.loop_count) == 1
+        and isinstance(info.loop_count[0], (int, sympy.Integer))
+        and int(info.loop_count[0]) > 1
+        and info.loop_tiled_dims == [[]]
+        and info.loop_tiled_reduction_dims == [[0]]
+        and len(data.reduction_ranges) == 1
+        and isinstance(data.reduction_ranges[0], (int, sympy.Integer))
+        and int(data.reduction_ranges[0]) == 1
+    ):
+        return False
+
+    try:
+        reads = list(tiled_op.get_read_writes().reads)
+    except Exception:
+        return False
+    return len(reads) == 1 and isinstance(reads[0], MemoryDep)
+
+
+def _same_loop_consumers(
+    op: ComputedBuffer, operations: list[Operation]
+) -> list[ComputedBuffer]:
+    """Consumers that would observe a terminal result before the loop drains."""
+
+    outer_key = op.loop_info.loop_group_id[0]  # type: ignore[attr-defined]
+    return [
+        candidate
+        for candidate in operations
+        if isinstance(candidate, ComputedBuffer)
+        and candidate is not op
+        and _reads_buffer(candidate, op.get_name())
+        and _outer_loop_key(candidate) == outer_key
+    ]
+
+
+def _preflight_persistent_reduction(
+    op: ComputedBuffer,
+    operations: list[Operation],
+    *,
+    pre_stickify: bool,
+) -> None:
+    """Reject an unrealizable persistent reduction before mutating the graph."""
+
+    loop_info = op.loop_info  # type: ignore[attr-defined]
+    reduction_plan = loop_info.propagation.reduction
+    counted_plan = loop_info.counted_loop_plan
+    if counted_plan.carried_reduction.accumulation_dtype != "source":
+        raise Unsupported(
+            "persistent expert accumulator must use the source contribution dtype"
+        )
+    if (
+        counted_plan.carried_reduction.kind != "terminal_sum"
+        or reduction_plan.reduction_type != "sum"
+        or reduction_plan.is_nested
+        or not _is_unit_tiled_sum_contribution(op, pre_stickify=pre_stickify)
+    ):
+        raise Unsupported(
+            "persistent expert execution requires one flat, unit-tiled terminal sum"
+        )
+    consumers = _same_loop_consumers(op, operations)
+    if consumers:
+        raise Unsupported(
+            "coarse_tile: persistent reduction must be terminal; same-loop "
+            f"consumers would run before its drain ({[o.get_name() for o in consumers]})"
+        )
+
+
 def _collapse_unit_tiled_sum_contribution(
     tiled_op: ComputedBuffer,
     combine_name: str,
@@ -3755,33 +3846,7 @@ def _collapse_unit_tiled_sum_contribution(
 
     data = tiled_op.data
     info = getattr(tiled_op, "loop_info", None)
-    propagation = getattr(info, "propagation", None)
-    reduction_plan = getattr(propagation, "reduction", None)
-    if not (
-        pre_stickify
-        and isinstance(data, Reduction)
-        and data.reduction_type == "sum"
-        and data.src_dtype == data.dtype
-        and getattr(propagation, "kind", None) == "reduction"
-        and reduction_plan is not None
-        and reduction_plan.reduction_type == "sum"
-        and not reduction_plan.is_nested
-        and len(info.loop_count) == 1
-        and isinstance(info.loop_count[0], (int, sympy.Integer))
-        and int(info.loop_count[0]) > 1
-        and info.loop_tiled_dims == [[]]
-        and info.loop_tiled_reduction_dims == [[0]]
-        and len(data.reduction_ranges) == 1
-        and isinstance(data.reduction_ranges[0], (int, sympy.Integer))
-        and int(data.reduction_ranges[0]) == 1
-    ):
-        return tiled_op
-
-    try:
-        reads = list(tiled_op.get_read_writes().reads)
-    except Exception:
-        return tiled_op
-    if len(reads) != 1 or not isinstance(reads[0], MemoryDep):
+    if not _is_unit_tiled_sum_contribution(tiled_op, pre_stickify=pre_stickify):
         return tiled_op
 
     expected_index = operations.index(tiled_op) + 1
@@ -3800,6 +3865,7 @@ def _collapse_unit_tiled_sum_contribution(
         == LoopStoragePlan(
             kind="loop_carried_accumulator",
             owner_group=info.loop_group_id,
+            execution_role="output_accumulator",
         )
     ):
         return tiled_op
@@ -3968,9 +4034,7 @@ def _insert_flat_reduction_copy_op(
     group_indices = [
         i
         for i, op in enumerate(operations)
-        if isinstance(op, ComputedBuffer)
-        and getattr(getattr(op, "loop_info", None), "loop_group_id", (None,))[0]
-        == outer_key
+        if isinstance(op, ComputedBuffer) and _outer_loop_key(op) == outer_key
     ]
     assert group_indices, "flat reduction loop group must contain its tiled op"
     operations.insert(max(group_indices) + 1, copy_buf)
@@ -4035,12 +4099,8 @@ def _propagate_tiled_reduction_op(
     reduction_plan = loop_info.propagation.reduction
     counted_plan = loop_info.counted_loop_plan
     persistent = counted_plan is not None
-    if persistent and (
-        counted_plan.carried_reduction.kind != "terminal_sum"
-        or reduction_plan.reduction_type != "sum"
-        or reduction_plan.is_nested
-    ):
-        raise Unsupported("persistent expert execution requires one flat terminal sum")
+    if persistent:
+        _preflight_persistent_reduction(op, operations, pre_stickify=pre_stickify)
     identity = reduction_plan.identity
     op_size = tuple(op.layout.size)
 
@@ -4116,6 +4176,7 @@ def _propagate_tiled_reduction_op(
         accum_tile.loop_storage_plan = LoopStoragePlan(
             kind="loop_carried_accumulator",
             owner_group=loop_group_id,
+            execution_role="output_accumulator",
         )
         fill_target = accum_tile
         combine_target = accum_tile
@@ -4218,12 +4279,17 @@ def _propagate_tiled_reduction_op(
     # Insert combine op after the tiled reduction op (inside the loop).
     combine_name = _insert_combine_op(op, combine_target, operations, is_nested)
     if persistent:
+        original_op = op
         op = _collapse_unit_tiled_sum_contribution(
             op,
             combine_name,
             operations,
             pre_stickify=pre_stickify,
         )
+        if op is original_op:
+            raise RuntimeError(
+                "persistent reduction preflight and materialization disagreed"
+            )
 
     # For nested case, insert a copy op at the outer loop level that writes
     # accum_tile → accum_full, advancing accum_full across outer output tiles.
@@ -4289,11 +4355,7 @@ def _propagate_tiled_reduction_op(
         )
     ]
     if persistent and raw_inside_consumers:
-        raise Unsupported(
-            "coarse_tile: flat reduction with an LX accumulator requires a "
-            "terminal reduction; same-loop consumers would run before the "
-            f"post-loop drain ({[o.get_name() for o in raw_inside_consumers]})"
-        )
+        raise RuntimeError("persistent reduction gained a same-loop consumer")
     if persistent:
         inside_consumers = []
     elif is_nested:

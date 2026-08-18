@@ -1399,6 +1399,17 @@ class NativeSolverDifferentialTests(TestCase):
         self.assertEqual(cpp_plan.quality(), py_plan.quality(), tag)
         self.assertEqual(cpp_plan.count_allocated(), py_plan.count_allocated(), tag)
 
+    def test_lifetime_end_override_matches_python(self):
+        held = LifetimeBoundBuffer("held", 64, [0], lifetime_end_override=4)
+        later = LifetimeBoundBuffer("later", 64, [1, 3])
+        buffers = [held, later]
+
+        py_plan = PermutationBasedLayoutSolver(buffers, [0, 1], 10_000, 1)
+        cpp_plan = NativePermutationLayoutSolver(buffers, [0, 1], 10_000, 1)
+
+        self._assert_equal(py_plan, cpp_plan, "lifetime end override")
+        self.assertEqual(list(cpp_plan.addresses), [0, 64])
+
     def test_fast_path_reads_pokethrough_top_not_dead_parent(self):
         """The aggregate fast path's boundary case, pinned deterministically.
 
