@@ -5,3 +5,5 @@ test_suite_config:
       unlisted_test_mode: mandatory_success
     - path: ${TORCH_DEVICE_ROOT}/tests/inductor/test_moe_ffn_semantics.py
       unlisted_test_mode: mandatory_success
+    - path: ${TORCH_DEVICE_ROOT}/tests/inductor/test_persistent_expert_loop_planning.py
+      unlisted_test_mode: mandatory_success

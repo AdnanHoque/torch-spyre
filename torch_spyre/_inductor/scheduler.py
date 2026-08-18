@@ -129,7 +129,7 @@ def _loop_group_id(node: BaseSchedulerNode):
         if isinstance(snode, SchedulerNode) and snode.node is not None:
             loop_info = getattr(snode.node, "loop_info", None)
             if loop_info is not None:
-                return loop_info.loop_group_id
+                return loop_info.loop_group_id or None
     return None
 
 

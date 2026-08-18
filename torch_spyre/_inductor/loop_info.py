@@ -31,6 +31,34 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class CountedLoopPlan:
+    """Compiler-owned contract for one static persistent expert loop."""
+
+    kind: Literal["persistent_dense_expert"]
+    trip_count: int
+    loop_dim: str = "E"
+    row_dim: str = "T"
+    invariant_operands: tuple[str, ...] = ("x",)
+    streamed_operands: tuple[str, ...] = (
+        "gate_weight",
+        "up_weight",
+        "down_weight",
+        "routing_weight",
+    )
+    transport_free: bool = True
+
+
+@dataclass(frozen=True)
+class LoopOperandBindingRequirement:
+    """Planning-time contract for one named streamed loop operand."""
+
+    kind: Literal["sequential_affine"]
+    host_advance_per_level: tuple[sympy.Expr, ...]
+    operand_role: str | None = None
+    source_name: str | None = None
+
+
+@dataclass(frozen=True)
 class ReductionPlan:
     """Planned shape/identity/nesting data for a tiled-reduction op.
 
@@ -152,6 +180,14 @@ class ReadCopyEntry:
     consumer_op_names:
         Names of every op in the group that must have this dep's buffer
         name patched (via _NameSwapHandler) to load from copy_name instead.
+    planned_dep_levels:
+        Planning-time, pre-range-division per-level tiled-dim metadata for
+        this exact source read.  Captured on the entry because earlier
+        entries may rebuild/patch the sizing op before this one executes.
+        ``None`` preserves legacy behavior for hand-built plans that do not
+        carry per-read metadata.
+    binding_requirement:
+        Typed sequential-affine address requirement for this source read.
     """
 
     copy_name: str
@@ -159,6 +195,8 @@ class ReadCopyEntry:
     insert_before_op_name: str
     sizing_op_name: str
     consumer_op_names: tuple[str, ...]
+    planned_dep_levels: tuple[tuple[tuple[int, sympy.Expr], ...], ...] | None = None
+    binding_requirement: LoopOperandBindingRequirement | None = None
 
 
 @dataclass(frozen=True)
@@ -220,6 +258,10 @@ class CoarseTileInfo:
         (possibly later-rewritten) index expression happens in
         spyre_kernel.py at OpSpec/TensorArg construction time, when the
         index is guaranteed final.
+    loop_operand_bindings:
+        One typed address requirement per read. Populated only for a planned
+        persistent expert loop; ordinary coarse-tiled graphs pay no symbolic
+        advance-analysis cost and retain their existing behavior.
     output_tiled_dims:
         The analogous per-level ``(op_dim_index, extent)`` list for this
         op's own write dependency. Defaults to ``[]`` (no levels tiled).
@@ -270,6 +312,9 @@ class CoarseTileInfo:
     tiled_dims_per_read: list[list[list[tuple[int, sympy.Expr]]]] = field(
         default_factory=list
     )
+    loop_operand_bindings: list[LoopOperandBindingRequirement | None] = field(
+        default_factory=list
+    )
     output_tiled_dims: list[list[tuple[int, sympy.Expr]]] = field(default_factory=list)
     squeezed_advance_per_read: list[list[list[tuple[sympy.Expr, sympy.Expr]]]] = field(
         default_factory=list
@@ -277,6 +322,8 @@ class CoarseTileInfo:
     squeezed_advance_output: list[list[tuple[sympy.Expr, sympy.Expr]]] = field(
         default_factory=list
     )
+    counted_loop_plan: CountedLoopPlan | None = None
+    preheader_for_group: tuple[int, ...] | None = None
     propagation: "PropagationPlan | None" = None
 
 

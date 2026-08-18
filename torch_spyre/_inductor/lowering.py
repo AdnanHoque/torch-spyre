@@ -74,6 +74,30 @@ def _current_fx_custom_meta() -> dict[str, Any]:
     return custom if isinstance(custom, dict) else {}
 
 
+def _in_persistent_expert_scope(custom_meta: dict[str, Any]) -> bool:
+    return any(
+        isinstance(value, dict)
+        and value.get("expert_execution") == "persistent_dense_expert"
+        for value in custom_meta.values()
+    )
+
+
+def _persistent_streamed_operand_role(custom_meta: dict[str, Any]) -> str | None:
+    roles = {
+        value["streamed_operand_role"]
+        for value in custom_meta.values()
+        if isinstance(value, dict) and "streamed_operand_role" in value
+    }
+    if not roles:
+        return None
+    if len(roles) != 1:
+        raise Unsupported(f"ambiguous persistent streamed operand roles: {roles}")
+    role = next(iter(roles))
+    if role not in {"gate_weight", "up_weight", "down_weight", "routing_weight"}:
+        raise Unsupported(f"unknown persistent streamed operand role {role!r}")
+    return role
+
+
 def register_spyre_lowering(
     op,
     name=None,
@@ -531,6 +555,8 @@ def lower_bmm(x, y):
         op_info[SHARED_WEIGHT_UNIT_BMM_INFO_KEY] = custom_meta[
             SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY
         ]
+    if _in_persistent_expert_scope(custom_meta):
+        op_info[PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY] = True
 
     if reduction_numel == 1:
         # Reduction degenerates to a pointwise mul
@@ -613,6 +639,131 @@ def lower_expert_shared_lhs_mm(x, expert_weights):
             "persistent_expert_shared_lhs": {"expert_dim": 0},
             PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY: True,
         },
+    )
+    result.realize()
+    return result
+
+
+@register_spyre_lowering(torch.ops.spyre.expert_shared_lhs_mm_prepacked.default)
+def lower_expert_shared_lhs_mm_prepacked(x, expert_weights):
+    """Lower ``[T,K] @ [K,E,N]`` without expanding the shared LHS."""
+
+    x.realize()
+    expert_weights.realize()
+    x_size = x.get_size()
+    weight_size = expert_weights.get_size()
+    if len(x_size) != 2 or len(weight_size) != 3 or x_size[1] != weight_size[0]:
+        raise Unsupported(
+            "expert_shared_lhs_mm_prepacked requires [T,K] and [K,E,N], "
+            f"got {x_size} and {weight_size}"
+        )
+    if x.get_dtype() != expert_weights.get_dtype():
+        raise Unsupported("x and expert_weights must have the same dtype")
+    role = _persistent_streamed_operand_role(_current_fx_custom_meta())
+    if role not in {"gate_weight", "up_weight"}:
+        raise Unsupported(
+            "prepacked shared-LHS projection requires a gate/up operand role"
+        )
+    x_loader = x.make_loader()
+    weight_loader = expert_weights.make_loader()
+
+    def inner_fn(index, reduction_index):
+        expert, row, column = index
+        (reduction,) = reduction_index
+        return (
+            x_loader([row, reduction]),
+            weight_loader([reduction, expert, column]),
+        )
+
+    result = SpyreReduction.create(
+        reduction_type=BATCH_MATMUL_OP,
+        input_node=[x, expert_weights],
+        device=x.get_device(),
+        dst_dtype=x.get_dtype(),
+        src_dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=[weight_size[1], x_size[0], weight_size[2]],
+        reduction_ranges=[x_size[1]],
+        op_info={
+            "persistent_expert_shared_lhs": {"expert_dim": 0},
+            PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY: role,
+        },
+    )
+    result.realize()
+    return result
+
+
+@register_spyre_lowering(torch.ops.spyre.expert_mm_prepacked.default)
+def lower_expert_mm_prepacked(x, expert_weights):
+    """Lower ``[E,T,K] @ [K,E,N]`` with a named streamed weight bank."""
+
+    x.realize()
+    expert_weights.realize()
+    x_size = x.get_size()
+    weight_size = expert_weights.get_size()
+    if (
+        len(x_size) != 3
+        or len(weight_size) != 3
+        or x_size[0] != weight_size[1]
+        or x_size[2] != weight_size[0]
+    ):
+        raise Unsupported(
+            "expert_mm_prepacked requires [E,T,K] and [K,E,N], "
+            f"got {x_size} and {weight_size}"
+        )
+    if x.get_dtype() != expert_weights.get_dtype():
+        raise Unsupported("x and expert_weights must have the same dtype")
+    role = _persistent_streamed_operand_role(_current_fx_custom_meta())
+    if role != "down_weight":
+        raise Unsupported("prepacked expert projection requires down_weight role")
+    x_loader = x.make_loader()
+    weight_loader = expert_weights.make_loader()
+
+    def inner_fn(index, reduction_index):
+        expert, row, column = index
+        (reduction,) = reduction_index
+        return (
+            x_loader([expert, row, reduction]),
+            weight_loader([reduction, expert, column]),
+        )
+
+    result = SpyreReduction.create(
+        reduction_type=BATCH_MATMUL_OP,
+        input_node=[x, expert_weights],
+        device=x.get_device(),
+        dst_dtype=x.get_dtype(),
+        src_dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=[x_size[0], x_size[1], weight_size[2]],
+        reduction_ranges=[x_size[2]],
+        op_info={PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY: role},
+    )
+    result.realize()
+    return result
+
+
+@register_spyre_lowering(torch.ops.spyre.expert_route_prepacked.default)
+def lower_expert_route_prepacked(routing_weight):
+    """Expose one expert-major routing plane as a named streamed operand."""
+
+    routing_weight.realize()
+    size = routing_weight.get_size()
+    if len(size) != 3 or size[2] != 1:
+        raise Unsupported(f"expert_route_prepacked requires [E,T,1], got {size}")
+    role = _persistent_streamed_operand_role(_current_fx_custom_meta())
+    if role != "routing_weight":
+        raise Unsupported("prepacked expert routing requires routing_weight role")
+    loader = routing_weight.make_loader()
+    result = Pointwise.create(
+        device=routing_weight.get_device(),
+        dtype=routing_weight.get_dtype(),
+        inner_fn=lambda index: loader(index),
+        ranges=size,
+        origin_node=routing_weight.get_origin_node(),
+        traceback=routing_weight.get_traceback(),
+    )
+    result.data.data._post_init_setattr(
+        "op_info", {PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY: role}
     )
     result.realize()
     return result

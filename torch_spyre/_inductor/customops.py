@@ -22,7 +22,10 @@ from torch_spyre.ops.fallbacks import warn_fallback
 from .errors import Unsupported
 from .expert_execution.custom_op import (  # noqa: F401
     dense_expert_persistent_ffn,
+    expert_mm_prepacked,
+    expert_route_prepacked,
     expert_shared_lhs_mm,
+    expert_shared_lhs_mm_prepacked,
     moe_ffn,
 )
 

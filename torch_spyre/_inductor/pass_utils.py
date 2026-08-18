@@ -836,9 +836,16 @@ def find_matmul_generated_var(
     generated_vars = (
         y_dep.index.free_symbols & out_dep.index.free_symbols
     ) - x_dep.index.free_symbols
+    # A counted shared-LHS expert matmul retains its statically-unit expert
+    # symbol after E is tiled to one.  It is not a physical generated axis.
+    if len(generated_vars) > 1:
+        generated_vars = {
+            var for var in generated_vars if sympy.sympify(out_dep.ranges[var]) != 1
+        }
     if len(generated_vars) != 1:
         raise Unsupported(
-            f"expected exactly 1 generated variable, got {generated_vars}"
+            f"expected exactly 1 generated variable, got {generated_vars}; "
+            f"output ranges={out_dep.ranges}"
         )
     return next(iter(generated_vars))
 

@@ -14,6 +14,7 @@
 
 
 import dataclasses
+import hashlib
 from typing import Any
 
 import regex as re
@@ -91,6 +92,22 @@ def spyre_hint(**kwargs: Any):
     else:
         _id = 0
     return torch.fx.traceback.annotate({f"_hint_{_id}": kwargs})
+
+
+def compiler_hint(scope_id: str, **kwargs: Any):
+    """Attach compiler-owned metadata with a stable region identity.
+
+    Unlike :func:`spyre_hint`, this is not a user scheduling request and does
+    not consume Dynamo's per-trace hint counter.  Every operation emitted for
+    one selected compiler plan uses the same deterministic ID, while separate
+    semantic MoE nodes remain separate coarse-tile regions.
+    """
+
+    digest = hashlib.sha256(scope_id.encode("utf-8")).digest()
+    # Reserve the high bit of the positive 63-bit space so compiler IDs cannot
+    # collide with the small monotonically increasing user-hint IDs.
+    hint_id = (int.from_bytes(digest[:8], "big") & ((1 << 62) - 1)) | (1 << 62)
+    return torch.fx.traceback.annotate({f"_hint_{hint_id}": kwargs})
 
 
 def get_op_hints(op: Operation) -> dict[int, dict[str, Any]]:

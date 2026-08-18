@@ -102,9 +102,12 @@ from torch_spyre._inductor.scheduler import (
     build_loop_scheduler_nodes,
 )
 from torch_spyre._inductor.spyre_kernel import (
+    LoopOperandBinding,
+    SpyreKernel,
     _codegen_op_spec_list,
     _iter_op_specs,
     _preserve_shared_weight_unit_bmm_dim,
+    _tensor_args_advance_by_symbol,
 )
 from torch_spyre._inductor.temp_passes import (
     _mark_static_unit_batch_bmm,
@@ -117,6 +120,99 @@ from torch_spyre._inductor.wsr.tile import (
 )
 
 _FP16 = DataFormats.SEN169_FP16
+
+
+class TestUnitDimArgumentAdvanceSymbols(unittest.TestCase):
+    """A squeezed expert tile must still advance its runtime operand."""
+
+    @staticmethod
+    def _arg(expr):
+        return TensorArg(
+            is_input=True,
+            arg_index=0,
+            device_dtype=_FP16,
+            device_size=[1, 64],
+            device_coordinates=[Integer(0), Integer(0)],
+            allocation={"hbm": 0},
+            device_tile_advance_expr=expr,
+        )
+
+    def test_detects_plain_and_floor_wrapped_symbols(self):
+        level = Symbol("_tile_adv_copy_lvl0")
+        other = Symbol("_tile_adv_copy_lvl1")
+
+        self.assertTrue(_tensor_args_advance_by_symbol([self._arg(64 * level)], level))
+        self.assertTrue(
+            _tensor_args_advance_by_symbol([self._arg(floor(64 * level))], level)
+        )
+        self.assertFalse(_tensor_args_advance_by_symbol([self._arg(64 * other)], level))
+        self.assertFalse(_tensor_args_advance_by_symbol([self._arg(None)], level))
+
+    def test_binding_rejects_unknown_addressing_kind(self):
+        with self.assertRaisesRegex(Unsupported, "unknown loop operand binding"):
+            LoopOperandBinding("indexed", Integer(0))
+
+    def test_create_op_spec_serializes_arg_only_level_symbol(self):
+        level = Symbol("_tile_adv_copy_lvl0")
+        ir_node = SimpleNamespace(
+            loop_info=CoarseTileInfo(
+                loop_group_id=(0,),
+                loop_count=[Integer(2)],
+                loop_tiled_dims=[],
+                loop_tiled_reduction_dims=[],
+            ),
+            get_operation_name=lambda: "identity",
+        )
+        kernel = SpyreKernel()
+        kernel.current_node = SimpleNamespace(node=ir_node)
+        kernel._tile_advance_symbols = {0: level}
+
+        with (
+            patch(
+                "torch_spyre._inductor.spyre_kernel.iteration_space",
+                return_value={},
+            ),
+            patch(
+                "torch_spyre._inductor.spyre_kernel.build_debug_handle",
+                return_value=None,
+            ),
+        ):
+            op = kernel.create_op_spec(
+                "identity", False, [self._arg(floor(64 * level))], {}
+            )
+
+        self.assertEqual(op.tiled_symbols, [[level]])
+        self.assertEqual(op.tiled_symbol_trip_counts, {level: 2})
+
+    def test_create_op_spec_keeps_invariant_level_empty(self):
+        level = Symbol("_tile_adv_copy_lvl0")
+        ir_node = SimpleNamespace(
+            loop_info=CoarseTileInfo(
+                loop_group_id=(0,),
+                loop_count=[Integer(2)],
+                loop_tiled_dims=[],
+                loop_tiled_reduction_dims=[],
+            ),
+            get_operation_name=lambda: "identity",
+        )
+        kernel = SpyreKernel()
+        kernel.current_node = SimpleNamespace(node=ir_node)
+        kernel._tile_advance_symbols = {0: level}
+
+        with (
+            patch(
+                "torch_spyre._inductor.spyre_kernel.iteration_space",
+                return_value={},
+            ),
+            patch(
+                "torch_spyre._inductor.spyre_kernel.build_debug_handle",
+                return_value=None,
+            ),
+        ):
+            op = kernel.create_op_spec("identity", False, [self._arg(None)], {})
+
+        self.assertEqual(op.tiled_symbols, [[]])
+        self.assertEqual(op.tiled_symbol_trip_counts, {})
 
 
 # ===========================================================================

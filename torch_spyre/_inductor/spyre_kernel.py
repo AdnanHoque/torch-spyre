@@ -52,6 +52,7 @@ from .scratchpad.lx_relayout import work_division_from_view
 from .pass_utils import (
     concretize_expr,
     concretize_index,
+    coeff_through_floor,
     compute_symbolic_bounds,
     finite_upper_or_none,
     apply_splits_from_index_coeff,
@@ -75,6 +76,28 @@ from torch_spyre._inductor.provenance import build_debug_handle
 import logging
 
 logger = get_inductor_logger("spyre_kernel")
+
+
+@dataclass(frozen=True)
+class LoopOperandBinding:
+    """Resolved per-iteration address change for one counted-loop operand."""
+
+    kind: str
+    device_element_offset: sympy.Expr
+
+    def __post_init__(self) -> None:
+        if self.kind != "sequential_affine":
+            raise Unsupported(f"unknown loop operand binding kind {self.kind!r}")
+
+
+def _tensor_args_advance_by_symbol(
+    args: Sequence["TensorArg"], symbol: sympy.Symbol
+) -> bool:
+    return any(
+        arg.device_tile_advance_expr is not None
+        and coeff_through_floor(arg.device_tile_advance_expr, symbol) != 0
+        for arg in args
+    )
 
 
 class RValue(ABC):
@@ -590,7 +613,7 @@ class SpyreKernel(Kernel[CSEVariable]):
         return self._tile_advance_symbols[level_idx]
 
     @staticmethod
-    def _host_dim_to_index_symbol(ir_node: Any, dim: int) -> sympy.Symbol:
+    def _host_dim_to_index_symbol(ir_node: Any, dim: int) -> sympy.Symbol | None:
         """Map a host-range positional dim index to its dep.index d{i} symbol.
 
         CoarseTileInfo.tiled_dims_per_read/output_tiled_dims store *host-range*
@@ -637,9 +660,13 @@ class SpyreKernel(Kernel[CSEVariable]):
                             break
                         red_it_idx += 1
         if mapped is None:
-            # Fallback: identity mapping (no unit dims to skip, or ir_node
-            # lacks a `data` attribute -- e.g. in unit tests using bare
-            # fixtures).
+            if hasattr(ir_node, "data") and hasattr(ir_node.data, "ranges"):
+                # A known unit output/reduction dimension has no iteration
+                # symbol. Returning d{dim} here can alias the next surviving
+                # dimension after squeeze and manufacture a false binding
+                # conflict.
+                return None
+            # Bare unit-test fixtures have no range information to squeeze.
             mapped = dim
         return sympy_index_symbol(f"d{mapped}")
 
@@ -677,6 +704,7 @@ class SpyreKernel(Kernel[CSEVariable]):
 
         op_name = ir_node.get_operation_name()
         squeezed_advance_per_level: list[list[tuple[sympy.Expr, sympy.Expr]]] = []
+        preserved_per_level: tuple[sympy.Expr, ...] = ()
 
         if is_input:
             read_deps = [
@@ -705,6 +733,16 @@ class SpyreKernel(Kernel[CSEVariable]):
             )
             if squeezed_advance_per_read and dep_idx < len(squeezed_advance_per_read):
                 squeezed_advance_per_level = squeezed_advance_per_read[dep_idx]
+            binding = (
+                loop_info.loop_operand_bindings[dep_idx]
+                if dep_idx < len(loop_info.loop_operand_bindings)
+                else None
+            )
+            preserved_per_level = (
+                binding.host_advance_per_level if binding is not None else ()
+            )
+            if binding is not None and binding.kind != "sequential_affine":
+                raise Unsupported(f"unknown loop operand binding kind {binding.kind!r}")
         else:
             write_deps = [
                 dep
@@ -719,32 +757,77 @@ class SpyreKernel(Kernel[CSEVariable]):
                 getattr(loop_info, "squeezed_advance_output", None) or []
             )
 
-        if not per_level_dims and not any(squeezed_advance_per_level):
+        if (
+            not per_level_dims
+            and not any(squeezed_advance_per_level)
+            and not any(preserved_per_level)
+        ):
             return None
 
         device_size = tensor.layout.device_layout.device_size
         stride_map = tensor.layout.device_layout.stride_map
 
         total_device_expr: "sympy.Expr | None" = None
-        n_levels = max(len(per_level_dims), len(squeezed_advance_per_level))
+        n_levels = max(
+            len(per_level_dims),
+            len(squeezed_advance_per_level),
+            len(preserved_per_level),
+        )
         for level_idx in range(n_levels):
-            dim_extent_pairs = (
+            planned_dim_extent_pairs = (
                 per_level_dims[level_idx] if level_idx < len(per_level_dims) else []
             )
+            # Planning records host dimensions before division.  Once a
+            # dimension is divided to one, Inductor may squeeze its symbol
+            # from the final dependency.  In that case the explicit binding,
+            # not the stale planned dimension, owns the address advance.
+            dim_extent_pairs = []
+            for dim, extent in planned_dim_extent_pairs:
+                index_symbol = self._host_dim_to_index_symbol(ir_node, dim)
+                if index_symbol is not None and index_symbol in dep.index.free_symbols:
+                    dim_extent_pairs.append((dim, extent))
             squeezed_pairs = (
                 squeezed_advance_per_level[level_idx]
                 if level_idx < len(squeezed_advance_per_level)
                 else []
             )
-            if not dim_extent_pairs and not squeezed_pairs:
+            # A typed binding is authoritative when division squeezed every
+            # tiled dim from this read.  Otherwise retain the ordinary
+            # per-dim and squeezed-dim machinery, which may represent a mix
+            # of surviving and squeezed dimensions at the same level.
+            requested_preserved_advance = (
+                preserved_per_level[level_idx]
+                if level_idx < len(preserved_per_level)
+                and preserved_per_level[level_idx] != 0
+                else sympy.Integer(0)
+            )
+            if dim_extent_pairs and requested_preserved_advance != 0:
+                raise Unsupported(
+                    "loop operand binding conflicts with surviving tiled dimensions "
+                    f"for {op_name} at loop level {level_idx}: "
+                    f"dims={dim_extent_pairs}, dep_index={dep.index}"
+                )
+            preserved_host_advance = (
+                requested_preserved_advance
+                if not dim_extent_pairs
+                else sympy.Integer(0)
+            )
+            if preserved_host_advance != 0:
+                squeezed_pairs = []
+            if (
+                not dim_extent_pairs
+                and not squeezed_pairs
+                and preserved_host_advance == 0
+            ):
                 continue
             level_symbol = self._get_or_mint_level_symbol(level_idx, op_name)
             host_expr = sympy.S.Zero
             if dim_extent_pairs:
-                tiled_dim_extents = {
-                    self._host_dim_to_index_symbol(ir_node, d): extent * level_symbol
-                    for d, extent in dim_extent_pairs
-                }
+                tiled_dim_extents = {}
+                for d, extent in dim_extent_pairs:
+                    index_symbol = self._host_dim_to_index_symbol(ir_node, d)
+                    assert index_symbol is not None
+                    tiled_dim_extents[index_symbol] = extent * level_symbol
                 subs = dict(tiled_dim_extents)
                 subs.update(
                     {
@@ -756,6 +839,8 @@ class SpyreKernel(Kernel[CSEVariable]):
                 host_expr += dep.index.subs(subs)
             for host_stride, extent in squeezed_pairs:
                 host_expr += level_symbol * extent * host_stride
+            if preserved_host_advance != 0:
+                host_expr += preserved_host_advance * level_symbol
             device_expr = tiling_expr_to_device_expr(device_size, stride_map, host_expr)
             total_device_expr = (
                 device_expr
@@ -764,6 +849,14 @@ class SpyreKernel(Kernel[CSEVariable]):
             )
 
         return total_device_expr
+
+    def _resolve_loop_operand_binding(
+        self, tensor: TensorAccess, is_input: bool, name: str
+    ) -> "LoopOperandBinding | None":
+        device_offset = self._general_tile_advance(tensor, is_input, name)
+        if device_offset is None:
+            return None
+        return LoopOperandBinding("sequential_affine", device_offset)
 
     def create_tensor_arg(
         self,
@@ -808,7 +901,9 @@ class SpyreKernel(Kernel[CSEVariable]):
             device_coords,
             tuple(it_space),
         )
-        device_tile_advance_expr = self._general_tile_advance(tensor, is_input, name)
+        loop_operand_binding = self._resolve_loop_operand_binding(
+            tensor, is_input, name
+        )
         tensor_arg = TensorArg(
             is_input,
             -1,
@@ -818,7 +913,11 @@ class SpyreKernel(Kernel[CSEVariable]):
             tensor.layout.allocation,
             element_arrangement=tensor.layout.device_layout.element_arrangement,
             name=opspec_name,
-            device_tile_advance_expr=device_tile_advance_expr,
+            device_tile_advance_expr=(
+                loop_operand_binding.device_element_offset
+                if loop_operand_binding is not None
+                else None
+            ),
             work_division=work_division,
         )
         if (
@@ -897,13 +996,16 @@ class SpyreKernel(Kernel[CSEVariable]):
         # nesting level), so max() is just a safety net; in practice both
         # lists have the same length and the per-level loop below never
         # silently drops an entry from the shorter one.
-        n_levels = max(len(raw_tiled_dims), len(raw_tiled_red_dims))
+        loop_count = li.loop_count if li is not None else []
+        n_levels = max(
+            len(raw_tiled_dims),
+            len(raw_tiled_red_dims),
+            len(loop_count),
+        )
 
         tiled_symbol_trip_counts: dict = {}
         tiled_syms: list[list] = []
         if n_levels > 0:
-            loop_count = li.loop_count if li is not None else []
-
             op_name = ir_node.get_operation_name()
             tiled_syms_per_level_outermost: list[list] = []
             for lvl in range(n_levels):
@@ -911,10 +1013,24 @@ class SpyreKernel(Kernel[CSEVariable]):
                 has_any_tiled_dim = (
                     lvl < len(raw_tiled_dims) and raw_tiled_dims[lvl]
                 ) or (lvl < len(raw_tiled_red_dims) and raw_tiled_red_dims[lvl])
-                if has_any_tiled_dim:
-                    level_syms.append(self._get_or_mint_level_symbol(lvl, op_name))
+                minted_level_symbol = self._tile_advance_symbols.get(lvl)
+                has_arg_advance = (
+                    minted_level_symbol is not None
+                    and _tensor_args_advance_by_symbol(args, minted_level_symbol)
+                )
+                if has_any_tiled_dim or has_arg_advance:
+                    level_syms.append(
+                        minted_level_symbol
+                        if minted_level_symbol is not None
+                        else self._get_or_mint_level_symbol(lvl, op_name)
+                    )
                 tiled_syms_per_level_outermost.append(level_syms)
-                if lvl < len(loop_count):
+                if level_syms:
+                    if lvl >= len(loop_count):
+                        raise Unsupported(
+                            "coarse-tile symbol has no enclosing loop trip count: "
+                            f"op={op_name!r}, level={lvl}, symbols={level_syms}"
+                        )
                     trip_count = int(loop_count[lvl])
                     for sym in level_syms:
                         tiled_symbol_trip_counts[sym] = trip_count

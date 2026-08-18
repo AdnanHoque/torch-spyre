@@ -39,6 +39,7 @@ from .logging_utils import get_inductor_logger
 
 from . import customops  # noqa: F401
 from . import spyre_hint
+from .propagate_hints import compiler_hint
 from torch_spyre._C import DataFormats, get_device_dtype, get_elem_in_stick
 import torch_spyre._inductor.customops  # noqa: F401
 
@@ -155,27 +156,67 @@ def decompose_dense_expert_persistent_ffn(
     compiler, which turns it into one counted device loop around a single
     gate/up/down body.
     """
-    del top_k, region_id  # Routing weights already encode top-k selection.
+    del top_k  # Routing weights already encode top-k selection.
     experts = gate_weight.shape[0]
-    with spyre_hint(num_tiles_per_dim={"E": experts}):
-        with spyre_hint(named_dims=["E", "T", "F"]):
-            gate = torch.ops.spyre.expert_shared_lhs_mm(x, gate_weight)
-            up = torch.ops.spyre.expert_shared_lhs_mm(x, up_weight)
-            if activation == "gelu_tanh":
-                activated_gate = torch.nn.functional.gelu(gate, approximate="tanh")
-            elif activation == "silu":
-                activated_gate = torch.nn.functional.silu(gate)
-            else:
-                raise Unsupported(f"unsupported MoE activation {activation!r}")
-            hidden = activated_gate * up
-        with spyre_hint(named_dims=["E", "T", "H"]):
-            down = torch.bmm(hidden, down_weight)
-        with spyre_hint(named_dims=["E", "T", "route"]):
-            route_by_expert = routing_weight.permute(1, 0, 2)
-        with spyre_hint(named_dims=["E", "T", "H"]):
-            weighted_down = down * route_by_expert
-        with spyre_hint(named_dims=["T", "H"], expected_reduction_dims=["E"]):
-            return torch.sum(weighted_down, dim=0)
+    loop = {
+        "num_tiles_per_dim": {"E": experts},
+        "expert_execution": "persistent_dense_expert",
+    }
+    # The semantic weights are logical [E,K,N] views backed by packed
+    # [K,E,N] storage.  Expose that physical layout to the internal lowerings
+    # without changing the model-facing contract.
+    gate_packed = gate_weight.permute(1, 0, 2)
+    up_packed = up_weight.permute(1, 0, 2)
+    down_packed = down_weight.permute(1, 0, 2)
+
+    with compiler_hint(
+        region_id,
+        **loop,
+        named_dims=["E", "T", "F"],
+        streamed_operand_role="gate_weight",
+    ):
+        gate = torch.ops.spyre.expert_shared_lhs_mm_prepacked(x, gate_packed)
+    with compiler_hint(
+        region_id,
+        **loop,
+        named_dims=["E", "T", "F"],
+        streamed_operand_role="up_weight",
+    ):
+        up = torch.ops.spyre.expert_shared_lhs_mm_prepacked(x, up_packed)
+    with compiler_hint(region_id, **loop, named_dims=["E", "T", "F"]):
+        if activation == "gelu_tanh":
+            activated_gate = torch.nn.functional.gelu(gate, approximate="tanh")
+        elif activation == "silu":
+            activated_gate = torch.nn.functional.silu(gate)
+        else:
+            raise Unsupported(f"unsupported MoE activation {activation!r}")
+    with compiler_hint(region_id, **loop, named_dims=["E", "T", "F"]):
+        hidden = activated_gate * up
+    with compiler_hint(
+        region_id,
+        **loop,
+        named_dims=["E", "T", "H"],
+        streamed_operand_role="down_weight",
+    ):
+        down = torch.ops.spyre.expert_mm_prepacked(hidden, down_packed)
+    with compiler_hint(
+        region_id,
+        **loop,
+        named_dims=["E", "T", "route"],
+        streamed_operand_role="routing_weight",
+    ):
+        route_by_expert = torch.ops.spyre.expert_route_prepacked(
+            routing_weight.permute(1, 0, 2)
+        )
+    with compiler_hint(region_id, **loop, named_dims=["E", "T", "H"]):
+        weighted_down = down * route_by_expert
+    with compiler_hint(
+        region_id,
+        **loop,
+        expected_named_dims=["T", "H"],
+        expected_reduction_dims=["E"],
+    ):
+        return torch.sum(weighted_down, dim=0)
 
 
 def get_spyre_decomp_table() -> dict[Any, Callable[..., Any]]:
