@@ -5944,6 +5944,327 @@ def _make_tiled_reduction_op(
     return op
 
 
+class TestUnitTiledSumContributionCollapse(unittest.TestCase):
+    """The expert loop, not a unit local DDL reduction, owns the E sum."""
+
+    def setUp(self):
+        gm = fx.symbolic_trace(lambda: None)
+        self._graph_ctx = V.set_graph_handler(GraphLowering(gm))
+        self._graph_ctx.__enter__()
+
+    def tearDown(self):
+        self._graph_ctx.__exit__(None, None, None)
+
+    def _fixture(
+        self,
+        reduction_extent,
+        *,
+        insert_combine,
+        src_dtype=torch.float32,
+        num_inputs=1,
+    ):
+        from torch._inductor.ir import (
+            ComputedBuffer,
+            FixedLayout,
+            InputBuffer,
+            Pointwise,
+            Reduction,
+            ReductionHint,
+            StorageBox,
+            TensorBox,
+        )
+
+        from torch_spyre._inductor.loop_info import (
+            CountedLoopPlan,
+            LoopStoragePlan,
+            PropagationPlan,
+            ReductionPlan,
+        )
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _divide_reduction_ranges,
+            _insert_combine_op,
+        )
+
+        full_reduction_extent = Integer(reduction_extent) * 2
+        input_boxes = []
+        for input_index in range(num_inputs):
+            inp = InputBuffer(
+                name=f"in{input_index}_buf6",
+                layout=FixedLayout(
+                    torch.device("cpu"),
+                    src_dtype,
+                    [Integer(4), full_reduction_extent],
+                    [full_reduction_extent, Integer(1)],
+                ),
+            )
+            V.graph.name_to_buffer[inp.get_name()] = inp
+            input_boxes.append(TensorBox(StorageBox(inp)))
+
+        def reduction_inner_fn(index, reduction_index):
+            values = [
+                input_box.make_loader()([index[0], reduction_index[0]])
+                for input_box in input_boxes
+            ]
+            result = values[0]
+            for value in values[1:]:
+                result = result + value
+            return result
+
+        # Construct Reduction directly.  Reduction.create() deliberately
+        # canonicalizes unit (and other sufficiently small) reductions to a
+        # Pointwise before coarse tiling, whereas the real failure starts as
+        # the full expert-axis Reduction and becomes extent one only after
+        # _divide_reduction_ranges mutates it in place.
+        reduction = Reduction(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            src_dtype=src_dtype,
+            inner_fn=reduction_inner_fn,
+            ranges=[Integer(4)],
+            reduction_ranges=[full_reduction_extent],
+            reduction_type="sum",
+            reduction_hint=ReductionHint.DEFAULT,
+        )
+        tiled_sum = ComputedBuffer(
+            name="buf6",
+            layout=FixedLayout(
+                torch.device("cpu"), torch.float32, [Integer(4)], [Integer(1)]
+            ),
+            data=reduction,
+        )
+        tiled_sum.operation_name = "buf6"
+        tiled_sum.origins = OrderedSet()
+        V.graph.name_to_buffer[tiled_sum.get_name()] = tiled_sum
+        # Match the real pass boundary: lowering first creates a genuine
+        # extent-E Reduction, then coarse tiling divides its reduction range
+        # to the per-expert extent.  Constructing Reduction.create directly
+        # with extent one would let upstream Inductor canonicalize it to a
+        # Pointwise before this pass ever sees it.
+        _divide_reduction_ranges(tiled_sum, Integer(2), [0])
+        tiled_sum.loop_info = CoarseTileInfo(
+            loop_group_id=(0,),
+            loop_count=[Integer(2)],
+            loop_tiled_dims=[[]],
+            loop_tiled_reduction_dims=[[0]],
+            tiled_dims_per_read=[[[(1, Integer(reduction_extent))]]],
+            output_tiled_dims=[[]],
+            counted_loop_plan=CountedLoopPlan(
+                kind="persistent_dense_expert", trip_count=2
+            ),
+            propagation=PropagationPlan(
+                kind="reduction",
+                reduction=ReductionPlan(
+                    reduction_type="sum",
+                    identity=0,
+                    is_nested=False,
+                    full_output_ranges=[Integer(4)],
+                    per_tile_ranges=[Integer(4)],
+                    outer_fill_loop_info=None,
+                    full_output_strides=(Integer(1),),
+                    per_tile_strides=(Integer(1),),
+                ),
+                is_graph_output=True,
+            ),
+        )
+
+        accum_data = Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=lambda index: sympy.Integer(0),
+            ranges=[Integer(4)],
+        )
+        accum = ComputedBuffer(
+            name="accum",
+            layout=FixedLayout(
+                torch.device("cpu"), torch.float32, [Integer(4)], [Integer(1)]
+            ),
+            data=accum_data,
+        )
+        accum.operation_name = "accum"
+        accum.loop_storage_plan = LoopStoragePlan(
+            kind="loop_carried_accumulator", owner_group=(0,)
+        )
+        V.graph.name_to_buffer[tiled_sum.get_name()] = tiled_sum
+        V.graph.name_to_buffer[accum.get_name()] = accum
+
+        operations = [tiled_sum]
+        combine_name = f"coarse_tile_combine_{tiled_sum.get_name()}"
+        if insert_combine:
+            combine_name = _insert_combine_op(
+                tiled_sum, accum, operations, is_nested=False
+            )
+        return tiled_sum, combine_name, operations
+
+    def test_static_unit_flat_sum_becomes_pointwise_contribution(self):
+        from torch._inductor.ir import Pointwise, Reduction
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _collapse_unit_tiled_sum_contribution,
+        )
+
+        tiled_sum, combine_name, operations = self._fixture(
+            Integer(1), insert_combine=True
+        )
+        self.assertIsInstance(tiled_sum.data, Reduction)
+
+        contribution = _collapse_unit_tiled_sum_contribution(
+            tiled_sum, combine_name, operations, pre_stickify=True
+        )
+
+        self.assertIsNot(contribution, tiled_sum)
+        self.assertIs(operations[0], contribution)
+        self.assertIs(V.graph.name_to_buffer["buf6"], contribution)
+        self.assertIsInstance(contribution.data, Pointwise)
+        self.assertEqual(contribution.get_name(), "buf6")
+        self.assertIs(contribution.loop_info, tiled_sum.loop_info)
+        self.assertEqual(list(contribution.data.ranges), [Integer(4)])
+
+        class _Recorder(list):
+            def load(self, name, index):
+                self.append((name, sympy.expand(index)))
+                return sympy.Symbol("value")
+
+        recorder = _Recorder()
+        row = sympy.Symbol("row", integer=True)
+        with V.set_ops_handler(recorder):
+            result = contribution.data.inner_fn([row])
+        self.assertEqual(result, sympy.Symbol("value"))
+        self.assertEqual(recorder, [("in0_buf6", 2 * row)])
+
+    def test_extent_greater_than_one_stays_a_reduction(self):
+        from torch._inductor.ir import Reduction
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _collapse_unit_tiled_sum_contribution,
+        )
+
+        tiled_sum, combine_name, operations = self._fixture(
+            Integer(2), insert_combine=True
+        )
+        result = _collapse_unit_tiled_sum_contribution(
+            tiled_sum, combine_name, operations, pre_stickify=True
+        )
+
+        self.assertIs(result, tiled_sum)
+        self.assertIs(operations[0], tiled_sum)
+        self.assertIsInstance(tiled_sum.data, Reduction)
+
+    def test_missing_combine_stays_a_reduction(self):
+        from torch._inductor.ir import Reduction
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _collapse_unit_tiled_sum_contribution,
+        )
+
+        tiled_sum, combine_name, operations = self._fixture(
+            Integer(1), insert_combine=False
+        )
+        result = _collapse_unit_tiled_sum_contribution(
+            tiled_sum, combine_name, operations, pre_stickify=True
+        )
+
+        self.assertIs(result, tiled_sum)
+        self.assertIs(operations[0], tiled_sum)
+        self.assertIsInstance(tiled_sum.data, Reduction)
+
+    def test_post_stickify_stays_a_reduction(self):
+        from torch._inductor.ir import Reduction
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _collapse_unit_tiled_sum_contribution,
+        )
+
+        tiled_sum, combine_name, operations = self._fixture(
+            Integer(1), insert_combine=True
+        )
+        result = _collapse_unit_tiled_sum_contribution(
+            tiled_sum, combine_name, operations, pre_stickify=False
+        )
+
+        self.assertIs(result, tiled_sum)
+        self.assertIsInstance(tiled_sum.data, Reduction)
+
+    def test_promoted_sum_stays_a_reduction(self):
+        from torch._inductor.ir import Reduction
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _collapse_unit_tiled_sum_contribution,
+        )
+
+        tiled_sum, combine_name, operations = self._fixture(
+            Integer(1), insert_combine=True, src_dtype=torch.float16
+        )
+        result = _collapse_unit_tiled_sum_contribution(
+            tiled_sum, combine_name, operations, pre_stickify=True
+        )
+
+        self.assertIs(result, tiled_sum)
+        self.assertIsInstance(tiled_sum.data, Reduction)
+
+    def test_multiple_read_contributions_stay_a_reduction(self):
+        from torch._inductor.ir import Reduction
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _collapse_unit_tiled_sum_contribution,
+        )
+
+        tiled_sum, combine_name, operations = self._fixture(
+            Integer(1), insert_combine=True, num_inputs=2
+        )
+        result = _collapse_unit_tiled_sum_contribution(
+            tiled_sum, combine_name, operations, pre_stickify=True
+        )
+
+        self.assertIs(result, tiled_sum)
+        self.assertIsInstance(tiled_sum.data, Reduction)
+
+    def test_later_retile_patch_rewrites_collapsed_pointwise_load(self):
+        from torch._inductor.ir import Pointwise
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _collapse_unit_tiled_sum_contribution,
+            _patch_retiled_load_indexes,
+        )
+
+        tiled_sum, combine_name, operations = self._fixture(
+            Integer(1), insert_combine=True
+        )
+        contribution = _collapse_unit_tiled_sum_contribution(
+            tiled_sum, combine_name, operations, pre_stickify=True
+        )
+        group_ops = [contribution]
+
+        _patch_retiled_load_indexes(
+            (0,),
+            group_ops,
+            {
+                "in0_buf6": _RetiledBufferInfo(
+                    old_stride=(Integer(2), Integer(1)),
+                    new_stride=(Integer(1), Integer(1)),
+                    old_size=(Integer(4), Integer(2)),
+                )
+            },
+            operations,
+        )
+
+        final_contribution = operations[0]
+        self.assertIs(group_ops[0], final_contribution)
+        self.assertIs(V.graph.name_to_buffer["buf6"], final_contribution)
+        self.assertIsInstance(final_contribution.data, Pointwise)
+
+        class _Recorder(list):
+            def load(self, name, index):
+                self.append((name, sympy.expand(index)))
+                return sympy.Symbol("value")
+
+        recorder = _Recorder()
+        row = sympy.Symbol("row", integer=True)
+        with V.set_ops_handler(recorder):
+            result = final_contribution.data.inner_fn([row])
+        self.assertEqual(result, sympy.Symbol("value"))
+        self.assertEqual(recorder, [("in0_buf6", row)])
+
+
 class TestCoarseTileReductionPropagation(unittest.TestCase):
     """Tests for tiling propagation Reduction support."""
 

@@ -26,6 +26,9 @@ from torch_spyre._inductor.loop_info import (
 )
 from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.pass_utils import coeff_through_floor
+from torch_spyre._inductor.scratchpad.utils import (
+    hoisted_loop_lifetime_end_overrides,
+)
 from torch_spyre._inductor.spyre_kernel import SpyreKernel, TensorAccess
 from torch_spyre._inductor.wsr.coarse_tile import _host_tile_advances_for_dep
 
@@ -48,7 +51,7 @@ def test_expert_advance_is_measured_relative_to_the_window_base():
     assert advances == [[], [(0, sympy.Integer(4096))]]
 
 
-def test_typed_preheader_owner_survives_ir_reconstruction():
+def test_hoisted_copy_owner_survives_ir_reconstruction():
     source = type("Source", (), {})()
     source.loop_info = CoarseTileInfo(
         loop_group_id=(),
@@ -195,3 +198,25 @@ def test_binding_owns_a_squeezed_expert_dim_without_aliasing_the_row_symbol():
     advance = kernel._general_tile_advance(tensor, True, "routing_weight")
     level = kernel._tile_advance_symbols[0]
     assert coeff_through_floor(advance, level) == 64
+
+
+def test_hoisted_copy_lifetime_ends_after_its_own_loop_group():
+    def op(name, group=(), preheader_for_group=None):
+        value = type("Op", (), {"get_name": lambda self: name})()
+        value.loop_info = CoarseTileInfo(
+            loop_group_id=group,
+            loop_count=[2] * len(group),
+            loop_tiled_dims=[[] for _ in group],
+            preheader_for_group=preheader_for_group,
+        )
+        return value
+
+    graph = type("Graph", (), {})()
+    graph.operations = [
+        op("x_copy", preheader_for_group=(2,)),
+        op("first", (2,)),
+        op("nested", (2, 0)),
+        op("later", (3,)),
+    ]
+
+    assert hoisted_loop_lifetime_end_overrides(graph) == {"x_copy": 3}

@@ -31,6 +31,25 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class CarriedReductionPlan:
+    """One reduction state that remains at a fixed address across a loop."""
+
+    kind: Literal["terminal_sum"] = "terminal_sum"
+    memory_kind: Literal["lx"] = "lx"
+    fill_once: bool = True
+    drain_once: bool = True
+
+
+@dataclass(frozen=True)
+class LoopStoragePlan:
+    """Typed storage intent consumed by scratchpad placement."""
+
+    kind: Literal["loop_carried_accumulator"]
+    owner_group: tuple[int, ...]
+    memory_kind: Literal["lx"] = "lx"
+
+
+@dataclass(frozen=True)
 class CountedLoopPlan:
     """Compiler-owned contract for one static persistent expert loop."""
 
@@ -46,6 +65,9 @@ class CountedLoopPlan:
         "routing_weight",
     )
     transport_free: bool = True
+    carried_reduction: CarriedReductionPlan = field(
+        default_factory=CarriedReductionPlan
+    )
 
 
 @dataclass(frozen=True)

@@ -37,6 +37,7 @@ import sympy
 from torch.utils._ordered_set import OrderedSet
 import torch._inductor.ir as ir
 from torch_spyre._inductor.logging_utils import get_inductor_logger
+from torch_spyre._inductor.loop_info import LoopStoragePlan
 
 logger = get_inductor_logger("ir")
 
@@ -422,7 +423,9 @@ class SpyreEmptyFallback(ir.ExternKernel):
 
     def should_allocate(self) -> bool:
         layout = self.get_layout()
-        if isinstance(layout, FixedTiledLayout) and "hbm_pool" in layout.allocation:
+        if isinstance(layout, FixedTiledLayout) and (
+            "hbm_pool" in layout.allocation or "lx" in layout.allocation
+        ):
             return False
         return True
 
@@ -448,6 +451,7 @@ class SpyreEmptyFallback(ir.ExternKernel):
             (),
             op_overload=op_overload,
         )
+        self.loop_storage_plan: LoopStoragePlan | None = None
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 

@@ -96,6 +96,7 @@ from ..errors import Unsupported
 from ..logging_utils import get_inductor_logger
 from ..loop_info import (
     CountedLoopPlan,
+    LoopStoragePlan,
     LoopOperandBindingRequirement,
     CoarseTileInfo,
     PropagationPlan,
@@ -1630,7 +1631,7 @@ def _coarse_tile_common(
     # 1 (a tiled-reduction op may itself have needed a read copy-in) and
     # before Pass 3 -- a reduction op is never also copy_out (the plan's
     # kind routes each op to exactly one).
-    _insert_all_reduction_ops(operations)
+    _insert_all_reduction_ops(operations, pre_stickify=run_read_copies)
 
     # Pass 3: write copy-outs (full buffer + copy op + outside-consumer/
     # graph-output patching), using each op's now-stamped
@@ -3729,6 +3730,123 @@ def _insert_combine_op(
     return combine_name
 
 
+def _collapse_unit_tiled_sum_contribution(
+    tiled_op: ComputedBuffer,
+    combine_name: str,
+    operations: list[Operation],
+    *,
+    pre_stickify: bool,
+) -> ComputedBuffer:
+    """Replace one local, unit-extent tiled sum with its sole contribution.
+
+    A reduction-dimension coarse tile can have static extent one even though
+    its enclosing ``LoopSpec`` has more than one iteration.  In that case the
+    reduction DDL has no local dimension left to map: the only value in the
+    tile is already the tile's contribution, while the coarse-tile combine op
+    performs the real cross-iteration reduction into the fixed accumulator.
+
+    This rewrite is deliberately fail-closed.  It applies only to a flat,
+    single-level ``sum`` whose sole reduction dimension is tiled to one, and
+    only after the exact mutation combine inserted by ``_insert_combine_op``
+    is present immediately downstream and targets the marked fixed
+    accumulator.  Every wider reduction, nested topology, other monoid, or
+    incomplete combine structure remains a ``Reduction``.
+    """
+
+    data = tiled_op.data
+    info = getattr(tiled_op, "loop_info", None)
+    propagation = getattr(info, "propagation", None)
+    reduction_plan = getattr(propagation, "reduction", None)
+    if not (
+        pre_stickify
+        and isinstance(data, Reduction)
+        and data.reduction_type == "sum"
+        and data.src_dtype == data.dtype
+        and getattr(propagation, "kind", None) == "reduction"
+        and reduction_plan is not None
+        and reduction_plan.reduction_type == "sum"
+        and not reduction_plan.is_nested
+        and len(info.loop_count) == 1
+        and isinstance(info.loop_count[0], (int, sympy.Integer))
+        and int(info.loop_count[0]) > 1
+        and info.loop_tiled_dims == [[]]
+        and info.loop_tiled_reduction_dims == [[0]]
+        and len(data.reduction_ranges) == 1
+        and isinstance(data.reduction_ranges[0], (int, sympy.Integer))
+        and int(data.reduction_ranges[0]) == 1
+    ):
+        return tiled_op
+
+    try:
+        reads = list(tiled_op.get_read_writes().reads)
+    except Exception:
+        return tiled_op
+    if len(reads) != 1 or not isinstance(reads[0], MemoryDep):
+        return tiled_op
+
+    expected_index = operations.index(tiled_op) + 1
+    if expected_index >= len(operations):
+        return tiled_op
+    combine = operations[expected_index]
+    if not (
+        isinstance(combine, ComputedBuffer)
+        and combine.get_name() == combine_name
+        and isinstance(combine.data, Pointwise)
+        and isinstance(combine.layout, MutationLayoutSHOULDREMOVE)
+        and getattr(getattr(combine, "loop_info", None), "loop_group_id", None)
+        == info.loop_group_id
+        and _reads_buffer(combine, tiled_op.get_name())
+        and getattr(combine.layout.get_buffer(), "loop_storage_plan", None)
+        == LoopStoragePlan(
+            kind="loop_carried_accumulator",
+            owner_group=info.loop_group_id,
+        )
+    ):
+        return tiled_op
+
+    reduction_inner_fn = data.inner_fn
+
+    def contribution_inner_fn(index):
+        return reduction_inner_fn(index, [sympy.Integer(0)])
+
+    contribution_data = Pointwise(
+        device=tiled_op.get_device(),
+        dtype=tiled_op.get_dtype(),
+        inner_fn=contribution_inner_fn,
+        ranges=list(data.ranges),
+    )
+    # Layout propagation inspects the Loops body's FX origins (not only the
+    # enclosing ComputedBuffer's provenance) to recover the pointwise op
+    # semantics.  Keep that body provenance across the Reduction->Pointwise
+    # normalization just as the buffer replacement below keeps buffer
+    # provenance.
+    from ..provenance import preserve_provenance
+
+    preserve_provenance(
+        data,
+        contribution_data,
+        pass_name="coarse_tile",
+        reason="collapse static unit tiled sum to loop contribution",
+    )
+    from ..pass_utils import replace_computed_buffer_body
+
+    contribution = replace_computed_buffer_body(
+        tiled_op,
+        contribution_data,
+        operations,
+        pass_name="coarse_tile",
+        reason="collapse static unit tiled sum to loop contribution",
+    )
+    V.graph.name_to_buffer[contribution.get_name()] = contribution
+    logger.debug(
+        "coarse_tile: collapsed unit tiled sum %s to pointwise contribution; "
+        "cross-iteration sum remains owned by %s",
+        contribution.get_name(),
+        combine_name,
+    )
+    return contribution
+
+
 def _insert_reduction_copy_op(
     tiled_op: ComputedBuffer,
     accum_tile: ComputedBuffer,
@@ -3815,7 +3933,52 @@ def _insert_reduction_copy_op(
     operations.insert(insert_idx, copy_buf)
 
 
-def _insert_all_reduction_ops(operations: list[Operation]) -> None:
+def _insert_flat_reduction_copy_op(
+    tiled_op: ComputedBuffer,
+    accum_tile: ComputedBuffer,
+    accum_full: ComputedBuffer,
+    operations: list[Operation],
+) -> None:
+    """Drain a fixed tile accumulator once after a flat reduction loop.
+
+    Unlike ``_insert_reduction_copy_op`` there is no outer output-tile loop:
+    the entire output lives at one fixed address while the sole reduction
+    loop runs.  The copy therefore carries no ``loop_info`` and is placed
+    after the last operation in the loop group, yielding exactly one HBM
+    write after the loop terminates.
+    """
+    copy_data = Pointwise(
+        device=tiled_op.get_device(),
+        dtype=tiled_op.get_dtype(),
+        inner_fn=accum_tile.make_loader(),
+        ranges=list(tiled_op.data.ranges),
+    )
+    copy_name = V.graph.qualify_name(f"coarse_tile_reduce_copy_{tiled_op.get_name()}")
+    copy_buf = ComputedBuffer(
+        name=copy_name,
+        layout=MutationLayoutSHOULDREMOVE(TensorBox(StorageBox(accum_full))),
+        data=copy_data,
+    )
+    copy_buf.origins = tiled_op.origins
+    copy_buf.operation_name = copy_name
+    copy_buf._coarse_tile_force_live = True  # type: ignore[attr-defined]
+    V.graph.name_to_buffer[copy_name] = copy_buf
+
+    outer_key = tiled_op.loop_info.loop_group_id[0]  # type: ignore[attr-defined]
+    group_indices = [
+        i
+        for i, op in enumerate(operations)
+        if isinstance(op, ComputedBuffer)
+        and getattr(getattr(op, "loop_info", None), "loop_group_id", (None,))[0]
+        == outer_key
+    ]
+    assert group_indices, "flat reduction loop group must contain its tiled op"
+    operations.insert(max(group_indices) + 1, copy_buf)
+
+
+def _insert_all_reduction_ops(
+    operations: list[Operation], *, pre_stickify: bool
+) -> None:
     """Pass 2: build reduction machinery for every planned reduction op.
 
     Transformation's Pass 2 (see the plan/execute split design). Every op
@@ -3837,21 +4000,22 @@ def _insert_all_reduction_ops(operations: list[Operation]) -> None:
         propagation = getattr(loop_info, "propagation", None)
         if propagation is None or propagation.kind != "reduction":
             continue
-        _propagate_tiled_reduction_op(op, operations)
+        _propagate_tiled_reduction_op(op, operations, pre_stickify=pre_stickify)
 
 
 def _propagate_tiled_reduction_op(
     op: ComputedBuffer,
     operations: list[Operation],
+    *,
+    pre_stickify: bool,
 ) -> None:
     """Handle buffer propagation for a Reduction op tiled over a reduction dim.
 
     Strategy: fill-initialize + per-tile combine.
-      1. Allocate a HBM accumulation buffer sized to the full
-         (pre-outer-division) output shape (planned as
-         reduction.full_output_ranges), so that address advancement across
-         outer tiles writes each tile into the correct slice.  For flat
-         (reduction-only) tiling this equals op.data.ranges.
+      1. Allocate a final HBM buffer plus a fixed-address tile accumulator.
+         The tile accumulator is eligible for LX; the HBM buffer is written
+         once after a flat reduction loop or once per outer output tile for a
+         nested reduction.
       2. Insert a fill op that writes the reduction's identity value into the
          accumulation buffer.  For flat reduction tiling the fill has no
          loop_info and runs before all loops.  For nested tiling (outer
@@ -3869,6 +4033,14 @@ def _propagate_tiled_reduction_op(
     loop_info = op.loop_info
     loop_group_id = loop_info.loop_group_id
     reduction_plan = loop_info.propagation.reduction
+    counted_plan = loop_info.counted_loop_plan
+    persistent = counted_plan is not None
+    if persistent and (
+        counted_plan.carried_reduction.kind != "terminal_sum"
+        or reduction_plan.reduction_type != "sum"
+        or reduction_plan.is_nested
+    ):
+        raise Unsupported("persistent expert execution requires one flat terminal sum")
     identity = reduction_plan.identity
     op_size = tuple(op.layout.size)
 
@@ -3881,12 +4053,29 @@ def _propagate_tiled_reduction_op(
     # outer division, so full == per-tile.
     full_output_ranges = reduction_plan.full_output_ranges
 
-    # Insert HBM buffer before the first op in the loop group.
+    # Persistent execution inserts setup before both the loop and its typed
+    # invariant preheaders. Legacy reductions retain their original insertion
+    # point at the first loop operation.
     outer_key = loop_group_id[0]
-    group_start_idx = next(
+    first_loop_idx = next(
         i
         for i, o in enumerate(operations)
         if isinstance(o, ComputedBuffer) and _outer_loop_key(o) == outer_key
+    )
+    hoisted_preheaders = [
+        o
+        for o in operations
+        if isinstance(o, ComputedBuffer)
+        and (
+            owner := getattr(getattr(o, "loop_info", None), "preheader_for_group", None)
+        )
+        is not None
+        and owner[0] == outer_key
+    ]
+    group_start_idx = (
+        min([first_loop_idx, *(operations.index(o) for o in hoisted_preheaders)])
+        if persistent
+        else first_loop_idx
     )
 
     fill_loop_info = reduction_plan.outer_fill_loop_info
@@ -3907,13 +4096,9 @@ def _propagate_tiled_reduction_op(
             loop_group_id=loop_group_id[: len(fill_loop_info.loop_count)],
         )
 
-    if is_nested:
-        # Nested case: allocate separate tile-sized and full-sized buffers.
-        # accum_tile stays inside the inner K-loop (never advances there --
-        # its only readers are the combine op and the outer copy op, both of
-        # which build their own correct tiled_dims_per_read/output_tiled_dims
-        # from their own loop_info, so accum_tile itself needs no flag);
-        # accum_full accumulates across outer B-tiles via a copy op.
+    if persistent:
+        # The visible result remains in HBM. A distinct typed accumulator is
+        # filled once, updated at a fixed LX address, and drained once.
         accum_full = _allocate_full_buffer(
             op,
             full_output_ranges,
@@ -3921,18 +4106,39 @@ def _propagate_tiled_reduction_op(
             operations,
             group_start_idx,
         )
-        group_start_idx_after_full = operations.index(accum_full) + 1
         accum_tile = _allocate_full_buffer(
             op,
             per_tile_ranges,
             reduction_plan.per_tile_strides,
             operations,
-            group_start_idx_after_full,
+            operations.index(accum_full) + 1,
+        )
+        accum_tile.loop_storage_plan = LoopStoragePlan(
+            kind="loop_carried_accumulator",
+            owner_group=loop_group_id,
+        )
+        fill_target = accum_tile
+        combine_target = accum_tile
+    elif is_nested:
+        # Original nested-reduction path.
+        accum_full = _allocate_full_buffer(
+            op,
+            full_output_ranges,
+            reduction_plan.full_output_strides,
+            operations,
+            group_start_idx,
+        )
+        accum_tile = _allocate_full_buffer(
+            op,
+            per_tile_ranges,
+            reduction_plan.per_tile_strides,
+            operations,
+            operations.index(accum_full) + 1,
         )
         fill_target = accum_tile
         combine_target = accum_tile
     else:
-        # Flat case: single full-sized buffer.
+        # Original flat-reduction path: combine directly into the full buffer.
         accum_full = _allocate_full_buffer(
             op,
             full_output_ranges,
@@ -3995,14 +4201,29 @@ def _propagate_tiled_reduction_op(
     fill_buf._coarse_tile_force_live = True  # type: ignore[attr-defined]
     V.graph.name_to_buffer[fill_name] = fill_buf
     fill_target_idx = operations.index(fill_target)
-    # scalar_op was appended to graph.operations by register_operation(); move it
-    # to just after fill_target, then insert fill_buf after scalar_op.
+    # scalar_op was appended to graph.operations by register_operation(); move
+    # it to just after fill_target.  For a flat group with invariant read-copy
+    # preheaders, insert the Spyre fill *after* the final preheader.  This keeps
+    # every wrapper-only setup op before the contiguous Spyre sequence
+    #   read-copy -> fill -> sole reduction loop -> final drain
+    # so one fusion/allocation plan owns the preheader's LX lifetime.
     operations.remove(scalar_op)
     operations.insert(fill_target_idx + 1, scalar_op)
-    operations.insert(fill_target_idx + 2, fill_buf)
+    if persistent and hoisted_preheaders:
+        fill_insert_idx = max(operations.index(o) for o in hoisted_preheaders) + 1
+    else:
+        fill_insert_idx = operations.index(scalar_op) + 1
+    operations.insert(fill_insert_idx, fill_buf)
 
     # Insert combine op after the tiled reduction op (inside the loop).
     combine_name = _insert_combine_op(op, combine_target, operations, is_nested)
+    if persistent:
+        op = _collapse_unit_tiled_sum_contribution(
+            op,
+            combine_name,
+            operations,
+            pre_stickify=pre_stickify,
+        )
 
     # For nested case, insert a copy op at the outer loop level that writes
     # accum_tile → accum_full, advancing accum_full across outer output tiles.
@@ -4011,6 +4232,8 @@ def _propagate_tiled_reduction_op(
         _insert_reduction_copy_op(
             op, accum_tile, accum_full, fill_loop_info, operations
         )
+    elif persistent:
+        _insert_flat_reduction_copy_op(op, accum_tile, accum_full, operations)
 
     # The tiled reduction op's own write is per-tile scratch: it is drained by
     # the combine op every inner iteration and never read directly by the
@@ -4044,20 +4267,15 @@ def _propagate_tiled_reduction_op(
     # accumulated value for that tile. All inside consumers are safe to
     # redirect.
     #
-    # Flat (is_nested=False): the combine op accumulates directly into
-    # accum_full via MutationLayout inside the (possibly multi-level)
-    # reduction loop itself. A consumer is safe to redirect only if its own
-    # loop_tiled_dims exactly matches op's -- both then advance through
-    # accum_full along exactly the same dimensions at exactly the same rate,
-    # so by the time the consumer's tile is reached, every reduction-dim
-    # tile contributing to it has already combined. A consumer with EXTRA
-    # tiled dimensions (e.g. it also tiles a dim op's reduction loop doesn't,
-    # or vice versa) could run before accum_full is fully combined for its
-    # slice -- those consumers are left reading buf_name (per-tile scratch).
+    # Flat (is_nested=False): accum_full is intentionally stale until the
+    # post-loop drain.  No same-loop consumer may observe the reduction
+    # result; supporting one would require scheduling it after the loop, not
+    # merely renaming its input.  The D-AS-X proof has a terminal expert sum,
+    # so fail closed on every other flat topology.
     combine_name = V.graph.qualify_name(f"coarse_tile_combine_{buf_name}")
     copy_name = V.graph.qualify_name(f"coarse_tile_reduce_copy_{buf_name}")
     outer_key = loop_group_id[0]
-    inside_consumers = [
+    raw_inside_consumers = [
         o
         for o in operations
         if isinstance(o, ComputedBuffer)
@@ -4070,6 +4288,23 @@ def _propagate_tiled_reduction_op(
             == loop_info.loop_tiled_dims
         )
     ]
+    if persistent and raw_inside_consumers:
+        raise Unsupported(
+            "coarse_tile: flat reduction with an LX accumulator requires a "
+            "terminal reduction; same-loop consumers would run before the "
+            f"post-loop drain ({[o.get_name() for o in raw_inside_consumers]})"
+        )
+    if persistent:
+        inside_consumers = []
+    elif is_nested:
+        inside_consumers = raw_inside_consumers
+    else:
+        inside_consumers = [
+            consumer
+            for consumer in raw_inside_consumers
+            if getattr(getattr(consumer, "loop_info", None), "loop_tiled_dims", None)
+            == loop_info.loop_tiled_dims
+        ]
 
     all_consumers = outside_consumers + inside_consumers
     accum_name = accum_full.get_name()
