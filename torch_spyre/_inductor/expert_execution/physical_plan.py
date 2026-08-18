@@ -18,6 +18,7 @@ from torch._inductor.ir import ComputedBuffer, MutationLayoutSHOULDREMOVE
 
 from ..errors import Unsupported
 from ..ir import FixedTiledLayout, SpyreEmptyFallback
+from ..loop_info import LoopStoragePlan
 from ..pass_utils import op_short_name
 from ..scratchpad.utils import (
     is_loop_carried_lx_storage,
@@ -95,7 +96,11 @@ def verify_persistent_expert_physical_plan(graph) -> None:
             for op in graph.operations
             if isinstance(op, SpyreEmptyFallback)
             and is_loop_carried_lx_storage(op)
-            and op.loop_storage_plan.owner_group[0] == group
+            and isinstance(
+                storage_plan := getattr(op, "loop_storage_plan", None),
+                LoopStoragePlan,
+            )
+            and storage_plan.owner_group[0] == group
         ]
         if len(preheaders) != 1 or len(fills) != 1 or len(drains) != 1:
             raise Unsupported(
