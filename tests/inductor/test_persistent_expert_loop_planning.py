@@ -16,9 +16,12 @@ from types import SimpleNamespace
 
 import sympy
 import pytest
+import torch
 from torch._inductor.dependencies import MemoryDep
+from torch._inductor.ir import FixedLayout
 from torch._inductor.utils import sympy_index_symbol
 
+from torch_spyre._C import SpyreTensorLayout
 from torch_spyre._inductor.loop_info import (
     CountedLoopPlan,
     CoarseTileInfo,
@@ -28,6 +31,9 @@ from torch_spyre._inductor.loop_info import (
 )
 from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.pass_utils import coeff_through_floor
+from torch_spyre._inductor.propagate_layouts import (
+    _constrain_persistent_row_layouts,
+)
 from torch_spyre._inductor import ir as spyre_ir
 from torch_spyre._inductor.ir import SpyreEmptyFallback
 from torch_spyre._inductor.scratchpad.allocator import (
@@ -209,6 +215,72 @@ def test_binding_owns_a_squeezed_expert_dim_without_aliasing_the_row_symbol():
     advance = kernel._general_tile_advance(tensor, True, "routing_weight")
     level = kernel._tile_advance_symbols[0]
     assert coeff_through_floor(advance, level) == 64
+
+
+def test_persistent_group_keeps_row_dimension_off_stick():
+    row = sympy_index_symbol("d0")
+    hidden = sympy_index_symbol("d1")
+    output = FixedLayout(
+        torch.device("privateuseone:0"),
+        torch.float16,
+        [32, 2816],
+        [2816, 1],
+    )
+    output_dep = MemoryDep(
+        name="accumulator",
+        index=2816 * row + hidden,
+        var_names=(row, hidden),
+        size=(32, 2816),
+    )
+    hidden_stick = SpyreTensorLayout([32, 2816], [2816, 1], torch.float16, [0, 1])
+    row_stick = SpyreTensorLayout([32, 2816], [2816, 1], torch.float16, [1, 0])
+    op = SimpleNamespace(
+        loop_info=CoarseTileInfo(
+            loop_group_id=(0,),
+            loop_count=[128],
+            loop_tiled_dims=[[]],
+            counted_loop_plan=CountedLoopPlan(
+                kind="persistent_dense_expert", trip_count=128
+            ),
+            work_div_row_dim=0,
+        ),
+        get_name=lambda: "coarse_tile_fill_accumulator",
+        data=SimpleNamespace(),
+    )
+
+    constrained = _constrain_persistent_row_layouts(
+        op, output, output_dep, [row_stick, hidden_stick]
+    )
+
+    assert constrained == [hidden_stick]
+
+
+def test_ordinary_accumulator_layout_candidates_are_unchanged():
+    row = sympy_index_symbol("d0")
+    hidden = sympy_index_symbol("d1")
+    output = FixedLayout(
+        torch.device("privateuseone:0"), torch.float16, [32, 64], [64, 1]
+    )
+    output_dep = MemoryDep(
+        name="ordinary",
+        index=64 * row + hidden,
+        var_names=(row, hidden),
+        size=(32, 64),
+    )
+    candidates = [
+        SpyreTensorLayout([32, 64], [64, 1], torch.float16, [1, 0]),
+        SpyreTensorLayout([32, 64], [64, 1], torch.float16, [0, 1]),
+    ]
+    op = SimpleNamespace(
+        loop_info=None,
+        get_name=lambda: "ordinary_accumulator",
+        data=SimpleNamespace(),
+    )
+
+    assert (
+        _constrain_persistent_row_layouts(op, output, output_dep, candidates)
+        == candidates
+    )
 
 
 def test_hoisted_copy_lifetime_ends_after_its_own_loop_group():

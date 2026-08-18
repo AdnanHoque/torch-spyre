@@ -1272,6 +1272,61 @@ def _multi_arg_pointwise_layouts(
     return results
 
 
+def _constrain_persistent_row_layouts(
+    op: ComputedBuffer,
+    output: FixedLayout,
+    output_dep: MemoryDep,
+    candidates: list[SpyreTensorLayout],
+) -> list[SpyreTensorLayout]:
+    """Keep a transport-free persistent group's row dimension off the stick.
+
+    Persistent expert execution divides the token row dimension across Sen
+    cores. A stick dimension is represented in stick units rather than rows,
+    so choosing the row as the stick can turn T=32 into extent 1 and make the
+    divider-owned equal-row constraint impossible. The temporal plan already
+    requires transport-free common-row ownership; layout propagation realizes
+    that requirement here instead of allowing the layout cost optimizer to
+    select an incompatible orientation and rejecting it later.
+
+    This applies only to operations carrying a transport-free counted plan.
+    Ordinary operations retain their complete candidate sets.
+    """
+
+    loop_info = getattr(op, "loop_info", None)
+    counted_plan = getattr(loop_info, "counted_loop_plan", None)
+    if counted_plan is None or not counted_plan.transport_free:
+        return candidates
+
+    row_dim = getattr(loop_info, "work_div_row_dim", None)
+    if row_dim is None:
+        raise Unsupported(
+            f"{op.get_name()}: persistent layout has no planned row dimension"
+        )
+
+    # Persistent tensors use direct coordinates. Passing no indirect sizes
+    # makes that restriction explicit here.
+    out_coords = host_coordinates(output, output_dep, None)
+    if not 0 <= row_dim < len(out_coords):
+        raise Unsupported(
+            f"{op.get_name()}: persistent row dimension {row_dim} "
+            f"is outside output rank {len(out_coords)}"
+        )
+
+    compatible = []
+    for candidate in candidates:
+        device_coords = device_coordinates(candidate, output_dep, None)
+        stick_dim = matching_dim(out_coords, device_coords[-1])
+        if stick_dim != row_dim:
+            compatible.append(candidate)
+
+    if not compatible:
+        raise Unsupported(
+            f"{op.get_name()}: no persistent layout keeps planned "
+            f"row dimension {row_dim} off the stick"
+        )
+    return compatible
+
+
 def _topk_layouts(
     op: Operation,
     output: FixedLayout,
@@ -1796,6 +1851,12 @@ def propagate_spyre_tensor_layouts(
                     if not new_value_args:
                         # No real inputs — fall back to unconstrained candidates.
                         candidates = _all_constant_layouts(target_buf)
+                        candidates = _constrain_persistent_row_layouts(
+                            op,
+                            target_buf.get_layout(),
+                            output_dep,
+                            candidates,
+                        )
                         target_buf.layouts = candidates
                         op.layouts = candidates
                         op.restick_cost_fn = AllSameNode.from_args(
@@ -1824,6 +1885,9 @@ def propagate_spyre_tensor_layouts(
                         accum_layout = target_buf.get_layout()
                         candidates = _matmul_layouts(
                             op, accum_layout, output_dep, new_value_args
+                        )
+                        candidates = _constrain_persistent_row_layouts(
+                            op, accum_layout, output_dep, candidates
                         )
                         target_buf.layouts = candidates
                         op.layouts = candidates
@@ -1861,6 +1925,9 @@ def propagate_spyre_tensor_layouts(
                                 f"candidate input layouts; accum size="
                                 f"{accum_layout.size}"
                             )
+                        candidates = _constrain_persistent_row_layouts(
+                            op, accum_layout, output_dep, candidates
+                        )
                         # The accumulator read-back (target_name) is also a
                         # real input to this op and its stick must match the
                         # output, so build the cost function from all_args
@@ -1874,6 +1941,9 @@ def propagate_spyre_tensor_layouts(
                         accum_layout = target_buf.get_layout()
                         candidates = _multi_arg_pointwise_layouts(
                             op, accum_layout, output_dep, new_value_args
+                        )
+                        candidates = _constrain_persistent_row_layouts(
+                            op, accum_layout, output_dep, candidates
                         )
                         # op.restick_cost_fn was set by _multi_arg_pointwise_layouts
                         # using only new_value_args.  The accumulator read-back
@@ -1922,7 +1992,9 @@ def propagate_spyre_tensor_layouts(
                         graph_input.layouts = [alt_stl]
                         op._restickify_plan = (target_name, target_stl, alt_stl)
                         target_stl = alt_stl
-                op.layouts = [target_stl]
+                op.layouts = _constrain_persistent_row_layouts(
+                    op, target_layout, output_dep, [target_stl]
+                )
                 op.restick_cost_fn = AllSameNode.from_args(
                     args, [target_stl], output_dep, op
                 )
@@ -1951,6 +2023,10 @@ def propagate_spyre_tensor_layouts(
                 op.layouts = compute_layouts(op, output, output_dep, args)
             else:
                 logger.warning(f"Warning: unhandled node type {type(op.data)}")
+            if hasattr(op, "layouts"):
+                op.layouts = _constrain_persistent_row_layouts(
+                    op, output, output_dep, op.layouts
+                )
         elif isinstance(op, FallbackKernel):
             # FallbackKernel.create in PyTorch produces three cases:
             #   Case 1 (single tensor)  -> MultiOutputLayout + 1 MultiOutput
