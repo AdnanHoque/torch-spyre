@@ -38,7 +38,7 @@ def _graph_module(*, experts=2):
         ("gate", (experts, 64, 64), (64, experts * 64, 1)),
         ("up", (experts, 64, 64), (64, experts * 64, 1)),
         ("down", (experts, 64, 64), (64, experts * 64, 1)),
-        ("routing", (64, experts, 1), (1, 64, 1)),
+        ("routing", (64, experts, 1), (experts * 64, 64, 1)),
     )
     args = []
     for name, shape, stride in specs:
@@ -81,7 +81,7 @@ def test_planning_is_pure_and_selects_persistent_schedule():
     assert selected.expert_count == 2
     assert selected.schedule.binding_kind == "sequential_affine"
     assert selected.schedule.weight_layout == "logical_expert_major_k_major_backing"
-    assert selected.schedule.routing_layout == "logical_token_major"
+    assert selected.schedule.routing_layout == "logical_token_major_full_sticks"
     assert selected.schedule.preheader == ("stage_x", "fill_accumulator")
     assert selected.schedule.drain == ("drain_output",)
     assert selected.selection_reason == "persistent envelope satisfied"
@@ -140,7 +140,7 @@ def test_contiguous_expert_weights_do_not_select_persistent():
     assert plan.nodes[0].strategy is ExpertStrategy.ORDINARY_DENSE
 
 
-def test_contiguous_token_major_routing_selects_persistent():
+def test_contiguous_token_major_routing_does_not_select_persistent():
     graph_module = _graph_module()
     routing = next(node for node in graph_module.graph.nodes if node.name == "routing")
     routing.meta["val"] = torch.empty(
@@ -153,7 +153,8 @@ def test_contiguous_token_major_routing_selects_persistent():
         available_lx_bytes=1_000_000,
     )
 
-    assert plan.nodes[0].strategy is ExpertStrategy.PERSISTENT_DENSE
+    assert plan.nodes[0].strategy is ExpertStrategy.ORDINARY_DENSE
+    assert "full-stick backing" in plan.nodes[0].selection_reason
 
 
 def test_ordinary_dense_materialization_is_a_no_op():

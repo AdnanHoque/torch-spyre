@@ -56,7 +56,7 @@ class PersistentExpertSchedule:
     )
     binding_kind: str = "sequential_affine"
     weight_layout: str = "logical_expert_major_k_major_backing"
-    routing_layout: str = "logical_token_major"
+    routing_layout: str = "logical_token_major_full_sticks"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -174,10 +174,10 @@ def _has_persistent_routing_layout(
 
     if _shape(node, name) != (tokens, experts, 1):
         return False
-    return _stride(node, name) in {
-        (experts, 1, 1),  # contiguous token-major storage
-        (1, tokens, 1),  # logical token-major view over expert-major storage
-    }
+    # The counted loop advances by expert and consumes one contiguous token
+    # plane per trip. A contiguous token-major input would require a gather
+    # across token rows; treating it as an affine expert plane is incorrect.
+    return _stride(node, name) == (experts * 64, 64, 1)
 
 
 def _dtype(node: torch.fx.Node, name: str) -> torch.dtype:
@@ -281,7 +281,9 @@ def _plan_node(
     if not packed_weights:
         decline_reasons.append("expert weights do not have packed [K,E,N] backing")
     if not packed_routing:
-        decline_reasons.append("routing weights do not have packed [E,T,1] backing")
+        decline_reasons.append(
+            "routing weights do not have token-major full-stick backing"
+        )
     use_persistent = not decline_reasons
     return PlannedExpertNode(
         node_name=node.name,
