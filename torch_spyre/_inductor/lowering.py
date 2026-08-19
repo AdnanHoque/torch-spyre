@@ -769,6 +769,48 @@ def lower_expert_route_prepacked(routing_weight):
     return result
 
 
+@register_spyre_lowering(torch.ops.spyre.expert_route_weighted_down.default)
+def lower_expert_route_weighted_down(down, routing_weight):
+    """Lower post-down route weighting while retaining route binding identity."""
+
+    down.realize()
+    routing_weight.realize()
+    down_size = down.get_size()
+    routing_size = routing_weight.get_size()
+    if (
+        len(down_size) != 3
+        or len(routing_size) != 3
+        or routing_size != [down_size[1], down_size[0], 1]
+    ):
+        raise Unsupported(
+            "expert_route_weighted_down requires down[E,T,H] and "
+            f"routing_weight[T,E,1], got {down_size} and {routing_size}"
+        )
+    if down.get_dtype() != routing_weight.get_dtype():
+        raise Unsupported("down and routing_weight must have the same dtype")
+    role = _persistent_streamed_operand_role(_current_fx_custom_meta())
+    if role != "routing_weight":
+        raise Unsupported("persistent route weighting requires routing_weight role")
+    down_loader = down.make_loader()
+    routing_loader = routing_weight.make_loader()
+
+    def inner_fn(index):
+        expert, row, feature = index
+        return down_loader(index) * routing_loader([row, expert, 0])
+
+    result = Pointwise.create(
+        device=down.get_device(),
+        dtype=down.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=down_size,
+    )
+    result.data.data._post_init_setattr(
+        "op_info", {PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY: role}
+    )
+    result.realize()
+    return result
+
+
 @register_spyre_lowering(torch.ops.spyre.conv2d.default)
 def lower_depthwise_conv2d(x, w, stride, padding, dilation, groups):
     x = V.graph.get_buffer(x.realize())

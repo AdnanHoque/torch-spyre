@@ -63,6 +63,7 @@ from .constants import (
     REDUCTIONS_NON_STICK_DIM_ONLY,
     STAGGERED_EAS,
     TOPK_OPS,
+    PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY,
 )
 from .ir import (
     AllReduceAsyncFallback,
@@ -111,6 +112,15 @@ class PropArg(NamedTuple):
     dep: MemoryDep
     layout: FixedLayout
     layouts: list[SpyreTensorLayout]
+
+
+def _is_graph_input(name: str) -> bool:
+    source = V.graph.get_buffer(name)
+    if isinstance(source, TensorBox):
+        source = source.data
+    if isinstance(source, StorageBox):
+        source = source.data
+    return isinstance(source, InputBuffer)
 
 
 def _get_prop_args(reads) -> list[PropArg]:
@@ -1096,9 +1106,31 @@ def _multi_arg_pointwise_layouts(
     stick_size = get_elem_in_stick(out_dtype_for_layout)
     c_size = [concretize_expr(s) for s in output.size]
     c_stride = [concretize_expr(s) for s in output.stride]
+    op_info = getattr(op.data, "op_info", None) or {}
+    persistent_route_deps = tuple(
+        arg.dep
+        for arg in args
+        if op_info.get(PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY) == "routing_weight"
+        and _is_graph_input(arg.dep.name)
+    )
+    if op_info.get(PERSISTENT_EXPERT_STREAM_WEIGHT_INFO_KEY) == "routing_weight" and (
+        len(persistent_route_deps) != 1
+    ):
+        raise Unsupported(
+            f"{op.get_name()}: expected exactly one graph-input routing operand"
+        )
 
     def _is_supported_layout(dim_order):
         for arg in args:
+            if arg.dep in persistent_route_deps:
+                if not any(
+                    (coord := try_device_coordinates(stl, arg.dep, ind_sizes))
+                    is not None
+                    and is_stick_expr_offset_free(coord[-1], stick_size)
+                    for stl in arg.layouts
+                ):
+                    return False
+                continue
             # Project output dim_order to input, dropping leading dims missing due to broadcast.
             rank_diff = len(output.size) - len(arg.layout.size)
             projected_dim_order = [d - rank_diff for d in dim_order if d >= rank_diff]

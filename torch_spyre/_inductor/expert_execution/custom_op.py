@@ -127,6 +127,37 @@ def _validate_expert_route_prepacked(routing_weight: torch.Tensor) -> None:
         raise ValueError("expected routing_weight[E,T,1]")
 
 
+@torch.library.custom_op(
+    "spyre::expert_route_weighted_down",
+    mutates_args=(),
+    device_types=("cpu", "spyre"),
+)
+def expert_route_weighted_down(
+    down: torch.Tensor, routing_weight: torch.Tensor
+) -> torch.Tensor:
+    """Apply logical ``[T,E,1]`` route weights to ``[E,T,H]`` expert output."""
+
+    _validate_expert_route_weighted_down(down, routing_weight)
+    return down * routing_weight.permute(1, 0, 2)
+
+
+@expert_route_weighted_down.register_fake
+def _(down: torch.Tensor, routing_weight: torch.Tensor) -> torch.Tensor:
+    _validate_expert_route_weighted_down(down, routing_weight)
+    return down.new_empty(down.shape)
+
+
+def _validate_expert_route_weighted_down(
+    down: torch.Tensor, routing_weight: torch.Tensor
+) -> None:
+    if down.ndim != 3 or routing_weight.ndim != 3:
+        raise ValueError("expected down[E,T,H] and routing_weight[T,E,1]")
+    if routing_weight.shape != (down.shape[1], down.shape[0], 1):
+        raise ValueError("routing_weight must have shape [T,E,1]")
+    if down.device != routing_weight.device or down.dtype != routing_weight.dtype:
+        raise ValueError("down and routing_weight must share device and dtype")
+
+
 def _validate_shared_lhs_mm(x: torch.Tensor, expert_weights: torch.Tensor) -> None:
     if x.ndim != 2:
         raise ValueError(f"x must have shape [T,K], got {tuple(x.shape)}")

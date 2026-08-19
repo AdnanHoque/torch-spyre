@@ -21,6 +21,7 @@ from torch_spyre._inductor import decompositions
 from torch_spyre._inductor.expert_execution.custom_op import (
     expert_mm_prepacked,
     expert_route_prepacked,
+    expert_route_weighted_down,
     expert_shared_lhs_mm,
     expert_shared_lhs_mm_prepacked,
     moe_ffn,
@@ -124,6 +125,21 @@ def test_internal_prepacked_route_is_an_identity():
     torch.testing.assert_close(expert_route_prepacked(routing), routing)
 
 
+def test_internal_route_weighting_preserves_token_expert_semantics():
+    routing = _inputs()[-1]
+    down = torch.randn(
+        routing.shape[1],
+        routing.shape[0],
+        8,
+        generator=torch.Generator().manual_seed(9),
+    )
+
+    actual = expert_route_weighted_down(down, routing)
+    expected = down * routing.permute(1, 0, 2)
+
+    torch.testing.assert_close(actual, expected)
+
+
 @pytest.mark.parametrize("activation", ["gelu_tanh", "silu"])
 def test_persistent_decomposition_matches_semantic_reference(activation):
     inputs = _inputs()
@@ -150,7 +166,7 @@ def test_persistent_decomposition_marks_the_complete_loop_body(monkeypatch):
     monkeypatch.setattr(decompositions, "compiler_hint", record_region)
     decompose_dense_expert_persistent_ffn(*_inputs(), 2, "gelu_tanh", "region-7")
 
-    assert len(regions) == 8
+    assert len(regions) == 7
     assert {scope_id for scope_id, _ in regions} == {"region-7"}
     assert all(
         metadata["expert_execution"] == "persistent_dense_expert"
@@ -163,6 +179,5 @@ def test_persistent_decomposition_marks_the_complete_loop_body(monkeypatch):
         None,
         "down_weight",
         "routing_weight",
-        None,
         None,
     ]

@@ -202,14 +202,10 @@ def decompose_dense_expert_persistent_ffn(
     with compiler_hint(
         region_id,
         **loop,
-        named_dims=["E", "T", "route"],
+        named_dims=["E", "T", "H"],
         streamed_operand_role="routing_weight",
     ):
-        route_by_expert = torch.ops.spyre.expert_route_prepacked(
-            routing_weight.permute(1, 0, 2)
-        )
-    with compiler_hint(region_id, **loop, named_dims=["E", "T", "H"]):
-        weighted_down = down * route_by_expert
+        weighted_down = torch.ops.spyre.expert_route_weighted_down(down, routing_weight)
     with compiler_hint(
         region_id,
         **loop,
