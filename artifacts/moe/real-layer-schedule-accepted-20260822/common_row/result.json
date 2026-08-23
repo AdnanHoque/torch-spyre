@@ -1,0 +1,48 @@
+{
+  "comparison": {
+    "cosine": 1.000017523765564,
+    "max_abs": 0.01383066177368164,
+    "mean_abs": 0.0008230317616835237,
+    "rel_l2": 0.00839489046484232
+  },
+  "correctness_pass": true,
+  "input": {
+    "capture": "/tmp/layer0-persistent-chunked-20260818-08.pt",
+    "captured_rows": 64,
+    "checkpoint_shard": "/home/adnan/hub/models--google--gemma-4-26B-A4B-it/snapshots/4d7ae4984b7db7de8f8457170b3f1a419ee76d52/model-00001-of-00002.safetensors",
+    "row_repetitions": 8
+  },
+  "layer": 0,
+  "load_s": 0.05717623792588711,
+  "model": "google/gemma-4-26B-A4B-it",
+  "route_nonzero": 2048,
+  "schedule": "common_row",
+  "shape": {
+    "E": 128,
+    "F": 704,
+    "H": 2816,
+    "T": 512
+  },
+  "source": {
+    "batchmatmul_ops": 3,
+    "completed_reduction_markers": 0,
+    "hbm_pool_allocations": 0,
+    "hbm_restickifies": 0,
+    "loop_specs": 1,
+    "lx_relayout_markers": 0
+  },
+  "timing": {
+    "maximum_ms": 45.83203489892185,
+    "median_ms": 45.63443805091083,
+    "minimum_ms": 45.4532359726727,
+    "samples_ms": [
+      45.512429904192686,
+      45.63443805091083,
+      45.83203489892185,
+      45.67760392092168,
+      45.61709286645055,
+      45.677709160372615,
+      45.4532359726727
+    ]
+  }
+}
