@@ -708,16 +708,52 @@ def verify_carried_reduction_ownership(
                     f"does not match accumulator ownership {expected_view}"
                 )
 
-        assert expected_view is not None
-        realized_cores = sympy_product(
-            factor for _, factor in expected_view.work_slice_dims
-        )
-        if sympy.simplify(realized_cores - record.required_row_split) != 0:
-            raise Unsupported(
-                f"carried reduction {record.accumulator_name} expected "
-                f"{record.row_dim_name} split={record.required_row_split}, but "
-                f"final ownership is {expected_view}"
+            # Equal physical views are necessary but not sufficient.  A
+            # 32-way split over H and a 32-way split over T can have the same
+            # total core count while assigning different logical rows to a
+            # core.  Project the final physical view back into this stage's
+            # scheduled loop symbols, then require the one split to be the
+            # row dimension named by the immutable carried-reduction record.
+            coordinates = try_device_coordinates(layout.device_layout, dep, None)
+            if coordinates is None:
+                raise Unsupported(
+                    f"carried reduction {op_name} {access} cannot map final "
+                    "accumulator coordinates back to operation loops"
+                )
+            try:
+                realized_division = work_division_from_view(
+                    view,
+                    coordinates,
+                    tuple(iteration_space(node)),
+                )
+            except ValueError as exc:
+                raise Unsupported(
+                    f"carried reduction {op_name} {access} cannot project final "
+                    f"ownership into operation loops: {exc}"
+                ) from exc
+            if realized_division is None:
+                raise Unsupported(
+                    f"carried reduction {op_name} {access} has no final work division"
+                )
+            named_dims = getattr(node.node, "work_div_loop_info", {})
+            row_symbols = [
+                symbol
+                for symbol in realized_division.work_slices
+                if record.row_dim_name in named_dims.get(symbol, [])
+            ]
+            expected_splits = (
+                {row_symbols[0]: record.required_row_split}
+                if len(row_symbols) == 1
+                else None
             )
+            if realized_division.work_slices != expected_splits:
+                raise Unsupported(
+                    f"carried reduction {op_name} {access} expected only "
+                    f"{record.row_dim_name} split={record.required_row_split}, but "
+                    f"final logical splits are {realized_division.work_slices}"
+                )
+
+        assert expected_view is not None
 
     return nodes
 
