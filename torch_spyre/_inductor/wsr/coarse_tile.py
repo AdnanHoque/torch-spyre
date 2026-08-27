@@ -3136,6 +3136,7 @@ def _insert_one_read_copy(
     insert_before_op: Operation,
     *,
     predivision_unit_steps: tuple[tuple[tuple[int, Expr, Expr], ...], ...] = (),
+    loop_invariant: bool = False,
 ) -> str:
     """Build and insert one tile-sized copy op for a single full-buffer read.
 
@@ -3188,7 +3189,6 @@ def _insert_one_read_copy(
     if isinstance(full_buf, StorageBox):
         full_buf = full_buf.data
 
-    tile_ranges = list(dep.size)
     # Derive copy buffer strides using compute_tile_stride.
     # dep.size is the full loop iteration space (output + reduction dims) and
     # may have higher rank than the tensor (e.g. for a Reduction reading
@@ -3214,6 +3214,13 @@ def _insert_one_read_copy(
     # Positions with non-zero coeff are active tensor dims; zero coeff means
     # broadcast/absent (e.g. the N dim in a Reduction reading a[M,K]).
     active_idx = [i for i, c in enumerate(full_coeff) if c != 0]
+    # A broadcast input that is fixed for the whole counted loop needs one
+    # compact staging copy of its real tensor dimensions.  Keeping the absent
+    # loop dimension would materialize the expanded [E, ...] view in HBM.
+    compact_invariant = loop_invariant and bool(active_idx)
+    tile_ranges = (
+        [dep.size[i] for i in active_idx] if compact_invariant else list(dep.size)
+    )
 
     tile_strides: list[Expr]
     if not active_idx:
@@ -3246,19 +3253,34 @@ def _insert_one_read_copy(
                 if next_stride is None
                 else next_stride // active_full_strides[k]
             )
-        active_tile_ranges = [tile_ranges[i] for i in active_idx]
+        active_tile_ranges = [dep.size[i] for i in active_idx]
         active_tile_strides = compute_tile_stride(
             active_full_sizes, active_full_strides, active_tile_ranges
         )
         # active_tile_strides[i] corresponds to active_idx[i]: both are indexed
         # by position in the compressed active-dims space, so zip pairs each
         # full dep.var_names position with its computed tile stride correctly.
-        tile_strides = [sympy.Integer(0)] * len(tile_ranges)
-        for pos, ts in zip(active_idx, active_tile_strides):
-            tile_strides[pos] = ts
+        if compact_invariant:
+            tile_strides = active_tile_strides
+        else:
+            tile_strides = [sympy.Integer(0)] * len(tile_ranges)
+            for pos, ts in zip(active_idx, active_tile_strides):
+                tile_strides[pos] = ts
 
-    def _copy_inner_fn(idx, _dep=dep, _full_name=full_buf.get_name()):
-        subs = dict(zip(_dep.var_names, idx))
+    def _copy_inner_fn(
+        idx,
+        _dep=dep,
+        _full_name=full_buf.get_name(),
+        _active_idx=active_idx,
+        _compact=compact_invariant,
+    ):
+        if _compact:
+            full_idx = [sympy.Integer(0)] * len(_dep.var_names)
+            for pos, value in zip(_active_idx, idx):
+                full_idx[pos] = value
+        else:
+            full_idx = idx
+        subs = dict(zip(_dep.var_names, full_idx))
         flat_index = sympy_subs(_dep.index, subs)
         return V.ops.load(_full_name, flat_index)
 
@@ -3457,6 +3479,21 @@ def _insert_one_read_copy(
     # let work-division planning choose from the copy's actual dimensions.
     if hasattr(copy_buf, "work_div_loop_info"):
         del copy_buf.work_div_loop_info  # type: ignore[attr-defined]
+
+    if loop_invariant:
+        # No loop metadata means codegen emits this copy once before the first
+        # loop-body consumer.  The copy has its own iteration symbols, so the
+        # consumer's named work-division request must not be reused on it.
+        if hasattr(copy_buf, "loop_info"):
+            del copy_buf.loop_info  # type: ignore[attr-defined]
+        if hasattr(copy_buf, "work_div_loop_info"):
+            del copy_buf.work_div_loop_info  # type: ignore[attr-defined]
+        V.graph.name_to_buffer[copy_name] = copy_buf
+        operations.insert(insert_idx, copy_buf)
+        logger.debug(
+            "coarse_tile: invariant read copy-in %s -> %s", dep.name, copy_name
+        )
+        return copy_buf.get_name()
 
     # Fresh per-level tiled-dim decisions for copy_buf's own read/write —
     # mirroring _insert_copy_op's read/write split (see its comment), but
@@ -3708,6 +3745,8 @@ def _patch_consumer_to_read_copy(
     dep: MemoryDep,
     copy_name: str,
     operations: list[Operation],
+    *,
+    loop_invariant: bool = False,
 ) -> None:
     """Patch consumer's inner_fn to read copy_name instead of dep.name.
 
@@ -3724,6 +3763,10 @@ def _patch_consumer_to_read_copy(
     one) via replace_computed_buffer_body, exactly as today.
     """
     full_strides = [dep.index.coeff(v) for v in dep.var_names]
+    # Keep the dependency-coordinate positions separate from buffer-layout
+    # strides appended below.  The latter make _rescale_index complete, but
+    # they are not dimensions of a compact invariant copy.
+    dep_full_strides = list(full_strides)
     # dep is sizing_op's own (upstream-Inductor-squeezed) MemoryDep for this
     # read, so dep.var_names only covers host dims sizing_op's tile-extent
     # keeps distinct -- a host dim tiled down to extent 1 (e.g. a B-tiled
@@ -3754,7 +3797,17 @@ def _patch_consumer_to_read_copy(
         for op in operations
         if isinstance(op, ComputedBuffer) and op.get_name() == copy_name
     )
-    tile_strides = list(copy_buf.layout.stride)
+    copy_strides = list(copy_buf.layout.stride)
+    active_idx = [i for i, stride in enumerate(dep_full_strides) if stride != 0]
+    if loop_invariant and len(copy_strides) == len(active_idx):
+        # Expand a compact invariant copy's real strides back into the
+        # consumer's iteration-space positions.  Broadcast loop dimensions
+        # remain fixed at zero instead of shifting the real tensor strides.
+        tile_strides = [sympy.Integer(0)] * len(dep_full_strides)
+        for pos, stride in zip(active_idx, copy_strides):
+            tile_strides[pos] = stride
+    else:
+        tile_strides = copy_strides
     tile_strides.extend(
         sympy.Integer(0) for _ in range(len(full_strides) - len(tile_strides))
     )
@@ -3910,6 +3963,28 @@ def _plan_read_copies(
             op_deps.sort(key=lambda pair: op_position[pair[0].get_operation_name()])
             sizing_op, sizing_dep = op_deps[0]
             sizing_info = sizing_op.loop_info  # type: ignore[attr-defined]
+            invariant_by_consumer: list[bool] = []
+            for candidate_op, candidate_dep in op_deps:
+                candidate_info = candidate_op.loop_info  # type: ignore[attr-defined]
+                candidate_reads = [
+                    read
+                    for read in candidate_op.get_read_writes().reads
+                    if isinstance(read, MemoryDep)
+                ]
+                dep_idx = candidate_reads.index(candidate_dep)
+                per_level_dims = (
+                    candidate_info.tiled_dims_per_read[dep_idx]
+                    if dep_idx < len(candidate_info.tiled_dims_per_read)
+                    else []
+                )
+                per_level_squeezed = (
+                    candidate_info.squeezed_advance_per_read[dep_idx]
+                    if dep_idx < len(candidate_info.squeezed_advance_per_read)
+                    else []
+                )
+                invariant_by_consumer.append(
+                    not any(per_level_dims) and not any(per_level_squeezed)
+                )
             for other_op, _dep in op_deps[1:]:
                 other_info = other_op.loop_info  # type: ignore[attr-defined]
                 # Only loop_count (the per-level trip counts) is a genuine
@@ -3963,6 +4038,7 @@ def _plan_read_copies(
                         op.get_operation_name() for op, _dep in op_deps
                     ),
                     predivision_unit_steps=predivision_unit_steps,
+                    loop_invariant=all(invariant_by_consumer),
                 )
             )
         if entries:
@@ -4002,11 +4078,16 @@ def _insert_all_read_copy_ops(
                 operations,
                 insert_before_op=insert_before_op,
                 predivision_unit_steps=entry.predivision_unit_steps,
+                loop_invariant=entry.loop_invariant,
             )
             for consumer_name in entry.consumer_op_names:
                 consumer = name_to_op[consumer_name]
                 _patch_consumer_to_read_copy(
-                    consumer, entry.dep, new_copy_name, operations
+                    consumer,
+                    entry.dep,
+                    new_copy_name,
+                    operations,
+                    loop_invariant=entry.loop_invariant,
                 )
 
 

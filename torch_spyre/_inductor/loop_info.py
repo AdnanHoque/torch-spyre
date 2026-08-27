@@ -176,6 +176,10 @@ class ReadCopyEntry:
         captured before division squeezes a size-one tiled dimension away.
         ``_plan_read_copies`` attaches the selected sizing read's facts here;
         this entry is their authority during copy construction.
+    loop_invariant:
+        True only when every consumer reads the same source slice on every
+        trip of the surrounding counted loop.  Such a copy is a preheader
+        operation, not part of the loop body.
     """
 
     copy_name: str
@@ -187,6 +191,7 @@ class ReadCopyEntry:
     predivision_unit_steps: tuple[
         tuple[tuple[int, sympy.Expr, sympy.Expr], ...], ...
     ] = ()
+    loop_invariant: bool = False
 
 
 @dataclass(frozen=True)
