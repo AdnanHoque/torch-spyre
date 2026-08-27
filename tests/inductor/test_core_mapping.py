@@ -25,8 +25,15 @@ from torch_spyre._inductor.constants import (
     BATCH_MATMUL_FP8_OP,
     BATCH_MATMUL_OP,
 )
-from torch_spyre._inductor.core_mapping import core_to_slice_mapping
+from torch_spyre._inductor.core_mapping import (
+    core_mappings_equal,
+    core_to_slice_mapping,
+    derive_core_mapping,
+    derive_partition_mapping,
+)
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
+from torch_spyre._inductor.spyre_kernel import simplify_op_spec
+from torch_spyre._inductor.views import align_tensors
 
 
 def _coordinates(splits, num_cores, **kwargs):
@@ -62,6 +69,135 @@ def test_selected_dim_varies_first(contiguous_dim):
         for dim in range(len(splits))
         if dim != contiguous_dim
     )
+
+
+def _mapping_coordinates(mapping, dims, num_cores):
+    core_id = sympy.Symbol("core_id")
+    return [
+        tuple(int(mapping[dim].subs(core_id, core)) for dim in dims)
+        for core in range(num_cores)
+    ]
+
+
+def test_late_mapping_derives_contiguous_gather_groups():
+    h, lq = sympy.symbols("h lq")
+    mapping = derive_core_mapping(
+        (h, lq),
+        (4, 8),
+        32,
+        grouped_splits={h: 4},
+    )
+    coordinates = _mapping_coordinates(mapping, (h, lq), 32)
+    assert coordinates == [(core // 8, core % 8) for core in range(32)]
+
+
+def test_late_mapping_preserves_selected_contiguous_dimension():
+    batch, output, reduction = sympy.symbols("batch output reduction")
+    mapping = derive_core_mapping(
+        (batch, output, reduction),
+        (2, 4, 4),
+        32,
+        contiguous_dim=reduction,
+    )
+    coordinates = _mapping_coordinates(mapping, (batch, output, reduction), 32)
+    assert [coordinate[2] for coordinate in coordinates[:4]] == [0, 1, 2, 3]
+    assert all(coordinate[:2] == (0, 0) for coordinate in coordinates[:4])
+
+
+def test_late_mapping_derives_contiguous_broadcast_groups():
+    h, query = sympy.symbols("h query")
+    mapping = derive_core_mapping(
+        (query, h),
+        (16, 2),
+        32,
+        grouped_splits={h: 2},
+    )
+    coordinates = _mapping_coordinates(mapping, (query, h), 32)
+    assert coordinates == [(core % 16, core // 16) for core in range(32)]
+
+
+def test_late_partition_mapping_repeats_contiguous_owners():
+    head = sympy.Symbol("head")
+    mapping = derive_partition_mapping((head,), (4,), 32)
+    assert _mapping_coordinates(mapping, (head,), 32) == [
+        (core // 8,) for core in range(32)
+    ]
+
+
+def test_late_mapping_keeps_shared_destination_after_one_consumer_factors():
+    h, query, inner = sympy.symbols("h query inner")
+    original = derive_core_mapping(
+        (h, query),
+        (4, 8),
+        32,
+        grouped_splits={h: 4},
+    )
+    factored = derive_core_mapping(
+        (h, inner, query),
+        (4, 2, 4),
+        32,
+        grouped_splits={h: 4},
+    )
+    assert core_mappings_equal({h: original[h]}, {h: factored[h]}, 32)
+
+
+def test_group_topology_does_not_follow_final_loop_reordering():
+    head, kv, query = sympy.symbols("head kv query")
+    grouped_splits = {head: 2, kv: 2}
+    original = derive_core_mapping(
+        (head, kv, query),
+        (2, 2, 8),
+        32,
+        grouped_splits=grouped_splits,
+    )
+    reordered = derive_core_mapping(
+        (query, kv, head),
+        (8, 2, 2),
+        32,
+        grouped_splits=grouped_splits,
+    )
+    assert _mapping_coordinates(original, (head, kv), 32) == _mapping_coordinates(
+        reordered, (head, kv), 32
+    )
+
+
+def test_late_mapping_rejects_geometry_that_does_not_fill_groups():
+    h, query = sympy.symbols("h query")
+    with pytest.raises(ValueError, match="does not match operation split"):
+        derive_core_mapping(
+            (h, query),
+            (4, 8),
+            32,
+            grouped_splits={h: 2},
+        )
+
+
+def test_scalar_op_has_a_complete_empty_mapping():
+    op_spec = OpSpec("identity", False, {}, [], {})
+    simplify_op_spec(op_spec)
+    assert op_spec.core_id_to_work_slice == {}
+
+
+def test_alignment_preview_is_repeatable_and_does_not_consume_repeat_info():
+    dim = sympy.Symbol("dim")
+    repeat_info = {
+        dim: {
+            "modulus": sympy.Integer(2),
+            "node": sympy.Mod(dim, 2),
+            "kind": "mod",
+        }
+    }
+    original = {symbol: dict(info) for symbol, info in repeat_info.items()}
+    args = (
+        {dim: (sympy.Integer(4), 2)},
+        [{"size": [2, 64], "coordinates": [sympy.floor(dim / 2), dim]}],
+    )
+
+    preview = align_tensors(*args, repeat_info=repeat_info)
+    codegen = align_tensors(*args, repeat_info=repeat_info)
+
+    assert repeat_info == original
+    assert preview == codegen
 
 
 def _bmm_op_spec(op: str) -> OpSpec:
