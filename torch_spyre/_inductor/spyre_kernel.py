@@ -57,6 +57,7 @@ from .errors import Unsupported
 from .ir import FixedTiledLayout
 from .scratchpad.lx_relayout import work_division_from_view
 from .pass_utils import (
+    AlignmentAccess,
     concretize_expr,
     compute_symbolic_bounds,
     finite_upper_or_none,
@@ -64,9 +65,15 @@ from .pass_utils import (
     indirect_access_subs_from_kernel,
     is_restickify_coords,
     alignment_coordinates,
+    build_operation_alignment_inputs,
     iteration_space_with_splits,
 )
-from .views import align_tensors, tiling_expr_to_device_expr
+from .views import (
+    AlignmentInputs,
+    align_tensors,
+    align_tensors_pure,
+    tiling_expr_to_device_expr,
+)
 from .logging_utils import get_inductor_logger
 from .op_spec import (
     IndirectAccess,
@@ -568,6 +575,8 @@ class SpyreKernel(Kernel[CSEVariable]):
         self._alignment_repeat_info_by_spec: dict[
             int, dict[sympy.Symbol, dict[str, Any]]
         ] = {}
+        self._alignment_access_by_tensor_arg: dict[int, AlignmentAccess] = {}
+        self._alignment_inputs_by_spec: dict[int, AlignmentInputs] = {}
         self.pool_size: int = pool_size
 
     def indirect_var_names(self) -> "frozenset[str] | None":
@@ -836,6 +845,9 @@ class SpyreKernel(Kernel[CSEVariable]):
             device_tile_advance_expr=device_tile_advance_expr,
             work_division=work_division,
         )
+        self._alignment_access_by_tensor_arg[id(tensor_arg)] = AlignmentAccess(
+            tensor.layout.device_layout, tensor.index
+        )
         if (
             "lx" not in tensor.layout.allocation
             and "hbm_pool" not in tensor.layout.allocation
@@ -879,6 +891,18 @@ class SpyreKernel(Kernel[CSEVariable]):
         it_space_extended = _preserve_shared_weight_unit_bmm_dim(
             op, it_space_extended, args, op_info
         )
+        alignment_inputs = build_operation_alignment_inputs(
+            it_space,
+            [self._alignment_access_by_tensor_arg[id(arg)] for arg in args],
+            indirect_sizes=self.indirect_sizes,
+            repeat_info=self._alignment_repeat_info,
+            aligned_iteration_space=it_space_extended,
+        )
+        for arg, tensor in zip(args, alignment_inputs.tensors):
+            if list(arg.device_coordinates) != tensor["coordinates"]:
+                raise RuntimeError(
+                    "alignment input collection disagrees with tensor codegen"
+                )
 
         # Build per-level tiled_symbols (innermost first) for this op.
         # loop_tiled_dims / loop_tiled_reduction_dims are lists of per-level
@@ -985,6 +1009,8 @@ class SpyreKernel(Kernel[CSEVariable]):
         self._alignment_repeat_info_by_spec[id(op_spec)] = {
             symbol: dict(info) for symbol, info in self._alignment_repeat_info.items()
         }
+        if op != RESTICKIFY_OP:
+            self._alignment_inputs_by_spec[id(op_spec)] = alignment_inputs
         return op_spec
 
     def remove_kernel_local_buffers(self) -> None:
@@ -1264,6 +1290,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                 self.indirect_sizes,
                 indirect_access_subs,
                 repeat_info=self._alignment_repeat_info_by_spec.get(id(op_spec)),
+                alignment_inputs=self._alignment_inputs_by_spec.get(id(op_spec)),
             )
 
         if _spyre_config.validate_op_specs:
@@ -1652,6 +1679,7 @@ def simplify_op_spec(
     indirect_access_subs=None,
     *,
     repeat_info=None,
+    alignment_inputs: AlignmentInputs | None = None,
 ):
     # Both parameters must be provided together for gather kernels — indirect_sizes
     # decomposes symbols in align_tensors; indirect_access_subs replaces them with IndirectAccess.
@@ -1662,15 +1690,24 @@ def simplify_op_spec(
         _restickify_restore_elided_dim(op_spec)
 
     it_space = op_spec.iteration_space
-    new_op_space_splits, new_tensors, work_division_remap = align_tensors(
-        it_space,
-        [
-            {"size": arg.device_size, "coordinates": arg.device_coordinates}
-            for arg in op_spec.args
-        ],
-        indirect_sizes,
-        repeat_info=repeat_info,
-    )
+    if alignment_inputs is None:
+        new_op_space_splits, new_tensors, work_division_remap = align_tensors(
+            it_space,
+            [
+                {"size": arg.device_size, "coordinates": arg.device_coordinates}
+                for arg in op_spec.args
+            ],
+            indirect_sizes,
+            repeat_info=repeat_info,
+        )
+    else:
+        if alignment_inputs.iteration_space != it_space:
+            raise RuntimeError(
+                "captured alignment iteration space changed before codegen"
+            )
+        new_op_space_splits, new_tensors, work_division_remap = align_tensors_pure(
+            alignment_inputs
+        )
     op_spec.iteration_space = new_op_space_splits
 
     for arg, t in zip(op_spec.args, new_tensors):

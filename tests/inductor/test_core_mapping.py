@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import math
+from types import SimpleNamespace
 
 import pytest
 import sympy
@@ -34,7 +36,10 @@ from torch_spyre._inductor.core_mapping import (
 )
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.spyre_kernel import simplify_op_spec
-from torch_spyre._inductor.views import align_tensors
+from torch_spyre._inductor.views import (
+    align_tensors,
+    align_tensors_pure,
+)
 
 
 def _coordinates(splits, num_cores, **kwargs):
@@ -199,6 +204,46 @@ def test_alignment_preview_is_repeatable_and_does_not_consume_repeat_info():
 
     assert repeat_info == original
     assert preview == codegen
+
+
+def test_captured_alignment_inputs_leave_codegen_unchanged(monkeypatch):
+    dim = sympy.Symbol("dim")
+    op_spec = OpSpec(
+        "identity",
+        False,
+        {dim: (sympy.Integer(4), 2)},
+        [
+            TensorArg(
+                True,
+                0,
+                DataFormats.SEN169_FP16,
+                [2, 64],
+                [sympy.floor(dim / 2), dim],
+                {"hbm": 0},
+            )
+        ],
+        {},
+    )
+    monkeypatch.setattr(
+        pass_utils_module,
+        "alignment_coordinates",
+        lambda *args, **kwargs: [sympy.floor(dim / 2), dim],
+    )
+    captured = pass_utils_module.build_operation_alignment_inputs(
+        {dim: sympy.Integer(4)},
+        [pass_utils_module.AlignmentAccess(SimpleNamespace(device_size=[2, 64]), dim)],
+        aligned_iteration_space=op_spec.iteration_space,
+    )
+    # A preceding validation preview must neither consume nor change the input
+    # subsequently used by codegen.
+    align_tensors_pure(captured)
+
+    captured_path = copy.deepcopy(op_spec)
+    ordinary_path = copy.deepcopy(op_spec)
+    simplify_op_spec(captured_path, alignment_inputs=captured)
+    simplify_op_spec(ordinary_path)
+
+    assert captured_path == ordinary_path
 
 
 def _bmm_op_spec(op: str) -> OpSpec:
