@@ -45,7 +45,6 @@ from torch_spyre._inductor.constants import (
     TOPK_OPS,
     KEEP_BY_INDEX_OP,
 )
-from torch_spyre._inductor.core_mapping import core_to_slice_mapping
 from torch_spyre._inductor.dtype_ops import DtypeOpTable
 from torch_spyre._inductor.indirect_access import (
     compute_indirect_max_dim_sizes,
@@ -1684,6 +1683,7 @@ def _finalize_tensor_work_divisions(
     operation_work_division = TensorWorkDivision(
         {dim: work_slices[dim] for dim in mapping_dims},
         {dim: core_map[dim] for dim in mapping_dims},
+        num_cores=num_cores,
     )
     assert is_lx_relayout or all(arg.work_division is None for arg in args), (
         "per-tensor ownership is supported only for LX relayout identities"
@@ -1701,11 +1701,20 @@ def _finalize_tensor_work_divisions(
                     dim: override.core_id_to_work_slice.get(dim, Integer(0))
                     for dim in mapping_dims
                 },
+                num_cores=override.num_cores or num_cores,
             )
         )
-        if math.prod(effective.work_slices.values()) != num_cores:
+        tensor_cores = effective.num_cores or num_cores
+        tensor_owners = math.prod(effective.work_slices.values())
+        valid = (
+            tensor_cores == num_cores == tensor_owners
+            if not is_lx_relayout
+            else num_cores % tensor_cores == 0 and tensor_cores % tensor_owners == 0
+        )
+        if not valid:
             raise ValueError(
-                f"tensor ownership uses {effective.work_slices}, expected {num_cores} cores"
+                f"tensor ownership uses {tensor_owners} slices across "
+                f"{tensor_cores} of {num_cores} operation cores"
             )
         arg.work_division = effective
 
@@ -1809,6 +1818,12 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     work_slices = {
         symbol_mapping[sym]: wk_slice
         for sym, (_, wk_slice) in op_spec.iteration_space.items()
+    }
+    if op_spec.core_id_to_work_slice is None:
+        raise ValueError("OpSpec is missing its finalized core mapping")
+    core_id_to_work_slice = {
+        symbol_mapping[sym]: expression
+        for sym, expression in op_spec.core_id_to_work_slice.items()
     }
 
     # Inject implicit kernel dimensions for conv2d when kernel_size=1. This is
@@ -2166,24 +2181,20 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     else:
         window_sdsc_fields = {}
 
-    # Project dim_splits into final SDSC iteration-space order; normalization
-    # can add unit axes to either mapping independently.
+    # Unit dimensions may be injected while translating the completed OpSpec
+    # into backend labels. They are unsplit and therefore owned at slice zero.
+    # Every non-unit dimension must already have a final assignment.
     mapping_dims = tuple(sdsc_iteration_space)
-    mapping_splits = tuple(int(dim_splits[dim]) for dim in mapping_dims)
-    # Generic reductions do not yet define the same physical cohort contract as
-    # matmul partial sums.
-    contiguous_dim = (
-        len(mapping_splits) - 1
-        if is_matmul and _spyre_config.core_id_k_fast_emission
-        else None
-    )
-    # TODO: Choose the mapping before LX planning and pass it through to codegen.
-    core_id_to_work_slice = core_to_slice_mapping(
-        mapping_dims,
-        mapping_splits,
-        num_cores,
-        contiguous_dim=contiguous_dim,
-    )
+    if is_relayout:
+        num_cores = max(
+            num_cores,
+            *(arg.work_division.num_cores or 1 for arg in args if arg.work_division),
+        )
+    for dim in mapping_dims:
+        if dim not in core_id_to_work_slice:
+            if int(dim_splits[dim]) != 1:
+                raise ValueError(f"final core mapping is missing split dimension {dim}")
+            core_id_to_work_slice[dim] = Integer(0)
     _finalize_tensor_work_divisions(
         args,
         mapping_dims,

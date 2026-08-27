@@ -93,7 +93,7 @@ def work_division_from_view(
             raise ValueError(f"conflicting ownership for loop {dim}")
         splits[dim] = split
         core_map[dim] = slot
-    return TensorWorkDivision(splits, core_map)
+    return TensorWorkDivision(splits, core_map, num_cores=view.num_cores)
 
 
 def materialized_lx_relayouts(
