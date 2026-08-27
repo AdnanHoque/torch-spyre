@@ -52,7 +52,8 @@ from torch_spyre._inductor.pass_utils import PerCoreView
 from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
 from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
-from torch_spyre._inductor.spyre_kernel import _remap_work_division, simplify_op_spec
+from torch_spyre._inductor.core_mapping import remap_work_division
+from torch_spyre._inductor.spyre_kernel import simplify_op_spec
 
 _LAUNCH_JOBPLAN = "torch_spyre.execution.kernel_runner.launch_jobplan"
 _PREPARE_KERNEL = "torch_spyre.execution.kernel_runner.prepare_kernel"
@@ -701,8 +702,8 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
     ]
     assert root["numWkSlicesPerDim_"] == {"mb": 1, "x": 8, "out": 1}
     maps = [node["coordinates_"]["coreIdToWkSlice_"] for node in allocations]
-    assert [maps[0][str(i)]["x"] for i in range(8)] == [i // 2 for i in range(8)]
-    assert [maps[0][str(i)]["out"] for i in range(8)] == [i % 2 for i in range(8)]
+    assert [maps[0][str(i)]["x"] for i in range(8)] == [i % 4 for i in range(8)]
+    assert [maps[0][str(i)]["out"] for i in range(8)] == [i // 4 for i in range(8)]
     assert [maps[1][str(i)]["x"] for i in range(8)] == [i % 2 for i in range(8)]
     assert [maps[1][str(i)]["out"] for i in range(8)] == [i // 2 for i in range(8)]
     coord_info = [node["coordinates_"]["coordInfo"] for node in allocations]
@@ -726,8 +727,10 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
         base,
         work_division=TensorWorkDivision({old: 16}, {old: Mod(_CORE_ID, 16)}),
     )
-    _remap_work_division(remapped, {old: ((inner, 2), (outer, 8))})
     assert remapped.work_division is not None
+    remapped.work_division = remap_work_division(
+        remapped.work_division, {old: ((inner, 2), (outer, 8))}
+    )
     core_three = {
         dim: int(slot.subs(_CORE_ID, 3))
         for dim, slot in remapped.work_division.core_id_to_work_slice.items()
