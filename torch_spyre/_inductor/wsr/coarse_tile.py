@@ -4699,9 +4699,7 @@ def _collapse_loop_carried_unit_sum(
     )
     from ..pass_utils import replace_computed_buffer_body
 
-    old_loop_symbols = list(iteration_space_from_op(tiled_op))[: len(data.ranges)]
-    old_dim_names = getattr(tiled_op, "work_div_loop_info", {})
-    output_names = [list(old_dim_names.get(sym, [])) for sym in old_loop_symbols]
+    before_symbols = _capture_logical_iteration_symbols(tiled_op)
 
     contribution = replace_computed_buffer_body(
         tiled_op,
@@ -4710,15 +4708,13 @@ def _collapse_loop_carried_unit_sum(
         pass_name="coarse_tile",
         reason="collapse one-expert sum to loop contribution",
     )
-    # This exact rewrite preserves output-dimension order.  Reattach the names
-    # only here; a general positional remap would be unsound for other rewrites.
-    new_loop_symbols = list(iteration_space_from_op(contribution))
-    if len(new_loop_symbols) != len(output_names):
-        raise Unsupported(
-            f"coarse_tile: carried sum {tiled_op.get_name()} changed output rank"
-        )
-    contribution.work_div_loop_info = dict(  # type: ignore[attr-defined]
-        zip(new_loop_symbols, output_names)
+    _apply_work_div_symbol_remap(
+        contribution,
+        _order_preserving_symbol_remap(
+            contribution,
+            before_symbols,
+            _capture_logical_iteration_symbols(contribution),
+        ),
     )
     V.graph.name_to_buffer[contribution.get_name()] = contribution
     return contribution
@@ -4728,19 +4724,19 @@ def _copy_carried_output_dim_names(
     source: ComputedBuffer,
     target: ComputedBuffer,
 ) -> None:
-    """Copy output-dim identity across this order-preserving local rewrite."""
+    """Copy named dimensions across this order-preserving local rewrite."""
 
-    source_symbols = list(iteration_space_from_op(source))[: len(source.data.ranges)]
-    target_symbols = list(iteration_space_from_op(target))[: len(target.data.ranges)]
-    if len(source_symbols) != len(target_symbols):
-        raise Unsupported(
-            f"coarse_tile: carried sum {source.get_name()} changed output rank"
-        )
-    source_names = getattr(source, "work_div_loop_info", {})
-    target.work_div_loop_info = {  # type: ignore[attr-defined]
-        target_sym: list(source_names.get(source_sym, []))
-        for source_sym, target_sym in zip(source_symbols, target_symbols)
-    }
+    target.work_div_loop_info = dict(  # type: ignore[attr-defined]
+        getattr(source, "work_div_loop_info", {})
+    )
+    _apply_work_div_symbol_remap(
+        target,
+        _order_preserving_symbol_remap(
+            target,
+            _capture_logical_iteration_symbols(source),
+            _capture_logical_iteration_symbols(target),
+        ),
+    )
 
 
 def _insert_flat_reduction_drain_op(
