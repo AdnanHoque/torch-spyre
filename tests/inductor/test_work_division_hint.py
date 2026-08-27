@@ -976,7 +976,12 @@ class _RelayoutNode:
 
 
 def _relayout_layout(address, view):
-    return SimpleNamespace(allocation={"lx": address}, lx_view=view)
+    # FixedTiledLayout always carries the final physical device layout.  Keep
+    # that field in the test double so ownership verification exercises the
+    # same contract as the real post-allocation pipeline.
+    return SimpleNamespace(
+        allocation={"lx": address}, lx_view=view, device_layout=object()
+    )
 
 
 def test_lx_relayout_scheduler_checks_final_ownership_projection():
