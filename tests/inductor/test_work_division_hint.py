@@ -1109,10 +1109,14 @@ class _CarriedReductionDep:
         self.name = name
 
 
-def _verify_carried_reduction(drift=None, wrong_logical_dim=False):
+def _verify_carried_reduction(
+    drift=None, wrong_logical_dim=False, scheduled_rank_mismatch=False
+):
     accumulator = "fill"
-    row = Symbol("row")
-    other = Symbol("other")
+    operation_row = Symbol("d0")
+    operation_other = Symbol("d1")
+    scheduled_row = Symbol("c0")
+    scheduled_other = Symbol("c1")
     record = CarriedReductionRecord(
         accumulator_name=accumulator,
         row_dim_name="T",
@@ -1129,7 +1133,10 @@ def _verify_carried_reduction(drift=None, wrong_logical_dim=False):
     ]
     for node in nodes:
         node.node._carried_reduction_record = record
-        node.node.work_div_loop_info = {row: ["T"], other: ["H"]}
+        node.node.work_div_loop_info = {
+            operation_row: ["T"],
+            operation_other: ["H"],
+        }
 
     layout = _relayout_layout(0, _SOURCE_VIEW)
     graph = SimpleNamespace(
@@ -1143,7 +1150,7 @@ def _verify_carried_reduction(drift=None, wrong_logical_dim=False):
         return realized, False, True
 
     def work_division(_view, _coordinates, _symbols):
-        symbol = other if wrong_logical_dim else row
+        symbol = scheduled_other if wrong_logical_dim else scheduled_row
         return SimpleNamespace(work_slices={symbol: 8})
 
     with (
@@ -1153,10 +1160,21 @@ def _verify_carried_reduction(drift=None, wrong_logical_dim=False):
         mock_patch.object(scheduler_module, "V", SimpleNamespace(graph=graph)),
         mock_patch.object(scheduler_module, "per_core_view_scheduled", view),
         mock_patch.object(
-            scheduler_module, "try_device_coordinates", return_value=[row]
+            scheduler_module, "try_device_coordinates", return_value=[scheduled_row]
         ),
         mock_patch.object(
-            scheduler_module, "iteration_space", return_value={row: 64, other: 64}
+            scheduler_module,
+            "iteration_space_from_op",
+            return_value={operation_row: 64, operation_other: 64},
+        ),
+        mock_patch.object(
+            scheduler_module,
+            "iteration_space",
+            return_value=(
+                {scheduled_row: 64}
+                if scheduled_rank_mismatch
+                else {scheduled_row: 64, scheduled_other: 64}
+            ),
         ),
         mock_patch.object(
             scheduler_module, "work_division_from_view", side_effect=work_division
@@ -1181,6 +1199,11 @@ def test_carried_reduction_verifier_rejects_final_ownership_drift():
 def test_carried_reduction_verifier_rejects_same_count_on_wrong_dimension():
     with pytest.raises(Unsupported, match="expected only T split=8"):
         _verify_carried_reduction(wrong_logical_dim=True)
+
+
+def test_carried_reduction_verifier_rejects_scheduler_rank_change():
+    with pytest.raises(Unsupported, match="changed iteration rank"):
+        _verify_carried_reduction(scheduled_rank_mismatch=True)
 
 
 def aot_backend(gm: GraphModule, example_inputs: Sequence[InputType]):

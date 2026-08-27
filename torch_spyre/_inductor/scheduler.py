@@ -38,6 +38,7 @@ from .ir import FixedTiledLayout
 from .pass_utils import (
     PerCoreView,
     iteration_space,
+    iteration_space_from_op,
     per_core_view_scheduled,
     try_device_coordinates,
 )
@@ -735,7 +736,28 @@ def verify_carried_reduction_ownership(
                 raise Unsupported(
                     f"carried reduction {op_name} {access} has no final work division"
                 )
-            named_dims = getattr(node.node, "work_div_loop_info", {})
+
+            # Scheduler dependency extraction alpha-renames operation symbols
+            # (for example, d0 -> c0) without changing dimension order.  The
+            # carried-reduction rewrite is explicitly limited to
+            # order-preserving pointwise stages, so translate the names across
+            # that rename here.  This is not a general positional-remapping
+            # facility: a rank change fails closed, and no other rewrite uses
+            # this path.
+            operation_symbols = tuple(iteration_space_from_op(node.node))
+            scheduled_symbols = tuple(iteration_space(node))
+            if len(operation_symbols) != len(scheduled_symbols):
+                raise Unsupported(
+                    f"carried reduction {op_name} {access} changed iteration rank "
+                    "before final ownership verification"
+                )
+            operation_named_dims = getattr(node.node, "work_div_loop_info", {})
+            named_dims = {
+                scheduled_symbol: operation_named_dims.get(operation_symbol, [])
+                for operation_symbol, scheduled_symbol in zip(
+                    operation_symbols, scheduled_symbols
+                )
+            }
             row_symbols = [
                 symbol
                 for symbol in realized_division.work_slices
