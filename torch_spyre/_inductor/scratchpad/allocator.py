@@ -88,7 +88,7 @@ from torch_spyre._inductor.scratchpad.utils import (
     OP_OUTPUT_NOT_GOOD_FOR_LX_REUSE,
 )
 from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
-from torch_spyre._inductor.ir import FixedTiledLayout
+from torch_spyre._inductor.ir import FixedTiledLayout, SpyreEmptyFallback
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
@@ -141,6 +141,7 @@ def _extern_kernel_in_live_range(graph: GraphLowering, uses: list[int]) -> bool:
         return False
     return any(
         isinstance(graph.operations[i], ExternKernel)
+        and not isinstance(graph.operations[i], SpyreEmptyFallback)
         for i in range(min(uses), max(uses) + 1)
     )
 
