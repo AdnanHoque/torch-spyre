@@ -16,7 +16,7 @@ import io
 import math
 import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, NamedTuple, Optional, TypeVar, Union
+from typing import Any, Callable, NamedTuple, Optional, Sequence, TypeVar, Union
 
 import regex
 import torch
@@ -53,7 +53,12 @@ from .ir import FixedTiledLayout, SpyreConstantFallback
 from .logging_utils import get_inductor_logger
 from .loop_info import copy_op_metadata
 from .provenance import preserve_provenance
-from .views import compute_coordinates, matching_dim
+from .views import (
+    AlignmentInputs,
+    build_alignment_inputs,
+    compute_coordinates,
+    matching_dim,
+)
 
 # PyTorch's default lower bound for size symbols (sizes 0/1 are specialised).
 _SHAPE_ENV_DEFAULT_LOWER = 2
@@ -63,6 +68,14 @@ logger = get_inductor_logger("pass_utils")
 class SchedNodeArg(NamedTuple):
     dep: MemoryDep
     layout: "FixedTiledLayout"
+
+
+@dataclass(frozen=True)
+class AlignmentAccess:
+    """One tensor access before its coordinates are normalized for codegen."""
+
+    device_layout: Any
+    index: sympy.Expr
 
 
 def _fixed_read_layout(buf) -> "FixedTiledLayout":
@@ -1092,6 +1105,71 @@ def alignment_coordinates(
         repeat_info_out=repeat_info_out,
     )
     return coords
+
+
+def build_operation_alignment_inputs(
+    raw_iteration_space: dict[sympy.Symbol, sympy.Expr],
+    accesses: Sequence[AlignmentAccess],
+    *,
+    indirect_sizes: "dict[sympy.Symbol, int] | None" = None,
+    repeat_info: "dict[sympy.Symbol, dict] | None" = None,
+    op: ComputedBuffer | None = None,
+    read_writes: ReadWrites | None = None,
+    aligned_iteration_space: (dict[sympy.Symbol, tuple[sympy.Expr, int]] | None) = None,
+) -> AlignmentInputs:
+    """Build the complete, immutable input to tensor alignment.
+
+    Codegen may supply its already-finalized iteration space when an operation
+    has an op-specific extension.  Scheduler preview supplies ``op`` and
+    ``read_writes`` and gets the standard split-aware space.  Coordinate and
+    indirect-symbol preparation are shared in both cases.
+    """
+
+    if aligned_iteration_space is None:
+        if op is None or read_writes is None:
+            raise ValueError(
+                "alignment input construction requires either a finalized "
+                "iteration space or an operation and its dependencies"
+            )
+        aligned_iteration_space = iteration_space_with_splits(
+            op, read_writes, raw_iteration_space
+        )
+
+    if indirect_sizes is None and op is not None:
+        indirect_sizes = indirect_sizes_from_op(op)
+    resolved_indirect_sizes = dict(indirect_sizes or {})
+    if resolved_indirect_sizes:
+        # Dependency extraction can recreate an equivalent Symbol with
+        # different assumptions.  Bind the Symbol present in the real index to
+        # the recovered range so preview and codegen normalize the same input.
+        size_by_name = {str(dim): size for dim, size in resolved_indirect_sizes.items()}
+        for access in accesses:
+            for dim in access.index.free_symbols - raw_iteration_space.keys():
+                if dim not in resolved_indirect_sizes and str(dim) in size_by_name:
+                    resolved_indirect_sizes[dim] = size_by_name[str(dim)]
+
+    repeat_snapshot = {
+        symbol: dict(info) for symbol, info in (repeat_info or {}).items()
+    }
+    tensors = [
+        {
+            "size": list(access.device_layout.device_size),
+            "coordinates": alignment_coordinates(
+                access.device_layout,
+                access.index,
+                raw_iteration_space,
+                resolved_indirect_sizes,
+                repeat_info_out=repeat_snapshot,
+            ),
+        }
+        for access in accesses
+    ]
+    return build_alignment_inputs(
+        aligned_iteration_space,
+        tensors,
+        resolved_indirect_sizes,
+        repeat_snapshot,
+    )
 
 
 def try_device_coordinates(
