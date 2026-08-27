@@ -5058,7 +5058,6 @@ def _propagate_tiled_reduction_op(
             layout=fill_layout,
             data=fill_data,
         )
-        fill_buf._coarse_tile_loop_carried_lx = True  # type: ignore[attr-defined]
         _copy_carried_output_dim_names(op, fill_buf)
         combine_target = fill_buf
     else:
