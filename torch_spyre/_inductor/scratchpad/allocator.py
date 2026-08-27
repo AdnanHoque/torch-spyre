@@ -367,8 +367,10 @@ class ScratchpadAllocator:
             return False
         # A planned source intentionally bypasses the profitability denylist:
         # the relayout planner has already applied its stricter structural gates.
-        return config.allow_all_ops_in_lx_planning or (
-            self._get_op_name(op) not in OP_OUTPUT_NOT_GOOD_FOR_LX_REUSE
+        return (
+            getattr(op, "_coarse_tile_loop_carried_lx", False)
+            or config.allow_all_ops_in_lx_planning
+            or self._get_op_name(op) not in OP_OUTPUT_NOT_GOOD_FOR_LX_REUSE
             or op.get_name() in planned_lx_buffers
         )
 
@@ -462,8 +464,13 @@ class ScratchpadAllocator:
             # MultiOutputLayout tuple op). There is nothing to place, and the
             # checks below would raise.
             return "unsized (no device layout)"
-        if name in mutated_buffers:
+        if name in mutated_buffers and not getattr(
+            op, "_coarse_tile_loop_carried_lx", False
+        ):
             return "mutation target"
+        # A marked carried accumulator has exactly one in-loop mutator and a
+        # closed fill -> combine -> drain lifetime.  The general mutation gate
+        # remains unchanged for every other buffer.
         if _is_tiled_advancing(op) or _is_read_advancing_anywhere(name, buf_user_deps):
             # LX addresses cannot be expressed as affine.apply symbols today (see
             # compute_ops.py's is_tiled_lx check), so a buffer whose address

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Sequence, Union
+from typing import Iterator, Sequence, Union
 
 import sympy
 
@@ -49,6 +49,7 @@ from .scratchpad.lx_relayout import (
 )
 from .op_spec import LoopSpec
 from . import config as _spyre_config
+from .errors import Unsupported
 
 logger = get_inductor_logger("scheduler")
 
@@ -589,6 +590,134 @@ def demote_incoherent_lx_buffers(
         if culprit is None:
             continue
         demote(source_by_copy.get(name, name), culprit)
+
+    return nodes
+
+
+def verify_carried_reduction_ownership(
+    nodes: list[BaseSchedulerNode],
+) -> list[BaseSchedulerNode]:
+    """Verify the final physical contract of every loop-carried reduction.
+
+    This runs after fusion, LX demotion, and HBM-pool planning.  Earlier split
+    metadata is only an input request; the scheduled per-core views checked
+    here are the ownership codegen will actually emit.
+    """
+
+    def all_scheduler_nodes(
+        items: Sequence[BaseSchedulerNode],
+    ) -> Iterator[SchedulerNode]:
+        for item in items:
+            if isinstance(item, FusedSchedulerNode):
+                yield from all_scheduler_nodes(item.get_nodes())
+            elif isinstance(item, SchedulerNode):
+                yield item
+
+    grouped: dict[object, dict[str, SchedulerNode]] = {}
+    for node in all_scheduler_nodes(nodes):
+        record = getattr(node.node, "_carried_reduction_record", None)
+        if record is not None:
+            grouped.setdefault(record, {})[node.get_name()] = node
+
+    for record, by_name in grouped.items():
+        expected_names = {
+            record.fill_name,
+            record.combine_name,
+            record.drain_name,
+        }
+        missing = expected_names - by_name.keys()
+        if missing:
+            raise Unsupported(
+                "carried reduction lost physical stages after fusion: "
+                f"accumulator={record.accumulator_name}, missing={sorted(missing)}"
+            )
+
+        accumulator = V.graph.try_get_buffer(record.accumulator_name)
+        if accumulator is None:
+            raise Unsupported(
+                f"carried reduction accumulator {record.accumulator_name} is missing"
+            )
+        layout = accumulator.get_layout()
+        if not isinstance(layout, FixedTiledLayout):
+            raise Unsupported(
+                f"carried reduction accumulator {record.accumulator_name} has "
+                f"non-device layout {type(layout).__name__}"
+            )
+        if "lx" not in layout.allocation:
+            logger.warning(
+                "carried reduction %s remained in HBM; execution is correct but "
+                "the persistent-LX performance contract was not realized",
+                record.accumulator_name,
+            )
+            continue
+
+        checks = (
+            (record.fill_name, "write"),
+            (record.combine_name, "read"),
+            (record.combine_name, "write"),
+            (record.drain_name, "read"),
+        )
+        expected_view = layout.lx_view
+        for op_name, access in checks:
+            node = by_name[op_name]
+            deps = (
+                node.read_writes.reads if access == "read" else node.read_writes.writes
+            )
+            dep = next(
+                (
+                    candidate
+                    for candidate in deps
+                    if isinstance(candidate, MemoryDep)
+                    and candidate.name == record.accumulator_name
+                ),
+                None,
+            )
+            if dep is None and access == "write" and op_name == record.combine_name:
+                # MutationLayout's scheduled write is named after the combine
+                # op, while its storage target is the carried accumulator.
+                memory_deps = [
+                    candidate for candidate in deps if isinstance(candidate, MemoryDep)
+                ]
+                dep = memory_deps[0] if len(memory_deps) == 1 else None
+            if dep is None and access == "read" and op_name == record.drain_name:
+                # Mutation propagation names this dependency after the latest
+                # in-place writer, but it still reads the accumulator storage.
+                memory_deps = [
+                    candidate for candidate in deps if isinstance(candidate, MemoryDep)
+                ]
+                dep = memory_deps[0] if len(memory_deps) == 1 else None
+            if dep is None:
+                raise Unsupported(
+                    f"carried reduction {op_name} lost its {access} of "
+                    f"{record.accumulator_name}; deps="
+                    f"{[(type(candidate).__name__, candidate.name) for candidate in deps]}"
+                )
+            view, _, representable = per_core_view_scheduled(
+                node, dep, record.accumulator_name
+            )
+            if not representable:
+                raise Unsupported(
+                    f"carried reduction {op_name} {access} ownership is not "
+                    "representable"
+                )
+            if expected_view is None:
+                expected_view = view
+            elif view != expected_view:
+                raise Unsupported(
+                    f"carried reduction {op_name} {access} ownership {view} "
+                    f"does not match accumulator ownership {expected_view}"
+                )
+
+        assert expected_view is not None
+        realized_cores = sympy_product(
+            factor for _, factor in expected_view.work_slice_dims
+        )
+        if sympy.simplify(realized_cores - record.required_row_split) != 0:
+            raise Unsupported(
+                f"carried reduction {record.accumulator_name} expected "
+                f"{record.row_dim_name} split={record.required_row_split}, but "
+                f"final ownership is {expected_view}"
+            )
 
     return nodes
 

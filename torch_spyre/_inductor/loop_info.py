@@ -31,6 +31,26 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class CarriedReductionSpec:
+    """Planning-time requirement for one value carried through a tiled loop."""
+
+    row_dim_name: str
+    required_row_split: int
+
+
+@dataclass(frozen=True)
+class CarriedReductionRecord:
+    """Shared identity and ownership contract for a realized carried sum."""
+
+    accumulator_name: str
+    row_dim_name: str
+    required_row_split: int
+    fill_name: str
+    combine_name: str
+    drain_name: str
+
+
+@dataclass(frozen=True)
 class ReductionPlan:
     """Planned shape/identity/nesting data for a tiled-reduction op.
 
@@ -84,6 +104,7 @@ class ReductionPlan:
     outer_fill_loop_info: "CoarseTileInfo | None"
     full_output_strides: tuple[sympy.Expr, ...]
     per_tile_strides: tuple[sympy.Expr, ...]
+    carried: CarriedReductionSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -353,6 +374,9 @@ _SPYRE_METADATA_ATTRS = (
     # coarse_tile._propagate_tiled_reduction_op, read by finalize_layouts in
     # insert_restickify.py to promote accum_full to FixedTiledLayout when needed.
     "_tiled_reduction_accum_name",
+    # One immutable record shared by the fill, loop combine, and final drain
+    # of a loop-carried reduction.  Post-fusion verification consumes it.
+    "_carried_reduction_record",
 )
 
 
