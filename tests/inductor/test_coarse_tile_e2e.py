@@ -6796,8 +6796,8 @@ class TestCoarseTileMoEBroadcastMatmulE2E(InductorTestCase):
             fn, x, w, run_compile=True, run_eager=False, atol=0.05, rtol=0.05
         )
 
-    def test_unsqueeze_broadcast_matmul_emits_expert_weight_step(self):
-        """Activation stays fixed while weights advance by one expert slab."""
+    def test_unsqueeze_broadcast_matmul_reads_expert_weights_directly(self):
+        """Activation stays fixed while weights advance without staging."""
         from torch_spyre._inductor import spyre_hint
 
         E, T, H, F = 3, 64, 64, 64
@@ -6861,6 +6861,97 @@ class TestCoarseTileMoEBroadcastMatmulE2E(InductorTestCase):
         # TensorArg addresses are in df16 sticks.  64 sticks * 64 elements
         # per stick is one H*F = 4096-element expert slab.
         self.assertEqual(int(weight_step.group(1)) * 64, H * F)
+        self.assertNotIn("coarse_tile_read_copy_0_arg1_1", source_codes[0])
+
+    def test_unsqueeze_broadcast_matmul_keeps_copy_when_proof_declines(self):
+        """A failed proof leaves the original staging copy authoritative."""
+        from torch_spyre._inductor import spyre_hint
+
+        E, T, H, F = 3, 64, 64, 64
+        x = torch.randn(T, H, dtype=torch.float16).to("spyre")
+        w = torch.randn(E, H, F, dtype=torch.float16).to("spyre")
+        _declare_tensor_dim("E", E)
+        _declare_tensor_dim("T", T)
+        _declare_tensor_dim("H", H)
+        _declare_tensor_dim("F", F)
+
+        def fn(x, w):
+            _name_tensor_dims(x, ["T", "H"])
+            _name_tensor_dims(w, ["E", "H", "F"])
+            with spyre_hint(num_tiles_per_dim={"E": E}):
+                return torch.matmul(x.unsqueeze(0), w)
+
+        with (
+            mock_patch(_LAUNCH_JOBPLAN),
+            mock_patch(_PREPARE_KERNEL),
+            mock_patch("subprocess.run"),
+            mock_patch(
+                "torch_spyre._inductor.read_copy_elision._prove_matmul_direct_read",
+                return_value=(None, "forced test decline"),
+            ),
+        ):
+            _, source_codes = run_and_get_code(torch.compile(fn), x, w)
+
+        src = source_codes[0]
+        self.assertIn("coarse_tile_read_copy_0_arg1_1", src)
+
+    def test_unsqueeze_broadcast_matmul_keeps_copy_for_different_core_views(self):
+        """A legal but different source ownership cannot replace the copy."""
+        from torch_spyre._inductor import spyre_hint
+
+        E, T, H, F = 3, 64, 64, 64
+        x = torch.randn(T, H, dtype=torch.float16).to("spyre")
+        w = torch.randn(E, H, F, dtype=torch.float16).to("spyre")
+        _declare_tensor_dim("E", E)
+        _declare_tensor_dim("T", T)
+        _declare_tensor_dim("H", H)
+        _declare_tensor_dim("F", F)
+
+        def fn(x, w):
+            _name_tensor_dims(x, ["T", "H"])
+            _name_tensor_dims(w, ["E", "H", "F"])
+            with spyre_hint(num_tiles_per_dim={"E": E}):
+                return torch.matmul(x.unsqueeze(0), w)
+
+        with (
+            mock_patch(_LAUNCH_JOBPLAN),
+            mock_patch(_PREPARE_KERNEL),
+            mock_patch("subprocess.run"),
+            mock_patch(
+                "torch_spyre._inductor.read_copy_elision._per_core_view_on_buf",
+                side_effect=[
+                    ("output", None, True),
+                    ("output", None, True),
+                    ("staged-weight", None, True),
+                    ("direct-weight", None, True),
+                ],
+            ),
+        ):
+            _, source_codes = run_and_get_code(torch.compile(fn), x, w)
+
+        self.assertIn("coarse_tile_read_copy_0_arg1_1", source_codes[0])
+
+    def test_unsqueeze_broadcast_matmul_distinguishes_experts_exactly(self):
+        """Each trip reads its own weight slab, not expert zero or stale HBM."""
+        from torch_spyre._inductor import spyre_hint
+
+        E, T, H, F = 3, 64, 64, 64
+        x = torch.eye(T, H, dtype=torch.float16)
+        w = torch.stack(
+            [torch.eye(H, F, dtype=torch.float16) * scale for scale in range(1, E + 1)]
+        )
+        _declare_tensor_dim("E", E)
+        _declare_tensor_dim("T", T)
+        _declare_tensor_dim("H", H)
+        _declare_tensor_dim("F", F)
+
+        def fn(x, w):
+            _name_tensor_dims(x, ["T", "H"])
+            _name_tensor_dims(w, ["E", "H", "F"])
+            with spyre_hint(num_tiles_per_dim={"E": E}):
+                return torch.matmul(x.unsqueeze(0), w)
+
+        compare_with_cpu(fn, x, w, run_compile=True, run_eager=False, atol=0, rtol=0)
 
     def test_unsqueeze_broadcast_matmul_tile_E_poisoned_correct(self):
         """Same pattern as test_unsqueeze_broadcast_matmul_tile_E_correct,

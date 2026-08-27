@@ -212,6 +212,25 @@ class ReadCopyPlan:
     entries: tuple["ReadCopyEntry", ...]
 
 
+@dataclass(frozen=True)
+class ReadCopyElisionRecord:
+    """Direct-read form saved while a consumer is redirected through a copy.
+
+    Coarse tiling keeps the copy authoritative until layout selection, work
+    division, and LX planning finish.  A later pass may restore
+    ``direct_inner_fn`` only when the final physical plan proves that reading
+    ``source_name`` directly is equivalent.  The record is deliberately not
+    copied by :func:`copy_op_metadata`: rebuilding the consumer body
+    invalidates the saved direct form unless that pass explicitly recreates
+    the record.
+    """
+
+    consumer_name: str
+    copy_name: str
+    source_name: str
+    direct_inner_fn: object
+
+
 @dataclass
 class CoarseTileInfo:
     """Loop metadata stamped on a ``ComputedBuffer`` by the coarse-tiling pass.
