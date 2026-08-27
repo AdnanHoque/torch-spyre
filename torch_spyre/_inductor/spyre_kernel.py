@@ -563,6 +563,8 @@ class SpyreKernel(Kernel[CSEVariable]):
         self._general_tile_advance_seen: dict[str, int] = {}
         self._tile_advance_symbols: dict[int, sympy.Symbol] = {}
         self._alignment_repeat_info: dict[sympy.Symbol, dict[str, Any]] = {}
+        # Specs stay in self.op_specs until codegen, and capture precedes lookup,
+        # so id(op_spec) remains stable for this side table's lifetime.
         self._alignment_repeat_info_by_spec: dict[
             int, dict[sympy.Symbol, dict[str, Any]]
         ] = {}

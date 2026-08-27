@@ -195,6 +195,22 @@ class TestFormatOpSpecList:
 # ---------------------------------------------------------------------------
 
 
+def _make_test_kernel():
+    from torch_spyre._inductor.spyre_kernel import SpyreKernel
+
+    kernel = SpyreKernel.__new__(SpyreKernel)
+    kernel.op_specs = [_make_add_op()]
+    kernel.indirect_vars = None
+    kernel.indirect_sizes = {}
+    kernel.args = MagicMock()
+    kernel.args.python_argdefs.return_value = (None, [])
+    kernel.spyre_kernel_args = []
+    kernel._alignment_repeat_info = {}
+    kernel._alignment_repeat_info_by_spec = {}
+    kernel.pool_size = 0
+    return kernel
+
+
 class TestSpyreKernelLogging:
     """Tests for logger.info calls in SpyreKernel.codegen_kernel."""
 
@@ -206,16 +222,7 @@ class TestSpyreKernelLogging:
                     "torch_spyre._inductor.spyre_kernel.format_op_spec_list",
                     return_value="<formatted>",
                 ) as mock_fmt:
-                    from torch_spyre._inductor.spyre_kernel import SpyreKernel
-
-                    kernel = SpyreKernel.__new__(SpyreKernel)
-                    kernel.op_specs = [_make_add_op()]
-                    kernel.indirect_vars = None
-                    kernel.indirect_sizes = {}
-                    kernel.args = MagicMock()
-                    kernel.args.python_argdefs.return_value = (None, [])
-                    kernel.spyre_kernel_args = []
-                    kernel.pool_size = 0
+                    kernel = _make_test_kernel()
 
                     with patch("torch_spyre._inductor.spyre_kernel.simplify_op_spec"):
                         kernel.codegen_kernel()
@@ -232,16 +239,7 @@ class TestSpyreKernelLogging:
             with patch(
                 "torch_spyre._inductor.spyre_kernel.format_op_spec_list"
             ) as mock_fmt:
-                from torch_spyre._inductor.spyre_kernel import SpyreKernel
-
-                kernel = SpyreKernel.__new__(SpyreKernel)
-                kernel.op_specs = [_make_add_op()]
-                kernel.indirect_vars = None
-                kernel.indirect_sizes = {}
-                kernel.args = MagicMock()
-                kernel.args.python_argdefs.return_value = (None, [])
-                kernel.spyre_kernel_args = []
-                kernel.pool_size = 0
+                kernel = _make_test_kernel()
 
                 with patch("torch_spyre._inductor.spyre_kernel.simplify_op_spec"):
                     kernel.codegen_kernel()
