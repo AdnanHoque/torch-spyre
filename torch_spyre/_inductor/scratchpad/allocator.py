@@ -997,15 +997,21 @@ class ScratchpadAllocator:
             if name in partition_footprints:
                 info["size_per_core"] = partition_footprints[name]
         for plan in lx_relayout_plans:
+            core_counts = {
+                plan.source_name: plan.source_view.num_cores or plan.num_cores,
+                plan.destination_name: plan.destination_view.num_cores
+                or plan.num_cores,
+            }
             footprints = {
                 plan.source_name: plan.source_footprint_bytes,
                 plan.destination_name: plan.destination_footprint_bytes,
             }
-            for name, footprint in footprints.items():
+            for name, num_cores in core_counts.items():
                 if name not in mem_usage:
                     continue
-                ncores[name] = plan.num_cores
+                ncores[name] = num_cores
                 ncores_reasons.pop(name, None)
+                footprint = footprints[name]
                 footprint = footprint or partition_footprints.get(name, 0)
                 # A source shared by multiple relayouts keeps the largest
                 # source bound. Each private destination keeps its own bound.

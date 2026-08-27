@@ -73,7 +73,7 @@ class LXRelayoutPlan:
     source_view: PerCoreView
     destination_view: PerCoreView
     num_cores: int
-    kind: Literal["shuffle", "gather"] = "shuffle"
+    kind: Literal["shuffle", "gather", "broadcast"] = "shuffle"
     group_geometry: tuple[RelayoutDimension, ...] = ()
     source_footprint_bytes: int = 0
     destination_footprint_bytes: int = 0
@@ -406,6 +406,50 @@ def _grouped_gather_geometry(
     return source, destination, tuple(geometry)
 
 
+def _grouped_broadcast_geometry(
+    source: PerCoreView,
+    destination: PerCoreView,
+    source_num_cores: int,
+    destination_num_cores: int,
+) -> tuple[PerCoreView, PerCoreView, tuple[RelayoutDimension, ...]] | None:
+    """Classify a complete source partition spread over more physical cores."""
+
+    source_splits = dict(source.work_slice_dims)
+    destination_splits = dict(destination.work_slice_dims)
+    if (
+        source_num_cores >= destination_num_cores
+        or math.prod(source_splits.values()) != source_num_cores
+        or destination_num_cores % math.prod(destination_splits.values())
+    ):
+        return None
+
+    geometry = []
+    for dim in dict.fromkeys((*source_splits, *destination_splits)):
+        source_split = source_splits.get(dim, 1)
+        destination_split = destination_splits.get(dim, 1)
+        if destination_split < source_split or destination_split % source_split:
+            return None
+        geometry.append(
+            RelayoutDimension(
+                device_dim=dim,
+                source_split=source_split,
+                destination_split=destination_split,
+                group_count=source_split,
+                group_size=destination_split // source_split,
+                multiplicity=destination_split // source_split,
+                ordering_tag="contiguous_groups",
+            )
+        )
+    if not _compatible_partitions(
+        source,
+        destination,
+        source_num_cores,
+        destination_num_cores,
+    ):
+        return None
+    return source, destination, tuple(geometry)
+
+
 def partition_footprint(layout: FixedTiledLayout, view: PerCoreView) -> int:
     device_layout = layout.device_layout
     return partition_physical_span_bytes(
@@ -563,15 +607,29 @@ def _gather_geometry(
     return _grouped_gather_geometry(source, destination, source_num_cores)
 
 
+def _broadcast_geometry(
+    source: PerCoreView,
+    destination: PerCoreView,
+    source_num_cores: int,
+    destination_num_cores: int,
+) -> tuple[PerCoreView, PerCoreView, tuple[RelayoutDimension, ...]] | None:
+    """Adapter giving grouped broadcast the common classifier signature."""
+
+    return _grouped_broadcast_geometry(
+        source, destination, source_num_cores, destination_num_cores
+    )
+
+
 # Existing lowering functions are the registry.  The table adds no plan IR: it
 # only makes the authority order explicit.  A surviving fast path must certify
 # the same edge set derived by ``_transfer_edges`` before its name is recorded
 # in ``LXRelayoutPlan.kind``.
 _LOWERING_CERTIFIERS = {
+    "broadcast": _broadcast_geometry,
     "gather": _gather_geometry,
     "shuffle": _shuffle_geometry,
 }
-_LOWERING_PRIORITY = ("gather", "shuffle")
+_LOWERING_PRIORITY = ("broadcast", "gather", "shuffle")
 
 
 def classify_relayout_views(
@@ -639,9 +697,11 @@ def validate_final_views(
             f"{len(destination_views)} final views"
         )
 
+    source_num_cores = plan.source_view.num_cores or plan.num_cores
+    destination_num_cores = plan.destination_view.num_cores or plan.num_cores
     if (
-        source.ownership.num_cores != plan.num_cores
-        or destination.ownership.num_cores != plan.num_cores
+        source.ownership.num_cores != source_num_cores
+        or destination.ownership.num_cores != destination_num_cores
     ):
         return "schedule drift: final view physical core count changed"
     if per_core_views_equal(source.ownership, destination.ownership):
@@ -650,7 +710,8 @@ def validate_final_views(
     classified = classify_relayout_views(
         source.ownership,
         destination.ownership,
-        plan.num_cores,
+        source_num_cores,
+        destination_num_cores,
         allowed_kinds=(plan.kind,),
     )
     if classified is None:
@@ -770,7 +831,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
         source_view, partial, representable = _per_core_view_on_buf(
             producer, write, source_name, cache
         )
-        num_cores = _op_num_cores(producer)
+        source_num_cores = _op_num_cores(producer)
         if source_view is None or partial or not representable:
             continue
 
@@ -805,16 +866,21 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
             view, consumer_partial, representable = _per_core_view_on_buf(
                 consumer, dep, source_name, cache
             )
+            consumer_num_cores = _op_num_cores(consumer)
+            if view is None or consumer_partial or not representable:
+                rejection_reason = "consumer ownership is partial or unrepresentable"
+                break
+            if consumer_num_cores < source_num_cores:
+                rejection_reason = "consumer uses fewer physical cores than producer"
+                break
+            if consumer_num_cores > source_num_cores and not _is_matmul_op(consumer):
+                rejection_reason = "grouped broadcast requires a matmul consumer"
+                break
             if (
-                view is None
-                or consumer_partial
-                or not representable
-                or _op_num_cores(consumer) != num_cores
+                consumer_num_cores > source_num_cores
+                and consumer_num_cores != config.sencores
             ):
-                rejection_reason = (
-                    "consumer ownership is partial, unrepresentable, or uses a "
-                    "different core count"
-                )
+                rejection_reason = "grouped broadcast must target all compute cores"
                 break
             consumer_coordinates = try_device_coordinates(
                 producer.layout.device_layout, dep, None
@@ -831,21 +897,56 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     view,
                     consumer_coordinates,
                     consumer_symbols,
+                    consumer_num_cores,
                 )
             )
 
         grouped_source = None
         grouped_destinations = {}
         grouped_geometry = {}
+        grouped_kinds = {}
         if rejection_reason is None:
-            for consumer_name, consumer, _, view, _, _ in consumer_views:
+            for (
+                consumer_name,
+                consumer,
+                _,
+                view,
+                _,
+                _,
+                consumer_num_cores,
+            ) in consumer_views:
+                if consumer_num_cores > source_num_cores:
+                    grouped = _grouped_broadcast_geometry(
+                        source_view,
+                        view,
+                        source_num_cores,
+                        consumer_num_cores,
+                    )
+                    if grouped is None:
+                        rejection_reason = (
+                            "grouped destination does not evenly replicate the source"
+                        )
+                        break
+                    candidate_source, destination, geometry = grouped
+                    if grouped_source is not None and not per_core_views_equal(
+                        candidate_source, grouped_source
+                    ):
+                        rejection_reason = (
+                            "consumers require different grouped source geometry"
+                        )
+                        break
+                    grouped_source = candidate_source
+                    grouped_destinations[consumer_name] = destination
+                    grouped_geometry[consumer_name] = geometry
+                    grouped_kinds[consumer_name] = "broadcast"
+                    continue
                 destination_owners = math.prod(dict(view.work_slice_dims).values())
-                if destination_owners >= num_cores:
+                if destination_owners >= source_num_cores:
                     continue
                 if not _is_matmul_op(consumer):
                     rejection_reason = "grouped gather requires a matmul consumer"
                     break
-                grouped = _grouped_gather_geometry(source_view, view, num_cores)
+                grouped = _grouped_gather_geometry(source_view, view, source_num_cores)
                 if grouped is None:
                     rejection_reason = (
                         "grouped destination does not evenly contract the source"
@@ -862,6 +963,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                 grouped_source = candidate_source
                 grouped_destinations[consumer_name] = destination
                 grouped_geometry[consumer_name] = geometry
+                grouped_kinds[consumer_name] = "gather"
 
         source_view = grouped_source or source_view
         producer_coordinates = try_device_coordinates(
@@ -891,6 +993,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                 raw_view,
                 consumer_coordinates,
                 consumer_symbols,
+                consumer_num_cores,
             ) in consumer_views:
                 destination_view = grouped_destinations.get(consumer_name, raw_view)
                 try:
@@ -912,13 +1015,12 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                 if not is_matmul and not isinstance(consumer.data, Pointwise):
                     rejection_reason = "consumer is neither pointwise nor matmul"
                     break
-                expected_kind = (
-                    "gather" if consumer_name in grouped_geometry else "shuffle"
-                )
+                expected_kind = grouped_kinds.get(consumer_name, "shuffle")
                 classified = classify_relayout_views(
                     source_view,
                     destination_view,
-                    num_cores,
+                    source_num_cores,
+                    consumer_num_cores,
                     allowed_kinds=(expected_kind,),
                 )
                 if classified is None:
@@ -964,7 +1066,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     consumer_names=tuple(consumer_names),
                     source_view=source_view,
                     destination_view=destination_view,
-                    num_cores=num_cores,
+                    num_cores=source_num_cores,
                     kind=kind,
                     group_geometry=geometry,
                     source_footprint_bytes=source_footprint,
