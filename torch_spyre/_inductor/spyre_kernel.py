@@ -53,16 +53,15 @@ from .ir import FixedTiledLayout
 from .scratchpad.lx_relayout import work_division_from_view
 from .pass_utils import (
     concretize_expr,
-    concretize_index,
     compute_symbolic_bounds,
     finite_upper_or_none,
-    apply_splits_from_index_coeff,
     iteration_space,
-    select_work_division_transport_indexes,
     indirect_access_subs_from_kernel,
     is_restickify_coords,
+    alignment_coordinates,
+    iteration_space_with_splits,
 )
-from .views import compute_coordinates, align_tensors, tiling_expr_to_device_expr
+from .views import align_tensors, tiling_expr_to_device_expr
 from .logging_utils import get_inductor_logger
 from .op_spec import (
     IndirectAccess,
@@ -795,8 +794,6 @@ class SpyreKernel(Kernel[CSEVariable]):
         # (e.g. x0*s1+x1).  Concretize size symbols so normalize_coordinates
         # can correctly isolate each loop variable's contribution.
 
-        index = concretize_index(tensor.index, set(it_space.keys()))
-
         # insert_post_mutation_restickify may override the input layout for this input tensor.
         # Restore it here because the tensor data was uploaded as orig_stl.
         if is_input:
@@ -804,11 +801,10 @@ class SpyreKernel(Kernel[CSEVariable]):
             if (layout := overrides.get(name)) is not None:
                 tensor.layout = layout
 
-        device_coords = compute_coordinates(
-            tensor.layout.device_layout.device_size,
-            tensor.layout.device_layout.stride_map,
+        device_coords = alignment_coordinates(
+            tensor.layout.device_layout,
+            tensor.index,
             it_space,
-            index,
             self.indirect_sizes,
         )
         work_division = work_division_from_view(
@@ -866,18 +862,9 @@ class SpyreKernel(Kernel[CSEVariable]):
         it_space = iteration_space(self.current_node)
 
         ir_node = self.current_node.node  # ComputedBuffer
-        work_division: dict[sympy.Symbol, int] = {}
-        if hasattr(ir_node, "op_it_space_splits"):
-            write_index, read_index = select_work_division_transport_indexes(
-                ir_node, self.current_node.read_writes, it_space
-            )
-            work_division = apply_splits_from_index_coeff(
-                ir_node.op_it_space_splits, write_index, read_index, it_space
-            )
-
-        it_space_extended = {
-            k: (v, work_division.get(k, 1)) for k, v in it_space.items()
-        }
+        it_space_extended = iteration_space_with_splits(
+            ir_node, self.current_node.read_writes, it_space
+        )
         it_space_extended = _preserve_shared_weight_unit_bmm_dim(
             op, it_space_extended, args, op_info
         )

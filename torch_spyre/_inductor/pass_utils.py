@@ -1060,17 +1060,37 @@ def device_coordinates(
         One coordinate expression per device dimension; the last element is
         the stick expression.
     """
+    coords = alignment_coordinates(stl, dep.index, dep.ranges, indirect_sizes)
+    _check_stick_expr_supported(coords[-1], stl.elems_per_stick())
+    return coords
+
+
+def alignment_coordinates(
+    stl: SpyreTensorLayout,
+    index: sympy.Expr,
+    it_space: dict[sympy.Symbol, sympy.Expr],
+    indirect_sizes: "dict[sympy.Symbol, int] | None",
+    *,
+    repeat_info_out: "dict[sympy.Symbol, dict] | None" = None,
+) -> list[sympy.Expr]:
+    """Build the coordinates consumed by tensor alignment.
+
+    Scheduler validation and codegen must prepare identical inputs for
+    ``align_tensors``.  Keep index concretization and coordinate construction in
+    this one helper so the validation preview cannot drift from real codegen.
+    """
+
     # device_size and stride_map come from the C++ SpyreTensorLayout and are
     # already concrete, so no concretization is needed here.
-    index = concretize_index(dep.index, set(dep.ranges.keys()))
+    index = concretize_index(index, set(it_space))
     coords = compute_coordinates(
         stl.device_size,
         stl.stride_map,
-        dep.ranges,
+        it_space,
         index,
         indirect_sizes,
+        repeat_info_out=repeat_info_out,
     )
-    _check_stick_expr_supported(coords[-1], stl.elems_per_stick())
     return coords
 
 
@@ -1669,6 +1689,24 @@ def apply_splits_from_index_coeff(
             if rc != 0 and rc in reduction_coeff_splits:
                 result[sym] = reduction_coeff_splits[rc]
     return result
+
+
+def iteration_space_with_splits(
+    op: Operation,
+    rw: ReadWrites,
+    it_space: dict[sympy.Symbol, sympy.Expr],
+) -> dict[sympy.Symbol, tuple[sympy.Expr, int]]:
+    """Attach the operation's committed work-division splits to loop symbols."""
+
+    splits: dict[sympy.Symbol, int] = {}
+    if hasattr(op, "op_it_space_splits"):
+        write_index, read_index = select_work_division_transport_indexes(
+            op, rw, it_space
+        )
+        splits = apply_splits_from_index_coeff(
+            op.op_it_space_splits, write_index, read_index, it_space
+        )
+    return {dim: (extent, int(splits.get(dim, 1))) for dim, extent in it_space.items()}
 
 
 # The following restickify helpers are used only by the restickify
