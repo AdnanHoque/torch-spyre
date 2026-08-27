@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-import math
 from typing import Any, Callable, Self, Sequence, Tuple, Union
 from abc import ABC
 import itertools
@@ -41,6 +40,7 @@ from .constants import (
     CONV_OPS,
     DEPTHWISE_CONV_REDUCTION_OPS,
     IDENTITY_OP,
+    MATMUL_REDUCTION_OPS,
     POOL_OPS,
     RESTICKIFY_OP,
     SEGMENT_OFFSETS,
@@ -48,6 +48,11 @@ from .constants import (
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
 )
 from . import config as _spyre_config
+from .core_mapping import (
+    derive_operation_mapping,
+    finalize_tensor_work_divisions,
+    remap_work_division,
+)
 from .errors import Unsupported
 from .ir import FixedTiledLayout
 from .scratchpad.lx_relayout import work_division_from_view
@@ -68,7 +73,6 @@ from .op_spec import (
     LoopSpec,
     OpSpec,
     TensorArg,
-    TensorWorkDivision,
     UnimplementedOp as OpSpecUnimplementedOp,
     format_op_spec_list,
     is_lx_relayout_identity,
@@ -558,6 +562,10 @@ class SpyreKernel(Kernel[CSEVariable]):
         self._indirect_var_count: int = 0
         self._general_tile_advance_seen: dict[str, int] = {}
         self._tile_advance_symbols: dict[int, sympy.Symbol] = {}
+        self._alignment_repeat_info: dict[sympy.Symbol, dict[str, Any]] = {}
+        self._alignment_repeat_info_by_spec: dict[
+            int, dict[sympy.Symbol, dict[str, Any]]
+        ] = {}
         self.pool_size: int = pool_size
 
     def indirect_var_names(self) -> "frozenset[str] | None":
@@ -806,6 +814,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             tensor.index,
             it_space,
             self.indirect_sizes,
+            repeat_info_out=self._alignment_repeat_info,
         )
         work_division = work_division_from_view(
             tensor.layout.lx_view if "lx" in tensor.layout.allocation else None,
@@ -959,11 +968,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             and hasattr(ir_node.data, "ranges")
             else None
         )
-        if not is_lx_relayout_identity(op, args):
-            for arg in args:
-                arg.work_division = None
-
-        return OpSpec(
+        op_spec = OpSpec(
             op,
             is_reduction,
             it_space_extended,
@@ -975,6 +980,10 @@ class SpyreKernel(Kernel[CSEVariable]):
             node_output_ranges=node_output_ranges,
             debug_handle=debug_handle,
         )
+        self._alignment_repeat_info_by_spec[id(op_spec)] = {
+            symbol: dict(info) for symbol, info in self._alignment_repeat_info.items()
+        }
+        return op_spec
 
     def remove_kernel_local_buffers(self) -> None:
         """Remove buffers that have a scratchpad or temporary allocation from the kernel's arg list."""
@@ -1018,6 +1027,7 @@ class SpyreKernel(Kernel[CSEVariable]):
     ) -> None:
         self._general_tile_advance_seen = {}
         self._tile_advance_symbols = {}
+        self._alignment_repeat_info = {}
         # mutation_real_name maps mutation aliases to their real destination buffer. Resolve that here,
         # and mark the buf name as removed so the wrapper does not allocate it separately.
         real_dst_name = V.graph.scheduler.mutation_real_name.get(name, name)
@@ -1146,6 +1156,7 @@ class SpyreKernel(Kernel[CSEVariable]):
         """Convert an RValue"""
         self._general_tile_advance_seen = {}
         self._tile_advance_symbols = {}
+        self._alignment_repeat_info = {}
         buf = V.graph.get_buffer(name)
         layout = buf.get_layout()
         if not isinstance(layout, FixedTiledLayout):
@@ -1246,7 +1257,12 @@ class SpyreKernel(Kernel[CSEVariable]):
             )
 
         for op_spec in _iter_op_specs(self.op_specs):
-            simplify_op_spec(op_spec, self.indirect_sizes, indirect_access_subs)
+            simplify_op_spec(
+                op_spec,
+                self.indirect_sizes,
+                indirect_access_subs,
+                repeat_info=self._alignment_repeat_info_by_spec.get(id(op_spec)),
+            )
 
         if _spyre_config.validate_op_specs:
             validate_op_specs(self.op_specs, stage="after_simplification")
@@ -1451,6 +1467,12 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                         for sym, count in op_spec.tiled_symbol_trip_counts.items()
                     )
                     buf.writeline(f"tiled_symbol_trip_counts={{{trip_counts_str}}},")
+                if op_spec.core_id_to_work_slice is not None:
+                    core_map = ", ".join(
+                        f"{sympy_str(dim)}: {sympy_str(slot)}"
+                        for dim, slot in op_spec.core_id_to_work_slice.items()
+                    )
+                    buf.writeline(f"core_id_to_work_slice={{{core_map}}},")
                 buf.writeline(
                     f"symbolic_dim_bounds={_serialize_value(op_spec.symbolic_dim_bounds)},"
                 )
@@ -1512,51 +1534,17 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                                 buf.writeline(
                                     "work_division=TensorWorkDivision("
                                     f"work_slices={{{splits}}}, "
-                                    f"core_id_to_work_slice={{{core_map}}}),"
+                                    f"core_id_to_work_slice={{{core_map}}}"
+                                    + (
+                                        f", num_cores={arg.work_division.num_cores}"
+                                        if arg.work_division.num_cores is not None
+                                        else ""
+                                    )
+                                    + "),"
                                 )
                         buf.writeline("),")
                 buf.writeline("]")
             buf.writeline("),")
-
-
-def _remap_work_division(arg: TensorArg, work_division_remap) -> None:
-    """Carry tensor ownership through iteration-space normalization."""
-
-    if arg.work_division is None:
-        return
-    new_splits: dict[sympy.Symbol, int] = {}
-    new_core_map: dict[sympy.Symbol, sympy.Expr] = {}
-    for old_dim, split in arg.work_division.work_slices.items():
-        new_dims = work_division_remap[old_dim]
-        remaining_split = int(split)
-        split_factors = []
-        if len(new_dims) == 1:
-            split_factors = [(new_dims[0][0], remaining_split)]
-            remaining_split = 1
-        else:
-            for new_dim, basis in reversed(new_dims):
-                factor = math.gcd(remaining_split, basis)
-                split_factors.append((new_dim, factor))
-                remaining_split //= factor
-            split_factors.reverse()
-        if remaining_split != 1:
-            raise ValueError(f"cannot normalize {split}-way split on {old_dim}")
-
-        slot = arg.work_division.core_id_to_work_slice[old_dim]
-        slot_stride = 1
-        for new_dim, factor in split_factors:
-            if factor == 1:
-                continue
-            new_slot = sympy.Mod(sympy.floor(slot / slot_stride), factor)
-            if new_dim in new_splits and (
-                new_splits[new_dim],
-                new_core_map[new_dim],
-            ) != (factor, new_slot):
-                raise ValueError(f"conflicting normalized ownership on {new_dim}")
-            new_splits[new_dim] = factor
-            new_core_map[new_dim] = new_slot
-            slot_stride *= factor
-    arg.work_division = TensorWorkDivision(new_splits, new_core_map)
 
 
 def _restickify_restore_elided_dim(op_spec) -> None:
@@ -1656,7 +1644,13 @@ def _restickify_restore_elided_dim(op_spec) -> None:
         _restore(new_sym, out_arg, in_arg)
 
 
-def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
+def simplify_op_spec(
+    op_spec,
+    indirect_sizes=None,
+    indirect_access_subs=None,
+    *,
+    repeat_info=None,
+):
     # Both parameters must be provided together for gather kernels — indirect_sizes
     # decomposes symbols in align_tensors; indirect_access_subs replaces them with IndirectAccess.
 
@@ -1673,11 +1667,15 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
             for arg in op_spec.args
         ],
         indirect_sizes,
+        repeat_info=repeat_info,
     )
     op_spec.iteration_space = new_op_space_splits
 
     for arg, t in zip(op_spec.args, new_tensors):
-        _remap_work_division(arg, work_division_remap)
+        if arg.work_division is not None:
+            arg.work_division = remap_work_division(
+                arg.work_division, work_division_remap
+            )
         arg.device_size = t["size"]
         arg.device_coordinates = t["coordinates"]
 
@@ -1687,3 +1685,43 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
             arg.device_coordinates = [
                 c.xreplace(indirect_access_subs) for c in arg.device_coordinates
             ]
+
+    _finalize_tensor_work_divisions(op_spec)
+    is_relayout = is_lx_relayout_identity(op_spec.op, op_spec.args)
+    if is_relayout:
+        destination = op_spec.args[-1].work_division
+        assert destination is not None
+        op_spec.core_id_to_work_slice = dict(destination.core_id_to_work_slice)
+    else:
+        _finalize_core_mapping(op_spec, use_tensor_constraints=True)
+        for arg in op_spec.args:
+            arg.work_division = None
+
+
+def _finalize_tensor_work_divisions(op_spec: OpSpec) -> None:
+    """Derive tensor owners from final symbols, never planning-time formulas."""
+    finalized = finalize_tensor_work_divisions(
+        op_spec.iteration_space,
+        [arg.work_division for arg in op_spec.args],
+    )
+    for arg, division in zip(op_spec.args, finalized):
+        arg.work_division = division
+
+
+def _finalize_core_mapping(
+    op_spec: OpSpec, *, use_tensor_constraints: bool = False
+) -> None:
+    """Assign physical cores from an OpSpec's final aligned dimensions."""
+
+    contiguous_dim = (
+        next(reversed(op_spec.iteration_space))
+        if op_spec.iteration_space
+        and op_spec.op in MATMUL_REDUCTION_OPS
+        and _spyre_config.core_id_k_fast_emission
+        else None
+    )
+    op_spec.core_id_to_work_slice = derive_operation_mapping(
+        op_spec.iteration_space,
+        [arg.work_division for arg in op_spec.args] if use_tensor_constraints else (),
+        contiguous_dim=contiguous_dim,
+    )

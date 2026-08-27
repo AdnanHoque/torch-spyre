@@ -29,6 +29,7 @@ from torch_spyre._inductor.core_mapping import (
     core_mappings_equal,
     core_to_slice_mapping,
     derive_core_mapping,
+    derive_operation_mapping,
     derive_partition_mapping,
 )
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
@@ -293,6 +294,10 @@ def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contig
         prep, splits, {dims[2]: 4}
     )
 
+    op_spec.core_id_to_work_slice = derive_operation_mapping(
+        op_spec.iteration_space,
+        contiguous_dim=dims[-1] if reduction_contiguous else None,
+    )
     sdsc_spec, renamed = parse_op_spec(op_spec)
     sdsc_output_mapping = {
         device_dim: sdsc_spec.core_id_to_work_slice[renamed[dim]]
