@@ -4052,7 +4052,9 @@ def _plan_read_copies(
     holds before _apply_plan runs for that op's group.
     """
     op_position = {op.get_operation_name(): i for i, op in enumerate(operations)}
-    operations_by_name = {op.get_name(): op for op in operations}
+    operations_by_name = {
+        op.get_name(): op for op in operations if isinstance(op, ComputedBuffer)
+    }
     loop_written_names = _loop_written_buffer_names(operations)
     predivision_unit_steps_by_op = predivision_unit_steps_by_op or {}
     plans: dict[tuple[int, ...], ReadCopyPlan] = {}
