@@ -490,7 +490,6 @@ class SpyreKernelOpsHandler(DefaultHandler):
         if reduction_type in [
             "welford_reduce",
             "welford_combine",
-            "any",
             "xor_sum",
         ]:
             return UnimplementedOp(reduction_type)
