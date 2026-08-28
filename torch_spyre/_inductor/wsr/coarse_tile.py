@@ -132,14 +132,30 @@ class _ReadCopyHoistDecision(enum.Enum):
     ELIGIBLE = enum.auto()
     CROSS_GROUP_SOURCE = enum.auto()
     LOOP_PRODUCED_SOURCE = enum.auto()
+    IN_LOOP_WRITTEN_SOURCE = enum.auto()
+    UNKNOWN_SOURCE = enum.auto()
     MISSING_STEP_METADATA = enum.auto()
     ADVANCING_READ = enum.auto()
+
+
+class _ReadCopySourceKind(enum.Enum):
+    """What planning has positively established about a staged-read source."""
+
+    KNOWN_EXTERNAL = enum.auto()
+    LOOP_PRODUCED = enum.auto()
+    IN_LOOP_WRITTEN = enum.auto()
+    UNKNOWN = enum.auto()
+
+
+class _ReadCopySourceInfo(NamedTuple):
+    kind: _ReadCopySourceKind
+    loop_group_id: tuple[int, ...] | None = None
 
 
 def _read_copy_hoist_decision(
     consumer_info: CoarseTileInfo,
     dep_idx: int,
-    producer_loop_group_id: tuple[int, ...] | None,
+    source_info: _ReadCopySourceInfo,
 ) -> _ReadCopyHoistDecision:
     """Classify whether a read sees the same source slice on every trip.
 
@@ -148,14 +164,25 @@ def _read_copy_hoist_decision(
     scratch address can be rewritten by another counted loop every trip.
     Hoisting is sound only when the source is loop-external and complete
     read-step metadata proves that the consumer's window does not advance.
+    Reads synthesized after Pass 1 are outside this classifier's scope and
+    must be validated by the pass that creates them.
     """
-    if producer_loop_group_id is not None:
-        if producer_loop_group_id != consumer_info.loop_group_id:
+    if source_info.kind is _ReadCopySourceKind.LOOP_PRODUCED:
+        if source_info.loop_group_id != consumer_info.loop_group_id:
             # Keep this distinct from the general loop-produced rejection:
             # cross-group scratch caused the correctness bug this guard fixes.
             return _ReadCopyHoistDecision.CROSS_GROUP_SOURCE
         return _ReadCopyHoistDecision.LOOP_PRODUCED_SOURCE
+    if source_info.kind is _ReadCopySourceKind.IN_LOOP_WRITTEN:
+        return _ReadCopyHoistDecision.IN_LOOP_WRITTEN_SOURCE
+    if source_info.kind is _ReadCopySourceKind.UNKNOWN:
+        return _ReadCopyHoistDecision.UNKNOWN_SOURCE
+    if source_info.kind is not _ReadCopySourceKind.KNOWN_EXTERNAL:
+        raise AssertionError(f"unexpected read-copy source kind {source_info.kind}")
 
+    # tiled_dims_per_read is dense: planning records one entry for every read,
+    # so a missing entry is missing evidence. squeezed_advance_per_read is
+    # sparse by design: an empty outer list is complete "none needed" evidence.
     if dep_idx >= len(consumer_info.tiled_dims_per_read):
         return _ReadCopyHoistDecision.MISSING_STEP_METADATA
     if consumer_info.squeezed_advance_per_read and dep_idx >= len(
@@ -172,6 +199,54 @@ def _read_copy_hoist_decision(
     if any(per_level_dims) or any(per_level_squeezed):
         return _ReadCopyHoistDecision.ADVANCING_READ
     return _ReadCopyHoistDecision.ELIGIBLE
+
+
+def _loop_written_buffer_names(operations: list[Operation]) -> set[str]:
+    """Return storage names mutated by an operation inside a counted loop."""
+    written: set[str] = set()
+    for op in operations:
+        if hasattr(op, "loop_info"):
+            # get_mutation_names is Inductor's authoritative record of storage
+            # written by this op beyond its ordinary produced value.
+            written.update(op.get_mutation_names())
+    return written
+
+
+def _read_copy_source_info(
+    source_name: str,
+    operations_by_name: dict[str, Operation],
+    loop_written_names: set[str],
+) -> _ReadCopySourceInfo:
+    """Classify one source using positive producer and writer evidence."""
+    if source_name in loop_written_names:
+        return _ReadCopySourceInfo(_ReadCopySourceKind.IN_LOOP_WRITTEN)
+
+    source = operations_by_name.get(source_name)
+    if source is None:
+        source = V.graph.try_get_buffer(source_name)
+        if source is None:
+            return _ReadCopySourceInfo(_ReadCopySourceKind.UNKNOWN)
+
+    while isinstance(source, (TensorBox, StorageBox)):
+        source = source.data
+
+    if isinstance(source, ComputedBuffer):
+        producer_info = getattr(source, "loop_info", None)
+        if producer_info is not None:
+            return _ReadCopySourceInfo(
+                _ReadCopySourceKind.LOOP_PRODUCED,
+                producer_info.loop_group_id,
+            )
+        return _ReadCopySourceInfo(_ReadCopySourceKind.KNOWN_EXTERNAL)
+
+    # Imported lazily for the same circular-import reason as
+    # _full_buffer_read_deps. A SpyreEmptyFallback is only external when the
+    # writer scan above proved no counted-loop operation mutates it.
+    from ..ir import SpyreEmptyFallback
+
+    if isinstance(source, (InputBuffer, SpyreEmptyFallback)):
+        return _ReadCopySourceInfo(_ReadCopySourceKind.KNOWN_EXTERNAL)
+    return _ReadCopySourceInfo(_ReadCopySourceKind.UNKNOWN)
 
 
 class _LogicalIterationSymbol(NamedTuple):
@@ -3270,6 +3345,7 @@ def _insert_one_read_copy(
     # A broadcast input that is fixed for the whole counted loop needs one
     # compact staging copy of its real tensor dimensions.  Keeping the absent
     # loop dimension would materialize the expanded [E, ...] view in HBM.
+    # A fully-broadcast scalar has no real dimensions to compact.
     compact_invariant = loop_invariant and bool(active_idx)
     tile_ranges = (
         [dep.size[i] for i in active_idx] if compact_invariant else list(dep.size)
@@ -3818,7 +3894,7 @@ def _patch_consumer_to_read_copy(
     # Keep the dependency-coordinate positions separate from buffer-layout
     # strides appended below.  The latter make _rescale_index complete, but
     # they are not dimensions of a compact invariant copy.
-    dep_full_strides = list(full_strides)
+    pre_extension_strides = list(full_strides)
     # dep is sizing_op's own (upstream-Inductor-squeezed) MemoryDep for this
     # read, so dep.var_names only covers host dims sizing_op's tile-extent
     # keeps distinct -- a host dim tiled down to extent 1 (e.g. a B-tiled
@@ -3850,12 +3926,12 @@ def _patch_consumer_to_read_copy(
         if isinstance(op, ComputedBuffer) and op.get_name() == copy_name
     )
     copy_strides = list(copy_buf.layout.stride)
-    active_idx = [i for i, stride in enumerate(dep_full_strides) if stride != 0]
+    active_idx = [i for i, stride in enumerate(pre_extension_strides) if stride != 0]
     if loop_invariant and len(copy_strides) == len(active_idx):
         # Expand a compact invariant copy's real strides back into the
         # consumer's iteration-space positions.  Broadcast loop dimensions
         # remain fixed at zero instead of shifting the real tensor strides.
-        tile_strides = [sympy.Integer(0)] * len(dep_full_strides)
+        tile_strides = [sympy.Integer(0)] * len(pre_extension_strides)
         for pos, stride in zip(active_idx, copy_strides):
             tile_strides[pos] = stride
     else:
@@ -3976,11 +4052,8 @@ def _plan_read_copies(
     holds before _apply_plan runs for that op's group.
     """
     op_position = {op.get_operation_name(): i for i, op in enumerate(operations)}
-    producer_loop_groups = {
-        op.get_name(): op.loop_info.loop_group_id  # type: ignore[attr-defined]
-        for op in operations
-        if isinstance(op, ComputedBuffer) and hasattr(op, "loop_info")
-    }
+    operations_by_name = {op.get_name(): op for op in operations}
+    loop_written_names = _loop_written_buffer_names(operations)
     predivision_unit_steps_by_op = predivision_unit_steps_by_op or {}
     plans: dict[tuple[int, ...], ReadCopyPlan] = {}
 
@@ -4035,7 +4108,11 @@ def _plan_read_copies(
                 decision = _read_copy_hoist_decision(
                     candidate_info,
                     dep_idx,
-                    producer_loop_groups.get(candidate_dep.name),
+                    _read_copy_source_info(
+                        candidate_dep.name,
+                        operations_by_name,
+                        loop_written_names,
+                    ),
                 )
                 hoist_decisions.append(decision)
                 logger.debug(

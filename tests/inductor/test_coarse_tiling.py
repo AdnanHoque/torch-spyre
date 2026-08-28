@@ -5439,18 +5439,26 @@ class TestPlanReadCopies(unittest.TestCase):
         """
         from torch_spyre._inductor.wsr.coarse_tile import (
             _ReadCopyHoistDecision,
+            _ReadCopySourceInfo,
+            _ReadCopySourceKind,
             _plan_read_copies,
             _read_copy_hoist_decision,
         )
 
         tiled_op, _full_deps, operations = _make_cross_group_producer_read_fixture()
+        # Isolate source classification: complete fixed-address metadata lets
+        # the test reach CROSS_GROUP_SOURCE rather than declining earlier.
         tiled_op.loop_info.tiled_dims_per_read = [[[]]]
 
         plans = _plan_read_copies(operations, [((0,), [tiled_op], {})])
 
         self.assertFalse(plans[(0,)].entries[0].loop_invariant)
         self.assertIs(
-            _read_copy_hoist_decision(tiled_op.loop_info, 0, (1,)),
+            _read_copy_hoist_decision(
+                tiled_op.loop_info,
+                0,
+                _ReadCopySourceInfo(_ReadCopySourceKind.LOOP_PRODUCED, (1,)),
+            ),
             _ReadCopyHoistDecision.CROSS_GROUP_SOURCE,
         )
 
@@ -5458,6 +5466,8 @@ class TestPlanReadCopies(unittest.TestCase):
         """Missing metadata cannot authorize moving a read before the loop."""
         from torch_spyre._inductor.wsr.coarse_tile import (
             _ReadCopyHoistDecision,
+            _ReadCopySourceInfo,
+            _ReadCopySourceKind,
             _plan_read_copies,
             _read_copy_hoist_decision,
         )
@@ -5469,13 +5479,19 @@ class TestPlanReadCopies(unittest.TestCase):
 
         self.assertFalse(plans[(0,)].entries[0].loop_invariant)
         self.assertIs(
-            _read_copy_hoist_decision(tiled_op.loop_info, 0, None),
+            _read_copy_hoist_decision(
+                tiled_op.loop_info,
+                0,
+                _ReadCopySourceInfo(_ReadCopySourceKind.KNOWN_EXTERNAL),
+            ),
             _ReadCopyHoistDecision.MISSING_STEP_METADATA,
         )
 
     def test_same_group_loop_source_is_not_loop_invariant(self):
         from torch_spyre._inductor.wsr.coarse_tile import (
             _ReadCopyHoistDecision,
+            _ReadCopySourceInfo,
+            _ReadCopySourceKind,
             _read_copy_hoist_decision,
         )
 
@@ -5483,13 +5499,88 @@ class TestPlanReadCopies(unittest.TestCase):
         tiled_op.loop_info.tiled_dims_per_read = [[[]]]
 
         self.assertIs(
-            _read_copy_hoist_decision(tiled_op.loop_info, 0, (0,)),
+            _read_copy_hoist_decision(
+                tiled_op.loop_info,
+                0,
+                _ReadCopySourceInfo(_ReadCopySourceKind.LOOP_PRODUCED, (0,)),
+            ),
             _ReadCopyHoistDecision.LOOP_PRODUCED_SOURCE,
+        )
+
+    def test_loop_written_storage_is_not_loop_invariant(self):
+        """A fixed allocation is not stable while a loop mutates it."""
+        from torch._inductor.ir import (
+            ComputedBuffer,
+            MutationLayoutSHOULDREMOVE,
+            StorageBox,
+            TensorBox,
+        )
+
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _ReadCopyHoistDecision,
+            _ReadCopySourceKind,
+            _loop_written_buffer_names,
+            _plan_read_copies,
+            _read_copy_hoist_decision,
+            _read_copy_source_info,
+        )
+
+        tiled_op, _full_deps, operations = _make_full_buffer_read_fixture()
+        tiled_op.loop_info.tiled_dims_per_read = [[[]]]
+        full_buf = operations[0]
+        writer = ComputedBuffer(
+            name="loop_writer",
+            layout=MutationLayoutSHOULDREMOVE(TensorBox(StorageBox(full_buf))),
+            data=tiled_op.data,
+        )
+        writer.operation_name = "loop_writer"
+        writer.origins = OrderedSet()
+        writer.loop_info = CoarseTileInfo(
+            loop_group_id=(0,),
+            loop_count=[Integer(8)],
+            loop_tiled_dims=[[0]],
+        )
+        operations.append(writer)
+
+        plans = _plan_read_copies(operations, [((0,), [tiled_op], {})])
+        source_info = _read_copy_source_info(
+            full_buf.get_name(),
+            {op.get_name(): op for op in operations},
+            _loop_written_buffer_names(operations),
+        )
+
+        self.assertFalse(plans[(0,)].entries[0].loop_invariant)
+        self.assertIs(source_info.kind, _ReadCopySourceKind.IN_LOOP_WRITTEN)
+        self.assertIs(
+            _read_copy_hoist_decision(tiled_op.loop_info, 0, source_info),
+            _ReadCopyHoistDecision.IN_LOOP_WRITTEN_SOURCE,
+        )
+
+    def test_unknown_source_is_not_loop_invariant(self):
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _ReadCopyHoistDecision,
+            _ReadCopySourceInfo,
+            _ReadCopySourceKind,
+            _read_copy_hoist_decision,
+        )
+
+        tiled_op, _full_deps, _operations = _make_full_buffer_read_fixture()
+        tiled_op.loop_info.tiled_dims_per_read = [[[]]]
+
+        self.assertIs(
+            _read_copy_hoist_decision(
+                tiled_op.loop_info,
+                0,
+                _ReadCopySourceInfo(_ReadCopySourceKind.UNKNOWN),
+            ),
+            _ReadCopyHoistDecision.UNKNOWN_SOURCE,
         )
 
     def test_advancing_external_read_is_not_loop_invariant(self):
         from torch_spyre._inductor.wsr.coarse_tile import (
             _ReadCopyHoistDecision,
+            _ReadCopySourceInfo,
+            _ReadCopySourceKind,
             _read_copy_hoist_decision,
         )
 
@@ -5497,13 +5588,19 @@ class TestPlanReadCopies(unittest.TestCase):
         tiled_op.loop_info.tiled_dims_per_read = [[[(0, Integer(8))]]]
 
         self.assertIs(
-            _read_copy_hoist_decision(tiled_op.loop_info, 0, None),
+            _read_copy_hoist_decision(
+                tiled_op.loop_info,
+                0,
+                _ReadCopySourceInfo(_ReadCopySourceKind.KNOWN_EXTERNAL),
+            ),
             _ReadCopyHoistDecision.ADVANCING_READ,
         )
 
     def test_fixed_external_read_is_loop_invariant(self):
         from torch_spyre._inductor.wsr.coarse_tile import (
             _ReadCopyHoistDecision,
+            _ReadCopySourceInfo,
+            _ReadCopySourceKind,
             _read_copy_hoist_decision,
         )
 
@@ -5511,7 +5608,11 @@ class TestPlanReadCopies(unittest.TestCase):
         tiled_op.loop_info.tiled_dims_per_read = [[[]]]
 
         self.assertIs(
-            _read_copy_hoist_decision(tiled_op.loop_info, 0, None),
+            _read_copy_hoist_decision(
+                tiled_op.loop_info,
+                0,
+                _ReadCopySourceInfo(_ReadCopySourceKind.KNOWN_EXTERNAL),
+            ),
             _ReadCopyHoistDecision.ELIGIBLE,
         )
 
