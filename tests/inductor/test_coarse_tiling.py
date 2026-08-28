@@ -2593,6 +2593,29 @@ class TestBuildLoopSchedulerNodes(unittest.TestCase):
         self.assertIs(result[2], after)
         self.assertEqual(created[0].loop_count, Integer(2))
 
+    def test_dependency_of_later_group_member_precedes_whole_group(self):
+        """A preheader copy inserted before a later consumer stays outside.
+
+        Coarse tiling may place a loop-invariant copy between two flat loop
+        members when only the later member reads it. Scheduler regrouping must
+        move that dependency before the counted-loop unit, not split the unit.
+        """
+        sched = _make_scheduler()
+        first = _make_snode(sched, _make_ir_op((0,), Integer(4)), "first")
+        copy = _make_snode(sched, _make_ir_op(), "copy")
+        consumer = _make_snode(sched, _make_ir_op((0,), Integer(4)), "consumer")
+
+        for node, name in ((first, "first"), (copy, "copy"), (consumer, "consumer")):
+            node.get_buffer_names.return_value = {name}
+        consumer.unmet_dependencies = OrderedSet(
+            [inductor_deps.MemoryDep("copy", Integer(0), (), ())]
+        )
+
+        result, created = self._run([first, copy, consumer])
+
+        self.assertEqual(result, [copy, created[0]])
+        self.assertEqual(created[0].snodes, [first, consumer])
+
     def test_two_separate_groups(self):
         sched = _make_scheduler()
         g0a = _make_snode(sched, _make_ir_op((0,), Integer(4)), "g0a")

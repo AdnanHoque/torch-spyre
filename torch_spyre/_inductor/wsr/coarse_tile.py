@@ -3536,11 +3536,10 @@ def _insert_one_read_copy(
     if loop_invariant:
         # No loop metadata means codegen emits this copy once before the first
         # loop-body consumer.  The copy has its own iteration symbols, so the
-        # consumer's named work-division request must not be reused on it.
+        # consumer's named work-division request must not be reused on it
+        # (it was removed unconditionally above).
         if hasattr(copy_buf, "loop_info"):
             del copy_buf.loop_info  # type: ignore[attr-defined]
-        if hasattr(copy_buf, "work_div_loop_info"):
-            del copy_buf.work_div_loop_info  # type: ignore[attr-defined]
         V.graph.name_to_buffer[copy_name] = copy_buf
         operations.insert(insert_idx, copy_buf)
         logger.debug(
@@ -4029,6 +4028,9 @@ def _plan_read_copies(
                     for read in candidate_op.get_read_writes().reads
                     if isinstance(read, MemoryDep)
                 ]
+                # reads is an OrderedSet: identical MemoryDeps collapse to one
+                # equality class, so index() cannot select a different copy of
+                # the same dependency with different movement metadata.
                 dep_idx = candidate_reads.index(candidate_dep)
                 decision = _read_copy_hoist_decision(
                     candidate_info,

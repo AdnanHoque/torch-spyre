@@ -285,8 +285,10 @@ class CoarseTileInfo:
         ``test_flash_tile_B``). Independent of ``dep.index`` entirely, so
         ``SpyreKernel._general_tile_advance`` can add its device-address
         contribution as an extra term via ``tiling_expr_to_device_expr``
-        rather than by substitution. Empty list means no such dims for this
-        read (the common case).
+        rather than by substitution. An empty per-read list means that read
+        has no such dims. The outer list may also be empty when no read in the
+        operation needs squeezed-dimension metadata; that is complete "none
+        needed" metadata, not a missing entry for every read.
     squeezed_advance_output:
         The analogous per-level ``(host_stride, extent)`` list for this op's
         own write dependency, parallel to ``output_tiled_dims`` the same way
