@@ -100,6 +100,7 @@ from ..loop_info import (
     CoarseTileInfo,
     PropagationPlan,
     ReadCopyEntry,
+    ReadCopyElisionRecord,
     ReadCopyPlan,
     ReductionPlan,
     copy_op_metadata,
@@ -4027,6 +4028,32 @@ def _patch_consumer_to_read_copy(
     from ..pass_utils import replace_computed_buffer_body
 
     orig_inner = consumer.data.inner_fn
+    existing_record = getattr(consumer, "_read_copy_elision_record", None)
+    original_loop_info = consumer.loop_info  # type: ignore[attr-defined]
+    original_reads = [
+        read for read in consumer.get_read_writes().reads if isinstance(read, MemoryDep)
+    ]
+    original_dep_idx = next(
+        (idx for idx, original_dep in enumerate(original_reads) if original_dep == dep),
+        None,
+    )
+    original_read_advances = original_dep_idx is not None and (
+        (
+            original_dep_idx < len(original_loop_info.tiled_dims_per_read)
+            and any(original_loop_info.tiled_dims_per_read[original_dep_idx])
+        )
+        or (
+            original_dep_idx < len(original_loop_info.squeezed_advance_per_read)
+            and any(original_loop_info.squeezed_advance_per_read[original_dep_idx])
+        )
+    )
+    direct_read_candidate = (
+        not loop_invariant
+        and original_read_advances
+        and dep.name in V.graph.graph_input_names
+        and isinstance(consumer.data, Reduction)
+        and consumer.data.reduction_type in MATMUL_REDUCTION_OPS
+    )
 
     def new_inner_fn(*args, _map=name_map, _orig_inner=orig_inner):
         with V.set_ops_handler(_NameSwapHandler(V.ops, _map)):
@@ -4041,6 +4068,27 @@ def _patch_consumer_to_read_copy(
         reason="redirect consumer to copied inputs",
     )
     V.graph.name_to_buffer[new_op.get_name()] = new_op
+    if isinstance(existing_record, ReadCopyElisionRecord):
+
+        def updated_direct_inner(
+            *args,
+            _map=name_map,
+            _direct_inner=existing_record.direct_inner_fn,
+        ):
+            with V.set_ops_handler(_NameSwapHandler(V.ops, _map)):
+                return _direct_inner(*args)
+
+        new_op._read_copy_elision_record = dataclasses.replace(  # type: ignore[attr-defined]
+            existing_record,
+            direct_inner_fn=updated_direct_inner,
+        )
+    if direct_read_candidate:
+        new_op._read_copy_elision_record = ReadCopyElisionRecord(  # type: ignore[attr-defined]
+            consumer_name=new_op.get_name(),
+            copy_name=copy_name,
+            source_name=dep.name,
+            direct_inner_fn=orig_inner,
+        )
 
     # new_op.loop_info (copied from consumer by copy_op_metadata inside
     # replace_computed_buffer_body) still carries tiled_dims_per_read as

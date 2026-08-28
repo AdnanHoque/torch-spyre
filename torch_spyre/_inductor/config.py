@@ -94,6 +94,10 @@ ignore_work_division_hints: bool = (
 
 ignore_wsr_hints: bool = os.environ.get("SPYRE_INDUCTOR_IGNORE_HINTS", "0") == "1"
 
+# Temporary kill switch for removing a proven-redundant read copy after LX
+# planning.  A failed proof leaves the original graph unchanged.
+read_copy_elision: bool = _get_env_bool("SPYRE_READ_COPY_ELISION", True)
+
 # Per-pass operation logging for CustomPreSchedulingPasses.
 # Set to "all" or "1" to log after every pass, or a comma-separated list of
 # pass function names (e.g., "split_multi_ops,insert_restickify") to log only

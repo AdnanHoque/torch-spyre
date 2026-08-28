@@ -5782,6 +5782,61 @@ class TestReadCopyPlanDataclasses(unittest.TestCase):
             plan.entries = ()
 
 
+class TestReadCopyElisionProof(unittest.TestCase):
+    def test_record_is_frozen(self):
+        from torch_spyre._inductor.loop_info import ReadCopyElisionRecord
+
+        record = ReadCopyElisionRecord(
+            consumer_name="op0",
+            copy_name="copy0",
+            source_name="weight",
+            direct_inner_fn=lambda: None,
+        )
+
+        with self.assertRaises(Exception):
+            record.copy_name = "other"
+
+    def test_local_bounds_are_measured_in_source_elements(self):
+        from torch._inductor.dependencies import MemoryDep
+        from torch_spyre._inductor.read_copy_elision import _affine_bounds
+
+        d0, d1, d2 = sympy.symbols("d0 d1 d2", integer=True)
+        dep = MemoryDep(
+            name="weight",
+            index=4096 * d0 + 64 * d1 + d2,
+            var_names=(d0, d1, d2),
+            size=(Integer(1), Integer(64), Integer(64)),
+        )
+
+        self.assertEqual(_affine_bounds(dep), (0, 4095))
+
+    def test_loop_bound_covers_every_expert_step(self):
+        from torch_spyre._inductor.read_copy_elision import _loop_advance_bound
+
+        info = CoarseTileInfo(
+            loop_group_id=(0,),
+            loop_count=[Integer(3)],
+            loop_tiled_dims=[[0]],
+            tiled_dims_per_read=[[[]]],
+            squeezed_advance_per_read=[[[(Integer(4096), Integer(1))]]],
+        )
+
+        self.assertEqual(_loop_advance_bound(info, 0), (0, 8192))
+
+    def test_unsqueezed_loop_step_is_not_elided(self):
+        from torch_spyre._inductor.read_copy_elision import _loop_advance_bound
+
+        info = CoarseTileInfo(
+            loop_group_id=(0,),
+            loop_count=[Integer(3)],
+            loop_tiled_dims=[[0]],
+            tiled_dims_per_read=[[[(0, Integer(1))]]],
+            squeezed_advance_per_read=[[[(Integer(4096), Integer(1))]]],
+        )
+
+        self.assertIsNone(_loop_advance_bound(info, 0))
+
+
 class TestInsertAllReadCopyOps(unittest.TestCase):
     """_insert_all_read_copy_ops executes a precomputed ReadCopyPlan."""
 
@@ -7858,6 +7913,22 @@ class TestCopyOpMetadataAttrCoverage(unittest.TestCase):
         dst = SimpleNamespace()
         copy_op_metadata(src, dst)
         self.assertFalse(hasattr(dst, "_coarse_tile_dim_advance"))
+
+    def test_copy_op_metadata_invalidates_read_copy_elision_record(self):
+        from torch_spyre._inductor.loop_info import ReadCopyElisionRecord
+
+        src = SimpleNamespace()
+        src._read_copy_elision_record = ReadCopyElisionRecord(
+            consumer_name="op0",
+            copy_name="copy0",
+            source_name="weight",
+            direct_inner_fn=lambda: None,
+        )
+        dst = SimpleNamespace()
+
+        copy_op_metadata(src, dst)
+
+        self.assertFalse(hasattr(dst, "_read_copy_elision_record"))
 
 
 class TestCoeffThroughFloor(unittest.TestCase):
