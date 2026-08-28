@@ -1869,6 +1869,52 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
                     torch.tensor([-0.0, 0.0, -0.0, 0.0], dtype=torch.float16),
                     torch.tensor([0.0, -0.0, 0.0, -0.0], dtype=torch.float16),
                 ),
+                "fp32_1d": (
+                    torch.ceil(
+                        cached_randn((256,), abs=True, scale=10.0, dtype=torch.float32)
+                    ),
+                    torch.ceil(
+                        cached_randn((256,), abs=True, scale=9.9, dtype=torch.float32)
+                    ),
+                ),
+                "fp32_2d": (
+                    torch.ceil(
+                        cached_randn(
+                            (64, 128), abs=True, scale=10.0, dtype=torch.float32
+                        )
+                    ),
+                    torch.ceil(
+                        cached_randn(
+                            (64, 128), abs=True, scale=9.9, dtype=torch.float32
+                        )
+                    ),
+                ),
+                "fp32_3d": (
+                    torch.ceil(
+                        cached_randn(
+                            (2, 32, 128), abs=True, scale=10.0, dtype=torch.float32
+                        )
+                    ),
+                    torch.ceil(
+                        cached_randn(
+                            (2, 32, 128), abs=True, scale=9.9, dtype=torch.float32
+                        )
+                    ),
+                ),
+                "fp32_broadcast": (
+                    torch.ceil(
+                        cached_randn(
+                            (256, 256), abs=True, scale=10.0, dtype=torch.float32
+                        )
+                    ),
+                    torch.ceil(
+                        cached_randn((256,), abs=True, scale=9.9, dtype=torch.float32)
+                    ),
+                ),
+                "fp32_signed_zero": (
+                    torch.tensor([-0.0, 0.0, -0.0, 0.0], dtype=torch.float32),
+                    torch.tensor([0.0, -0.0, 0.0, -0.0], dtype=torch.float32),
+                ),
             },
         },
         ("test_cmp_scalar_int64", "test_cmp_scalar_int64_cpu"): {
