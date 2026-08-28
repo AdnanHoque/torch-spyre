@@ -176,6 +176,10 @@ class ReadCopyEntry:
         captured before division squeezes a size-one tiled dimension away.
         ``_plan_read_copies`` attaches the selected sizing read's facts here;
         this entry is their authority during copy construction.
+    loop_invariant:
+        True only when every consumer reads the same source slice on every
+        trip of the surrounding counted loop.  Such a copy is a preheader
+        operation, not part of the loop body.
     """
 
     copy_name: str
@@ -187,6 +191,7 @@ class ReadCopyEntry:
     predivision_unit_steps: tuple[
         tuple[tuple[int, sympy.Expr, sympy.Expr], ...], ...
     ] = ()
+    loop_invariant: bool = False
 
 
 @dataclass(frozen=True)
@@ -242,9 +247,11 @@ class CoarseTileInfo:
         level's extent equals the final (innermost) extent times the
         product of every more-inner level's own count that also tiles that
         dim.
-        An empty per-level list means the dep is loop-invariant at that
-        level. This is a tiling *decision*, not a substituted index
-        expression -- deferred substitution into the dependency's actual
+        An empty per-level list means this read's address does not advance at
+        that level. It does not by itself prove value invariance: a producer
+        may rewrite fixed-address scratch on every trip. This is a tiling
+        *decision*, not a substituted index expression -- deferred
+        substitution into the dependency's actual
         (possibly later-rewritten) index expression happens in
         spyre_kernel.py at OpSpec/TensorArg construction time, when the
         index is guaranteed final.
@@ -278,8 +285,10 @@ class CoarseTileInfo:
         ``test_flash_tile_B``). Independent of ``dep.index`` entirely, so
         ``SpyreKernel._general_tile_advance`` can add its device-address
         contribution as an extra term via ``tiling_expr_to_device_expr``
-        rather than by substitution. Empty list means no such dims for this
-        read (the common case).
+        rather than by substitution. An empty per-read list means that read
+        has no such dims. The outer list may also be empty when no read in the
+        operation needs squeezed-dimension metadata; that is complete "none
+        needed" metadata, not a missing entry for every read.
     squeezed_advance_output:
         The analogous per-level ``(host_stride, extent)`` list for this op's
         own write dependency, parallel to ``output_tiled_dims`` the same way
