@@ -556,9 +556,11 @@ class TestNamedWorkDivisionHint(InductorTestCase):
 
 _CORE_ID = Symbol("core_id")
 _SOURCE_VIEW = PerCoreView(
-    ((0, 4), (1, 2)), ((0, floor(_CORE_ID / 2)), (1, Mod(_CORE_ID, 2)))
+    ((0, 4), (1, 2)),
+    ((0, floor(_CORE_ID / 2)), (1, Mod(_CORE_ID, 2))),
+    num_cores=8,
 )
-_DESTINATION_VIEW = PerCoreView(((0, 8),), ((0, _CORE_ID),))
+_DESTINATION_VIEW = PerCoreView(((0, 8),), ((0, _CORE_ID),), num_cores=8)
 
 
 def _relayout_plan(source="source", consumers="consumer"):
@@ -591,10 +593,12 @@ def test_lx_relayout_planner_rejects_equal_projected_ownership():
     source_view = PerCoreView(
         ((1, 32),),
         ((1, Mod(_CORE_ID, 32)),),
+        num_cores=32,
     )
     destination_view = PerCoreView(
         ((0, 32),),
         ((0, Mod(_CORE_ID, 32)),),
+        num_cores=32,
     )
     coordinates = [m, m]
     source_work_division = work_division_from_view(source_view, coordinates, (m,))
@@ -668,10 +672,12 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
     source_view = PerCoreView(
         ((1, 4), (2, 2)),
         ((1, floor(_CORE_ID / 2)), (2, Mod(_CORE_ID, 2))),
+        num_cores=8,
     )
     destination_view = PerCoreView(
         ((1, 2), (2, 4)),
         ((1, Mod(_CORE_ID, 2)), (2, floor(_CORE_ID / 2))),
+        num_cores=8,
     )
     coordinates = [Mod(n, 32), floor(n / 32), Mod(m, 64)]
     base = TensorArg(

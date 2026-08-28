@@ -2080,9 +2080,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
                 if dev_dim_size < padded_it_size:
                     sdsc_arg.backGap[dim_sym] = padded_it_size - dev_dim_size
         for dim in padding:
-            dim_splits[dim] = 1
-            work_slices[dim] = 1
-        num_cores = math.prod(dim_splits.values())
+            if dim_splits[dim] != 1:
+                raise ValueError(
+                    f"restickify padding dimension {dim} must be unsplit before codegen"
+                )
 
     conv_params = (
         dict(op_spec.op_info.get("conv_params", {})) if op_spec.op_info else {}
@@ -2124,10 +2125,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         # The pool hardware accumulates the full kernel window on each core.
         # Splitting ki/kj across cores produces partial sums, giving wrong results.
         for _k_sym in (Symbol("ki"), Symbol("kj")):
-            if _k_sym in dim_splits:
-                dim_splits[_k_sym] = 1
-                work_slices[_k_sym] = 1
-        num_cores = math.prod(dim_splits.values())
+            if dim_splits.get(_k_sym, 1) != 1:
+                raise ValueError(
+                    f"pool kernel dimension {_k_sym} must be unsplit before codegen"
+                )
 
     if is_conv:
         # Both conv paths accumulate the full kernel window per core; splitting
@@ -2135,9 +2136,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         # reduction MAY be core-split (matmul K via psum), so it is left to the
         # default work division.
         for _k_sym in (Symbol("ki"), Symbol("kj")):
-            if _k_sym in dim_splits:
-                dim_splits[_k_sym] = 1
-                work_slices[_k_sym] = 1
+            if dim_splits.get(_k_sym, 1) != 1:
+                raise ValueError(
+                    f"convolution kernel dimension {_k_sym} must be unsplit before codegen"
+                )
 
         if _spyre_config.disable_conv2d_spatial_split:
             # Strided convs cannot split the output spatial dims (i/j): a strided
@@ -2163,8 +2165,6 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
                             f"ways; expected work division to block it unless the "
                             f"memory-span limit required the split."
                         )
-        num_cores = math.prod(dim_splits.values())
-
     # Pool-specific SDSC field values (#3510).  Empty for non-pool ops.
     pool_sdsc_fields = (
         _avgpool_sdsc_fields(sdsc_iteration_space, pool_params_out) if is_pool else {}

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from itertools import permutations
 
 from sympy import Expr, Integer, Mod, Symbol, floor
 
@@ -234,15 +235,8 @@ def finalize_tensor_work_divisions(
     iteration_space: Mapping[Symbol, tuple[Expr, int]],
     divisions: Sequence[TensorWorkDivision | None],
 ) -> tuple[TensorWorkDivision | None, ...]:
-    """Derive every tensor's final owners from aligned split geometry."""
+    """Derive each tensor's owners from its final aligned partition."""
 
-    operation_cores = math.prod(int(split) for _, split in iteration_space.values())
-    owner_counts = [
-        math.prod(int(split) for split in division.work_slices.values())
-        for division in divisions
-        if division is not None
-    ]
-    default_num_cores = max([operation_cores, *owner_counts])
     result: list[TensorWorkDivision | None] = []
     for division in divisions:
         if division is None:
@@ -253,11 +247,15 @@ def finalize_tensor_work_divisions(
             for dim, split in division.work_slices.items()
             if int(split) > 1
         }
-        num_cores = division.num_cores or default_num_cores
-        owner_count = math.prod(work_slices.values())
-        if num_cores % owner_count:
+        unknown_dims = work_slices.keys() - iteration_space.keys()
+        if unknown_dims:
             raise ValueError(
-                f"tensor ownership uses {owner_count} slices across {num_cores} cores"
+                f"tensor ownership dimensions are not aligned: {unknown_dims}"
+            )
+
+        if division.num_cores is None:
+            raise ValueError(
+                "tensor ownership must carry its physical core domain before alignment"
             )
         result.append(
             TensorWorkDivision(
@@ -265,9 +263,9 @@ def finalize_tensor_work_divisions(
                 derive_partition_mapping(
                     tuple(work_slices),
                     tuple(work_slices.values()),
-                    num_cores,
+                    division.num_cores,
                 ),
-                num_cores=num_cores,
+                num_cores=division.num_cores,
             )
         )
     return tuple(result)
@@ -279,27 +277,59 @@ def derive_operation_mapping(
     *,
     contiguous_dim: Symbol | None = None,
 ) -> dict[Symbol, Expr]:
-    """Derive one operation mapping from final dimensions and LX constraints."""
+    """Derive one operation mapping that satisfies every LX tensor owner."""
 
     dims = tuple(iteration_space)
     splits = tuple(int(iteration_space[dim][1]) for dim in dims)
-    grouped_splits: dict[Symbol, int] = {}
+    num_cores = math.prod(splits)
+    split_by_dim = dict(zip(dims, splits))
+    constrained: dict[Symbol, Expr] = {}
     for division in tensor_divisions:
         if division is None:
             continue
+        if division.work_slices and division.num_cores not in (None, num_cores):
+            raise ValueError(
+                "LX tensor ownership and operation use different core domains: "
+                f"{division.num_cores} != {num_cores}"
+            )
         for dim, split in division.work_slices.items():
-            previous = grouped_splits.setdefault(dim, int(split))
-            if previous != int(split):
+            if dim not in split_by_dim:
+                raise ValueError(f"LX tensor dimension {dim} is not in the operation")
+            if split_by_dim[dim] != int(split):
                 raise ValueError(
-                    f"LX tensors disagree on the split for {dim}: {previous} != {split}"
+                    f"LX tensor split for {dim} does not match the operation: "
+                    f"{split} != {split_by_dim[dim]}"
                 )
-    return derive_core_mapping(
-        dims,
-        splits,
-        math.prod(splits),
-        contiguous_dim=contiguous_dim,
-        grouped_splits=grouped_splits,
-    )
+            expression = division.core_id_to_work_slice[dim]
+            previous = constrained.setdefault(dim, expression)
+            if not core_mappings_equal({dim: previous}, {dim: expression}, num_cores):
+                raise ValueError(f"LX tensors disagree on core ownership for {dim}")
+
+    if not constrained:
+        return derive_core_mapping(
+            dims,
+            splits,
+            num_cores,
+            contiguous_dim=contiguous_dim,
+        )
+
+    # Tensor-owned dimensions occupy the outer, contiguous groups. At most five
+    # dimensions can be split on 32 cores, so trying their radix orders is small.
+    for order in permutations(constrained):
+        candidate = derive_core_mapping(
+            dims,
+            splits,
+            num_cores,
+            contiguous_dim=contiguous_dim,
+            grouped_splits={dim: split_by_dim[dim] for dim in order},
+        )
+        if all(
+            core_mappings_equal({dim: candidate[dim]}, {dim: expression}, num_cores)
+            for dim, expression in constrained.items()
+        ):
+            return candidate
+
+    raise ValueError("no operation core mapping satisfies every LX tensor owner")
 
 
 def core_mappings_equal(

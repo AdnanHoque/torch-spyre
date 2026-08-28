@@ -77,6 +77,8 @@ def work_division_from_view(
 
     if view is None:
         return None
+    if view.num_cores is None:
+        raise ValueError("LX ownership must carry its physical core domain")
     loop_symbols = set(iteration_symbols)
     splits: dict[sympy.Symbol, int] = {}
     core_map: dict[sympy.Symbol, sympy.Expr] = {}

@@ -33,8 +33,9 @@ from torch_spyre._inductor.core_mapping import (
     derive_core_mapping,
     derive_operation_mapping,
     derive_partition_mapping,
+    finalize_tensor_work_divisions,
 )
-from torch_spyre._inductor.op_spec import OpSpec, TensorArg
+from torch_spyre._inductor.op_spec import OpSpec, TensorArg, TensorWorkDivision
 from torch_spyre._inductor.spyre_kernel import simplify_op_spec
 from torch_spyre._inductor.views import (
     align_tensors,
@@ -175,6 +176,111 @@ def test_late_mapping_rejects_geometry_that_does_not_fill_groups():
             (4, 8),
             32,
             grouped_splits={h: 2},
+        )
+
+
+def test_final_tensor_ownership_is_derived_from_aligned_buffer_geometry():
+    extra, shared = sympy.symbols("extra shared")
+    core_id = sympy.Symbol("core_id")
+    division = TensorWorkDivision(
+        {shared: 2},
+        # Planning-time placement is working data, not the final assignment.
+        {shared: sympy.Mod(core_id, 2)},
+        num_cores=4,
+    )
+
+    (finalized,) = finalize_tensor_work_divisions(
+        {extra: (8, 2), shared: (8, 2)},
+        [division],
+    )
+
+    assert finalized == TensorWorkDivision(
+        {shared: 2},
+        {shared: sympy.Mod(sympy.floor(core_id / 2), 2)},
+        num_cores=4,
+    )
+
+
+def test_shared_lx_buffer_keeps_owners_across_different_operation_dims():
+    producer_extra, producer_shared = sympy.symbols("producer_extra producer_shared")
+    consumer_shared, consumer_extra = sympy.symbols("consumer_shared consumer_extra")
+    core_id = sympy.Symbol("core_id")
+    owners = sympy.Mod(core_id, 2)
+    producer_division = finalize_tensor_work_divisions(
+        {producer_extra: (8, 2), producer_shared: (8, 2)},
+        [
+            TensorWorkDivision(
+                {producer_shared: 2},
+                {producer_shared: owners},
+                num_cores=4,
+            )
+        ],
+    )[0]
+    consumer_division = finalize_tensor_work_divisions(
+        {consumer_shared: (8, 2), consumer_extra: (8, 2)},
+        [
+            TensorWorkDivision(
+                {consumer_shared: 2},
+                {consumer_shared: owners},
+                num_cores=4,
+            )
+        ],
+    )[0]
+    assert producer_division is not None
+    assert consumer_division is not None
+
+    producer = derive_operation_mapping(
+        {producer_extra: (8, 2), producer_shared: (8, 2)},
+        [producer_division],
+    )
+    consumer = derive_operation_mapping(
+        {consumer_shared: (8, 2), consumer_extra: (8, 2)},
+        [consumer_division],
+    )
+
+    assert core_mappings_equal(
+        {producer_shared: producer[producer_shared]},
+        {producer_shared: consumer[consumer_shared]},
+        4,
+    )
+
+
+def test_final_tensor_ownership_requires_a_buffer_core_domain():
+    shared = sympy.Symbol("shared")
+    core_id = sympy.Symbol("core_id")
+
+    with pytest.raises(ValueError, match="physical core domain"):
+        finalize_tensor_work_divisions(
+            {shared: (8, 2)},
+            [
+                TensorWorkDivision(
+                    {shared: 2},
+                    {shared: sympy.Mod(core_id, 2)},
+                )
+            ],
+        )
+
+
+def test_operation_mapping_rejects_conflicting_lx_tensor_owners():
+    shared, extra = sympy.symbols("shared extra")
+    core_id = sympy.Symbol("core_id")
+    divisions = [
+        TensorWorkDivision(
+            {shared: 2},
+            {shared: sympy.Mod(core_id, 2)},
+            num_cores=4,
+        ),
+        TensorWorkDivision(
+            {shared: 2},
+            {shared: sympy.floor(core_id / 2)},
+            num_cores=4,
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="disagree on core ownership"):
+        derive_operation_mapping(
+            {shared: (8, 2), extra: (8, 2)},
+            divisions,
         )
 
 
