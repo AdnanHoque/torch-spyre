@@ -1348,18 +1348,49 @@ class SpyreKernel(Kernel[CSEVariable]):
         return uses_hbm_pool(self.op_specs)
 
     def call_kernel(self, name: str, node=None):
-        """Codegen a call to this kernel. This kernel's own HBM pool tensor
-        (if any) is allocated by the generated MLIR itself, via
-        sdscbundle.device_mem_allocate -- there is no Python-side pool
-        tensor to allocate or free here."""
+        """Codegen a call to this kernel.
+
+        When config.frontend_pool_allocation is False (default), this
+        kernel's own HBM pool tensor (if any) is allocated by the generated
+        MLIR itself, via sdscbundle.device_mem_allocate -- there is no
+        Python-side pool tensor to allocate or free here. When True, a
+        real pool tensor is allocated immediately before and freed
+        immediately after this kernel's .run() call, scoping its lifetime
+        tightly to this one bundle's execution.
+        """
         wrapper = V.graph.wrapper_code
         call_args = []
 
-        # Add kernel arguments, deduplicating tensors that appear as both
-        # input and output (e.g. in-place ops like x *= 2).  With symbolic
-        # args the MLIR bundle emits one !sdscbundle.input_arg<index> per unique
-        # arg_index; passing the same tensor twice would cause a runtime
-        # "Number of inputs mismatches" error in processComputeOnHostCommand.
+        uses_pool = self._kernel_uses_hbm_pool()
+        # name is unique across kernels per Inductor's wrapper codegen --
+        # kernels are deduped by src_code, but each kept kernel still gets
+        # its own unique name -- so deriving the pool variable name from it
+        # is collision-free without any extra bookkeeping here.
+        pool_var_name = f"_pool_{name}"
+        emit_pool_tensor = uses_pool and _spyre_config.frontend_pool_allocation
+        if emit_pool_tensor and _spyre_config.ktir_emitter:
+            raise AssertionError(
+                "config.frontend_pool_allocation is not supported on the KTIR "
+                "emitter path: async_compile.ktir() takes no pool_size and the "
+                "KTIR emitter threads hbm_pool buffers as internal SSA values, "
+                "so a front-end pool argument would shift every tensor's "
+                "positional address binding."
+            )
+        if emit_pool_tensor:
+            wrapper.writeline(
+                f"{pool_var_name} = spyre_empty_with_layout("
+                f"({self.pool_size},), (1,), torch.uint8, "
+                f"SpyreTensorLayout(device_size=[{self.pool_size}], "
+                f"stride_map=[1], device_dtype=DataFormats.SENINT8))"
+            )
+            call_args.append(pool_var_name)
+
+        # Add remaining kernel arguments, deduplicating tensors that appear
+        # as both input and output (e.g. in-place ops like x *= 2).  With
+        # symbolic args the MLIR bundle emits one
+        # !sdscbundle.input_arg<index> per unique arg_index; passing the
+        # same tensor twice would cause a runtime "Number of inputs
+        # mismatches" error in processComputeOnHostCommand.
         seen: set[str] = set()
         for arg in self.args.python_argdefs()[1]:
             if arg not in seen:
@@ -1368,6 +1399,8 @@ class SpyreKernel(Kernel[CSEVariable]):
 
         call_args_str = ", ".join(call_args)
         wrapper.writeline(f"{name}.run({call_args_str})")
+        if emit_pool_tensor:
+            wrapper.writeline(f"del {pool_var_name}")
 
     def emit_layout_restores(self, restores) -> None:
         """Emit set_spyre_tensor_layout wrapper calls after this kernel's run.
@@ -1435,8 +1468,9 @@ def uses_hbm_pool(specs) -> bool:
     """Return True if any op in ``specs`` references an HBM-pool-allocated tensor.
 
     This decides whether ``call_kernel`` passes the pool ahead of the kernel
-    args, so anything reading a kernel's ``.run()`` arguments has to agree with
-    it -- hence a shared function rather than a copy per caller.
+    args when ``config.frontend_pool_allocation`` is set, so anything reading
+    a kernel's ``.run()`` arguments has to agree with it -- hence a shared
+    function rather than a copy per caller.
     """
     return any(
         "hbm_pool" in arg.allocation
