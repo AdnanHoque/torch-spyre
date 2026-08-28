@@ -41,6 +41,7 @@ ORIGINAL TESTS (below the boundary marker)
     Original class-based tests preserved for coverage and reference, to be cleaned up in future.
 """
 
+import ast
 import dataclasses
 import math
 import os
@@ -6906,7 +6907,7 @@ class TestCoarseTileMoEBroadcastMatmulE2E(InductorTestCase):
         )
 
     def test_unsqueeze_broadcast_matmul_emits_expert_weight_step(self):
-        """The read of packed weights advances once per expert loop trip."""
+        """Activation stays fixed while weights advance by one expert slab."""
         from torch_spyre._inductor import spyre_hint
 
         E, T, H, F = 3, 64, 64, 64
@@ -6930,15 +6931,46 @@ class TestCoarseTileMoEBroadcastMatmulE2E(InductorTestCase):
         ):
             _, source_codes = run_and_get_code(torch.compile(fn), x, w)
 
-        src = source_codes[0]
-        weight_copy = re.search(
-            r"op='identity'.*?arg_index=1.*?"
-            r"device_tile_advance_expr=sympify\('([^']+)'\)",
-            src,
-            flags=re.DOTALL,
-        )
-        self.assertIsNotNone(weight_copy)
-        self.assertIn("_tile_adv_coarse_tile_read_copy", weight_copy.group(1))
+        tensor_args = []
+        for node in ast.walk(ast.parse(source_codes[0])):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "TensorArg"
+            ):
+                continue
+            keywords = {kw.arg: kw.value for kw in node.keywords}
+            size_node = keywords.get("device_size")
+            if not isinstance(size_node, ast.List):
+                continue
+            size = [ast.literal_eval(elt) for elt in size_node.elts]
+            advance_node = keywords.get("device_tile_advance_expr")
+            advance = (
+                ast.literal_eval(advance_node.args[0])
+                if isinstance(advance_node, ast.Call) and advance_node.args
+                else None
+            )
+            tensor_args.append((ast.literal_eval(keywords["is_input"]), size, advance))
+
+        activation_reads = [
+            advance
+            for is_input, size, advance in tensor_args
+            if is_input and size == [1, T, H]
+        ]
+        self.assertEqual(activation_reads, [None])
+
+        weight_reads = [
+            advance
+            for is_input, size, advance in tensor_args
+            if is_input and size == [1, H, E, F]
+        ]
+        self.assertEqual(len(weight_reads), 1)
+        self.assertIsInstance(weight_reads[0], str)
+        weight_step = re.fullmatch(r"floor\((\d+)\*[^)]+\)", weight_reads[0])
+        self.assertIsNotNone(weight_step)
+        # TensorArg addresses are in df16 sticks.  64 sticks * 64 elements
+        # per stick is one H*F = 4096-element expert slab.
+        self.assertEqual(int(weight_step.group(1)) * 64, H * F)
 
     def test_unsqueeze_broadcast_matmul_tile_E_poisoned_correct(self):
         """Same pattern as test_unsqueeze_broadcast_matmul_tile_E_correct,

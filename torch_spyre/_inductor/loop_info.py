@@ -247,9 +247,11 @@ class CoarseTileInfo:
         level's extent equals the final (innermost) extent times the
         product of every more-inner level's own count that also tiles that
         dim.
-        An empty per-level list means the dep is loop-invariant at that
-        level. This is a tiling *decision*, not a substituted index
-        expression -- deferred substitution into the dependency's actual
+        An empty per-level list means this read's address does not advance at
+        that level. It does not by itself prove value invariance: a producer
+        may rewrite fixed-address scratch on every trip. This is a tiling
+        *decision*, not a substituted index expression -- deferred
+        substitution into the dependency's actual
         (possibly later-rewritten) index expression happens in
         spyre_kernel.py at OpSpec/TensorArg construction time, when the
         index is guaranteed final.

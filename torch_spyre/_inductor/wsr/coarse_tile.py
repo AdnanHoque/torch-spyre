@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import enum
 import logging
 from typing import NamedTuple
 
@@ -123,6 +124,54 @@ class _RetiledBufferInfo(NamedTuple):
     old_stride: tuple[Expr, ...]
     new_stride: tuple[Expr, ...]
     old_size: tuple[Expr, ...]
+
+
+class _ReadCopyHoistDecision(enum.Enum):
+    """Why a staged read may or may not move before its counted loop."""
+
+    ELIGIBLE = enum.auto()
+    CROSS_GROUP_SOURCE = enum.auto()
+    LOOP_PRODUCED_SOURCE = enum.auto()
+    MISSING_STEP_METADATA = enum.auto()
+    ADVANCING_READ = enum.auto()
+
+
+def _read_copy_hoist_decision(
+    consumer_info: CoarseTileInfo,
+    dep_idx: int,
+    producer_loop_group_id: tuple[int, ...] | None,
+) -> _ReadCopyHoistDecision:
+    """Classify whether a read sees the same source slice on every trip.
+
+    Source stability and address stability are independent requirements. A
+    graph input can still be read through an advancing window, while a fixed
+    scratch address can be rewritten by another counted loop every trip.
+    Hoisting is sound only when the source is loop-external and complete
+    read-step metadata proves that the consumer's window does not advance.
+    """
+    if producer_loop_group_id is not None:
+        if producer_loop_group_id != consumer_info.loop_group_id:
+            # Keep this distinct from the general loop-produced rejection:
+            # cross-group scratch caused the correctness bug this guard fixes.
+            return _ReadCopyHoistDecision.CROSS_GROUP_SOURCE
+        return _ReadCopyHoistDecision.LOOP_PRODUCED_SOURCE
+
+    if dep_idx >= len(consumer_info.tiled_dims_per_read):
+        return _ReadCopyHoistDecision.MISSING_STEP_METADATA
+    if consumer_info.squeezed_advance_per_read and dep_idx >= len(
+        consumer_info.squeezed_advance_per_read
+    ):
+        return _ReadCopyHoistDecision.MISSING_STEP_METADATA
+
+    per_level_dims = consumer_info.tiled_dims_per_read[dep_idx]
+    per_level_squeezed = (
+        consumer_info.squeezed_advance_per_read[dep_idx]
+        if consumer_info.squeezed_advance_per_read
+        else []
+    )
+    if any(per_level_dims) or any(per_level_squeezed):
+        return _ReadCopyHoistDecision.ADVANCING_READ
+    return _ReadCopyHoistDecision.ELIGIBLE
 
 
 class _LogicalIterationSymbol(NamedTuple):
@@ -777,6 +826,10 @@ def _zero_reads_of_fixed_buffers_planned(
         reads = [d for d in op.get_read_writes().reads if isinstance(d, MemoryDep)]
         for i, dep in enumerate(reads):
             if dep.name in fixed_names and info.tiled_dims_per_read[i]:
+                # This makes the read address stationary while it names the
+                # producer's per-tile scratch.  It does not make the value
+                # invariant: that scratch is rewritten every trip, and an
+                # outside consumer may later be redirected to a full buffer.
                 info.tiled_dims_per_read[i] = []
 
 
@@ -3924,6 +3977,11 @@ def _plan_read_copies(
     holds before _apply_plan runs for that op's group.
     """
     op_position = {op.get_operation_name(): i for i, op in enumerate(operations)}
+    producer_loop_groups = {
+        op.get_name(): op.loop_info.loop_group_id  # type: ignore[attr-defined]
+        for op in operations
+        if isinstance(op, ComputedBuffer) and hasattr(op, "loop_info")
+    }
     predivision_unit_steps_by_op = predivision_unit_steps_by_op or {}
     plans: dict[tuple[int, ...], ReadCopyPlan] = {}
 
@@ -3963,7 +4021,7 @@ def _plan_read_copies(
             op_deps.sort(key=lambda pair: op_position[pair[0].get_operation_name()])
             sizing_op, sizing_dep = op_deps[0]
             sizing_info = sizing_op.loop_info  # type: ignore[attr-defined]
-            invariant_by_consumer: list[bool] = []
+            hoist_decisions: list[_ReadCopyHoistDecision] = []
             for candidate_op, candidate_dep in op_deps:
                 candidate_info = candidate_op.loop_info  # type: ignore[attr-defined]
                 candidate_reads = [
@@ -3972,18 +4030,18 @@ def _plan_read_copies(
                     if isinstance(read, MemoryDep)
                 ]
                 dep_idx = candidate_reads.index(candidate_dep)
-                per_level_dims = (
-                    candidate_info.tiled_dims_per_read[dep_idx]
-                    if dep_idx < len(candidate_info.tiled_dims_per_read)
-                    else []
+                decision = _read_copy_hoist_decision(
+                    candidate_info,
+                    dep_idx,
+                    producer_loop_groups.get(candidate_dep.name),
                 )
-                per_level_squeezed = (
-                    candidate_info.squeezed_advance_per_read[dep_idx]
-                    if dep_idx < len(candidate_info.squeezed_advance_per_read)
-                    else []
-                )
-                invariant_by_consumer.append(
-                    not any(per_level_dims) and not any(per_level_squeezed)
+                hoist_decisions.append(decision)
+                logger.debug(
+                    "coarse_tile: read-copy hoist decision consumer=%s "
+                    "source=%s decision=%s",
+                    candidate_op.get_operation_name(),
+                    candidate_dep.name,
+                    decision.name,
                 )
             for other_op, _dep in op_deps[1:]:
                 other_info = other_op.loop_info  # type: ignore[attr-defined]
@@ -4038,7 +4096,14 @@ def _plan_read_copies(
                         op.get_operation_name() for op, _dep in op_deps
                     ),
                     predivision_unit_steps=predivision_unit_steps,
-                    loop_invariant=all(invariant_by_consumer),
+                    # This one decision controls both preheader placement and
+                    # compact staging in _insert_one_read_copy. They require
+                    # the same proof: every consumer sees the same source
+                    # slice on every counted-loop trip.
+                    loop_invariant=all(
+                        decision is _ReadCopyHoistDecision.ELIGIBLE
+                        for decision in hoist_decisions
+                    ),
                 )
             )
         if entries:

@@ -5158,7 +5158,10 @@ def _make_cross_group_producer_read_fixture():
     tiled_op.operation_name = "tiled_op0"
     tiled_op.origins = OrderedSet()
     tiled_op.loop_info = CoarseTileInfo(
-        loop_group_id=(0,), loop_count=[Integer(8)], loop_tiled_dims=[[0]]
+        loop_group_id=(0,),
+        loop_count=[Integer(8)],
+        loop_tiled_dims=[[0]],
+        tiled_dims_per_read=[[[]]],
     )
     V.graph.name_to_buffer["tiled_op0"] = tiled_op
 
@@ -5353,7 +5356,10 @@ def _make_two_op_shared_read_fixture():
         op.operation_name = name
         op.origins = OrderedSet()
         op.loop_info = CoarseTileInfo(
-            loop_group_id=(0,), loop_count=[Integer(8)], loop_tiled_dims=[[0]]
+            loop_group_id=(0,),
+            loop_count=[Integer(8)],
+            loop_tiled_dims=[[0]],
+            tiled_dims_per_read=[[[]]],
         )
         V.graph.name_to_buffer[name] = op
         return op
@@ -5399,6 +5405,91 @@ class TestPlanReadCopies(unittest.TestCase):
         self.assertEqual(
             entry.predivision_unit_steps,
             (((0, Integer(128), Integer(1)),),),
+        )
+
+    def test_cross_group_source_is_not_loop_invariant(self):
+        """A fixed-address producer scratch is rewritten each trip.
+
+        Even after propagation clears the consumer's address step, a read
+        from another counted-loop group must remain inside the consumer's
+        loop so Pass 3 can redirect it to the advancing full buffer.
+        """
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _ReadCopyHoistDecision,
+            _plan_read_copies,
+            _read_copy_hoist_decision,
+        )
+
+        tiled_op, _full_deps, operations = _make_cross_group_producer_read_fixture()
+        tiled_op.loop_info.tiled_dims_per_read = [[[]]]
+
+        plans = _plan_read_copies(operations, [((0,), [tiled_op], {})])
+
+        self.assertFalse(plans[(0,)].entries[0].loop_invariant)
+        self.assertIs(
+            _read_copy_hoist_decision(tiled_op.loop_info, 0, (1,)),
+            _ReadCopyHoistDecision.CROSS_GROUP_SOURCE,
+        )
+
+    def test_missing_read_step_metadata_is_not_loop_invariant(self):
+        """Missing metadata cannot authorize moving a read before the loop."""
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _ReadCopyHoistDecision,
+            _plan_read_copies,
+            _read_copy_hoist_decision,
+        )
+
+        tiled_op, _full_deps, operations = _make_full_buffer_read_fixture()
+        self.assertEqual(tiled_op.loop_info.tiled_dims_per_read, [])
+
+        plans = _plan_read_copies(operations, [((0,), [tiled_op], {})])
+
+        self.assertFalse(plans[(0,)].entries[0].loop_invariant)
+        self.assertIs(
+            _read_copy_hoist_decision(tiled_op.loop_info, 0, None),
+            _ReadCopyHoistDecision.MISSING_STEP_METADATA,
+        )
+
+    def test_same_group_loop_source_is_not_loop_invariant(self):
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _ReadCopyHoistDecision,
+            _read_copy_hoist_decision,
+        )
+
+        tiled_op, _full_deps, _operations = _make_full_buffer_read_fixture()
+        tiled_op.loop_info.tiled_dims_per_read = [[[]]]
+
+        self.assertIs(
+            _read_copy_hoist_decision(tiled_op.loop_info, 0, (0,)),
+            _ReadCopyHoistDecision.LOOP_PRODUCED_SOURCE,
+        )
+
+    def test_advancing_external_read_is_not_loop_invariant(self):
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _ReadCopyHoistDecision,
+            _read_copy_hoist_decision,
+        )
+
+        tiled_op, _full_deps, _operations = _make_full_buffer_read_fixture()
+        tiled_op.loop_info.tiled_dims_per_read = [[[(0, Integer(8))]]]
+
+        self.assertIs(
+            _read_copy_hoist_decision(tiled_op.loop_info, 0, None),
+            _ReadCopyHoistDecision.ADVANCING_READ,
+        )
+
+    def test_fixed_external_read_is_loop_invariant(self):
+        from torch_spyre._inductor.wsr.coarse_tile import (
+            _ReadCopyHoistDecision,
+            _read_copy_hoist_decision,
+        )
+
+        tiled_op, _full_deps, _operations = _make_full_buffer_read_fixture()
+        tiled_op.loop_info.tiled_dims_per_read = [[[]]]
+
+        self.assertIs(
+            _read_copy_hoist_decision(tiled_op.loop_info, 0, None),
+            _ReadCopyHoistDecision.ELIGIBLE,
         )
 
     def test_same_op_two_reads_same_index_collapse_to_one_entry(self):
@@ -5734,6 +5825,7 @@ class TestInsertAllReadCopyOps(unittest.TestCase):
             loop_group_id=(0,),
             loop_count=[Integer(8)],
             loop_tiled_dims=[[0]],
+            tiled_dims_per_read=[[[]]],
         )
         V.graph.name_to_buffer[tiled_op.get_name()] = tiled_op
 
