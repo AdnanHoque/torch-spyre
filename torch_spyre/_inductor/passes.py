@@ -87,6 +87,7 @@ from .scheduler import (
     align_lx_producer_loop_order,
     build_loop_scheduler_nodes,
     demote_incoherent_lx_buffers,
+    verify_carried_reduction_ownership,
 )
 from .constants import DEVICE_NAME
 from .deadcode_elimination import deadcode_elimination
@@ -295,7 +296,12 @@ class CustomPostFusionPasses(_SpyreNodePassPipeline):
         # hbm_pool_planning runs after spyre_fuse_nodes so it can compute
         # bundle-scoped live ranges.
         super().__init__(
-            [demote_incoherent_lx_buffers, spyre_fuse_nodes, hbm_pool_planning]
+            [
+                demote_incoherent_lx_buffers,
+                spyre_fuse_nodes,
+                hbm_pool_planning,
+                verify_carried_reduction_ownership,
+            ]
         )
 
 
