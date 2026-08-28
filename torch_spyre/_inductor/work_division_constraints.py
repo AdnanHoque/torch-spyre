@@ -106,7 +106,6 @@ def collect_work_division_constraints(
         coordinate_mask_blocked_vars,
         conv_spatial_blocked_vars,
         reduction_window_blocked_vars,
-        restickify_padding_blocked_vars,
         qfp8wt_split_domains,
         qfp8wt_matmul_k_split_domains,
         topk_split_domains,
