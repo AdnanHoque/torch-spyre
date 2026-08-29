@@ -725,7 +725,6 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
 
         plans_by_destination: dict[tuple, list[str]] = {}
         if rejection_reason is None:
-            source_geometry = source_view.work_slice_dims
             for (
                 consumer_name,
                 consumer,
@@ -735,8 +734,6 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                 consumer_symbols,
             ) in consumer_views:
                 destination_view = grouped_destinations.get(consumer_name, raw_view)
-                if raw_view.work_slice_dims == source_geometry:
-                    destination_view = source_view
                 try:
                     source_work_division = work_division_from_view(
                         source_view, consumer_coordinates, consumer_symbols
