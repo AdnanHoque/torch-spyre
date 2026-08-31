@@ -30,7 +30,7 @@ from torch._inductor.ir import (
 )
 
 from .. import config
-from ..core_mapping import derive_partition_mapping, partition_physical_span_bytes
+from ..core_mapping import partition_physical_span_bytes
 from ..ir import FixedTiledLayout
 from ..logging_utils import get_inductor_logger
 from ..op_spec import TensorWorkDivision
@@ -73,7 +73,8 @@ class LXRelayoutPlan:
     num_cores: int
     kind: Literal["shuffle", "gather"] = "shuffle"
     group_geometry: tuple[RelayoutDimension, ...] = ()
-    max_footprint_bytes: int = 0
+    source_footprint_bytes: int = 0
+    destination_footprint_bytes: int = 0
     source_address: int | None = None
     destination_address: int | None = None
 
@@ -84,6 +85,12 @@ class LXRelayoutPlan:
     @property
     def edge(self) -> tuple[str, str]:
         return self.source_name, self.destination_name
+
+    @property
+    def max_footprint_bytes(self) -> int:
+        """Largest member span, for diagnostics rather than allocation."""
+
+        return max(self.source_footprint_bytes, self.destination_footprint_bytes)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -303,29 +310,6 @@ def final_view_from_work_division(
     )
 
 
-def _view_from_splits(
-    split_by_device_dim: dict[int, int], num_cores: int
-) -> PerCoreView:
-    """Build v1 planning ownership with the shared late-mapping formula."""
-
-    dims = tuple(sympy.Symbol(f"device_dim_{dim}") for dim in split_by_device_dim)
-    mapping = derive_partition_mapping(
-        dims,
-        tuple(split_by_device_dim.values()),
-        num_cores,
-    )
-    device_dim_by_symbol = dict(zip(dims, split_by_device_dim))
-    return PerCoreView(
-        tuple(split_by_device_dim.items()),
-        tuple(
-            (device_dim_by_symbol[dim], expression)
-            for dim, expression in mapping.items()
-            if split_by_device_dim[device_dim_by_symbol[dim]] > 1
-        ),
-        num_cores=num_cores,
-    )
-
-
 def _grouped_gather_geometry(
     source: PerCoreView, destination: PerCoreView, num_cores: int
 ) -> tuple[PerCoreView, PerCoreView, tuple[RelayoutDimension, ...]] | None:
@@ -364,11 +348,11 @@ def _grouped_gather_geometry(
         != num_cores
     ):
         return None
-    grouped_source = _view_from_splits(source_splits, num_cores)
-    grouped_destination = _view_from_splits(destination_splits, num_cores)
-    if not _compatible_partitions(grouped_source, grouped_destination, num_cores):
+    # Split counts classify the geometry; the actual views are the ownership
+    # contract. Never replace their core order with a reconstructed default.
+    if not _compatible_partitions(source, destination, num_cores):
         return None
-    return grouped_source, grouped_destination, tuple(geometry)
+    return source, destination, tuple(geometry)
 
 
 def partition_footprint(layout: FixedTiledLayout, view: PerCoreView) -> int:
@@ -503,9 +487,9 @@ def validate_final_views(
     elif plan.kind != "shuffle":
         return f"unsupported relayout kind {plan.kind}"
 
-    for name, view in (
-        (plan.source_name, source),
-        (destination_name, destination),
+    for name, planned_bound, view in (
+        (plan.source_name, plan.source_footprint_bytes, source),
+        (destination_name, plan.destination_footprint_bytes, destination),
     ):
         buffer = graph.try_get_buffer(name)
         if buffer is None:
@@ -531,11 +515,11 @@ def validate_final_views(
             )
         if view.physical_span_bytes is None:
             return f"final {name} has no committed physical span"
-        if view.physical_span_bytes > plan.max_footprint_bytes:
+        if view.physical_span_bytes > planned_bound:
             return (
                 f"final {name} physical span {view.physical_span_bytes} "
                 f"exceeds planned "
-                f"{plan.max_footprint_bytes}"
+                f"{planned_bound}"
             )
 
     if plan.source_address is None or plan.destination_address is None:
@@ -775,11 +759,17 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     break
                 kind = "gather" if consumer_name in grouped_geometry else "shuffle"
                 geometry = grouped_geometry.get(consumer_name, ())
-                footprint = max(
-                    partition_footprint(producer.layout, source_view),
-                    partition_footprint(producer.layout, destination_view),
+                source_footprint = partition_footprint(producer.layout, source_view)
+                destination_footprint = partition_footprint(
+                    producer.layout, destination_view
                 )
-                key = (destination_view, kind, geometry, footprint)
+                key = (
+                    destination_view,
+                    kind,
+                    geometry,
+                    source_footprint,
+                    destination_footprint,
+                )
                 plans_by_destination.setdefault(key, []).append(consumer_name)
 
         if rejection_reason is None:
@@ -792,13 +782,15 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     num_cores=num_cores,
                     kind=kind,
                     group_geometry=geometry,
-                    max_footprint_bytes=footprint,
+                    source_footprint_bytes=source_footprint,
+                    destination_footprint_bytes=destination_footprint,
                 )
                 for (
                     destination_view,
                     kind,
                     geometry,
-                    footprint,
+                    source_footprint,
+                    destination_footprint,
                 ), consumer_names in plans_by_destination.items()
             )
         if rejection_reason is not None:

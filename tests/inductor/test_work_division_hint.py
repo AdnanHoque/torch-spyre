@@ -633,7 +633,15 @@ _DESTINATION_VIEW = PerCoreView(((0, 8),), ((0, _CORE_ID),), num_cores=8)
 def _relayout_plan(source="source", consumers="consumer"):
     if isinstance(consumers, str):
         consumers = (consumers,)
-    return LXRelayoutPlan(source, consumers, _SOURCE_VIEW, _DESTINATION_VIEW, 8)
+    return LXRelayoutPlan(
+        source,
+        consumers,
+        _SOURCE_VIEW,
+        _DESTINATION_VIEW,
+        8,
+        source_footprint_bytes=8,
+        destination_footprint_bytes=8,
+    )
 
 
 def _collect_mock_relayout_plans(
@@ -700,7 +708,8 @@ def _collect_mock_relayout_plans(
 def _assert_plan_survives_final_view_validation(plan, device_size):
     plan = replace(
         plan,
-        max_footprint_bytes=max(plan.max_footprint_bytes, 512),
+        source_footprint_bytes=max(plan.source_footprint_bytes, 512),
+        destination_footprint_bytes=max(plan.destination_footprint_bytes, 512),
         source_address=0,
         destination_address=1024,
     )
@@ -781,7 +790,8 @@ def test_grouped_gather_records_geometry_without_persisting_new_placement():
         32,
         kind="gather",
         group_geometry=geometry,
-        max_footprint_bytes=512,
+        source_footprint_bytes=512,
+        destination_footprint_bytes=512,
     )
     _assert_plan_survives_final_view_validation(plan, (4, 8, 64))
     assert [
@@ -795,6 +805,25 @@ def test_grouped_gather_records_geometry_without_persisting_new_placement():
         len({tuple(owners[core].items()) for core in range(start, start + 8)}) == 1
         for start in range(0, 32, 8)
     )
+
+
+def test_grouped_gather_preserves_real_owner_order():
+    source = PerCoreView(
+        ((0, 4), (1, 8)),
+        ((0, Mod(_CORE_ID, 4)), (1, Mod(floor(_CORE_ID / 4), 8))),
+        num_cores=32,
+    )
+    destination = PerCoreView(
+        ((0, 4),),
+        ((0, Mod(_CORE_ID, 4)),),
+        num_cores=32,
+    )
+
+    grouped = lx_relayout_module._grouped_gather_geometry(source, destination, 32)
+    assert grouped is not None
+    grouped_source, grouped_destination, _ = grouped
+    assert grouped_source is source
+    assert grouped_destination is destination
 
 
 def test_partition_footprint_counts_strided_span_not_elements():
@@ -874,7 +903,8 @@ def test_final_view_ignores_alignment_only_singleton_dimensions():
 def test_final_view_validation_requires_one_shared_physical_view():
     plan = replace(
         _relayout_plan(),
-        max_footprint_bytes=1024,
+        source_footprint_bytes=1024,
+        destination_footprint_bytes=1024,
         source_address=0,
         destination_address=2048,
     )
@@ -974,7 +1004,8 @@ def test_final_view_validation_rejects_padded_span_above_plan():
         source_view,
         destination_view,
         4,
-        max_footprint_bytes=element_count_bound,
+        source_footprint_bytes=element_count_bound,
+        destination_footprint_bytes=element_count_bound,
         source_address=0,
         destination_address=4096,
     )
@@ -1378,6 +1409,8 @@ def test_lx_relayout_allocation_is_atomic_in_one_greedy_solve(caplog):
             _SOURCE_VIEW,
             alternate_view,
             8,
+            source_footprint_bytes=8,
+            destination_footprint_bytes=8,
         ),
     ]
     allocator = ScratchpadAllocator(GreedyLayoutSolver, 256)
@@ -1418,6 +1451,70 @@ def test_lx_relayout_allocation_is_atomic_in_one_greedy_solve(caplog):
     )
 
 
+def test_lx_relayout_allocates_each_paired_member_at_its_own_footprint():
+    source_footprint = 16_768
+    destination_footprint = 803_200
+    plan = replace(
+        _relayout_plan(),
+        source_footprint_bytes=source_footprint,
+        destination_footprint_bytes=destination_footprint,
+    )
+    graph = SimpleNamespace(
+        operations=[
+            SimpleNamespace(get_name=lambda: "producer"),
+            SimpleNamespace(get_name=lambda: "consumer"),
+        ]
+    )
+    mem_usage = {
+        "source": {
+            "size_per_core": source_footprint,
+            "core_div_mismatch": False,
+        }
+    }
+    allocator = ScratchpadAllocator(
+        GreedyLayoutSolver, source_footprint + destination_footprint
+    )
+
+    def build_buffers(_graph, _in_place, usage, _reasons, **_kwargs):
+        return [LifetimeBoundBuffer("source", usage["source"]["size_per_core"], [0, 1])]
+
+    with (
+        mock_patch.object(
+            allocator_module, "counted_loop_lifetime_end_overrides", return_value={}
+        ),
+        mock_patch.object(
+            allocator_module,
+            "get_ncores_for_buffers",
+            return_value=({"source": 8}, {}),
+        ),
+        mock_patch.object(allocator_module, "mem_usage_by_buf", return_value=mem_usage),
+        mock_patch.object(
+            allocator,
+            "_partition_footprints",
+            return_value={"source": source_footprint},
+        ),
+        mock_patch.object(allocator, "_residency_reasons", return_value={}),
+        mock_patch.object(allocator, "_determine_in_place", return_value={}),
+        mock_patch.object(allocator, "_build_bound_buffers", side_effect=build_buffers),
+    ):
+        buffers = allocator._generate_buffers(
+            graph,
+            lifetimes={"source": [0, 1]},
+            lx_relayout_plans=[plan],
+        )
+
+    allocator._append_lx_relayout_destinations(graph, buffers)
+    source = next(buffer for buffer in buffers if buffer.name == "source")
+    destination = next(
+        buffer for buffer in buffers if buffer.name == plan.destination_name
+    )
+    assert source.size == source_footprint
+    assert destination.size == destination_footprint
+
+    allocation = allocator._solve(allocator._build_solver(buffers), graph)
+    assert allocator._allocated_lx_relayout_sources(allocation) == {"source"}
+
+
 def _assert_live_buffers_do_not_share_addresses(graph, buffers, limit):
     allocator = ScratchpadAllocator(GreedyLayoutSolver, limit)
     allocation = allocator._solve(allocator._build_solver(buffers), graph)
@@ -1440,6 +1537,8 @@ def test_lx_relayout_copies_loop_lifetime_to_every_destination():
             _SOURCE_VIEW,
             PerCoreView(((1, 8),), ((1, _CORE_ID),)),
             8,
+            source_footprint_bytes=8,
+            destination_footprint_bytes=8,
         ),
     ]
     graph = SimpleNamespace(

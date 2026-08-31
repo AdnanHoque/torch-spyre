@@ -997,19 +997,22 @@ class ScratchpadAllocator:
             if name in partition_footprints:
                 info["size_per_core"] = partition_footprints[name]
         for plan in lx_relayout_plans:
-            name = plan.source_name
-            if name not in mem_usage:
-                continue
-            ncores[name] = plan.num_cores
-            ncores_reasons.pop(name, None)
-            footprint = plan.max_footprint_bytes or partition_footprints.get(name, 0)
-            # One source may feed differently shaped destinations. Its shared
-            # allocation must satisfy the largest member of the atomic group,
-            # independent of plan iteration order.
-            mem_usage[name]["size_per_core"] = max(
-                mem_usage[name]["size_per_core"], footprint
-            )
-            mem_usage[name]["core_div_mismatch"] = False
+            footprints = {
+                plan.source_name: plan.source_footprint_bytes,
+                plan.destination_name: plan.destination_footprint_bytes,
+            }
+            for name, footprint in footprints.items():
+                if name not in mem_usage:
+                    continue
+                ncores[name] = plan.num_cores
+                ncores_reasons.pop(name, None)
+                footprint = footprint or partition_footprints.get(name, 0)
+                # A source shared by multiple relayouts keeps the largest
+                # source bound. Each private destination keeps its own bound.
+                mem_usage[name]["size_per_core"] = max(
+                    mem_usage[name]["size_per_core"], footprint
+                )
+                mem_usage[name]["core_div_mismatch"] = False
         t2 = time.perf_counter()
         if timings is not None:
             timings["residency"] += t1 - t0
@@ -1106,7 +1109,7 @@ class ScratchpadAllocator:
                 destination = LifetimeBoundBuffer(
                     plan.destination_name,
                     round_up_to_alignment(
-                        plan.max_footprint_bytes or source.size,
+                        plan.destination_footprint_bytes or source.size,
                         _LX_ALLOCATION_GRANULARITY_BYTES,
                     ),
                     [transfer_tick, *consumer_ticks],
