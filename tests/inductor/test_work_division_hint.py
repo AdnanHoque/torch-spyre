@@ -1161,6 +1161,17 @@ def test_grouped_gather_mapping_is_derived_after_alignment():
     ] == [owner for owner in range(4) for _ in range(8)]
 
 
+def test_grouped_broadcast_preserves_real_owner_order():
+    source = PerCoreView(((0, 2),), ((0, Mod(_CORE_ID, 2)),), num_cores=2)
+    destination = PerCoreView(((0, 2),), ((0, Mod(_CORE_ID, 2)),), num_cores=32)
+
+    grouped = lx_relayout_module._grouped_broadcast_geometry(source, destination, 2, 32)
+    assert grouped is not None
+    grouped_source, grouped_destination, _ = grouped
+    assert grouped_source is source
+    assert grouped_destination is destination
+
+
 @config.patch({"sencores": 32})
 def test_grouped_broadcast_derives_distinct_physical_core_domains():
     h = Symbol("h")

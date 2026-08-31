@@ -440,6 +440,8 @@ def _grouped_broadcast_geometry(
                 ordering_tag="contiguous_groups",
             )
         )
+    # Split counts classify the geometry; the actual views are the ownership
+    # contract. Never replace their core order with a reconstructed default.
     if not _compatible_partitions(
         source,
         destination,
