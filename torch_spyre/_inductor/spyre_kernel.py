@@ -60,6 +60,7 @@ from .ir import FixedTiledLayout
 from .scratchpad.lx_relayout import (
     final_view_from_work_division,
     final_lx_views,
+    final_lx_views_equal,
     partition_footprint,
     work_division_from_view,
 )
@@ -1127,7 +1128,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                     else None
                 ),
             )
-            if actual != expected:
+            if not final_lx_views_equal(actual, expected):
                 raise RuntimeError(
                     f"LX final view changed after the graph-wide gate for "
                     f"{node_name}:{name}: {actual} != {expected}"

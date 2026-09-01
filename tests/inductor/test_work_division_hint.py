@@ -767,6 +767,66 @@ def test_same_splits_with_different_core_owners_are_relayouted():
     _assert_plan_survives_final_view_validation(plans[0], (4, 4, 64))
 
 
+def test_relayout_semantics_have_one_edge_deriver_and_lowering_registry():
+    source = PerCoreView(
+        ((0, 4),),
+        ((0, _CORE_ID),),
+        num_cores=4,
+    )
+    destination = PerCoreView(
+        ((0, 2),),
+        ((0, floor(_CORE_ID / 2)),),
+        num_cores=4,
+    )
+
+    edges = lx_relayout_module._transfer_edges(source, destination, 4, 4)
+    assert edges == frozenset(
+        {
+            (0, 0),
+            (0, 1),
+            (1, 0),
+            (1, 1),
+            (2, 2),
+            (2, 3),
+            (3, 2),
+            (3, 3),
+        }
+    )
+    classified = lx_relayout_module.classify_relayout_views(source, destination, 4)
+    assert classified is not None and classified[0] == "gather"
+    assert set(lx_relayout_module._LOWERING_CERTIFIERS) == {"gather", "shuffle"}
+
+
+def test_physical_view_equality_uses_owner_semantics_not_sympy_spelling():
+    canonical = PerCoreView(
+        ((0, 4),),
+        ((0, Mod(_CORE_ID, 4)),),
+        num_cores=4,
+    )
+    equivalent = PerCoreView(
+        ((0, 4),),
+        ((0, _CORE_ID),),
+        num_cores=4,
+    )
+    assert lx_relayout_module.per_core_views_equal(canonical, equivalent)
+    assert lx_relayout_module.classify_relayout_views(canonical, equivalent, 4) is None
+
+
+def test_lx_validation_registry_has_stable_extension_partitions():
+    plan = _relayout_plan()
+    graph = SimpleNamespace(
+        _spyre_lx_relayout_copies={plan.edge: (plan.destination_name, plan)}
+    )
+    lx_relayout_module.register_lx_validation_buffers(
+        graph, "explicit_view", ("explicit",)
+    )
+    partitions = lx_relayout_module.lx_validation_partitions(graph)
+    assert partitions == {
+        "relayout": {"source", plan.destination_name},
+        "explicit_view": {"explicit"},
+    }
+
+
 def test_grouped_gather_records_geometry_without_persisting_new_placement():
     source = PerCoreView(
         ((0, 4), (1, 8)),

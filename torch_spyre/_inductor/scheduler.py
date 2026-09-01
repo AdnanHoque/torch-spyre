@@ -46,6 +46,7 @@ from .pass_utils import (
     build_operation_alignment_inputs,
     iteration_space,
     iteration_space_from_op,
+    per_core_views_equal,
     per_core_view_scheduled,
     try_device_coordinates,
 )
@@ -59,6 +60,8 @@ from .logging_utils import get_inductor_logger
 from .scratchpad.lx_relayout import (
     FinalLXView,
     demote_lx_relayout_group,
+    final_lx_views_equal,
+    lx_validation_partitions,
     materialized_lx_relayouts,
     set_final_lx_views,
     validate_final_views,
@@ -586,7 +589,7 @@ def _preview_final_lx_views(
         )
         key = (node.get_name(), name)
         previous = result.setdefault(key, view)
-        if previous != view:
+        if not final_lx_views_equal(previous, view):
             raise ValueError(f"{node.get_name()} accesses {name} with two final views")
     return result, changed
 
@@ -653,7 +656,7 @@ def demote_incoherent_lx_buffers(
             if (
                 source_view is None
                 or destination_view is None
-                or source_view == destination_view
+                or per_core_views_equal(source_view, destination_view)
                 or len(reads) != 1
                 or len(writes) != 1
                 or reads[0].name != plan.source_name
@@ -670,10 +673,10 @@ def demote_incoherent_lx_buffers(
         if copy_name not in seen_copies:
             invalid_sources[plan.source_name] = f"missing relayout copy {copy_name}"
 
-    # Validation coverage is partitioned by the plan registry. Ordinary LX
-    # buffers retain the scheduler's established view-equality validation;
-    # registered non-canonical handoffs use the graph-wide C4 gate below.
-    # Future non-canonical residency must first register its buffers here.
+    # Validation coverage is partitioned by a registry. Ordinary LX buffers
+    # retain the scheduler's established view-equality validation; registered
+    # non-canonical ownership uses its named graph-wide validator. Every LX
+    # resident buffer must belong to exactly one partition.
     resident_relayout_buffers = {
         name
         for name in relayout_buffers
@@ -681,12 +684,23 @@ def demote_incoherent_lx_buffers(
         and "lx" in layout.allocation
     }
     resident_lx_buffers = set(lx_names) | resident_relayout_buffers
-    registered_lx_buffers = resident_lx_buffers & relayout_buffers
+    validation_partitions = {
+        category: resident_lx_buffers & names
+        for category, names in lx_validation_partitions(V.graph).items()
+    }
+    registered_lx_buffers = set().union(*validation_partitions.values())
     ordinary_lx_buffers = OrderedSet(
-        name for name in lx_names if name not in relayout_buffers
+        name for name in lx_names if name not in registered_lx_buffers
     )
-    assert registered_lx_buffers.isdisjoint(set(ordinary_lx_buffers))
-    assert registered_lx_buffers | set(ordinary_lx_buffers) == resident_lx_buffers
+    all_partitions = [*validation_partitions.values(), set(ordinary_lx_buffers)]
+    assert all(
+        left.isdisjoint(right)
+        for index, left in enumerate(all_partitions)
+        for right in all_partitions[index + 1 :]
+    ), "LX buffer belongs to more than one validation partition"
+    assert set().union(*all_partitions) == resident_lx_buffers, (
+        "every LX buffer must have exactly one validation authority"
+    )
 
     demoted = set()
 

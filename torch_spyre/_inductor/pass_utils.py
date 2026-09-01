@@ -2381,6 +2381,42 @@ class PerCoreView:
     num_cores: int | None = None
 
 
+def per_core_views_equal(left: PerCoreView, right: PerCoreView) -> bool:
+    """Whether two physical views assign every core the same tensor slice.
+
+    SymPy expressions are implementation spellings, not ownership.  Compare
+    the concrete slot selected for every physical core so semantically equal
+    expressions cannot create a false relayout or a false mismatch.
+    """
+
+    left_splits = dict(left.work_slice_dims)
+    right_splits = dict(right.work_slice_dims)
+    left_slots = dict(left.core_to_slot)
+    right_slots = dict(right.core_to_slot)
+    if (
+        len(left_splits) != len(left.work_slice_dims)
+        or len(right_splits) != len(right.work_slice_dims)
+        or len(left_slots) != len(left.core_to_slot)
+        or len(right_slots) != len(right.core_to_slot)
+        or left_splits != right_splits
+        or left_slots.keys() != right_slots.keys()
+        or left.num_cores is None
+        or left.num_cores != right.num_cores
+    ):
+        return False
+
+    core_id = Symbol("core_id")
+    try:
+        return all(
+            int(left_slots[dim].subs(core_id, core))
+            == int(right_slots[dim].subs(core_id, core))
+            for dim in left_slots
+            for core in range(left.num_cores)
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def _is_matmul_op(op: Operation) -> bool:
     return (
         isinstance(op, ComputedBuffer)

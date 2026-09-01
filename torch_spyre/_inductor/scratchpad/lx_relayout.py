@@ -41,6 +41,7 @@ from ..pass_utils import (
     iteration_space_from_op,
     op_short_name,
     op_read_writes,
+    per_core_views_equal,
     try_device_coordinates,
 )
 from .utils import _op_num_cores
@@ -49,6 +50,7 @@ logger = get_inductor_logger("lx_relayout")
 _DESTINATION_PREFIX = "__spyre_lx_relayout__"
 _REGISTRY = "_spyre_lx_relayout_copies"
 _FINAL_VIEWS = "_spyre_lx_final_views"
+_VALIDATION_PARTITIONS = "_spyre_lx_validation_partitions"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -103,6 +105,17 @@ class FinalLXView:
     physical_span_bytes: int | None
 
 
+def final_lx_views_equal(left: FinalLXView, right: FinalLXView) -> bool:
+    """Whether two final descriptors carry the same accepted ownership claim."""
+
+    return (
+        left.device_size == right.device_size
+        and left.slice_shape == right.slice_shape
+        and left.physical_span_bytes == right.physical_span_bytes
+        and per_core_views_equal(left.ownership, right.ownership)
+    )
+
+
 def work_division_from_view(
     view: PerCoreView | None,
     device_coordinates: Sequence[sympy.Expr],
@@ -149,6 +162,44 @@ def set_final_lx_views(
     graph: GraphLowering, views: dict[tuple[str, str], FinalLXView]
 ) -> None:
     setattr(graph, _FINAL_VIEWS, views)
+
+
+def register_lx_validation_buffers(
+    graph: GraphLowering, category: str, names: Sequence[str]
+) -> None:
+    """Register non-ordinary LX buffers with their validation authority.
+
+    Ordinary LX remains on the established scheduled-view validation path.
+    New non-canonical ownership must register a named partition before it can
+    bypass that path; the scheduler asserts that every resident buffer belongs
+    to exactly one partition.
+    """
+
+    assert category != "ordinary", "ordinary LX is the unregistered partition"
+    partitions = getattr(graph, _VALIDATION_PARTITIONS, None)
+    if partitions is None:
+        partitions = {}
+        setattr(graph, _VALIDATION_PARTITIONS, partitions)
+    partitions.setdefault(category, set()).update(names)
+
+
+def lx_validation_partitions(graph: GraphLowering) -> dict[str, set[str]]:
+    """Return all explicitly registered LX validation partitions."""
+
+    result = {
+        category: set(names)
+        for category, names in getattr(graph, _VALIDATION_PARTITIONS, {}).items()
+    }
+    relayout = {
+        name
+        for copy_name, plan in materialized_lx_relayouts(graph).values()
+        for name in (plan.source_name, copy_name)
+    }
+    result.setdefault("relayout", set()).update(relayout)
+    # The category exists from the foundation PR even before a feature uses it.
+    # This keeps totality registry-driven when explicit-view residency is added.
+    result.setdefault("explicit_view", set())
+    return result
 
 
 def _discard_lx_relayout_group(graph: GraphLowering, source_name: str) -> set[str]:
@@ -393,45 +444,162 @@ def _overlap(a: int, an: int, b: int, bn: int) -> bool:
     return a * bn < (b + 1) * an and b * an < (a + 1) * bn
 
 
+def _transfer_edges(
+    source: PerCoreView,
+    destination: PerCoreView,
+    source_num_cores: int,
+    destination_num_cores: int,
+) -> frozenset[tuple[int, int]]:
+    """Derive movement from ownership, independent of collective names.
+
+    An edge ``(s, d)`` exists exactly when source core ``s`` owns tensor
+    elements needed by destination core ``d``.  Gather, broadcast, and shuffle
+    are certified shapes of this one fact; they must never derive a different
+    movement graph.
+    """
+
+    source_map = _core_slices(source, source_num_cores)
+    destination_map = _core_slices(destination, destination_num_cores)
+    source_splits = dict(source.work_slice_dims)
+    destination_splits = dict(destination.work_slice_dims)
+    dimensions = set(source_splits) | set(destination_splits)
+    return frozenset(
+        (source_core, destination_core)
+        for source_core, source_slice in source_map.items()
+        for destination_core, destination_slice in destination_map.items()
+        if all(
+            _overlap(
+                source_slice.get(dim, 0),
+                source_splits.get(dim, 1),
+                destination_slice.get(dim, 0),
+                destination_splits.get(dim, 1),
+            )
+            for dim in dimensions
+        )
+    )
+
+
 def _compatible_partitions(
-    source: PerCoreView, destination: PerCoreView, num_cores: int
+    source: PerCoreView,
+    destination: PerCoreView,
+    source_num_cores: int,
+    destination_num_cores: int | None = None,
 ) -> bool:
     """Whether every destination receives a uniform, complete partition."""
 
-    source_map = _core_slices(source, num_cores)
-    destination_map = _core_slices(destination, num_cores)
+    destination_num_cores = destination_num_cores or source_num_cores
+    source_map = _core_slices(source, source_num_cores)
+    destination_map = _core_slices(destination, destination_num_cores)
     source_splits = dict(source.work_slice_dims)
     destination_splits = dict(destination.work_slice_dims)
-    dims = set(source_splits) | set(destination_splits)
-    edges = {
-        (s_core, d_core)
-        for s_core, s_slice in source_map.items()
-        for d_core, d_slice in destination_map.items()
-        if all(
-            _overlap(
-                s_slice.get(dim, 0),
-                source_splits.get(dim, 1),
-                d_slice.get(dim, 0),
-                destination_splits.get(dim, 1),
-            )
-            for dim in dims
-        )
-    }
-    fanout = [sum(src == core for src, _ in edges) for core in range(num_cores)]
-    fanin = [sum(dst == core for _, dst in edges) for core in range(num_cores)]
+    edges = _transfer_edges(
+        source, destination, source_num_cores, destination_num_cores
+    )
+    fanout = [sum(src == core for src, _ in edges) for core in range(source_num_cores)]
+    fanin = [
+        sum(dst == core for _, dst in edges) for core in range(destination_num_cores)
+    ]
     if not edges or len(set(fanout)) != 1 or len(set(fanin)) != 1:
         return False
     source_owners = len({tuple(sorted(row.items())) for row in source_map.values()})
     destination_owners = len(
         {tuple(sorted(row.items())) for row in destination_map.values()}
     )
-    if source_owners != num_cores or math.prod(source_splits.values()) != num_cores:
+    if (
+        source_owners != source_num_cores
+        or math.prod(source_splits.values()) != source_num_cores
+    ):
         return False
     destination_slices = math.prod(destination_splits.values())
-    if destination_owners != destination_slices or num_cores % destination_slices:
+    if (
+        destination_owners != destination_slices
+        or destination_num_cores % destination_slices
+    ):
         return False
-    multiplicity = num_cores // destination_slices
+    if source_num_cores != destination_num_cores:
+        return fanout[0] == destination_num_cores // source_num_cores and fanin[0] == 1
+    multiplicity = source_num_cores // destination_slices
     return multiplicity == 1 or (fanout[0] == multiplicity and fanin[0] == multiplicity)
+
+
+def _shuffle_geometry(
+    source: PerCoreView,
+    destination: PerCoreView,
+    source_num_cores: int,
+    destination_num_cores: int,
+) -> tuple[PerCoreView, PerCoreView, tuple[RelayoutDimension, ...]] | None:
+    """Certify the existing one-to-one shuffle lowering."""
+
+    if source_num_cores != destination_num_cores or per_core_views_equal(
+        source, destination
+    ):
+        return None
+    if not _compatible_partitions(
+        source, destination, source_num_cores, destination_num_cores
+    ):
+        return None
+    edges = _transfer_edges(
+        source, destination, source_num_cores, destination_num_cores
+    )
+    if any(
+        sum(src == core for src, _ in edges) != 1
+        or sum(dst == core for _, dst in edges) != 1
+        for core in range(source_num_cores)
+    ):
+        return None
+    return source, destination, ()
+
+
+def _gather_geometry(
+    source: PerCoreView,
+    destination: PerCoreView,
+    source_num_cores: int,
+    destination_num_cores: int,
+) -> tuple[PerCoreView, PerCoreView, tuple[RelayoutDimension, ...]] | None:
+    """Adapter giving grouped gather the common classifier signature."""
+
+    if source_num_cores != destination_num_cores:
+        return None
+    return _grouped_gather_geometry(source, destination, source_num_cores)
+
+
+# Existing lowering functions are the registry.  The table adds no plan IR: it
+# only makes the authority order explicit.  A surviving fast path must certify
+# the same edge set derived by ``_transfer_edges`` before its name is recorded
+# in ``LXRelayoutPlan.kind``.
+_LOWERING_CERTIFIERS = {
+    "gather": _gather_geometry,
+    "shuffle": _shuffle_geometry,
+}
+_LOWERING_PRIORITY = ("gather", "shuffle")
+
+
+def classify_relayout_views(
+    source: PerCoreView,
+    destination: PerCoreView,
+    source_num_cores: int,
+    destination_num_cores: int | None = None,
+    *,
+    allowed_kinds: Sequence[str] | None = None,
+) -> tuple[str, tuple[RelayoutDimension, ...]] | None:
+    """Choose a certified lowering for one already-described view pair.
+
+    Ownership is the fact.  The returned name is merely the first existing
+    lowering, in deterministic priority order, whose certifier agrees with the
+    shared movement graph.  Unsupported movement remains an HBM fallback.
+    """
+
+    destination_num_cores = destination_num_cores or source_num_cores
+    allowed = set(allowed_kinds) if allowed_kinds is not None else None
+    for kind in _LOWERING_PRIORITY:
+        if allowed is not None and kind not in allowed:
+            continue
+        classified = _LOWERING_CERTIFIERS[kind](
+            source, destination, source_num_cores, destination_num_cores
+        )
+        if classified is not None:
+            return kind, classified[2]
+    return None
 
 
 def validate_final_views(
@@ -444,48 +612,52 @@ def validate_final_views(
     """Validate one complete relayout group after scheduler alignment preview."""
 
     destination_name = destination_name or plan.destination_name
-    source_views = {
+    source_views = [
         view
         for (_, buffer_name), view in views.items()
         if buffer_name == plan.source_name
-    }
-    destination_views = {
+    ]
+    destination_views = [
         view
         for (_, buffer_name), view in views.items()
         if buffer_name == destination_name
-    }
-    if len(source_views) != 1:
-        return f"source users derived {len(source_views)} final views"
-    if len(destination_views) != 1:
-        return f"destination users derived {len(destination_views)} final views"
-    source = next(iter(source_views))
-    destination = next(iter(destination_views))
+    ]
+    if not source_views:
+        return "schedule drift: source users derived 0 final views"
+    if not destination_views:
+        return "schedule drift: destination users derived 0 final views"
+    source = source_views[0]
+    destination = destination_views[0]
+
+    if any(not final_lx_views_equal(source, view) for view in source_views[1:]):
+        return f"schedule drift: source users derived {len(source_views)} final views"
+    if any(
+        not final_lx_views_equal(destination, view) for view in destination_views[1:]
+    ):
+        return (
+            "schedule drift: destination users derived "
+            f"{len(destination_views)} final views"
+        )
 
     if (
         source.ownership.num_cores != plan.num_cores
         or destination.ownership.num_cores != plan.num_cores
     ):
-        return "final view physical core count changed"
-    if source == destination:
-        return "final source and destination views no longer require a relayout"
-    if not _compatible_partitions(
-        source.ownership, destination.ownership, plan.num_cores
-    ):
-        return "final source and destination partitions are not a complete transfer"
+        return "schedule drift: final view physical core count changed"
+    if per_core_views_equal(source.ownership, destination.ownership):
+        return "schedule drift: final views no longer require a relayout"
 
-    if plan.kind == "gather":
-        classified = _grouped_gather_geometry(
-            source.ownership,
-            destination.ownership,
-            plan.num_cores,
-        )
-        if classified is None:
-            return "final views are not a grouped gather"
-        geometry = classified[2]
-        if _geometry_topology(geometry) != _geometry_topology(plan.group_geometry):
-            return f"final grouped-gather geometry changed: {geometry}"
-    elif plan.kind != "shuffle":
-        return f"unsupported relayout kind {plan.kind}"
+    classified = classify_relayout_views(
+        source.ownership,
+        destination.ownership,
+        plan.num_cores,
+        allowed_kinds=(plan.kind,),
+    )
+    if classified is None:
+        return f"cannot emit: final views do not satisfy {plan.kind}"
+    _, geometry = classified
+    if _geometry_topology(geometry) != _geometry_topology(plan.group_geometry):
+        return f"schedule drift: {plan.kind} geometry changed: {geometry}"
 
     for name, planned_bound, view in (
         (plan.source_name, plan.source_footprint_bytes, source),
@@ -517,13 +689,14 @@ def validate_final_views(
             return f"final {name} has no committed physical span"
         if view.physical_span_bytes > planned_bound:
             return (
-                f"final {name} physical span {view.physical_span_bytes} "
+                f"allocation: final {name} physical span "
+                f"{view.physical_span_bytes} "
                 f"exceeds planned "
                 f"{planned_bound}"
             )
 
     if plan.source_address is None or plan.destination_address is None:
-        return "relayout group has no committed LX addresses"
+        return "allocation: relayout group has no committed LX addresses"
     # The allocator validates disjointness using each concrete buffer size.
     # Repeating that check with this edge's maximum bound is incorrect for a
     # source shared by differently sized destinations.
@@ -679,7 +852,9 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     )
                     break
                 candidate_source, destination, geometry = grouped
-                if grouped_source is not None and candidate_source != grouped_source:
+                if grouped_source is not None and not per_core_views_equal(
+                    candidate_source, grouped_source
+                ):
                     rejection_reason = (
                         "consumers require different grouped source geometry"
                     )
@@ -728,7 +903,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     )
                     break
                 assert source_work_division is not None
-                if destination_view == source_view:
+                if per_core_views_equal(destination_view, source_view):
                     continue
                 is_matmul = _is_matmul_op(consumer)
                 if is_matmul and len(deps) != 2:
@@ -737,10 +912,17 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                 if not is_matmul and not isinstance(consumer.data, Pointwise):
                     rejection_reason = "consumer is neither pointwise nor matmul"
                     break
-                if not _compatible_partitions(source_view, destination_view, num_cores):
-                    rejection_reason = (
-                        "source and destination partitions are incompatible"
-                    )
+                expected_kind = (
+                    "gather" if consumer_name in grouped_geometry else "shuffle"
+                )
+                classified = classify_relayout_views(
+                    source_view,
+                    destination_view,
+                    num_cores,
+                    allowed_kinds=(expected_kind,),
+                )
+                if classified is None:
+                    rejection_reason = "cannot emit: unsupported ownership transfer"
                     break
                 try:
                     destination_work_division = work_division_from_view(
@@ -757,8 +939,11 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                 ):
                     rejection_reason = reason
                     break
-                kind = "gather" if consumer_name in grouped_geometry else "shuffle"
-                geometry = grouped_geometry.get(consumer_name, ())
+                kind, geometry = classified
+                planned_geometry = grouped_geometry.get(consumer_name, ())
+                if _geometry_topology(geometry) != _geometry_topology(planned_geometry):
+                    rejection_reason = "cannot emit: lowering geometry disagrees"
+                    break
                 source_footprint = partition_footprint(producer.layout, source_view)
                 destination_footprint = partition_footprint(
                     producer.layout, destination_view
@@ -822,7 +1007,7 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
         copies[plan.edge] = (copy.get_name(), plan)
 
         assert plan.source_address is not None and plan.destination_address is not None
-        assert plan.source_view != plan.destination_view
+        assert not per_core_views_equal(plan.source_view, plan.destination_view)
         source_layout = cast(FixedTiledLayout, source.layout)
         copy_layout = cast(FixedTiledLayout, copy.layout)
         source_layout.allocation["lx"] = plan.source_address
