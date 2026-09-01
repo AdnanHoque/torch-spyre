@@ -196,6 +196,69 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
             "aten.mm.default should be replaced by bmm/batched_matmul after passes"
         )
 
+    @pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
+    @pytest.mark.filterwarnings("ignore::UserWarning")
+    def test_unflatten_bmm_bypasses_only_its_broadcast_clone(self):
+        from torch._dynamo.testing import InductorAndRecordGraphs
+        import torch._inductor.config as config
+
+        config.force_disable_caches = True
+
+        def fn(x, w):
+            expanded = w.expand(3, 17, 256, 128).clone()
+            return x @ expanded, expanded + 1
+
+        x = torch.randn(3, 17, 128, 256, device="spyre", dtype=torch.float16)
+        w = torch.randn(1, 17, 256, 128, device="spyre", dtype=torch.float16)
+        torch.compiler.reset()
+        backend = InductorAndRecordGraphs()
+        torch.compile(fn, backend=backend)(x, w)
+
+        graph = backend.inductor_graphs[0].graph
+        matmul = next(
+            node
+            for node in graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.spyre.batched_matmul.default
+        )
+        assert tuple(matmul.args[1].meta["val"].shape) == (1, 17, 256, 128)
+        assert any(
+            node.op == "call_function"
+            and node.target == torch.ops.aten.clone.default
+            and tuple(node.meta["val"].shape) == (3, 17, 256, 128)
+            for node in graph.nodes
+        )
+
+    @pytest.mark.filterwarnings("ignore::torch_spyre.ops.fallbacks.FallbackWarning")
+    @pytest.mark.filterwarnings("ignore::UserWarning")
+    def test_unflatten_bmm_elides_dead_multi_axis_broadcast_clone(self):
+        from torch._dynamo.testing import InductorAndRecordGraphs
+        import torch._inductor.config as config
+
+        config.force_disable_caches = True
+
+        def fn(x, w):
+            return x @ w.expand(4, 8, 128, 64).clone()
+
+        x = torch.randn(4, 8, 32, 128, device="spyre", dtype=torch.float16)
+        w = torch.randn(1, 1, 128, 64, device="spyre", dtype=torch.float16)
+        torch.compiler.reset()
+        backend = InductorAndRecordGraphs()
+        torch.compile(fn, backend=backend)(x, w)
+
+        graph = backend.inductor_graphs[0].graph
+        matmul = next(
+            node
+            for node in graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.spyre.batched_matmul.default
+        )
+        assert tuple(matmul.args[1].meta["val"].shape) == (1, 1, 128, 64)
+        assert not any(
+            node.op == "call_function" and node.target == torch.ops.aten.clone.default
+            for node in graph.nodes
+        )
+
     def test_mixed_device_seq(self):
         model = torch.compile(torch.sin)
         cpu_1 = torch._inductor.utils.get_code(model, torch.randn(5))[0]
