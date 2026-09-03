@@ -25,6 +25,9 @@ from sympy import Expr, Integer, Mod, Symbol, floor, sympify
 from .op_spec import TensorWorkDivision
 
 
+_MAX_OWNER_PERMUTATION_DIMS = 5
+
+
 def core_to_slice_mapping(
     dims: Sequence[Symbol],
     dim_splits: Sequence[int],
@@ -327,6 +330,11 @@ def derive_operation_mapping(
 
     # Tensor-owned dimensions occupy the outer, contiguous groups. At most five
     # dimensions can be split on 32 cores, so trying their radix orders is small.
+    if len(constrained) > _MAX_OWNER_PERMUTATION_DIMS:
+        raise ValueError(
+            "too many aligned tensor-owned dimensions for bounded core-order "
+            f"search: {len(constrained)} > {_MAX_OWNER_PERMUTATION_DIMS}"
+        )
     for order in permutations(constrained):
         candidate = derive_core_mapping(
             dims,

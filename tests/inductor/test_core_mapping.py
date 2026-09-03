@@ -446,6 +446,28 @@ def test_operation_mapping_rejects_conflicting_lx_tensor_owners():
         )
 
 
+def test_operation_mapping_bounds_aligned_owner_dimension_permutations():
+    dims = sympy.symbols("d0:6")
+    core_id = sympy.Symbol("core_id")
+    division = TensorWorkDivision(
+        {dim: 2 for dim in dims},
+        {
+            dim: sympy.Mod(sympy.floor(core_id / (2**index)), 2)
+            for index, dim in enumerate(dims)
+        },
+        num_cores=64,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="too many aligned tensor-owned dimensions.*6 > 5",
+    ):
+        derive_operation_mapping(
+            {dim: (sympy.Integer(2), 2) for dim in dims},
+            [division],
+        )
+
+
 def test_scalar_op_has_a_complete_empty_mapping():
     op_spec = OpSpec("identity", False, {}, [], {})
     simplify_op_spec(op_spec)

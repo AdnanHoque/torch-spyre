@@ -147,14 +147,23 @@ def _core_slices(view: PerCoreView, num_cores: int) -> dict[int, dict[int, int]]
     core_id = sympy.Symbol("core_id")
     splits = dict(view.work_slice_dims)
     slots = dict(view.core_to_slot)
+    if splits.keys() != slots.keys():
+        raise ValueError(
+            "ownership split and owner-slot dimensions differ: "
+            f"{set(splits)} != {set(slots)}"
+        )
     result = {}
     for core in range(num_cores):
         row = {}
         for dim, split in splits.items():
             value = sympy.sympify(slots[dim]).subs(core_id, core)
-            assert not value.free_symbols, f"non-concrete owner slot {value}"
+            if value.free_symbols:
+                raise ValueError(f"non-concrete owner slot {value} on core {core}")
             slot = int(value)
-            assert 0 <= slot < split, f"owner slot {slot} outside split {split}"
+            if not 0 <= slot < split:
+                raise ValueError(
+                    f"owner slot {slot} outside split {split} on core {core}"
+                )
             row[dim] = slot
         result[core] = row
     return result
@@ -353,7 +362,12 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
             if not is_matmul and not isinstance(consumer.data, Pointwise):
                 rejection_reason = "consumer is neither pointwise nor matmul"
                 break
-            if not _compatible_partitions(source_view, view, num_cores):
+            try:
+                compatible = _compatible_partitions(source_view, view, num_cores)
+            except (TypeError, ValueError) as exc:
+                rejection_reason = f"invalid ownership partition: {exc}"
+                break
+            if not compatible:
                 rejection_reason = "source and destination partitions are incompatible"
                 break
             try:
