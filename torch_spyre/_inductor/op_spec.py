@@ -302,8 +302,11 @@ def is_lx_relayout_identity(
 ) -> bool:
     """A planner-certified LX identity moving between different owners."""
 
-    if not op_info or not op_info.get(LX_RELAYOUT_INFO_KEY):
+    if not op_info or LX_RELAYOUT_INFO_KEY not in op_info:
         return False
+    kind = op_info[LX_RELAYOUT_INFO_KEY]
+    if not isinstance(kind, str) or not kind:
+        raise ValueError("certified LX relayout must name its registered plan kind")
     if op != IDENTITY_OP or len(args) != 2:
         raise ValueError("certified LX relayout must be a two-argument identity")
     source, destination = args

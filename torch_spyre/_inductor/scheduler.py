@@ -118,8 +118,8 @@ def _operand_ordered_reads(
                 )
             visit(operation.args[3])
     # Indirect index tensors are not children of the stored value: LoopBody
-    # binds them through set_<symbol> submodules. Codegen emits used bindings
-    # first, in their creation order. Unused loads are not operation operands.
+    # binds them through set_<symbol> submodules. Used index bindings precede
+    # value operands; unused loads are not operation operands.
     operands = ordered
     ordered = []
     binder_names = {f"set_{symbol}" for symbol in used_indirect}
@@ -158,7 +158,6 @@ def _preflight_lx_ownership(
     node: SchedulerNode,
     *,
     relayout_copy: bool,
-    constrained_names: set[str] | None = None,
 ) -> None:
     """Dry-run the same ownership finalization codegen will consume."""
 
@@ -205,9 +204,7 @@ def _preflight_lx_ownership(
     # two callers pass divisions on the same symbol basis to the finalizer.
     divisions = []
     for (name, layout, _), tensor in zip(entries, alignment_inputs.tensors):
-        constrained = "lx" in layout.allocation and (
-            constrained_names is None or name in constrained_names
-        )
+        constrained = "lx" in layout.allocation
         if constrained and layout.lx_view is None:
             raise ValueError(f"LX buffer {name} has no physical ownership")
         divisions.append(
@@ -243,55 +240,6 @@ def _preflight_lx_ownership(
         core_id_k_fast=_spyre_config.core_id_k_fast_emission,
         is_relayout=relayout_copy,
     )
-
-
-def _preflight_lx_culprits(node: SchedulerNode) -> set[str]:
-    """Return LX inputs that cannot share the writer's committed operation map."""
-
-    reads = {
-        dep.name
-        for dep in node.read_writes.reads
-        if isinstance(dep, MemoryDep) and _lx_layout(dep.name) is not None
-    }
-    writes = {
-        dep.name
-        for dep in node.read_writes.writes
-        if isinstance(dep, MemoryDep) and _lx_layout(dep.name) is not None
-    }
-    try:
-        _preflight_lx_ownership(node, relayout_copy=False, constrained_names=writes)
-    except (Unsupported, ValueError):
-        # A write that cannot express its own committed view gives us no valid
-        # operation map to test the reads against. Drop every LX constraint on
-        # this op so no unresolved read/read conflict can first fail in codegen.
-        return writes | reads
-
-    culprits = set()
-    for name in reads:
-        try:
-            _preflight_lx_ownership(
-                node,
-                relayout_copy=False,
-                constrained_names={*writes, name},
-            )
-        except (Unsupported, ValueError):
-            culprits.add(name)
-    # Individual failures do not prove that the remaining reads work together:
-    # two survivors can each agree with the writer yet impose incompatible core
-    # orders on different dimensions. Validate the exact survivor set before
-    # allowing it to reach codegen. If it still conflicts, keep no arbitrary
-    # winner and send every read through the safe HBM path.
-    survivors = reads - culprits
-    if survivors:
-        try:
-            _preflight_lx_ownership(
-                node,
-                relayout_copy=False,
-                constrained_names=writes | survivors,
-            )
-        except (Unsupported, ValueError):
-            return reads
-    return culprits
 
 
 class CountedLoopSchedulerNode(FusedSchedulerNode):
@@ -721,10 +669,10 @@ def demote_incoherent_lx_buffers(
                 )
             except (Unsupported, ValueError) as exc:
                 reason = f"{node.get_name()} LX ownership preflight failed: {exc}"
-                culprits = (
-                    set(touched_lx) if relayout_copy else _preflight_lx_culprits(node)
-                )
-                for name in culprits:
+                # This is a preservation check, not another placement search.
+                # Do not try subsets or keep a preferred writer: all LX buffers
+                # touched by the failed operation fall back together.
+                for name in touched_lx:
                     changed |= demote(source_by_copy.get(name, name), reason)
         if not changed:
             break
@@ -733,9 +681,7 @@ def demote_incoherent_lx_buffers(
             "LX ownership preflight did not reach its monotone demotion fixed point"
         )
 
-    # Keep the carried-reduction contract, but make it consume the same physical
-    # record instead of rebuilding core order from scheduler split counts.
-    return verify_carried_reduction_ownership(nodes)
+    return nodes
 
 
 def verify_carried_reduction_ownership(
@@ -743,7 +689,7 @@ def verify_carried_reduction_ownership(
 ) -> list[BaseSchedulerNode]:
     """Verify the final physical contract of every loop-carried reduction.
 
-    This runs after fusion and LX preflight, before HBM-pool planning. Earlier
+    This runs after fusion, LX preflight, and HBM-pool planning. Earlier
     split metadata is only an input request; the committed physical view checked
     here is the ownership codegen will actually emit.
     """

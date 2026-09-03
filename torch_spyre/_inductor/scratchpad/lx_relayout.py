@@ -59,6 +59,7 @@ class LXRelayoutPlan:
     num_cores: int
     source_address: int | None = None
     destination_address: int | None = None
+    kind: str = "shuffle"
 
     @property
     def destination_name(self) -> str:

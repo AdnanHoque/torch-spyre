@@ -85,6 +85,7 @@ from .fusion import spyre_fuse_nodes
 from .scheduler import (
     build_loop_scheduler_nodes,
     demote_incoherent_lx_buffers,
+    verify_carried_reduction_ownership,
 )
 from .constants import DEVICE_NAME
 from .deadcode_elimination import deadcode_elimination
@@ -284,12 +285,14 @@ class CustomPostFusionPasses(_SpyreNodePassPipeline):
     def __init__(self):
         # Fusion fixes the final loop coordinates. LX ownership preflight then
         # dry-runs codegen's real finalization while HBM fallback is still
-        # available. HBM planning runs last and claims anything preflight demotes.
+        # available. HBM planning claims anything preflight demotes before the
+        # carried-reduction pass checks that its required stages still exist.
         super().__init__(
             [
                 spyre_fuse_nodes,
                 demote_incoherent_lx_buffers,
                 hbm_pool_planning,
+                verify_carried_reduction_ownership,
             ]
         )
 
