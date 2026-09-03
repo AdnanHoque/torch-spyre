@@ -1029,7 +1029,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             symbolic_dim_bounds=symbolic_dim_bounds,
             node_output_ranges=node_output_ranges,
             producer_consumers=(
-                relayout_plan.producer_consumers if relayout_plan is not None else ()
+                relayout_plans[0].producer_consumers if relayout_plans else ()
             ),
             debug_handle=debug_handle,
         )
