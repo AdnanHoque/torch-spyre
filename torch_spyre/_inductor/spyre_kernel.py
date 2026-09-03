@@ -787,8 +787,9 @@ class SpyreKernel(Kernel[CSEVariable]):
         )
         work_division = work_division_from_view(
             tensor.layout.lx_view if "lx" in tensor.layout.allocation else None,
+            tensor.layout.device_layout.device_size,
             device_coords,
-            tuple(it_space),
+            it_space,
         )
         device_tile_advance_expr = self._general_tile_advance(tensor, is_input, name)
         tensor_arg = TensorArg(

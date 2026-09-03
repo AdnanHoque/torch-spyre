@@ -680,6 +680,7 @@ def test_lx_relayout_kinds_share_one_edge_derivation():
         "shuffle",
         "gather",
         "broadcast",
+        "gather_broadcast",
     }
     wrong_domain = replace(broadcast_source, num_cores=4)
     assert (
@@ -713,6 +714,52 @@ def test_grouped_gather_can_contract_two_dimensions():
     } == {(4, 2), (8, 4)}
     edges = lx_relayout_module._transfer_edges(source, destination, 32, 32)
     assert {sum(target == core for _, target in edges) for core in range(32)} == {4}
+
+
+def test_gather_broadcast_uses_the_complete_owner_maps():
+    source = PerCoreView(
+        ((2, 32),),
+        ((2, Mod(_CORE_ID, 32)),),
+        num_cores=32,
+    )
+    destination = PerCoreView(
+        ((1, 8), (3, 2)),
+        ((1, Mod(_CORE_ID, 8)), (3, Mod(floor(_CORE_ID / 16), 2))),
+        num_cores=32,
+    )
+
+    classified = lx_relayout_module.classify_relayout_views(
+        source,
+        destination,
+        32,
+        allowed_kinds=("gather_broadcast",),
+    )
+
+    assert classified is not None and classified[0] == "gather_broadcast"
+    assert {item.ordering_tag for item in classified[1]} == {"view_pair"}
+    edges = lx_relayout_module._transfer_edges(source, destination, 32, 32)
+    assert {sum(dst == core for _, dst in edges) for core in range(32)} == {32}
+    assert {sum(src == core for src, _ in edges) for core in range(32)} == {32}
+
+
+def test_fused_physical_axes_project_to_one_loop_division():
+    fused = Symbol("fused")
+    view = PerCoreView(
+        ((0, 4), (1, 8)),
+        ((0, floor(_CORE_ID / 8)), (1, Mod(_CORE_ID, 8))),
+        num_cores=32,
+    )
+
+    division = work_division_from_view(
+        view,
+        (4, 8),
+        (floor(fused / 8), Mod(fused, 8)),
+        {fused: 32},
+    )
+
+    assert division is not None
+    assert division.work_slices == {fused: 32}
+    assert division.physical_core_count == 32
 
 
 @pytest.mark.parametrize(
@@ -780,16 +827,18 @@ def test_lx_relayout_planner_rejects_equal_projected_ownership():
         num_cores=32,
     )
     coordinates = [m, m]
-    source_work_division = work_division_from_view(source_view, coordinates, (m,))
+    source_work_division = work_division_from_view(
+        source_view, [32, 32], coordinates, {m: 32}
+    )
     destination_work_division = work_division_from_view(
-        destination_view, coordinates, (m,)
+        destination_view, [32, 32], coordinates, {m: 32}
     )
     assert source_view != destination_view
     assert source_work_division == destination_work_division
 
     source_dep = SimpleNamespace(name="source", is_indirect=lambda: False)
     producer = SimpleNamespace(
-        layout=SimpleNamespace(device_layout=SimpleNamespace()),
+        layout=SimpleNamespace(device_layout=SimpleNamespace(device_size=[32, 32])),
         data=SimpleNamespace(),
         get_name=lambda: "source",
     )
@@ -826,7 +875,7 @@ def test_lx_relayout_planner_rejects_equal_projected_ownership():
             lx_relayout_module, "try_device_coordinates", return_value=coordinates
         ),
         mock_patch.object(
-            lx_relayout_module, "iteration_space_from_op", return_value=(m,)
+            lx_relayout_module, "iteration_space_from_op", return_value={m: 32}
         ),
         mock_patch.object(lx_relayout_module, "is_restickify_op", return_value=False),
         mock_patch.object(lx_relayout_module, "partition_footprint", return_value=128),
@@ -864,14 +913,19 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
     args = [
         replace(
             base,
-            work_division=work_division_from_view(source_view, coordinates, (m, n)),
+            work_division=work_division_from_view(
+                source_view, base.device_size, coordinates, {m: 64, n: 256}
+            ),
         ),
         replace(
             base,
             is_input=False,
             allocation={"lx": 256},
             work_division=work_division_from_view(
-                destination_view, coordinates, (m, n)
+                destination_view,
+                base.device_size,
+                coordinates,
+                {m: 64, n: 256},
             ),
         ),
     ]
@@ -900,7 +954,12 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
     assert coord_info[0]["x"]["folds"]["dim_prop_func"][0]["Affine"]["alpha_"] == 2
     assert coord_info[1]["x"]["folds"]["dim_prop_func"][0]["Affine"]["alpha_"] == 4
     with pytest.raises(ValueError, match="cannot map device dimension"):
-        work_division_from_view(source_view, [Integer(0), m + n, Integer(0)], (m, n))
+        work_division_from_view(
+            source_view,
+            base.device_size,
+            [Integer(0), m + n, Integer(0)],
+            {m: 64, n: 256},
+        )
 
     for arg in spec.args:
         arg.work_division = None
@@ -1565,13 +1624,17 @@ def test_lx_preflight_uses_the_codegen_input_layout_override(missing_view):
     source = SimpleNamespace(name="source", index=Symbol("source_index"))
     destination = SimpleNamespace(name="destination", index=Symbol("destination_index"))
     current_input = SimpleNamespace(
-        device_layout=object(), allocation={"hbm": 0}, lx_view=None
+        device_layout=SimpleNamespace(device_size=(32,)),
+        allocation={"hbm": 0},
+        lx_view=None,
     )
     override_input = SimpleNamespace(
-        device_layout=object(), allocation={"hbm": 0}, lx_view=None
+        device_layout=SimpleNamespace(device_size=(32,)),
+        allocation={"hbm": 0},
+        lx_view=None,
     )
     output = SimpleNamespace(
-        device_layout=object(),
+        device_layout=SimpleNamespace(device_size=(32,)),
         allocation={"lx": 0},
         lx_view=None if missing_view else _DESTINATION_VIEW,
     )
@@ -1644,7 +1707,9 @@ def _relayout_layout(address, view):
     # that field in the test double so ownership verification exercises the
     # same contract as the real post-allocation pipeline.
     return SimpleNamespace(
-        allocation={"lx": address}, lx_view=view, device_layout=object()
+        allocation={"lx": address},
+        lx_view=view,
+        device_layout=SimpleNamespace(device_size=(8, 8)),
     )
 
 
@@ -1681,7 +1746,7 @@ def test_lx_scheduler_demotes_an_allocation_without_physical_ownership():
 
 def test_lx_relayout_scheduler_checks_final_ownership_projection():
     m, n = Symbol("m"), Symbol("n")
-    layout = SimpleNamespace(device_layout=object())
+    layout = SimpleNamespace(device_layout=SimpleNamespace(device_size=(32, 64)))
     graph = SimpleNamespace(
         try_get_buffer=lambda name: (
             SimpleNamespace(get_layout=lambda: layout) if name == "source" else None
@@ -1785,6 +1850,11 @@ def test_lx_relayout_scheduler_demotes_all_touched_buffers_and_closes_groups():
                 side_effect=lambda node, _dep, _name, _view: (
                     not (drift == "projection" and node.name == "consumer")
                 ),
+            ),
+            mock_patch.object(
+                lx_relayout_module,
+                "partition_footprint",
+                return_value=128,
             ),
             config.patch({"lx_planning": True}),
         ):

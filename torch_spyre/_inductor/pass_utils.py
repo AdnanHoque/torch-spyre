@@ -52,7 +52,7 @@ from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.op_spec import IndirectAccess, TensorWorkDivision
 
 from . import config
-from .core_mapping import core_to_slice_mapping
+from .core_mapping import core_to_slice_mapping, decompose_fused_split_view
 from .constants import (
     ELIDED_COPY_BACK_ATTR,
     KEEP_BY_INDEX_OP,
@@ -3164,6 +3164,34 @@ def _per_core_view_from_prep(
     num_stick_stride = prep.num_stick_stride
     iter_space = prep.iter_space
 
+    core_to_slot: Optional[dict[sympy.Symbol, Expr]] = None
+
+    def iteration_core_to_slot() -> Optional[dict[sympy.Symbol, Expr]]:
+        nonlocal core_to_slot
+        if core_to_slot is not None:
+            return core_to_slot
+        iter_symbols = tuple(iter_space)
+        dim_splits = tuple(int(per_sym[sym]) for sym in iter_symbols)
+        contiguous_dim = (
+            len(dim_splits) - 1
+            if prep.is_matmul and config.core_id_k_fast_emission
+            else None
+        )
+        if ownership is not None:
+            if set(ownership.work_slices) != set(iter_symbols) or set(
+                ownership.core_id_to_work_slice
+            ) != set(iter_symbols):
+                return None
+            core_to_slot = dict(ownership.core_id_to_work_slice)
+        else:
+            core_to_slot = core_to_slice_mapping(
+                iter_symbols,
+                dim_splits,
+                num_cores,
+                contiguous_dim=contiguous_dim,
+            )
+        return core_to_slot
+
     # Step 3: place each split on a device dim via stride lookup.
     #
     # stride_map[i] is a device-dim → host-stride mapping. The stickified
@@ -3186,6 +3214,7 @@ def _per_core_view_from_prep(
     # come from ``prep`` (bound above).
     work_slice_dims: dict[int, int] = {}
     sym_to_device_dim: dict["sympy.Symbol", int] = {}
+    decomposed_core_to_slot: dict[int, Expr] = {}
     for h, (split, sym) in sorted(splits_by_stride.items()):
         dev_dim = device_stride_to_dim.get(h)
         if h == stick_host_stride:
@@ -3300,8 +3329,7 @@ def _per_core_view_from_prep(
                     f"on device dim {dev_dim}; returning empty_view"
                 )
                 return unrepresentable
-        # TODO: two known unhandled failure modes fall through to the
-        # empty_view fallback (cases catalogued in
+        # Two reshape cases reach the fallback below (catalogued in
         # per_core_view_failing_cases.md):
         #   (A) Collapsed-axis info loss — device_layout built from a
         #       higher-rank host tensor while dep is indexed via a lower-rank
@@ -3312,16 +3340,37 @@ def _per_core_view_from_prep(
         #       h = k * stride_map[num_stick_dim], k > 1, but
         #       split * k < num_stick (rescue above only
         #       handles the full-coverage case where they are equal).
-        # In both cases no single (dev_dim, factor) placement faithfully
-        # represents the per-core slicing; empty_view keeps the buffer on
-        # HBM via the caller's mismatch logic. Future work: extend the
-        # PerCoreView schema to express multi-dim or strided splits, or
-        # refuse the buffer earlier in scratchpad planning.
+        # Everything outside the exact rectangular subset remains
+        # unrepresentable and keeps the buffer on HBM.
         if (
             dev_dim is None
             or dev_dim in work_slice_dims
             or device_size[dev_dim] % split != 0
         ):
+            decomposed = None
+            if config.lx_fused_split_views:
+                mapping = iteration_core_to_slot()
+                loop_extents = {
+                    dim: extent[0] if isinstance(extent, tuple) else extent
+                    for dim, extent in iter_space.items()
+                }
+                if mapping is not None and sym in mapping:
+                    decomposed = decompose_fused_split_view(
+                        sym,
+                        split,
+                        mapping[sym],
+                        loop_extents,
+                        device_size,
+                        prep.dep_device_coordinates,
+                        num_cores,
+                    )
+            if decomposed is not None:
+                decomposed_splits, decomposed_slots = decomposed
+                new_dims = {device_dim for device_dim, _ in decomposed_splits}
+                if new_dims.isdisjoint(work_slice_dims):
+                    work_slice_dims.update(decomposed_splits)
+                    decomposed_core_to_slot.update(decomposed_slots)
+                    continue
             logger.debug(
                 f"could not place split h={h} factor={split} on "
                 f"stride_map={stride_map} device_size={device_size}; "
@@ -3331,34 +3380,20 @@ def _per_core_view_from_prep(
         work_slice_dims[dev_dim] = split
         sym_to_device_dim[sym] = dev_dim
 
-    # Step 4: project the committed core order into device dimensions. Candidate
-    # exploration has no committed record yet and keeps the existing default.
-    iter_symbols = tuple(iter_space)
-    dim_splits = tuple(int(per_sym[sym]) for sym in iter_symbols)
-    if ownership is not None:
-        if set(ownership.work_slices) != set(iter_symbols) or set(
-            ownership.core_id_to_work_slice
-        ) != set(iter_symbols):
-            return unrepresentable
-        core_to_slot = dict(ownership.core_id_to_work_slice)
-    else:
-        contiguous_dim = (
-            len(dim_splits) - 1
-            if prep.is_matmul and config.core_id_k_fast_emission
-            else None
-        )
-        core_to_slot = core_to_slice_mapping(
-            iter_symbols,
-            dim_splits,
-            num_cores,
-            contiguous_dim=contiguous_dim,
-        )
+    # Step 4: model the same physical ownership SDSC will emit. LX compatibility
+    # requires producer and consumer to assign each slice to the same physical
+    # core; matching split factors alone is insufficient.
+    num_cores = int(num_cores)
+    core_to_slot = iteration_core_to_slot()
+    if core_to_slot is None:
+        return unrepresentable
     # Re-key by the buffer's device-dim index (canonical) instead of the op's
     # iter symbol name. Two ops with the same per-core slicing on this buffer
     # compare equal even if they name their iter axes differently.
     pruned_core_to_slot: list[tuple[int, "Expr"]] = []
     for sym, dev_dim in sym_to_device_dim.items():
         pruned_core_to_slot.append((dev_dim, core_to_slot[sym]))
+    pruned_core_to_slot.extend(decomposed_core_to_slot.items())
     pruned_core_to_slot.sort(key=lambda x: x[0])
 
     view = PerCoreView(

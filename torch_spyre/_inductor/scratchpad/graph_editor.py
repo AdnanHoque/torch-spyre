@@ -207,11 +207,12 @@ class GraphEditor:
                     f"got {len(clone_writes)}"
                 )
             clone_write = clone_writes[0]
-            clone_symbols = tuple(iteration_space_from_op(new_com_buf))
+            clone_space = iteration_space_from_op(new_com_buf)
             clone_ownership = work_division_from_view(
                 lx_view,
+                clone_layout.device_layout.device_size,
                 device_coordinates(clone_layout.device_layout, clone_write, None),
-                clone_symbols,
+                clone_space,
             )
             if clone_ownership is None:
                 raise ValueError("LX clone is missing its accepted physical ownership")

@@ -148,7 +148,12 @@ def _ownership_projectable(
     if coordinates is None:
         return False
     try:
-        work_division_from_view(view, coordinates, tuple(iteration_space(node)))
+        work_division_from_view(
+            view,
+            layout.device_layout.device_size,
+            coordinates,
+            iteration_space(node),
+        )
     except ValueError:
         return False
     return True
@@ -210,8 +215,9 @@ def _preflight_lx_ownership(
         divisions.append(
             work_division_from_view(
                 layout.lx_view if constrained else None,
+                layout.device_layout.device_size,
                 tensor["coordinates"],
-                tuple(alignment_inputs.iteration_space),
+                alignment_inputs.iteration_space,
             )
         )
     coordinates = [tensor["coordinates"] for tensor in alignment_inputs.tensors]

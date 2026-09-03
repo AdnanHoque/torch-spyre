@@ -35,11 +35,13 @@ from torch_spyre._inductor.core_mapping import (
     core_mappings_equal,
     core_to_slice_mapping,
     derive_core_mapping,
+    derive_partition_mapping,
     derive_operation_mapping,
     finalize_core_mapping_pure,
     finalize_tensor_work_divisions,
     partition_physical_span_bytes,
     remap_work_division,
+    work_division_matches_physical_ownership,
 )
 from torch_spyre._inductor.op_spec import (
     OpSpec,
@@ -208,6 +210,101 @@ def test_late_mapping_derives_contiguous_broadcast_groups():
     )
     coordinates = _mapping_coordinates(mapping, (query, h), 32)
     assert coordinates == [(core % 16, core // 16) for core in range(32)]
+
+
+def test_late_partition_mapping_repeats_contiguous_owners():
+    head = sympy.Symbol("head")
+    mapping = derive_partition_mapping((head,), (4,), 32)
+    assert _mapping_coordinates(mapping, (head,), 32) == [
+        (core // 8,) for core in range(32)
+    ]
+
+
+def _canonical_division(extents, splits, num_cores):
+    dims = tuple(extents)
+    mapping = derive_partition_mapping(
+        dims,
+        tuple(splits[dim] for dim in dims),
+        num_cores,
+    )
+    return TensorWorkDivision(dict(splits), mapping, num_cores=num_cores)
+
+
+def test_exact_fused_axis_projection_accepts_k_4_by_8():
+    fused = sympy.Symbol("fused")
+    division = _canonical_division({fused: 32}, {fused: 32}, 32)
+    core_id = sympy.Symbol("core_id")
+
+    assert work_division_matches_physical_ownership(
+        division,
+        {fused: 32},
+        (4, 8),
+        (sympy.floor(fused / 8), sympy.Mod(fused, 8)),
+        ((0, 4), (1, 8)),
+        ((0, sympy.floor(core_id / 8)), (1, sympy.Mod(core_id, 8))),
+        32,
+    )
+
+
+def test_exact_fused_axis_projection_accepts_v_with_replication():
+    fused, feature = sympy.symbols("fused feature")
+    division = _canonical_division(
+        {fused: 32, feature: 16},
+        {fused: 8, feature: 2},
+        32,
+    )
+    core_id = sympy.Symbol("core_id")
+    fused_slot = sympy.Mod(sympy.floor(core_id / 2), 8)
+
+    assert work_division_matches_physical_ownership(
+        division,
+        {fused: 32, feature: 16},
+        (4, 8, 16),
+        (sympy.floor(fused / 8), sympy.Mod(fused, 8), feature),
+        ((0, 4), (1, 2), (2, 2)),
+        (
+            (0, sympy.floor(fused_slot / 2)),
+            (1, sympy.Mod(fused_slot, 2)),
+            (2, sympy.Mod(sympy.floor(core_id / 16), 2)),
+        ),
+        32,
+    )
+
+
+def test_exact_fused_axis_projection_rejects_disjoint_2_by_2_regions():
+    fused = sympy.Symbol("fused")
+    division = _canonical_division({fused: 32}, {fused: 4}, 4)
+    core_id = sympy.Symbol("core_id")
+
+    assert not work_division_matches_physical_ownership(
+        division,
+        {fused: 32},
+        (4, 8),
+        (sympy.floor(fused / 8), sympy.Mod(fused, 8)),
+        ((0, 2), (1, 2)),
+        ((0, sympy.floor(core_id / 2)), (1, sympy.Mod(core_id, 2))),
+        4,
+    )
+
+
+def test_exact_fused_axis_projection_checks_every_loop_value():
+    fused, feature = sympy.symbols("fused feature")
+    core_id = sympy.Symbol("core_id")
+    division = TensorWorkDivision(
+        {fused: 4, feature: 2},
+        {fused: sympy.Mod(core_id, 4), feature: sympy.floor(core_id / 4)},
+        num_cores=8,
+    )
+
+    assert not work_division_matches_physical_ownership(
+        division,
+        {fused: 4, feature: 8},
+        (4, 8),
+        (fused, sympy.Mod(feature + 4 * sympy.Mod(feature, 4), 8)),
+        ((0, 4), (1, 2)),
+        ((0, sympy.Mod(core_id, 4)), (1, sympy.floor(core_id / 4))),
+        8,
+    )
 
 
 def test_late_mapping_keeps_shared_destination_after_one_consumer_factors():
@@ -1171,6 +1268,52 @@ def test_stick_axis_split_is_proved_in_whole_sticks(extent, split, representable
     assert dict(view.work_slice_dims) == {0: split}
     slot = dict(view.core_to_slot)[0]
     assert [int(slot.subs(core, c)) for c in range(split)] == list(range(split))
+
+
+def test_fused_split_view_is_gated_and_preserves_exact_owner_order(monkeypatch):
+    fused = sympy.Symbol("fused")
+    prep = pass_utils_module._ViewPrep(
+        iter_space={fused: 32},
+        write_index=fused,
+        read_index=fused,
+        dep_coeff={fused: 1},
+        dep_device_coordinates=(sympy.floor(fused / 8), sympy.Mod(fused, 8)),
+        device_size=[4, 8],
+        stride_map=[-1, -1],
+        elems_per_stick=64,
+        device_stride_to_dim={},
+        stick_host_stride=None,
+        num_stick_dim=None,
+        num_stick=0,
+        num_stick_stride=0,
+        is_matmul=False,
+    )
+
+    monkeypatch.setattr(pass_utils_module.config, "lx_fused_split_views", False)
+    disabled_view, disabled_partial, disabled_representable = (
+        pass_utils_module._per_core_view_from_prep(prep, {fused: 32})
+    )
+    assert not disabled_representable
+    assert not disabled_partial
+    assert not disabled_view.work_slice_dims
+
+    monkeypatch.setattr(pass_utils_module.config, "lx_fused_split_views", True)
+    enabled_view, enabled_partial, enabled_representable = (
+        pass_utils_module._per_core_view_from_prep(prep, {fused: 32})
+    )
+    assert enabled_representable
+    assert not enabled_partial
+    assert enabled_view.work_slice_dims == ((0, 4), (1, 8))
+    assert enabled_view.same_partition(
+        PerCoreView(
+            ((0, 4), (1, 8)),
+            (
+                (0, sympy.floor(sympy.Symbol("core_id") / 8)),
+                (1, sympy.Mod(sympy.Symbol("core_id"), 8)),
+            ),
+            num_cores=32,
+        )
+    )
 
 
 def _prepare_compound_axis_view(iter_space, index, repeat_info=None):

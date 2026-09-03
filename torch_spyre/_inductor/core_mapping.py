@@ -19,11 +19,11 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
-from itertools import permutations
+from itertools import permutations, product
 from numbers import Integral
 from typing import TYPE_CHECKING
 
-from sympy import Expr, Integer, Mod, Symbol, floor, lambdify, sympify
+from sympy import Expr, Integer, Mod, Symbol, floor, sympify
 
 from .constants import BYTES_PER_STICK
 from .op_spec import TensorWorkDivision
@@ -147,6 +147,372 @@ def _direct_axis_ownership_matches(
         ZeroDivisionError,
     ):
         return False
+
+
+_MAX_EXACT_OWNERSHIP_POINTS = 1024
+
+
+def work_division_matches_physical_ownership(
+    division: TensorWorkDivision,
+    loop_extents: Mapping[Symbol, int],
+    device_size: Sequence[int],
+    device_coordinates: Sequence[Expr],
+    physical_splits: Sequence[tuple[int, int]],
+    physical_core_to_slot: Sequence[tuple[int, Expr]],
+    num_cores: int,
+) -> bool:
+    """Prove that loop and physical ownership assign every point identically.
+
+    The proof deliberately treats coordinate expressions as black boxes.  It
+    evaluates the concrete domain instead of trying to recognize floor/mod or
+    mixed-radix formulas.  This is only for the small fused-axis cases that the
+    ordinary one-loop-to-one-device-axis projection cannot represent.
+    """
+
+    try:
+        if num_cores <= 0 or division.physical_core_count != num_cores:
+            return False
+        if len(device_size) != len(device_coordinates):
+            return False
+        if division.work_slices.keys() != division.core_id_to_work_slice.keys():
+            return False
+        if not division.work_slices.keys() <= loop_extents.keys():
+            return False
+
+        splits = dict(physical_splits)
+        slots = dict(physical_core_to_slot)
+        if (
+            len(splits) != len(physical_splits)
+            or len(slots) != len(physical_core_to_slot)
+            or splits.keys() != slots.keys()
+        ):
+            return False
+
+        core_id = Symbol("core_id")
+        physical_slots_by_core: dict[int, dict[int, int]] = {}
+        for device_dim, split in splits.items():
+            if not 0 <= device_dim < len(device_size):
+                return False
+            extent = sympify(device_size[device_dim])
+            if (
+                extent.free_symbols
+                or extent.is_integer is not True
+                or int(extent) <= 0
+                or split <= 0
+                or int(extent) % split
+            ):
+                return False
+            slot_expr = sympify(slots[device_dim])
+            if slot_expr.free_symbols - {core_id}:
+                return False
+            for core in range(num_cores):
+                value = sympify(slot_expr.subs(core_id, core))
+                if value.free_symbols or value.is_integer is not True:
+                    return False
+                slot = int(value)
+                if not 0 <= slot < split:
+                    return False
+                physical_slots_by_core.setdefault(core, {})[device_dim] = slot
+
+        owned_coordinates = {
+            device_dim: sympify(device_coordinates[device_dim]) for device_dim in splits
+        }
+        coordinate_symbols = set().union(
+            *(coordinate.free_symbols for coordinate in owned_coordinates.values())
+        )
+        if coordinate_symbols - loop_extents.keys():
+            return False
+        relevant_dims = tuple(dim for dim in loop_extents if dim in coordinate_symbols)
+        physical_dims_by_loop: dict[Symbol, list[int]] = {}
+        for device_dim, coordinate in owned_coordinates.items():
+            matches = coordinate.free_symbols & loop_extents.keys()
+            if len(matches) != 1:
+                return False
+            physical_dims_by_loop.setdefault(next(iter(matches)), []).append(device_dim)
+        concrete_extents = {}
+        for dim in relevant_dims:
+            value = sympify(loop_extents[dim])
+            if value.free_symbols or value.is_integer is not True:
+                return False
+            concrete_extent = int(value)
+            if concrete_extent <= 0:
+                return False
+            concrete_extents[dim] = concrete_extent
+        candidate_splits = {
+            dim: int(split)
+            for dim, split in division.work_slices.items()
+            if dim in coordinate_symbols and int(split) > 1
+        }
+        candidate_slots_by_core: dict[int, dict[Symbol, int]] = {}
+        for dim, split in candidate_splits.items():
+            if dim not in concrete_extents or concrete_extents[dim] % split:
+                return False
+            slot_expr = sympify(division.core_id_to_work_slice[dim])
+            if slot_expr.free_symbols - {core_id}:
+                return False
+            for core in range(num_cores):
+                value = sympify(slot_expr.subs(core_id, core))
+                if value.free_symbols or value.is_integer is not True:
+                    return False
+                slot = int(value)
+                if not 0 <= slot < split:
+                    return False
+                candidate_slots_by_core.setdefault(core, {})[dim] = slot
+
+        # Prove each loop independently before combining its partitions.  This
+        # is exact because every owned device coordinate depends on exactly one
+        # loop symbol: once all values in a candidate partition have the same
+        # physical slot tuple, the full Cartesian product is represented by the
+        # Cartesian product of those tuples.  No loop value is sampled.
+        physical_slots_by_partition: dict[Symbol, dict[int, tuple[int, ...]]] = {}
+        exact_states = sum(concrete_extents.values())
+        partition_count = math.prod(
+            candidate_splits.get(dim, 1) for dim in relevant_dims
+        )
+        if exact_states + partition_count > _MAX_EXACT_OWNERSHIP_POINTS:
+            return False
+
+        for dim in relevant_dims:
+            extent = concrete_extents[dim]
+            split = candidate_splits.get(dim, 1)
+            slots_by_partition: dict[int, tuple[int, ...]] = {}
+            physical_dims = physical_dims_by_loop[dim]
+            for point in range(extent):
+                physical_slots = []
+                for device_dim in physical_dims:
+                    coordinate = owned_coordinates[device_dim]
+                    value = sympify(coordinate.subs(dim, point))
+                    if value.free_symbols or value.is_integer is not True:
+                        return False
+                    coordinate_value = int(value)
+                    device_extent = int(device_size[device_dim])
+                    if not 0 <= coordinate_value < device_extent:
+                        return False
+                    physical_slots.append(
+                        coordinate_value // (device_extent // splits[device_dim])
+                    )
+                partition = point // (extent // split)
+                signature = tuple(physical_slots)
+                previous = slots_by_partition.setdefault(partition, signature)
+                if previous != signature:
+                    return False
+            if len(slots_by_partition) != split:
+                return False
+            if len(set(slots_by_partition.values())) != split:
+                return False
+            physical_slots_by_partition[dim] = slots_by_partition
+
+        partition_ranges = [
+            range(candidate_splits.get(dim, 1)) for dim in relevant_dims
+        ]
+        for partitions in product(*partition_ranges):
+            candidate_point_slots = {
+                dim: partition
+                for dim, partition in zip(relevant_dims, partitions)
+                if candidate_splits.get(dim, 1) > 1
+            }
+            physical_point_slots = {}
+            for dim, partition in zip(relevant_dims, partitions):
+                for device_dim, slot in zip(
+                    physical_dims_by_loop[dim],
+                    physical_slots_by_partition[dim][partition],
+                ):
+                    physical_point_slots[device_dim] = slot
+
+            physical_owners = {
+                core
+                for core in range(num_cores)
+                if physical_slots_by_core.get(core, {}) == physical_point_slots
+            }
+            candidate_owners = {
+                core
+                for core in range(num_cores)
+                if candidate_slots_by_core.get(core, {}) == candidate_point_slots
+            }
+            if not physical_owners or physical_owners != candidate_owners:
+                return False
+        return True
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return False
+
+
+def decompose_fused_split_view(
+    fused_symbol: Symbol,
+    fused_split: int,
+    fused_slot_expr: Expr,
+    loop_extents: Mapping[Symbol, int],
+    device_size: Sequence[int],
+    device_coordinates: Sequence[Expr],
+    num_cores: int,
+) -> tuple[tuple[tuple[int, int], ...], tuple[tuple[int, Expr], ...]] | None:
+    """Express one contiguous fused-loop partition on physical device axes.
+
+    A fused loop may drive several physical axes. The ordinary view builder
+    sees one split and therefore cannot place it on one axis. This helper
+    enumerates the concrete fused domain, accepts only rectangular per-slot
+    regions, constructs candidates with the canonical mapping generator, and
+    lets the exact ownership proof decide. It never parses coordinate formulas
+    or represents disjoint regions.
+    """
+
+    try:
+        fused_split = int(fused_split)
+        num_cores = int(num_cores)
+        if fused_split <= 1 or num_cores <= 0 or num_cores % fused_split:
+            return None
+        if len(device_size) != len(device_coordinates):
+            return None
+
+        extent_expr = sympify(loop_extents[fused_symbol])
+        if (
+            extent_expr.free_symbols
+            or extent_expr.is_integer is not True
+            or int(extent_expr) <= 0
+        ):
+            return None
+        extent = int(extent_expr)
+        if extent % fused_split:
+            return None
+        if extent + fused_split > _MAX_EXACT_OWNERSHIP_POINTS:
+            return None
+
+        core_id = Symbol("core_id")
+        fused_slot_expr = sympify(fused_slot_expr)
+        if fused_slot_expr.free_symbols - {core_id}:
+            return None
+
+        # Replicated fused partitions must use the same contiguous owner groups
+        # as the canonical tensor-division contract. Interleaved groups are a
+        # different ownership representation and remain fail-closed.
+        canonical_slot = derive_partition_mapping(
+            (fused_symbol,), (fused_split,), num_cores
+        )[fused_symbol]
+        if any(
+            sympify(fused_slot_expr.subs(core_id, core))
+            != sympify(canonical_slot.subs(core_id, core))
+            for core in range(num_cores)
+        ):
+            return None
+
+        driven_dims = tuple(
+            device_dim
+            for device_dim, coordinate in enumerate(device_coordinates)
+            if fused_symbol in sympify(coordinate).free_symbols
+        )
+        if not 2 <= len(driven_dims) <= 5:
+            return None
+        if any(
+            sympify(device_coordinates[device_dim]).free_symbols != {fused_symbol}
+            for device_dim in driven_dims
+        ):
+            return None
+
+        concrete_device_size: dict[int, int] = {}
+        for device_dim in driven_dims:
+            device_extent = sympify(device_size[device_dim])
+            if (
+                device_extent.free_symbols
+                or device_extent.is_integer is not True
+                or int(device_extent) <= 0
+            ):
+                return None
+            concrete_device_size[device_dim] = int(device_extent)
+
+        coordinates_by_point: list[tuple[int, ...]] = []
+        for point in range(extent):
+            point_coordinates = []
+            for device_dim in driven_dims:
+                value = sympify(
+                    sympify(device_coordinates[device_dim]).subs(fused_symbol, point)
+                )
+                if value.free_symbols or value.is_integer is not True:
+                    return None
+                coordinate = int(value)
+                if not 0 <= coordinate < concrete_device_size[device_dim]:
+                    return None
+                point_coordinates.append(coordinate)
+            coordinates_by_point.append(tuple(point_coordinates))
+
+        slot_width = extent // fused_split
+        run_widths: tuple[int, ...] | None = None
+        for slot in range(fused_split):
+            points = coordinates_by_point[slot * slot_width : (slot + 1) * slot_width]
+            if len(set(points)) != slot_width:
+                return None
+            slot_run_widths = []
+            for axis in range(len(driven_dims)):
+                values = {point[axis] for point in points}
+                if max(values) - min(values) + 1 != len(values):
+                    return None
+                slot_run_widths.append(len(values))
+            widths = tuple(slot_run_widths)
+            if math.prod(widths) != slot_width:
+                return None
+            if run_widths is None:
+                run_widths = widths
+            elif widths != run_widths:
+                return None
+
+        if run_widths is None:
+            return None
+        factor_by_dim = {
+            device_dim: concrete_device_size[device_dim] // width
+            for device_dim, width in zip(driven_dims, run_widths)
+        }
+        if any(
+            concrete_device_size[device_dim] % width
+            for device_dim, width in zip(driven_dims, run_widths)
+        ):
+            return None
+
+        division = TensorWorkDivision(
+            {fused_symbol: fused_split},
+            {fused_symbol: fused_slot_expr},
+            num_cores=num_cores,
+        )
+        split_dims = tuple(
+            (device_dim, factor)
+            for device_dim, factor in factor_by_dim.items()
+            if factor > 1
+        )
+        if not split_dims:
+            return None
+
+        synthetic_dims = {
+            device_dim: Symbol(f"physical_dim_{device_dim}")
+            for device_dim in driven_dims
+        }
+        for ordered_device_dims in permutations(driven_dims):
+            mapping = core_to_slice_mapping(
+                tuple(synthetic_dims[device_dim] for device_dim in ordered_device_dims),
+                tuple(factor_by_dim[device_dim] for device_dim in ordered_device_dims),
+                fused_split,
+            )
+            core_slots = tuple(
+                sorted(
+                    (
+                        device_dim,
+                        mapping[synthetic_dims[device_dim]].subs(
+                            core_id, fused_slot_expr
+                        ),
+                    )
+                    for device_dim, factor in factor_by_dim.items()
+                    if factor > 1
+                )
+            )
+            if work_division_matches_physical_ownership(
+                division,
+                loop_extents,
+                device_size,
+                device_coordinates,
+                split_dims,
+                core_slots,
+                num_cores,
+            ):
+                return tuple(sorted(split_dims)), core_slots
+        return None
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
 
 
 def core_to_slice_mapping(
@@ -281,6 +647,33 @@ def derive_core_mapping(
             dim: expression.subs(core_id, local_core_id)
             for dim, expression in local_mapping.items()
         },
+    }
+
+
+def derive_partition_mapping(
+    dims: Sequence[Symbol],
+    dim_splits: Sequence[int],
+    num_cores: int,
+) -> dict[Symbol, Expr]:
+    """Derive tensor owners from final partition geometry.
+
+    A partition may have fewer logical owners than physical cores. In that
+    case each owner occupies one contiguous, equal-size core group.
+    """
+
+    dims = tuple(dims)
+    splits = tuple(int(split) for split in dim_splits)
+    owner_count = math.prod(splits)
+    if owner_count <= 0 or num_cores <= 0 or num_cores % owner_count:
+        raise ValueError(
+            f"partition owner count must divide num_cores: {owner_count}, {num_cores}"
+        )
+    group_size = num_cores // owner_count
+    core_id = Symbol("core_id")
+    group_id = floor(core_id / group_size)
+    mapping = core_to_slice_mapping(dims, splits, owner_count)
+    return {
+        dim: expression.subs(core_id, group_id) for dim, expression in mapping.items()
     }
 
 
