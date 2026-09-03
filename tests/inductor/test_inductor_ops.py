@@ -1424,16 +1424,12 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
             },
             "param_sets": INDEX_REDUCTION_KEEPDIM_PARAM_SETS,
         },
-        # Regression guard for the LX producer/consumer core->slice agreement
-        # (#3374, #3387). Two device reductions over one LX-pinned input reducing
-        # a non-trailing dim get a positional core->slice mapping from
-        # core_to_slice_mapping; if the clone that pins the input into LX walks it
-        # in a different dim order than the reductions read it, each core reads a
-        # slice another core wrote and the result is silently wrong. Through 2.12
-        # Inductor's loop_ordering_after_fusion happened to rewrite the clone into
-        # the consumers' order; 2.13 computes that reorder and discards it, which
-        # is what exposed it. aminmax was merely the first op to show it, so these
-        # cases assert the general shape.
+        # Regression guard for LX producer/consumer physical ownership
+        # (#3374, #3387). Two reductions over one pinned input may read it in a
+        # different loop order from the boundary clone. The clone must commit
+        # the consumers' accepted physical view before scheduling; otherwise a
+        # core can read a slice another core wrote. aminmax was merely the first
+        # op to expose the general shape.
         (
             "test_shared_input_two_reductions",
             "test_shared_input_two_reductions_base",

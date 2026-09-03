@@ -78,12 +78,14 @@ def work_division_from_view(
 
     if view is None:
         return None
-    if view.num_cores is None:
+    if view.num_cores is None or view.num_cores <= 0:
         raise ValueError("LX ownership must carry its physical core domain")
     loop_symbols = set(iteration_symbols)
     splits: dict[sympy.Symbol, int] = {}
     core_map: dict[sympy.Symbol, sympy.Expr] = {}
     slots = dict(view.core_to_slot)
+    if dict(view.work_slice_dims).keys() != slots.keys():
+        raise ValueError("LX ownership split and owner-slot dimensions differ")
     for device_dim, split in view.work_slice_dims:
         if device_dim >= len(device_coordinates):
             raise ValueError(f"missing device coordinate {device_dim}")
@@ -159,21 +161,33 @@ def demote_lx_relayout_group(
 
 
 def _core_slices(view: PerCoreView, num_cores: int) -> dict[int, dict[int, int]]:
+    if num_cores <= 0:
+        raise ValueError(f"physical core count must be positive, got {num_cores}")
+    if view.num_cores is not None:
+        if view.num_cores <= 0:
+            raise ValueError(
+                f"physical core count must be positive, got {view.num_cores}"
+            )
+        if view.num_cores != num_cores:
+            raise ValueError(
+                "ownership core count differs from the communication domain: "
+                f"{view.num_cores} != {num_cores}"
+            )
     core_id = sympy.Symbol("core_id")
     splits = dict(view.work_slice_dims)
     slots = dict(view.core_to_slot)
     if splits.keys() != slots.keys():
         raise ValueError(
             "ownership split and owner-slot dimensions differ: "
-            f"{set(splits)} != {set(slots)}"
+            f"{sorted(splits)} != {sorted(slots)}"
         )
     result = {}
     for core in range(num_cores):
         row = {}
         for dim, split in splits.items():
             value = sympy.sympify(slots[dim]).subs(core_id, core)
-            if value.free_symbols:
-                raise ValueError(f"non-concrete owner slot {value} on core {core}")
+            if value.free_symbols or value.is_integer is not True:
+                raise ValueError(f"non-integral owner slot {value} on core {core}")
             slot = int(value)
             if not 0 <= slot < split:
                 raise ValueError(
@@ -442,7 +456,11 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
         consumers = [
             cast(ComputedBuffer, graph.get_buffer(name)) for name in plan.consumer_names
         ]
-        copy = editor.insert_clone_before_consumers(source, consumers)
+        copy = editor.insert_clone_before_consumers(
+            source,
+            consumers,
+            lx_view=plan.destination_view,
+        )
         copies[plan.edge] = (copy.get_name(), plan)
 
         assert plan.source_address is not None and plan.destination_address is not None
@@ -451,13 +469,12 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
         source_layout = cast(FixedTiledLayout, source.layout)
         copy_layout = cast(FixedTiledLayout, copy.layout)
         if (
-            source_layout.lx_view is not None
-            and not source_layout.lx_view.same_partition(plan.source_view)
+            source_layout.allocation.get("lx") != plan.source_address
+            or source_layout.lx_view is None
+            or not source_layout.lx_view.same_partition(plan.source_view)
         ):
-            raise RuntimeError("placed relayout source view disagrees with its plan")
-        source_layout.allocation["lx"] = plan.source_address
+            raise RuntimeError("placed relayout source disagrees with its plan")
         copy_layout.allocation["lx"] = plan.destination_address
-        source_layout.lx_view = plan.source_view
         copy_layout.lx_view = plan.destination_view
         logger.debug(
             "accepted LX relayout %s -> %s: source=%s@%d destination=%s@%d",

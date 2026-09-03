@@ -223,12 +223,19 @@ class TensorWorkDivision:
     def to_core_slices(self, num_cores: int) -> dict[str, dict[str, int]]:
         """Expand symbolic ownership into DeepTools' per-core slice map."""
 
+        if num_cores <= 0:
+            raise ValueError(f"physical core count must be positive, got {num_cores}")
         core_id = Symbol("core_id")
         result = {}
         for core in range(num_cores):
             slots = {}
             for dim, expression in self.core_id_to_work_slice.items():
-                slot = int(sympify(expression).subs(core_id, core))
+                value = sympify(expression).subs(core_id, core)
+                if value.free_symbols or value.is_integer is not True:
+                    raise ValueError(
+                        f"core {core} owns non-integral {dim} slot {value}"
+                    )
+                slot = int(value)
                 split = self.work_slices[dim]
                 if not 0 <= slot < split:
                     raise ValueError(
@@ -295,21 +302,18 @@ def is_lx_relayout_identity(
 ) -> bool:
     """A planner-certified LX identity moving between different owners."""
 
-    if (
-        op != IDENTITY_OP
-        or len(args) != 2
-        or not op_info
-        or not op_info.get(LX_RELAYOUT_INFO_KEY)
-    ):
+    if not op_info or not op_info.get(LX_RELAYOUT_INFO_KEY):
         return False
+    if op != IDENTITY_OP or len(args) != 2:
+        raise ValueError("certified LX relayout must be a two-argument identity")
     source, destination = args
-    return (
-        "lx" in source.allocation
-        and "lx" in destination.allocation
-        and source.work_division is not None
-        and destination.work_division is not None
-        and not source.work_division.same_ownership(destination.work_division)
-    )
+    if "lx" not in source.allocation or "lx" not in destination.allocation:
+        raise ValueError("certified LX relayout lost an LX allocation")
+    if source.work_division is None or destination.work_division is None:
+        raise ValueError("certified LX relayout lost a tensor work division")
+    if source.work_division.same_ownership(destination.work_division):
+        raise ValueError("certified LX relayout ownership collapsed")
+    return True
 
 
 @dataclasses.dataclass

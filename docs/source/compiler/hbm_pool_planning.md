@@ -99,8 +99,8 @@ CustomPreSchedulingPasses:
 ... Inductor scheduler construction ...
 
 CustomPostFusionPasses:
-  demote_incoherent_lx_buffers         # LX fixups (phase 2)
   spyre_fuse_nodes                     # Determine bundle boundaries
+  demote_incoherent_lx_buffers         # Check final LX ownership; demote on failure
   hbm_pool_planning                    # Per-bundle HBM pool allocation (this pass)
 ```
 
