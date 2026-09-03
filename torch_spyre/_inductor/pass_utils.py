@@ -3304,49 +3304,6 @@ def _per_core_view_on_buf(
     return result
 
 
-def per_core_view_scheduled(
-    node: "SchedulerNode", dep: MemoryDep, buf_name: str
-) -> tuple[PerCoreView, bool, bool]:
-    """:func:`_per_core_view_on_buf` against the *post*-scheduler ranges.
-
-    Same result shape, but the iteration space and indices come from
-    ``node.read_writes`` / :func:`iteration_space` rather than the pre-scheduler
-    ``op.get_read_writes()``. Inductor's ``loop_ordering_after_fusion`` can
-    permute a fused op's ranges after LX planning has already committed, and
-    ``core_to_slice_mapping`` is positional, so only this post-fusion view
-    reflects the core->slice assignment codegen will really emit.
-    """
-    op = node.node
-    coeff_splits: tuple[dict, dict] = getattr(op, "op_it_space_splits", ({}, {}))
-    if not any(n > 1 for d in coeff_splits for n in d.values()):
-        # No real split -> whole-buffer view; every core holds all of it.
-        return (
-            PerCoreView(work_slice_dims=(), core_to_slot=(), num_cores=1),
-            False,
-            True,
-        )
-
-    rw = node.read_writes
-    write_dep = next((d for d in rw.writes if isinstance(d, MemoryDep)), None)
-    if write_dep is None:
-        # StarDep-only writer: no index to reason about, so treat as
-        # unrepresentable rather than guessing.
-        num_cores = math.prod(
-            value for group in coeff_splits for value in group.values()
-        )
-        return (
-            PerCoreView(work_slice_dims=(), core_to_slot=(), num_cores=num_cores),
-            False,
-            False,
-        )
-    read_index = next(
-        (d.index for d in rw.reads if isinstance(d, MemoryDep)), write_dep.index
-    )
-    parts = (iteration_space(node), write_dep.index, read_index)
-    prep = _prepare_per_core_view(op, dep, buf_name, parts=parts)
-    return _per_core_view_from_prep(prep, coeff_splits)
-
-
 def format_operations(operations: list[Operation]) -> str:
     """Format LLIR operations including torch-spyre custom metadata"""
     buf = io.StringIO()

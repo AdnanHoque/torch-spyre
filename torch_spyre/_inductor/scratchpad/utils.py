@@ -28,7 +28,6 @@ from torch.utils._sympy.value_ranges import ValueRanges, bound_sympy
 
 import sympy
 
-from torch_spyre._inductor import config
 from torch_spyre._inductor.ir import FixedTiledLayout
 from torch_spyre._inductor.pass_utils import (
     PerCoreView,
@@ -541,11 +540,10 @@ def get_ncores_for_buffers(
     result: dict[str, int] = {}
     mismatch_reasons_cache: dict[str, str] = {}
     accepted_views: dict[str, PerCoreView] = {}
-    using_multicore = config.sencores > 1
     buf_user_deps = _get_buffer_user_deps(graph)
     for buf_name, users in buf_user_deps.items():
         # this dict includes graph input and output
-        if using_multicore and len(users) > 1:
+        if users:
             # A K-split-reduction writer leaves partial sums on most cores (only
             # k-last cores hold the final value), so it's unsafe on LX even if
             # geometry matches — the `flag` gate applies to write-deps only.
@@ -623,8 +621,6 @@ def get_ncores_for_buffers(
                 num_cores = max(_op_num_cores(op) for op, _ in users)
                 assert ref_view is not None
                 accepted_views[buf_name] = ref_view
-        elif using_multicore:
-            num_cores = _op_num_cores(users[0][0])
         else:
             num_cores = 1
         result[buf_name] = num_cores

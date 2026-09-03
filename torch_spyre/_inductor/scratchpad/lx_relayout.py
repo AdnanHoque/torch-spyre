@@ -450,6 +450,11 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
             raise RuntimeError("LX relayout plan has identical source and destination")
         source_layout = cast(FixedTiledLayout, source.layout)
         copy_layout = cast(FixedTiledLayout, copy.layout)
+        if (
+            source_layout.lx_view is not None
+            and not source_layout.lx_view.same_partition(plan.source_view)
+        ):
+            raise RuntimeError("placed relayout source view disagrees with its plan")
         source_layout.allocation["lx"] = plan.source_address
         copy_layout.allocation["lx"] = plan.destination_address
         source_layout.lx_view = plan.source_view

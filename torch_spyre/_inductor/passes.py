@@ -86,7 +86,6 @@ from .scheduler import (
     align_lx_producer_loop_order,
     build_loop_scheduler_nodes,
     demote_incoherent_lx_buffers,
-    verify_carried_reduction_ownership,
 )
 from .constants import DEVICE_NAME
 from .deadcode_elimination import deadcode_elimination
@@ -288,17 +287,14 @@ class CustomPostFusionPasses(_SpyreNodePassPipeline):
     """
 
     def __init__(self):
-        # demote_incoherent_lx_buffers runs first: it re-checks LX core->slice
-        # coherence now that loop orders are final, and anything it demotes must
-        # still be visible to hbm_pool_planning as an unclaimed intermediate.
-        # hbm_pool_planning runs after spyre_fuse_nodes so it can compute
-        # bundle-scoped live ranges.
+        # Fusion fixes the final loop coordinates. LX ownership preflight then
+        # dry-runs codegen's real finalization while HBM fallback is still
+        # available. HBM planning runs last and claims anything preflight demotes.
         super().__init__(
             [
-                demote_incoherent_lx_buffers,
                 spyre_fuse_nodes,
+                demote_incoherent_lx_buffers,
                 hbm_pool_planning,
-                verify_carried_reduction_ownership,
             ]
         )
 
