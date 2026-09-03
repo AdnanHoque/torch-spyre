@@ -3436,6 +3436,49 @@ def _per_core_view_on_buf(
     return result
 
 
+def completed_reduction_splits_on_buf(
+    op: Operation,
+    dep: MemoryDep,
+    buf_name: str,
+) -> tuple[int, int] | None:
+    """Return the committed reduction and output splits for a matmul result.
+
+    DeepTools chooses the core holding the completed partial sum from both
+    values: an unsplit OUT dimension completes on the last core in each
+    reduction group, while a split OUT dimension completes on the middle core.
+    Planning therefore certifies both facts before it records broadcast routes.
+    """
+
+    if not _is_matmul_op(op):
+        return None
+    prep = _prepare_per_core_view(op, dep, buf_name)
+    ownership = getattr(op, "iteration_space_ownership", None)
+    if prep is None or ownership is None:
+        return None
+    reduction_splits = [
+        int(ownership.work_slices.get(sym, 1))
+        for sym in prep.iter_space
+        if prep.write_index.coeff(sym) == 0
+        and int(ownership.work_slices.get(sym, 1)) > 1
+    ]
+    if len(reduction_splits) != 1 or prep.stick_host_stride is None:
+        return None
+
+    # Matmul OUT is the output tensor's stick dimension. Size-one OUT has no
+    # loop symbol and therefore keeps the default split of one.
+    output_symbols = [
+        sym
+        for sym in prep.iter_space
+        if prep.write_index.coeff(sym) == prep.stick_host_stride
+    ]
+    if len(output_symbols) > 1:
+        return None
+    output_split = (
+        int(ownership.work_slices.get(output_symbols[0], 1)) if output_symbols else 1
+    )
+    return reduction_splits[0], output_split
+
+
 def format_operations(operations: list[Operation]) -> str:
     """Format LLIR operations including torch-spyre custom metadata"""
     buf = io.StringIO()

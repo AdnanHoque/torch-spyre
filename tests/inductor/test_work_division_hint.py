@@ -715,6 +715,139 @@ def test_grouped_gather_can_contract_two_dimensions():
     assert {sum(target == core for _, target in edges) for core in range(32)} == {4}
 
 
+def test_completed_reduction_broadcast_uses_terminal_producers():
+    source = PerCoreView(((0, 2),), ((0, floor(_CORE_ID / 4)),), num_cores=8)
+    destination = PerCoreView(
+        ((0, 2), (1, 4)),
+        ((0, floor(_CORE_ID / 4)), (1, Mod(_CORE_ID, 4))),
+        num_cores=8,
+    )
+
+    classified = lx_relayout_module.classify_relayout_views(
+        source, destination, 8, reduction_split=4
+    )
+
+    assert classified is not None and classified[0] == "broadcast"
+    assert lx_relayout_module.derive_completed_reduction_routes(
+        source, destination, 4
+    ) == ((3, (0, 1, 2, 3)), (7, (4, 5, 6, 7)))
+    # DeepTools changes the completed producer when the matmul OUT dimension
+    # is split. For K=4, the roots move from the last to the middle core.
+    assert lx_relayout_module.derive_completed_reduction_routes(
+        source, destination, 4, output_split=2
+    ) == ((2, (0, 1, 2, 3)), (6, (4, 5, 6, 7)))
+
+    # Equal split counts are not enough: this owner order interleaves each
+    # partial-sum group across the physical cores, which the backend cannot
+    # name as a completed-reduction broadcast.
+    interleaved_source = PerCoreView(((0, 2),), ((0, Mod(_CORE_ID, 2)),), num_cores=8)
+    assert (
+        lx_relayout_module.classify_relayout_views(
+            interleaved_source, destination, 8, reduction_split=4
+        )
+        is None
+    )
+    duplicate_destination = replace(
+        destination,
+        core_to_slot=((0, floor(_CORE_ID / 4)), (1, Integer(0))),
+    )
+    assert (
+        lx_relayout_module.classify_relayout_views(
+            source, duplicate_destination, 8, reduction_split=4
+        )
+        is None
+    )
+
+    unsupported_source = PerCoreView((), (), num_cores=8)
+    unsupported_destination = PerCoreView(((0, 8),), ((0, _CORE_ID),), num_cores=8)
+    assert (
+        lx_relayout_module.classify_relayout_views(
+            unsupported_source,
+            unsupported_destination,
+            8,
+            reduction_split=8,
+        )
+        is None
+    )
+
+
+def test_completed_reduction_split_extraction_includes_matmul_output():
+    m, n, k = Symbol("m"), Symbol("n"), Symbol("k")
+    prep = SimpleNamespace(
+        iter_space=(m, n, k),
+        write_index=128 * m + n,
+        stick_host_stride=1,
+    )
+    op = SimpleNamespace(
+        iteration_space_ownership=SimpleNamespace(work_slices={m: 2, n: 4, k: 4})
+    )
+
+    with (
+        mock_patch("torch_spyre._inductor.pass_utils._is_matmul_op", return_value=True),
+        mock_patch(
+            "torch_spyre._inductor.pass_utils._prepare_per_core_view",
+            return_value=prep,
+        ),
+    ):
+        assert lx_relayout_module.completed_reduction_splits_on_buf(
+            op, SimpleNamespace(), "result"
+        ) == (4, 4)
+
+        op.iteration_space_ownership.work_slices[n] = 1
+        assert lx_relayout_module.completed_reduction_splits_on_buf(
+            op, SimpleNamespace(), "result"
+        ) == (4, 1)
+
+
+@config.patch({"sencores": 8})
+def test_completed_reduction_routes_survive_alignment_unchanged():
+    m, n = Symbol("m"), Symbol("n")
+    coordinates = [Mod(n, 32), floor(n / 32), Mod(m, 64)]
+    source_view = PerCoreView(((1, 2),), ((1, floor(_CORE_ID / 4)),), num_cores=8)
+    destination_view = PerCoreView(
+        ((1, 2), (2, 4)),
+        ((1, floor(_CORE_ID / 4)), (2, Mod(_CORE_ID, 4))),
+        num_cores=8,
+    )
+    base = TensorArg(
+        True, -1, DataFormats.SEN169_FP16, [32, 8, 64], coordinates, {"lx": 0}
+    )
+    planned_routes = ((3, (0, 1, 2, 3)), (7, (4, 5, 6, 7)))
+    spec = OpSpec(
+        IDENTITY_OP,
+        False,
+        {n: (Integer(256), 2), m: (Integer(64), 4)},
+        [
+            replace(
+                base,
+                work_division=work_division_from_view(source_view, coordinates, (m, n)),
+            ),
+            replace(
+                base,
+                is_input=False,
+                allocation={"lx": 256},
+                work_division=work_division_from_view(
+                    destination_view, coordinates, (m, n)
+                ),
+            ),
+        ],
+        {LX_RELAYOUT_INFO_KEY: True},
+        producer_consumers=planned_routes,
+    )
+
+    root, allocations = _compile_spec(spec)
+
+    assert set(root["dscs_"][0]) == {"shuffle"}
+    assert spec.producer_consumers == planned_routes
+    assert root["prodConsList"] == {"3": [0, 1, 2, 3], "7": [4, 5, 6, 7]}
+    assert root["numCoresUsed_"] == 2
+    source_map, destination_map = [
+        node["coordinates_"]["coreIdToWkSlice_"] for node in allocations
+    ]
+    assert set(source_map) == {"3", "7"}
+    assert set(destination_map) == {str(core) for core in range(8)}
+
+
 @pytest.mark.parametrize(
     ("view", "message"),
     [

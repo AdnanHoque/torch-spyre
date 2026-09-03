@@ -40,6 +40,7 @@ from ..pass_utils import (
     PerCoreView,
     _is_matmul_op,
     _per_core_view_on_buf,
+    completed_reduction_splits_on_buf,
     iteration_space_from_op,
     op_read_writes,
     try_device_coordinates,
@@ -79,6 +80,10 @@ class LXRelayoutPlan:
     group_geometry: tuple[RelayoutDimension, ...] = ()
     source_footprint_bytes: int = 0
     destination_footprint_bytes: int = 0
+    # Planning derives completed-reduction roots once from the physical views.
+    # Later stages carry this certificate; they never reconstruct it from the
+    # aligned operation symbols.
+    producer_consumers: tuple[tuple[int, tuple[int, ...]], ...] = ()
     source_address: int | None = None
     destination_address: int | None = None
     # Lowering names are registry keys rather than a closed type. Extension
@@ -338,6 +343,61 @@ def _grouped_broadcast_geometry(
     return source, destination, geometry
 
 
+def _completed_reduction_geometry(
+    source: PerCoreView,
+    destination: PerCoreView,
+    source_num_cores: int,
+    destination_num_cores: int,
+    reduction_split: int,
+) -> tuple[PerCoreView, PerCoreView, tuple[RelayoutDimension, ...]] | None:
+    """Certify terminal reduction slices fanning out to complete consumers."""
+
+    source_splits = dict(source.work_slice_dims)
+    destination_splits = dict(destination.work_slice_dims)
+    source_owners = math.prod(source_splits.values())
+    destination_owners = math.prod(destination_splits.values())
+    if (
+        source.num_cores != source_num_cores
+        or destination.num_cores != destination_num_cores
+        or source_num_cores != destination_num_cores
+        # The current backend PSUM path accepts only these group widths.
+        or reduction_split not in (2, 3, 4)
+        or source_owners * reduction_split != source_num_cores
+        or destination_owners != destination_num_cores
+        or destination_owners <= source_owners
+    ):
+        return None
+
+    geometry = []
+    for dim in dict.fromkeys((*source_splits, *destination_splits)):
+        source_split = source_splits.get(dim, 1)
+        destination_split = destination_splits.get(dim, 1)
+        if destination_split < source_split or destination_split % source_split:
+            return None
+        geometry.append(
+            RelayoutDimension(
+                device_dim=dim,
+                source_split=source_split,
+                destination_split=destination_split,
+                group_count=source_split,
+                group_size=destination_split // source_split,
+                multiplicity=destination_split // source_split,
+                ordering_tag="uniform_groups",
+            )
+        )
+    if destination_owners // source_owners != reduction_split:
+        return None
+    # Split counts describe the shape but do not prove which physical cores
+    # hold the completed values.  Use the same exact edge proof that planning
+    # carries forward, so this certifier cannot accept a count-compatible but
+    # physically unsupported owner order.
+    try:
+        derive_completed_reduction_routes(source, destination, reduction_split)
+    except ValueError:
+        return None
+    return source, destination, tuple(geometry)
+
+
 def partition_footprint(layout: FixedTiledLayout, view: PerCoreView) -> int:
     device_layout = layout.device_layout
     if device_layout.element_arrangement != ElementArrangement.STANDARD:
@@ -394,6 +454,87 @@ def _transfer_edges(
             )
             for dim in dimensions
         )
+    )
+
+
+def derive_completed_reduction_routes(
+    source: PerCoreView,
+    destination: PerCoreView,
+    reduction_split: int,
+    output_split: int = 1,
+) -> tuple[tuple[int, tuple[int, ...]], ...]:
+    """Choose the completed producer for each destination from physical ownership.
+
+    ``_transfer_edges`` remains the only movement derivation. This step removes
+    nonterminal contributors. DeepTools leaves the complete value on the last
+    core of a contiguous reduction group when OUT is unsplit, and on the middle
+    core when OUT is split.
+    """
+
+    source_num_cores = source.num_cores
+    destination_num_cores = destination.num_cores
+    if source_num_cores is None or destination_num_cores is None:
+        raise ValueError("completed-reduction views require physical core domains")
+    if reduction_split not in (2, 3, 4):
+        raise ValueError(
+            "a completed-reduction broadcast requires a backend-supported split"
+        )
+    if output_split <= 0:
+        raise ValueError("the completed-reduction output split must be positive")
+    if source_num_cores <= 0 or destination_num_cores <= 0:
+        raise ValueError("physical core counts must be positive")
+
+    source_slices = _core_slices(source, source_num_cores)
+    destination_slices = _core_slices(destination, destination_num_cores)
+    destination_owners = {
+        tuple(sorted(owned_slice.items()))
+        for owned_slice in destination_slices.values()
+    }
+    if len(destination_owners) != destination_num_cores:
+        raise ValueError(
+            "completed-reduction destinations must own distinct physical slices"
+        )
+    edges = _transfer_edges(
+        source,
+        destination,
+        source_num_cores,
+        destination_num_cores,
+    )
+    source_groups: dict[tuple[tuple[int, int], ...], list[int]] = {}
+    for core, owned_slice in source_slices.items():
+        owner = tuple(sorted(owned_slice.items()))
+        source_groups.setdefault(owner, []).append(core)
+    if any(len(group) != reduction_split for group in source_groups.values()):
+        raise ValueError("source owner groups do not match the reduction split")
+    if any(
+        group != list(range(group[0], group[-1] + 1))
+        for group in source_groups.values()
+    ):
+        raise ValueError("completed-reduction source groups must be contiguous")
+
+    terminal_offset = reduction_split // 2 if output_split > 1 else reduction_split - 1
+    terminals = {group[0] + terminal_offset for group in source_groups.values()}
+    routes: dict[int, list[int]] = {terminal: [] for terminal in terminals}
+    sources_by_destination: dict[int, list[int]] = {
+        core: [] for core in range(destination_num_cores)
+    }
+    for source_core, destination_core in edges:
+        if source_core in terminals:
+            sources_by_destination[destination_core].append(source_core)
+    for destination_core, source_cores in sources_by_destination.items():
+        if len(source_cores) != 1:
+            raise ValueError(
+                f"destination core {destination_core} has "
+                f"{len(source_cores)} completed sources"
+            )
+        routes[source_cores[0]].append(destination_core)
+
+    fanouts = {len(consumers) for consumers in routes.values()}
+    if 0 in fanouts or len(fanouts) != 1:
+        raise ValueError("completed-reduction routes require uniform fanout")
+    return tuple(
+        (source_core, tuple(sorted(consumers)))
+        for source_core, consumers in sorted(routes.items())
     )
 
 
@@ -518,6 +659,7 @@ def classify_relayout_views(
     destination_num_cores: int | None = None,
     *,
     allowed_kinds: Sequence[str] | None = None,
+    reduction_split: int | None = None,
 ) -> tuple[str, tuple[RelayoutDimension, ...]] | None:
     """Choose a certified lowering for one already-described view pair.
 
@@ -536,6 +678,17 @@ def classify_relayout_views(
     ):
         return None
     allowed = set(allowed_kinds) if allowed_kinds is not None else None
+    if reduction_split is not None:
+        if allowed is not None and "broadcast" not in allowed:
+            return None
+        classified = _completed_reduction_geometry(
+            source,
+            destination,
+            source_num_cores,
+            destination_num_cores,
+            reduction_split,
+        )
+        return None if classified is None else ("broadcast", classified[2])
     for kind in _LOWERING_PRIORITY:
         if allowed is not None and kind not in allowed:
             continue
@@ -599,6 +752,7 @@ def _destination_plan_key(
     geometry: tuple[RelayoutDimension, ...],
     source_footprint: int,
     destination_footprint: int,
+    producer_consumers: tuple[tuple[int, tuple[int, ...]], ...],
 ) -> tuple:
     """Reuse a destination whose owner formulas mean the same thing.
 
@@ -613,6 +767,7 @@ def _destination_plan_key(
         geometry,
         source_footprint,
         destination_footprint,
+        producer_consumers,
     )
     for candidate in existing:
         if candidate[1:] == key[1:] and candidate[0].same_partition(destination_view):
@@ -647,11 +802,24 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
             producer, write, source_name, cache
         )
         source_num_cores = _op_num_cores(producer)
+        reduction_info = (
+            completed_reduction_splits_on_buf(producer, write, source_name)
+            if partial
+            else None
+        )
+        reduction_split, reduction_output_split = (
+            reduction_info if reduction_info is not None else (None, None)
+        )
         if (
             source_view is None
-            or partial
             or not representable
             or source_view.num_cores != source_num_cores
+        ):
+            continue
+        if partial and (
+            reduction_split is None
+            or source_num_cores != config.sencores
+            or not config.core_id_k_fast_emission
         ):
             continue
 
@@ -747,7 +915,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                 )
                 break
             consumer_symbols = tuple(iteration_space_from_op(consumer))
-            if view.same_partition(source_view):
+            if reduction_split is None and view.same_partition(source_view):
                 continue
             is_matmul = _is_matmul_op(consumer)
             if is_matmul and len(deps) != 2:
@@ -762,7 +930,13 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                 break
 
             destination_owners = math.prod(dict(view.work_slice_dims).values())
-            if consumer_num_cores > source_num_cores:
+            if reduction_split is not None:
+                expected_kind = "broadcast"
+                failure = (
+                    "cannot emit: completed reduction does not evenly cover "
+                    "the destination"
+                )
+            elif consumer_num_cores > source_num_cores:
                 expected_kind = "broadcast"
                 failure = (
                     "cannot emit: grouped destination does not evenly "
@@ -790,6 +964,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     source_num_cores,
                     consumer_num_cores,
                     allowed_kinds=(expected_kind,),
+                    reduction_split=reduction_split,
                 )
             except (TypeError, ValueError) as exc:
                 rejection_reason = (
@@ -799,6 +974,25 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
             if classified is None:
                 rejection_reason = failure
                 break
+            try:
+                if reduction_split is not None:
+                    if reduction_output_split is None:
+                        raise ValueError(
+                            "completed-reduction output split was not certified"
+                        )
+                    producer_consumers = derive_completed_reduction_routes(
+                        source_view,
+                        view,
+                        reduction_split,
+                        reduction_output_split,
+                    )
+                else:
+                    producer_consumers = ()
+            except ValueError as exc:
+                rejection_reason = (
+                    f"cannot emit: invalid completed-reduction routes: {exc}"
+                )
+                break
             transfers.append(
                 (
                     consumer_name,
@@ -806,6 +1000,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     consumer_symbols,
                     view,
                     *classified,
+                    producer_consumers,
                 )
             )
 
@@ -824,6 +1019,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                 destination_view,
                 kind,
                 geometry,
+                producer_consumers,
             ) in transfers:
                 try:
                     source_work_division = work_division_from_view(
@@ -874,6 +1070,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     geometry,
                     source_footprint,
                     destination_footprint,
+                    producer_consumers,
                 )
                 plans_by_destination.setdefault(key, []).append(consumer_name)
 
@@ -889,6 +1086,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     group_geometry=geometry,
                     source_footprint_bytes=source_footprint,
                     destination_footprint_bytes=destination_footprint,
+                    producer_consumers=producer_consumers,
                 )
                 for (
                     destination_view,
@@ -896,6 +1094,7 @@ def collect_lx_relayout_plans(graph: GraphLowering) -> list[LXRelayoutPlan]:
                     geometry,
                     source_footprint,
                     destination_footprint,
+                    producer_consumers,
                 ), consumer_names in plans_by_destination.items()
             )
         if rejection_reason is not None:
