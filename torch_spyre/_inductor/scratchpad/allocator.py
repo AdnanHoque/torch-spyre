@@ -49,15 +49,17 @@ from torch_spyre._inductor.pass_utils import (
     op_read_writes,
     _prepare_per_core_view,
     _per_core_view_from_prep,
+    _per_core_view_on_buf,
     _is_matmul_op,
     op_short_name,
 )
+from torch_spyre._inductor.constants import BYTES_PER_STICK
+from torch_spyre._inductor.core_mapping import partition_physical_span_bytes
 from torch_spyre._inductor.work_division import (
     enumerate_work_division_candidates,
     work_division_splits_are_legal,
 )
 from torch_spyre._inductor.errors import Unsupported
-from torch_spyre._inductor.constants import BYTES_PER_STICK
 from torch_spyre._inductor.scratchpad.plan_solver import (
     CoreDivision,
     CoreDivisionBuffer,
@@ -692,6 +694,7 @@ class ScratchpadAllocator:
         ncores: dict[str, int],
         ncores_reasons: dict[str, str],
         lx_views: dict[str, PerCoreView],
+        partition_footprints: dict[str, int],
         lifetime_end_overrides: Optional[dict[str, int]] = None,
     ) -> list[LifetimeBoundBuffer]:
         """Build one :class:`LifetimeBoundBuffer` per buffer, barred or not.
@@ -754,7 +757,7 @@ class ScratchpadAllocator:
                 ncores_reasons=ncores_reasons,
                 division_is_fixed=True,
             )
-            clone_size = self._input_footprint(graph, input_name, ncores)
+            clone_size = partition_footprints.get(input_name, 0)
             buffers.append(
                 LifetimeBoundBuffer(
                     input_name,
@@ -862,18 +865,75 @@ class ScratchpadAllocator:
         )
 
     @staticmethod
-    def _input_footprint(
-        graph: GraphLowering, name: str, ncores: dict[str, int]
-    ) -> int:
-        """Per-core LX footprint of a cloned graph input, or 0 when it has no
-        computable one (in which case ``input_residency_reason`` has already
-        barred it, so the value is never used)."""
-        layout = getattr(graph.get_buffer(name), "layout", None)
-        dev_layout = getattr(layout, "device_layout", None)
-        num_cores = ncores.get(name, -1)
-        if dev_layout is None or num_cores < 1:
-            return 0
-        return math.prod(dev_layout.device_size[:-1]) * BYTES_PER_STICK // num_cores
+    def _partition_footprints(
+        graph: GraphLowering, ncores: dict[str, int]
+    ) -> dict[str, int]:
+        """Largest physical per-core span for every committed partition."""
+
+        footprints: dict[str, int] = {}
+        cache: dict = {}
+        for op in graph.operations:
+            for dep in (*op_read_writes(op).writes, *op_read_writes(op).reads):
+                if not isinstance(dep, MemoryDep):
+                    continue
+                num_cores = ncores.get(dep.name, -1)
+                if num_cores < 1:
+                    continue
+                buffer = graph.try_get_buffer(dep.name)
+                if buffer is None:
+                    continue
+                try:
+                    layout = buffer.get_layout()
+                except NotImplementedError:
+                    continue
+                if not isinstance(layout, FixedTiledLayout):
+                    continue
+                view, partial, representable = _per_core_view_on_buf(
+                    op, dep, dep.name, cache
+                )
+                if not representable or partial or view.num_cores != num_cores:
+                    continue
+                device_layout = layout.device_layout
+                footprint = partition_physical_span_bytes(
+                    tuple(int(size) for size in device_layout.device_size),
+                    tuple(int(stride) for stride in device_layout.stride_map),
+                    int(device_layout.elems_per_stick()),
+                    dict(view.work_slice_dims),
+                )
+                # The physical span is the ragged/padded-layout bound.  Keep
+                # the historical equal-share size as a lower bound so this
+                # refinement can never shrink an ordinary LX allocation.
+                full_size = math.prod(device_layout.device_size[:-1]) * BYTES_PER_STICK
+                equal_share = (
+                    math.ceil(full_size / num_cores / _LX_ALLOCATION_GRANULARITY_BYTES)
+                    * _LX_ALLOCATION_GRANULARITY_BYTES
+                )
+                footprint = max(footprint, equal_share)
+                footprints[dep.name] = max(footprints.get(dep.name, 0), footprint)
+
+        # The residency gate bars partitions with no valid view. Keep a padded,
+        # full-buffer span as a conservative value so they cannot look cheap if
+        # a future caller reaches allocation before that verdict.
+        for name, num_cores in ncores.items():
+            if num_cores < 1 or name in footprints:
+                continue
+            buffer = graph.try_get_buffer(name)
+            if buffer is None:
+                continue
+            try:
+                layout = buffer.get_layout()
+            except NotImplementedError:
+                continue
+            if not isinstance(layout, FixedTiledLayout):
+                continue
+            device_layout = layout.device_layout
+            footprints[name] = partition_physical_span_bytes(
+                tuple(int(size) for size in device_layout.device_size),
+                tuple(int(stride) for stride in device_layout.stride_map),
+                int(device_layout.elems_per_stick()),
+                {},
+            )
+        return footprints
 
     def _determine_in_place(
         self,
@@ -943,19 +1003,36 @@ class ScratchpadAllocator:
         ncores, ncores_reasons, lx_views = get_ncores_for_buffers(graph)
         t1 = time.perf_counter()
         mem_usage = mem_usage_by_buf(graph, cache)
+        partition_footprints = self._partition_footprints(graph, ncores)
+        for name, info in mem_usage.items():
+            if name in partition_footprints:
+                info["size_per_core"] = partition_footprints[name]
         for plan in lx_relayout_plans:
-            for name in (plan.source_name, plan.destination_name):
+            core_counts = {
+                plan.source_name: plan.source_view.num_cores or plan.num_cores,
+                plan.destination_name: plan.destination_view.num_cores
+                or plan.num_cores,
+            }
+            footprints = {
+                plan.source_name: plan.source_footprint_bytes,
+                plan.destination_name: plan.destination_footprint_bytes,
+            }
+            for name, num_cores in core_counts.items():
                 if name not in mem_usage:
                     continue
-                ncores[name] = plan.num_cores
+                ncores[name] = num_cores
                 ncores_reasons.pop(name, None)
                 lx_views[name] = (
                     plan.source_view
                     if name == plan.source_name
                     else plan.destination_view
                 )
-                mem_usage[name]["size_per_core"] = (
-                    mem_usage[name]["size"] // plan.num_cores
+                footprint = footprints[name]
+                footprint = footprint or partition_footprints.get(name, 0)
+                # A source shared by multiple relayouts keeps the largest
+                # source bound. Each private destination keeps its own bound.
+                mem_usage[name]["size_per_core"] = max(
+                    mem_usage[name]["size_per_core"], footprint
                 )
                 mem_usage[name]["core_div_mismatch"] = False
         t2 = time.perf_counter()
@@ -985,6 +1062,7 @@ class ScratchpadAllocator:
             ncores=ncores,
             ncores_reasons=ncores_reasons,
             lx_views=lx_views,
+            partition_footprints=partition_footprints,
             lifetime_end_overrides=lifetime_end_overrides,
         )
         if lx_relayout_plans:
@@ -1002,7 +1080,11 @@ class ScratchpadAllocator:
         for source in buffers:
             for plan in source.lx_relayout_plans:
                 consumer_ticks = [op_index[name] for name in plan.consumer_names]
-                assert all(tick in source.uses for tick in consumer_ticks)
+                if not all(tick in source.uses for tick in consumer_ticks):
+                    raise RuntimeError(
+                        f"LX relayout consumers for {source.name} are outside "
+                        "the source lifetime"
+                    )
                 if source.residency_reason is not None:
                     invalid.add(plan.source_name)
                 else:
@@ -1054,7 +1136,8 @@ class ScratchpadAllocator:
                 destination = LifetimeBoundBuffer(
                     plan.destination_name,
                     round_up_to_alignment(
-                        source.size, _LX_ALLOCATION_GRANULARITY_BYTES
+                        plan.destination_footprint_bytes or source.size,
+                        _LX_ALLOCATION_GRANULARITY_BYTES,
                     ),
                     [transfer_tick, *consumer_ticks],
                     lifetime_end_override=destination_end,
@@ -1084,20 +1167,27 @@ class ScratchpadAllocator:
             allocated = [
                 buffer.address is not None for buffer in (source, *destinations)
             ]
-            assert all(allocated) or not any(allocated), (
-                f"paired-buffer group for {source_name} was only partially allocated"
-            )
+            if not (all(allocated) or not any(allocated)):
+                raise RuntimeError(
+                    f"paired-buffer group for {source_name} was only partially allocated"
+                )
             if not allocated[0]:
                 continue
-            assert source.address is not None
-            assert all(
+            if source.address is None:
+                raise RuntimeError(
+                    f"paired-buffer source {source_name} has no LX address"
+                )
+            if not all(
                 destination.address is not None
                 and not (
                     source.address < destination.address + destination.size
                     and destination.address < source.address + source.size
                 )
                 for destination in destinations
-            ), f"paired-buffer group for {source_name} has overlapping placements"
+            ):
+                raise RuntimeError(
+                    f"paired-buffer group for {source_name} has overlapping placements"
+                )
             complete.add(source_name)
         return complete
 

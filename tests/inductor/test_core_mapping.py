@@ -38,6 +38,7 @@ from torch_spyre._inductor.core_mapping import (
     derive_operation_mapping,
     finalize_core_mapping_pure,
     finalize_tensor_work_divisions,
+    partition_physical_span_bytes,
     remap_work_division,
 )
 from torch_spyre._inductor.op_spec import (
@@ -111,6 +112,18 @@ def test_codegen_rejects_lx_allocation_without_physical_ownership():
         ),
     ):
         kernel.create_tensor_arg(False, "missing_view", tensor)
+
+
+def test_partition_span_includes_padding_between_rows():
+    assert (
+        partition_physical_span_bytes(
+            device_size=(8, 4, 64),
+            stride_map=(256, 64, 1),
+            elems_per_stick=64,
+            split_by_device_dim={0: 4, 1: 2},
+        )
+        == 768
+    )
 
 
 @pytest.mark.parametrize("contiguous_dim", [0, 1, 2])
