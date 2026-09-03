@@ -264,12 +264,10 @@ _LX_ALLOCATION_MARKER = "allocation={'lx'"
 def _assert_keeps_lx_residency(fn, x, case):
     """Assert the compiled graph still pins at least one buffer into LX.
 
-    Comparing values cannot detect a regression in
-    ``align_lx_producer_loop_order``: if an LX buffer's producer and consumers
-    stop agreeing on core->slice, ``demote_incoherent_lx_buffers`` clears the LX
+    Comparing values cannot detect a residency regression: if the clone cannot
+    commit the consumers' agreed physical ownership, preflight clears its LX
     allocation and the results come out correct anyway -- just served from HBM.
-    Residency is therefore the only observable that separates "aligned" from
-    "demoted", so assert it directly.
+    Assert residency directly as well as values.
 
     Measured on the shapes in SHARED_INPUT_TWO_REDUCTION_PARAM_SETS: with the
     aligner in place every case keeps 3 LX allocations (4 for the three-consumer
@@ -284,8 +282,8 @@ def _assert_keeps_lx_residency(fn, x, case):
     assert source_codes[0].count(_LX_ALLOCATION_MARKER) > 0, (
         f"{case}: no buffer left in LX. The values may still be correct, but an "
         f"LX buffer whose users disagree on core->slice gets demoted to HBM -- so "
-        f"this is the signature of the producer/consumer loop-order alignment "
-        f"regressing (see align_lx_producer_loop_order, #3374/#3387)."
+        f"this is the signature of clone ownership or finalization preflight "
+        f"regressing (see #3374/#3387)."
     )
 
 
