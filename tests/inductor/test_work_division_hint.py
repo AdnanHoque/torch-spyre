@@ -580,6 +580,80 @@ def _relayout_plan(source="source", consumers="consumer"):
     return LXRelayoutPlan(source, consumers, _SOURCE_VIEW, _DESTINATION_VIEW, 8)
 
 
+def test_lx_relayout_kinds_share_one_edge_derivation():
+    shuffle_source = PerCoreView(
+        ((0, 4), (1, 2)),
+        ((0, floor(_CORE_ID / 2)), (1, Mod(_CORE_ID, 2))),
+        num_cores=8,
+    )
+    shuffle_destination = PerCoreView(
+        ((0, 2), (1, 4)),
+        ((0, floor(_CORE_ID / 4)), (1, Mod(_CORE_ID, 4))),
+        num_cores=8,
+    )
+    broadcast_source = PerCoreView(((0, 2),), ((0, Mod(_CORE_ID, 2)),), num_cores=2)
+    broadcast_destination = PerCoreView(
+        ((0, 2),), ((0, floor(_CORE_ID / 16)),), num_cores=32
+    )
+
+    shuffle = lx_relayout_module.classify_relayout_views(
+        shuffle_source, shuffle_destination, 8
+    )
+    broadcast = lx_relayout_module.classify_relayout_views(
+        broadcast_source, broadcast_destination, 2, 32
+    )
+
+    assert shuffle is not None and shuffle[0] == "shuffle"
+    assert broadcast is not None and broadcast[0] == "broadcast"
+    broadcast_edges = lx_relayout_module._transfer_edges(
+        broadcast_source, broadcast_destination, 2, 32
+    )
+    assert {
+        sum(source == core for source, _ in broadcast_edges) for core in range(2)
+    } == {16}
+    assert {
+        sum(destination == core for _, destination in broadcast_edges)
+        for core in range(32)
+    } == {1}
+    assert set(lx_relayout_module._LOWERING_CERTIFIERS) == {
+        "shuffle",
+        "gather",
+        "broadcast",
+    }
+    wrong_domain = replace(broadcast_source, num_cores=4)
+    assert (
+        lx_relayout_module.classify_relayout_views(
+            wrong_domain, broadcast_destination, 2, 32
+        )
+        is None
+    )
+    with pytest.raises(ValueError, match="source ownership core domain"):
+        lx_relayout_module._transfer_edges(wrong_domain, broadcast_destination, 2, 32)
+
+
+def test_grouped_gather_can_contract_two_dimensions():
+    source = PerCoreView(
+        ((0, 4), (1, 8)),
+        ((0, floor(_CORE_ID / 8)), (1, Mod(_CORE_ID, 8))),
+        num_cores=32,
+    )
+    destination = PerCoreView(
+        ((0, 2), (1, 4)),
+        ((0, floor(_CORE_ID / 16)), (1, Mod(floor(_CORE_ID / 4), 4))),
+        num_cores=32,
+    )
+
+    classified = lx_relayout_module.classify_relayout_views(source, destination, 32)
+
+    assert classified is not None and classified[0] == "gather"
+    assert {
+        (dimension.source_split, dimension.destination_split)
+        for dimension in classified[1]
+    } == {(4, 2), (8, 4)}
+    edges = lx_relayout_module._transfer_edges(source, destination, 32, 32)
+    assert {sum(target == core for _, target in edges) for core in range(32)} == {4}
+
+
 @pytest.mark.parametrize(
     ("view", "message"),
     [
@@ -616,11 +690,10 @@ def test_lx_relayout_partition_validation_fails_closed(view, message):
 
 def test_lx_relayout_activation_policy_is_source_wide():
     dep = SimpleNamespace(name="input")
+    graph = SimpleNamespace()
     producer = SimpleNamespace()
     with (
-        mock_patch.object(
-            lx_relayout_module, "op_short_name", return_value="restickify"
-        ),
+        mock_patch.object(lx_relayout_module, "is_restickify_op", return_value=True),
         mock_patch.object(
             lx_relayout_module,
             "op_read_writes",
@@ -629,8 +702,8 @@ def test_lx_relayout_activation_policy_is_source_wide():
         mock_patch.object(lx_relayout_module, "MemoryDep", SimpleNamespace),
         mock_patch.object(lx_relayout_module, "ComputedBuffer", SimpleNamespace),
     ):
-        assert not lx_relayout_module._is_activation_source({}, producer)
-        assert lx_relayout_module._is_activation_source({"input": dep}, producer)
+        assert not lx_relayout_module._is_activation_source(graph, {}, producer)
+        assert lx_relayout_module._is_activation_source(graph, {"input": dep}, producer)
 
 
 def test_lx_relayout_planner_rejects_equal_projected_ownership():
@@ -694,9 +767,8 @@ def test_lx_relayout_planner_rejects_equal_projected_ownership():
         mock_patch.object(
             lx_relayout_module, "iteration_space_from_op", return_value=(m,)
         ),
-        mock_patch.object(
-            lx_relayout_module, "op_short_name", return_value="pointwise"
-        ),
+        mock_patch.object(lx_relayout_module, "is_restickify_op", return_value=False),
+        mock_patch.object(lx_relayout_module, "partition_footprint", return_value=128),
     ):
         assert lx_relayout_module.collect_lx_relayout_plans(graph) == []
 
@@ -1048,6 +1120,22 @@ def test_lx_relayout_allocation_is_atomic_in_one_greedy_solve(caplog):
         "rejected LX relayout group source=source" in record.message
         for record in caplog.records
     )
+
+
+def test_lx_relayout_rejects_invalid_paired_allocation():
+    plan = _relayout_plan("source", ("consumer",))
+    source = LifetimeBoundBuffer("source", 128, [0, 1])
+    destination = LifetimeBoundBuffer(plan.destination_name, 128, [1, 2])
+    source.lx_relayout_plans = [plan]
+    source.address = 0
+    allocator = ScratchpadAllocator(GreedyLayoutSolver, 256)
+
+    with pytest.raises(RuntimeError, match="only partially allocated"):
+        allocator._allocated_lx_relayout_sources([source, destination])
+
+    destination.address = 64
+    with pytest.raises(RuntimeError, match="overlapping placements"):
+        allocator._allocated_lx_relayout_sources([source, destination])
 
 
 def _assert_live_buffers_do_not_share_addresses(graph, buffers, limit):

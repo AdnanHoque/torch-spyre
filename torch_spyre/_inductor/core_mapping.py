@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 
 from sympy import Expr, Integer, Mod, Symbol, floor, lambdify, sympify
 
+from .constants import BYTES_PER_STICK
 from .op_spec import TensorWorkDivision
 
 if TYPE_CHECKING:
@@ -630,6 +631,38 @@ def derive_operation_mapping(
             return candidate
 
     raise ValueError("no operation core mapping satisfies every LX tensor owner")
+
+
+def partition_physical_span_bytes(
+    device_size: Sequence[int],
+    stride_map: Sequence[int],
+    elems_per_stick: int,
+    split_by_device_dim: Mapping[int, int],
+) -> int:
+    """Return the largest per-core physical span for a partition.
+
+    A slice is a rectangle cut from the original strided tensor. Its storage
+    span can exceed its element count because rows may retain padding between
+    them. The final device dimension is one stick and is never split. This is a
+    finalized placement measurement, not the earlier split-cost estimate.
+    """
+
+    if len(device_size) != len(stride_map) or not device_size:
+        raise ValueError("device size and stride map must have the same rank")
+    if elems_per_stick <= 0:
+        raise ValueError("elems_per_stick must be positive")
+
+    max_offset_elems = 0
+    for dim, (extent, stride) in enumerate(zip(device_size[:-1], stride_map[:-1])):
+        split = int(split_by_device_dim.get(dim, 1))
+        if split <= 0:
+            raise ValueError(f"invalid split {split} on device dimension {dim}")
+        slice_extent = math.ceil(int(extent) / split)
+        if int(stride) > 0:
+            max_offset_elems += (slice_extent - 1) * int(stride)
+
+    sticks = math.ceil((max_offset_elems + elems_per_stick) / elems_per_stick)
+    return sticks * BYTES_PER_STICK
 
 
 def core_mappings_equal(
