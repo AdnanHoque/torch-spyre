@@ -1120,7 +1120,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                         idx_tensor,
                         opspec_name=idx_tensor.name,
                     )
-                    for sym in sorted(indirect_syms, key=str)
+                    for sym in indirect_syms
                     for idx_tensor in [self.indirect_vars[sym]]
                 ]
             for input in value.arguments:
@@ -1149,7 +1149,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                     dst_index=dst.index,
                 )
                 if self.indirect_vars
-                else set()
+                else []
             )
 
             if indirect_syms_used:
@@ -1163,7 +1163,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                         idx_tensor,
                         opspec_name=idx_tensor.name,
                     )
-                    for sym in sorted(indirect_syms_used, key=str)
+                    for sym in indirect_syms_used
                     for idx_tensor in [self.indirect_vars[sym]]
                 ]
                 args += [
@@ -1423,8 +1423,8 @@ def _indirect_syms_used(
     indirect_vars: "dict[sympy.Symbol, TensorAccess]",
     src_index: "sympy.Expr | None" = None,
     dst_index: "sympy.Expr | None" = None,
-) -> "set[sympy.Symbol]":
-    """Return the subset of indirect_vars keys that appear in value's indices.
+) -> "list[sympy.Symbol]":
+    """Return used indirect bindings in their creation order.
 
     For PointwiseOp: checks all argument indices (via value.arguments).
     If src_index is provided (for gather source indices), also checks it.
@@ -1443,7 +1443,10 @@ def _indirect_syms_used(
         syms.update(s for s in src_index.free_symbols if s in indirect_vars)
     if dst_index is not None:
         syms.update(s for s in dst_index.free_symbols if s in indirect_vars)
-    return syms
+    # Kernel-global names can cross indirect9 -> indirect10 inside one op.
+    # Lexical sorting would then reverse bindings relative to the scheduled
+    # body. Dict insertion order preserves that body's order at any offset.
+    return [symbol for symbol in indirect_vars if symbol in syms]
 
 
 def _is_indirect_index_arg(
