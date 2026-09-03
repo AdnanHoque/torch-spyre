@@ -114,16 +114,35 @@ def test_codegen_rejects_lx_allocation_without_physical_ownership():
         kernel.create_tensor_arg(False, "missing_view", tensor)
 
 
-def test_partition_span_includes_padding_between_rows():
+@pytest.mark.parametrize("elems_per_stick", [32, 64, 128])
+def test_partition_span_includes_padding_between_rows(elems_per_stick):
     assert (
         partition_physical_span_bytes(
-            device_size=(8, 4, 64),
-            stride_map=(256, 64, 1),
-            elems_per_stick=64,
+            device_size=(8, 4, elems_per_stick),
+            elems_per_stick=elems_per_stick,
             split_by_device_dim={0: 4, 1: 2},
         )
         == 768
     )
+
+
+@pytest.mark.parametrize(
+    "device_size,eps,splits,reason",
+    [
+        ((), 64, {}, "extents"),
+        ((0, 64), 64, {}, "extents"),
+        ((-1, 64), 64, {}, "extents"),
+        ((8, 64), 0, {}, "elems_per_stick"),
+        ((8, 64), 64, {0: 0}, "invalid split"),
+        ((8, 64), 64, {-1: 2}, "invalid split"),
+        ((8, 64), 64, {2: 2}, "invalid split"),
+        ((8, 32), 64, {}, "complete final stick"),
+        ((8, 64), 64, {1: 2}, "cannot be split"),
+    ],
+)
+def test_partition_span_rejects_unsupported_geometry(device_size, eps, splits, reason):
+    with pytest.raises(ValueError, match=reason):
+        partition_physical_span_bytes(device_size, eps, splits)
 
 
 @pytest.mark.parametrize("contiguous_dim", [0, 1, 2])

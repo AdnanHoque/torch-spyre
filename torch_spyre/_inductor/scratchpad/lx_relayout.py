@@ -28,6 +28,7 @@ from torch._inductor.ir import (
     Operation,
     Pointwise,
 )
+from torch_spyre._C import ElementArrangement
 
 from .. import config
 from ..core_mapping import partition_physical_span_bytes
@@ -339,9 +340,10 @@ def _grouped_broadcast_geometry(
 
 def partition_footprint(layout: FixedTiledLayout, view: PerCoreView) -> int:
     device_layout = layout.device_layout
+    if device_layout.element_arrangement != ElementArrangement.STANDARD:
+        raise ValueError("relayout footprint requires standard element arrangement")
     return partition_physical_span_bytes(
         tuple(int(size) for size in device_layout.device_size),
-        tuple(int(stride) for stride in device_layout.stride_map),
         int(device_layout.elems_per_stick()),
         dict(view.work_slice_dims),
     )
