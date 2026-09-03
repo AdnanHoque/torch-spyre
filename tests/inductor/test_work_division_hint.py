@@ -64,12 +64,7 @@ from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
 from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
 from torch_spyre._inductor.core_mapping import remap_work_division
-from torch_spyre._inductor.spyre_kernel import (
-    PointwiseOp,
-    TensorAccess,
-    _indirect_syms_used,
-    simplify_op_spec,
-)
+from torch_spyre._inductor.spyre_kernel import simplify_op_spec
 
 _LAUNCH_JOBPLAN = "torch_spyre.execution.kernel_runner.launch_jobplan"
 _PREPARE_KERNEL = "torch_spyre.execution.kernel_runner.prepare_kernel"
@@ -752,7 +747,7 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
         False,
         {n: (256, 8), m: (64, 1)},
         args,
-        {LX_RELAYOUT_INFO_KEY: True},
+        {LX_RELAYOUT_INFO_KEY: "shuffle"},
     )
     root, allocations = _compile_spec(spec)
     assert spec.op == IDENTITY_OP
@@ -901,6 +896,15 @@ def test_lx_relayout_consumers_share_destination_view(
     ]
     expected_copies = 1 if shares_destination else 2
     assert len(divisions) == expected_copies
+    certified_specs = [
+        spec
+        for _, spec in lx_finalizer_parity.created_specs
+        if LX_RELAYOUT_INFO_KEY in spec.op_info
+    ]
+    assert len(certified_specs) == expected_copies
+    assert all(
+        spec.op_info[LX_RELAYOUT_INFO_KEY] == "shuffle" for spec in certified_specs
+    )
     assert all(len(pair) == 2 for pair in divisions)
     assert {pair[0] for pair in divisions} == {"sympify('c1'): 2, sympify('c0'): 4"}
     expected_destinations = {"sympify('c1'): 4, sympify('c0'): 2"}
@@ -1255,33 +1259,18 @@ def test_preflight_orders_used_index_bindings_before_value_operands():
     assert [dep.name for dep in ordered] == ["index_a", "index_b", "value_a", "value_b"]
 
 
-def test_codegen_keeps_used_index_bindings_in_creation_order():
-    unused, indirect9, indirect10 = map(
-        Symbol, ("indirect8", "indirect9", "indirect10")
-    )
-    layout = SimpleNamespace()
-    bindings = {
-        symbol: TensorAccess(name, Integer(0), layout)
-        for symbol, name in (
-            (unused, "unused"),
-            (indirect9, "index_a"),
-            (indirect10, "index_b"),
-        )
-    }
-    value = PointwiseOp(
-        "truediv",
-        [
-            TensorAccess("value_b", indirect10, layout),
-            TensorAccess("value_a", indirect9, layout),
-        ],
-    )
-    assert _indirect_syms_used(value, bindings) == [indirect9, indirect10]
-    assert _indirect_syms_used(
-        None, bindings, src_index=indirect10, dst_index=indirect9
-    ) == [indirect9, indirect10]
-
-
-@pytest.mark.parametrize("missing_view", [False, True])
+@pytest.mark.parametrize(
+    "missing_view",
+    [
+        False,
+        pytest.param(
+            True,
+            marks=pytest.mark.lx_finalizer_fallback_expected(
+                "LX buffer destination has no physical ownership"
+            ),
+        ),
+    ],
+)
 def test_lx_preflight_uses_the_codegen_input_layout_override(missing_view):
     source = SimpleNamespace(name="source", index=Symbol("source_index"))
     destination = SimpleNamespace(name="destination", index=Symbol("destination_index"))
@@ -1360,77 +1349,6 @@ def test_lx_preflight_uses_the_codegen_input_layout_override(missing_view):
     restore.assert_not_called()
 
 
-def test_lx_preflight_drops_all_constraints_when_writer_is_not_expressible():
-    source = SimpleNamespace(name="source")
-    destination = SimpleNamespace(name="destination")
-    node = _RelayoutNode("ordinary", reads=(source,), writes=(destination,))
-
-    def preflight(_node, *, relayout_copy, constrained_names=None):
-        assert not relayout_copy
-        if constrained_names == {"destination"}:
-            raise ValueError("writer cannot be expressed")
-
-    with (
-        mock_patch.object(scheduler_module, "MemoryDep", SimpleNamespace),
-        mock_patch.object(scheduler_module, "_lx_layout", return_value=object()),
-        mock_patch.object(
-            scheduler_module, "_preflight_lx_ownership", side_effect=preflight
-        ),
-    ):
-        assert scheduler_module._preflight_lx_culprits(node) == {
-            "source",
-            "destination",
-        }
-
-
-def test_lx_preflight_rechecks_surviving_reads_as_one_operation():
-    destination = SimpleNamespace(name="destination")
-    reads = tuple(SimpleNamespace(name=name) for name in ("a", "b", "c"))
-    node = _RelayoutNode("ordinary", reads=reads, writes=(destination,))
-
-    def preflight(_node, *, relayout_copy, constrained_names=None):
-        assert not relayout_copy
-        constrained = set(constrained_names or ())
-        if "c" in constrained or {"a", "b"} <= constrained:
-            raise ValueError("constraints do not share one operation map")
-
-    with (
-        mock_patch.object(scheduler_module, "MemoryDep", SimpleNamespace),
-        mock_patch.object(scheduler_module, "_lx_layout", return_value=object()),
-        mock_patch.object(
-            scheduler_module, "_preflight_lx_ownership", side_effect=preflight
-        ),
-    ):
-        assert scheduler_module._preflight_lx_culprits(node) == {"a", "b", "c"}
-
-
-def test_lx_preflight_keeps_reads_that_share_the_writer_mapping():
-    destination = SimpleNamespace(name="destination")
-    reads = tuple(SimpleNamespace(name=name) for name in ("a", "b"))
-    node = _RelayoutNode("ordinary", reads=reads, writes=(destination,))
-    calls = []
-
-    def preflight(_node, *, relayout_copy, constrained_names=None):
-        assert not relayout_copy
-        calls.append(set(constrained_names or ()))
-
-    with (
-        mock_patch.object(scheduler_module, "MemoryDep", SimpleNamespace),
-        mock_patch.object(scheduler_module, "_lx_layout", return_value=object()),
-        mock_patch.object(
-            scheduler_module, "_preflight_lx_ownership", side_effect=preflight
-        ),
-    ):
-        assert scheduler_module._preflight_lx_culprits(node) == set()
-
-    assert calls[0] == {"destination"}
-    assert {frozenset(call) for call in calls[1:3]} == {
-        frozenset({"destination", "a"}),
-        frozenset({"destination", "b"}),
-    }
-    assert calls[3] == {"destination", "a", "b"}
-
-
 def _relayout_layout(address, view):
     # FixedTiledLayout always carries the final physical device layout.  Keep
     # that field in the test double so ownership verification exercises the
@@ -1502,7 +1420,10 @@ def test_lx_relayout_scheduler_checks_final_ownership_projection():
     assert not projectable([m + n, n])
 
 
-def test_lx_relayout_scheduler_demotes_groups_but_not_ordinary_unary():
+@pytest.mark.lx_finalizer_fallback_expected(
+    "LX_RELAYOUT_STRUCTURAL_DEMOTION source='source'", count=6
+)
+def test_lx_relayout_scheduler_demotes_all_touched_buffers_and_closes_groups():
     def run_registered(drift, *, reverse_preflight_order=False):
         plan = _relayout_plan()
         src, dst = SimpleNamespace(name="source"), SimpleNamespace(name="destination")
@@ -1550,12 +1471,9 @@ def test_lx_relayout_scheduler_demotes_groups_but_not_ordinary_unary():
 
         preflight_calls = []
 
-        def preflight(node, *, relayout_copy, constrained_names=None):
-            preflight_calls.append((node.name, relayout_copy, constrained_names))
-            if node.name == "ordinary_unary" and (
-                constrained_names is None
-                or {"ordinary_source", "ordinary_unary"} <= constrained_names
-            ):
+        def preflight(node, *, relayout_copy):
+            preflight_calls.append((node.name, relayout_copy))
+            if node.name == "ordinary_unary":
                 raise ValueError("ordinary input disagrees with its output")
             if node.name == drift or (
                 drift == "projection" and node.name == "consumer"
@@ -1587,10 +1505,11 @@ def test_lx_relayout_scheduler_demotes_groups_but_not_ordinary_unary():
             assert "lx" not in layouts["destination"].allocation
             assert layouts["destination"].lx_view is None
         assert "lx" not in layouts["ordinary_source"].allocation
-        assert "lx" in layouts["ordinary_unary"].allocation
+        assert "lx" not in layouts["ordinary_unary"].allocation
+        assert layouts["ordinary_unary"].lx_view is None
         if drift == "consumer" and not reverse_preflight_order:
-            assert ("destination", True, None) in preflight_calls
-            assert ("consumer", False, None) in preflight_calls
+            assert ("destination", True) in preflight_calls
+            assert ("consumer", False) in preflight_calls
             # ``consumer`` removes both ends of the relayout after the copy
             # node has already been checked.  The fixed-point pass must visit
             # that now-empty copy node once more so the final preflight state

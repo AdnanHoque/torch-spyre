@@ -406,7 +406,7 @@ def test_certified_identity_fails_if_equivalent_owner_spellings_collapse():
 
     with pytest.raises(ValueError, match="ownership collapsed"):
         is_lx_relayout_identity(
-            "identity", (base, destination), {LX_RELAYOUT_INFO_KEY: True}
+            "identity", (base, destination), {LX_RELAYOUT_INFO_KEY: "shuffle"}
         )
     different_destination = dataclasses.replace(
         destination,
@@ -420,8 +420,12 @@ def test_certified_identity_fails_if_equivalent_owner_spellings_collapse():
     assert is_lx_relayout_identity(
         "identity",
         (base, different_destination),
-        {LX_RELAYOUT_INFO_KEY: True},
+        {LX_RELAYOUT_INFO_KEY: "shuffle"},
     )
+    with pytest.raises(ValueError, match="registered plan kind"):
+        is_lx_relayout_identity(
+            "identity", (base, different_destination), {LX_RELAYOUT_INFO_KEY: True}
+        )
 
 
 def test_late_mapping_rejects_geometry_that_does_not_fill_groups():

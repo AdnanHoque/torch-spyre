@@ -134,43 +134,38 @@ class LXFinalizerParity:
 
         return wrapped
 
-    def _preflight(self, node, *, relayout_copy, constrained_names=None):
-        # Culprit isolation deliberately tries smaller constraint sets. The
-        # codegen contract is with the one full-node preflight only.
-        identity = self._identity(node) if constrained_names is None else None
-        if identity is not None:
-            # Preflight runs to a fixed point. A later demotion can remove every
-            # LX constraint from a node, in which case the final attempt calls
-            # no finalizer. Clear the earlier attempt before making this one so
-            # the corpus compares codegen with the stable ownership state only.
-            self.preflight_states[identity] = None
-            self.preflight_lx_names[identity] = tuple(
-                sorted(
-                    {
-                        dep.name
-                        for dep in (*node.read_writes.reads, *node.read_writes.writes)
-                        if self.scheduler_module._lx_layout(dep.name) is not None
-                    }
-                )
+    def _preflight(self, node, *, relayout_copy):
+        identity = self._identity(node)
+        # Preflight runs to a fixed point. A later demotion can remove every
+        # LX constraint from a node, in which case the final attempt calls
+        # no finalizer. Clear the earlier attempt before making this one so
+        # the corpus compares codegen with the stable ownership state only.
+        self.preflight_states[identity] = None
+        self.preflight_lx_names[identity] = tuple(
+            sorted(
+                {
+                    dep.name
+                    for dep in (*node.read_writes.reads, *node.read_writes.writes)
+                    if self.scheduler_module._lx_layout(dep.name) is not None
+                }
             )
+        )
         self._preflight_node = identity
         try:
             return self._real_preflight(
                 node,
                 relayout_copy=relayout_copy,
-                constrained_names=constrained_names,
             )
         except Exception as exc:
-            if identity is not None:
-                self.preflight_failures.append(
-                    (
-                        identity,
-                        self.preflight_lx_names[identity],
-                        relayout_copy,
-                        type(exc).__name__,
-                        str(exc),
-                    )
+            self.preflight_failures.append(
+                (
+                    identity,
+                    self.preflight_lx_names[identity],
+                    relayout_copy,
+                    type(exc).__name__,
+                    str(exc),
                 )
+            )
             raise
         finally:
             self._preflight_node = None

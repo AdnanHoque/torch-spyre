@@ -1010,8 +1010,13 @@ class SpyreKernel(Kernel[CSEVariable]):
         ]
         if len(relayout_plans) > 1:
             raise RuntimeError("one operation writes multiple LX relayout destinations")
+        marker = op_info.get(LX_RELAYOUT_INFO_KEY)
+        if LX_RELAYOUT_INFO_KEY in op_info and (
+            not relayout_plans or marker != relayout_plans[0].kind
+        ):
+            raise RuntimeError("LX relayout marker has no matching registered plan")
         if relayout_plans:
-            op_info = {**op_info, LX_RELAYOUT_INFO_KEY: True}
+            op_info = {**op_info, LX_RELAYOUT_INFO_KEY: relayout_plans[0].kind}
 
         op_spec = OpSpec(
             op,
@@ -1120,7 +1125,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                         idx_tensor,
                         opspec_name=idx_tensor.name,
                     )
-                    for sym in indirect_syms
+                    for sym in sorted(indirect_syms, key=str)
                     for idx_tensor in [self.indirect_vars[sym]]
                 ]
             for input in value.arguments:
@@ -1149,7 +1154,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                     dst_index=dst.index,
                 )
                 if self.indirect_vars
-                else []
+                else set()
             )
 
             if indirect_syms_used:
@@ -1163,7 +1168,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                         idx_tensor,
                         opspec_name=idx_tensor.name,
                     )
-                    for sym in indirect_syms_used
+                    for sym in sorted(indirect_syms_used, key=str)
                     for idx_tensor in [self.indirect_vars[sym]]
                 ]
                 args += [
@@ -1423,8 +1428,8 @@ def _indirect_syms_used(
     indirect_vars: "dict[sympy.Symbol, TensorAccess]",
     src_index: "sympy.Expr | None" = None,
     dst_index: "sympy.Expr | None" = None,
-) -> "list[sympy.Symbol]":
-    """Return used indirect bindings in their creation order.
+) -> "set[sympy.Symbol]":
+    """Return the subset of indirect_vars keys that appear in value's indices.
 
     For PointwiseOp: checks all argument indices (via value.arguments).
     If src_index is provided (for gather source indices), also checks it.
@@ -1443,10 +1448,7 @@ def _indirect_syms_used(
         syms.update(s for s in src_index.free_symbols if s in indirect_vars)
     if dst_index is not None:
         syms.update(s for s in dst_index.free_symbols if s in indirect_vars)
-    # Kernel-global names can cross indirect9 -> indirect10 inside one op.
-    # Lexical sorting would then reverse bindings relative to the scheduled
-    # body. Dict insertion order preserves that body's order at any offset.
-    return [symbol for symbol in indirect_vars if symbol in syms]
+    return syms
 
 
 def _is_indirect_index_arg(
