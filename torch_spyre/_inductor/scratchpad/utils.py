@@ -31,6 +31,7 @@ import sympy
 from torch_spyre._inductor import config
 from torch_spyre._inductor.ir import FixedTiledLayout
 from torch_spyre._inductor.pass_utils import (
+    PerCoreView,
     _per_core_view_on_buf,
     concretize_expr,
     op_read_writes,
@@ -202,7 +203,7 @@ def mem_usage_by_buf(
     """
     # The mismatch reasons are surfaced by the residency path; here only the
     # per-buffer core count (with -1 marking a mismatch) drives mem_usage.
-    num_cores_per_op, _ = get_ncores_for_buffers(graph, cache)
+    num_cores_per_op, _, _ = get_ncores_for_buffers(graph, cache)
     mem_usage: dict = {}
 
     for op in graph.operations:
@@ -519,17 +520,18 @@ def _get_buffer_user_deps(
 def _op_num_cores(op: Operation) -> int:
     """Cores implied by symbol-keyed ownership (defaults to one)."""
     ownership = getattr(op, "iteration_space_ownership", None)
-    return math.prod(ownership.work_slices.values()) if ownership is not None else 1
+    return ownership.physical_core_count if ownership is not None else 1
 
 
 def get_ncores_for_buffers(
     graph: GraphLowering, cache: Optional[dict] = None
-) -> tuple[dict[str, int], dict[str, str]]:
+) -> tuple[dict[str, int], dict[str, str], dict[str, PerCoreView]]:
     """
-    Return ``(num_cores, mismatch_reasons)``, where ``num_cores`` maps each
+    Return ``(num_cores, mismatch_reasons, accepted_views)``, where ``num_cores`` maps each
     buffer name to the number of cores used by all the operations that use the
     buffer (``-1`` on a core-division mismatch) and ``mismatch_reasons`` maps
-    each mismatched buffer name to a human-readable reason for the ``-1``.
+    each mismatched buffer name to a human-readable reason for the ``-1``, and
+    ``accepted_views`` carries the exact physical view approved by the judge.
 
     Pass an optional `cache` dict to memoize `_per_core_view_on_buf`
     results across calls (e.g. across co-opt search leaves). Safe to
@@ -538,6 +540,7 @@ def get_ncores_for_buffers(
     """
     result: dict[str, int] = {}
     mismatch_reasons_cache: dict[str, str] = {}
+    accepted_views: dict[str, PerCoreView] = {}
     using_multicore = config.sencores > 1
     buf_user_deps = _get_buffer_user_deps(graph)
     for buf_name, users in buf_user_deps.items():
@@ -551,9 +554,18 @@ def get_ncores_for_buffers(
             mismatch_reason = None
             writer_cores = None
             for op, dep in users:
-                view, flag, _ = _per_core_view_on_buf(op, dep, buf_name, cache)
+                view, flag, representable = _per_core_view_on_buf(
+                    op, dep, buf_name, cache
+                )
+                if not representable:
+                    mismatch_reason = (
+                        f"ownership on '{op.get_name()}' cannot be represented "
+                        "by the physical buffer layout"
+                    )
+                    break
                 if ref_view is None:
                     ref_view = view
+                    ref_op_name = op.get_name()
                 op_rw = op_read_writes(op)
                 if dep in op_rw.writes:
                     # Size by the writer's core count (the writer sets per-core
@@ -603,16 +615,20 @@ def get_ncores_for_buffers(
                 mismatch_reasons_cache[buf_name] = mismatch_reason
             elif writer_cores is not None:
                 num_cores = writer_cores
+                assert ref_view is not None
+                accepted_views[buf_name] = ref_view
             else:
                 # No writer (graph input, produced outside the graph): fall back
                 # to the users' (matching) max count.
                 num_cores = max(_op_num_cores(op) for op, _ in users)
+                assert ref_view is not None
+                accepted_views[buf_name] = ref_view
         elif using_multicore:
             num_cores = _op_num_cores(users[0][0])
         else:
             num_cores = 1
         result[buf_name] = num_cores
-    return result, mismatch_reasons_cache
+    return result, mismatch_reasons_cache, accepted_views
 
 
 class _GetLoadStoreIndices(WrapperHandler):
