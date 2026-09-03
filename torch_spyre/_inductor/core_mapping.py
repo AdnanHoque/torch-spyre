@@ -20,7 +20,7 @@ import math
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from itertools import permutations
-from numbers import Integral, product
+from numbers import Integral
 from typing import TYPE_CHECKING, Callable
 
 from sympy import Expr, Integer, Mod, Symbol, floor, lambdify, sympify
@@ -33,6 +33,9 @@ if TYPE_CHECKING:
 
 
 _MAX_OWNER_PERMUTATION_DIMS = 5
+
+
+_MAX_EXACT_OWNERSHIP_POINTS = 1024
 
 
 _MAX_EXACT_DIRECT_AXIS_POINTS = 1 << 16
@@ -149,9 +152,6 @@ def _direct_axis_ownership_matches(
         return False
 
 
-_MAX_EXACT_OWNERSHIP_POINTS = 1024
-
-
 def work_division_matches_physical_ownership(
     division: TensorWorkDivision,
     loop_extents: Mapping[Symbol, int],
@@ -163,10 +163,11 @@ def work_division_matches_physical_ownership(
 ) -> bool:
     """Prove that loop and physical ownership assign every point identically.
 
-    The proof deliberately treats coordinate expressions as black boxes.  It
+    The proof deliberately treats coordinate expressions as black boxes. It
     evaluates the concrete domain instead of trying to recognize floor/mod or
-    mixed-radix formulas.  This is only for the small fused-axis cases that the
-    ordinary one-loop-to-one-device-axis projection cannot represent.
+    mixed-radix formulas. Direct axes use one compiled, cached evaluator so a
+    32K loop remains cheap; multi-axis fused cases keep a smaller fail-closed
+    bound.
     """
 
     try:
@@ -189,7 +190,7 @@ def work_division_matches_physical_ownership(
             return False
 
         core_id = Symbol("core_id")
-        physical_slots_by_core: dict[int, dict[int, int]] = {}
+        concrete_device_extents: dict[int, int] = {}
         for device_dim, split in splits.items():
             if not 0 <= device_dim < len(device_size):
                 return False
@@ -202,17 +203,10 @@ def work_division_matches_physical_ownership(
                 or int(extent) % split
             ):
                 return False
+            concrete_device_extents[device_dim] = int(extent)
             slot_expr = sympify(slots[device_dim])
             if slot_expr.free_symbols - {core_id}:
                 return False
-            for core in range(num_cores):
-                value = sympify(slot_expr.subs(core_id, core))
-                if value.free_symbols or value.is_integer is not True:
-                    return False
-                slot = int(value)
-                if not 0 <= slot < split:
-                    return False
-                physical_slots_by_core.setdefault(core, {})[device_dim] = slot
 
         owned_coordinates = {
             device_dim: sympify(device_coordinates[device_dim]) for device_dim in splits
@@ -243,13 +237,73 @@ def work_division_matches_physical_ownership(
             for dim, split in division.work_slices.items()
             if dim in coordinate_symbols and int(split) > 1
         }
-        candidate_slots_by_core: dict[int, dict[Symbol, int]] = {}
+        if any(
+            int(split) > 1 and dim not in coordinate_symbols
+            for dim, split in division.work_slices.items()
+        ):
+            return False
         for dim, split in candidate_splits.items():
             if dim not in concrete_extents or concrete_extents[dim] % split:
                 return False
             slot_expr = sympify(division.core_id_to_work_slice[dim])
             if slot_expr.free_symbols - {core_id}:
                 return False
+
+        # Every physical coordinate depends on exactly one loop. Proving each
+        # loop's partition-to-physical-slot tuple and core owners is therefore
+        # sufficient: the complete tensor ownership is their Cartesian product.
+        # Direct axes use the cached large-domain proof; only fused axes consume
+        # the smaller enumeration budget.
+        fused_dims = tuple(
+            dim for dim in relevant_dims if len(physical_dims_by_loop[dim]) > 1
+        )
+        for dim in relevant_dims:
+            physical_dims = physical_dims_by_loop[dim]
+            if len(physical_dims) != 1:
+                continue
+            device_dim = physical_dims[0]
+            if not _direct_axis_ownership_matches(
+                concrete_extents[dim],
+                candidate_splits.get(dim, 1),
+                division.core_id_to_work_slice.get(dim, Integer(0)),
+                concrete_device_extents[device_dim],
+                owned_coordinates[device_dim].xreplace({dim: _DIRECT_AXIS_LOOP}),
+                splits[device_dim],
+                slots[device_dim],
+                num_cores,
+            ):
+                return False
+        if not fused_dims:
+            return True
+
+        fused_exact_states = sum(
+            concrete_extents[dim] + candidate_splits.get(dim, 1) for dim in fused_dims
+        )
+        if fused_exact_states > _MAX_EXACT_OWNERSHIP_POINTS:
+            return False
+
+        physical_slots_by_core: dict[int, dict[int, int]] = {}
+        fused_physical_dims = {
+            device_dim
+            for dim in fused_dims
+            for device_dim in physical_dims_by_loop[dim]
+        }
+        for device_dim in fused_physical_dims:
+            split = splits[device_dim]
+            slot_expr = sympify(slots[device_dim])
+            for core in range(num_cores):
+                value = sympify(slot_expr.subs(core_id, core))
+                if value.free_symbols or value.is_integer is not True:
+                    return False
+                slot = int(value)
+                if not 0 <= slot < split:
+                    return False
+                physical_slots_by_core.setdefault(core, {})[device_dim] = slot
+
+        candidate_slots_by_core: dict[int, dict[Symbol, int]] = {}
+        for dim in fused_dims:
+            split = candidate_splits.get(dim, 1)
+            slot_expr = sympify(division.core_id_to_work_slice.get(dim, Integer(0)))
             for core in range(num_cores):
                 value = sympify(slot_expr.subs(core_id, core))
                 if value.free_symbols or value.is_integer is not True:
@@ -259,24 +313,11 @@ def work_division_matches_physical_ownership(
                     return False
                 candidate_slots_by_core.setdefault(core, {})[dim] = slot
 
-        # Prove each loop independently before combining its partitions.  This
-        # is exact because every owned device coordinate depends on exactly one
-        # loop symbol: once all values in a candidate partition have the same
-        # physical slot tuple, the full Cartesian product is represented by the
-        # Cartesian product of those tuples.  No loop value is sampled.
-        physical_slots_by_partition: dict[Symbol, dict[int, tuple[int, ...]]] = {}
-        exact_states = sum(concrete_extents.values())
-        partition_count = math.prod(
-            candidate_splits.get(dim, 1) for dim in relevant_dims
-        )
-        if exact_states + partition_count > _MAX_EXACT_OWNERSHIP_POINTS:
-            return False
-
-        for dim in relevant_dims:
+        for dim in fused_dims:
             extent = concrete_extents[dim]
             split = candidate_splits.get(dim, 1)
-            slots_by_partition: dict[int, tuple[int, ...]] = {}
             physical_dims = physical_dims_by_loop[dim]
+            slots_by_partition: dict[int, tuple[int, ...]] = {}
             for point in range(extent):
                 physical_slots = []
                 for device_dim in physical_dims:
@@ -300,39 +341,25 @@ def work_division_matches_physical_ownership(
                 return False
             if len(set(slots_by_partition.values())) != split:
                 return False
-            physical_slots_by_partition[dim] = slots_by_partition
-
-        partition_ranges = [
-            range(candidate_splits.get(dim, 1)) for dim in relevant_dims
-        ]
-        for partitions in product(*partition_ranges):
-            candidate_point_slots = {
-                dim: partition
-                for dim, partition in zip(relevant_dims, partitions)
-                if candidate_splits.get(dim, 1) > 1
-            }
-            physical_point_slots = {}
-            for dim, partition in zip(relevant_dims, partitions):
-                for device_dim, slot in zip(
-                    physical_dims_by_loop[dim],
-                    physical_slots_by_partition[dim][partition],
-                ):
-                    physical_point_slots[device_dim] = slot
-
-            physical_owners = {
-                core
-                for core in range(num_cores)
-                if physical_slots_by_core.get(core, {}) == physical_point_slots
-            }
-            candidate_owners = {
-                core
-                for core in range(num_cores)
-                if candidate_slots_by_core.get(core, {}) == candidate_point_slots
-            }
-            if not physical_owners or physical_owners != candidate_owners:
-                return False
+            for partition, physical_signature in slots_by_partition.items():
+                physical_owners = {
+                    core
+                    for core in range(num_cores)
+                    if tuple(
+                        physical_slots_by_core[core][device_dim]
+                        for device_dim in physical_dims
+                    )
+                    == physical_signature
+                }
+                candidate_owners = {
+                    core
+                    for core in range(num_cores)
+                    if candidate_slots_by_core.get(core, {}).get(dim, 0) == partition
+                }
+                if not physical_owners or physical_owners != candidate_owners:
+                    return False
         return True
-    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+    except (KeyError, OverflowError, TypeError, ValueError, ZeroDivisionError):
         return False
 
 

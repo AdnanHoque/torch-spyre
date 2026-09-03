@@ -42,6 +42,7 @@ from torch._inductor.ir import NoneLayout
 from torch._inductor.utils import run_and_get_code, InputType
 
 from torch_spyre._inductor import config, spyre_hint
+import torch_spyre._inductor.core_mapping as core_mapping_module
 import torch_spyre._inductor.scratchpad.lx_relayout as lx_relayout_module
 import torch_spyre._inductor.scheduler as scheduler_module
 import torch_spyre._inductor.work_division as _wd
@@ -830,6 +831,93 @@ def test_fused_physical_axes_project_to_one_loop_division():
     assert division is not None
     assert division.work_slices == {fused: 32}
     assert division.physical_core_count == 32
+
+
+def test_diagonal_access_cannot_become_a_complete_relayout_source():
+    loop = Symbol("loop")
+    owner = Mod(_CORE_ID, 2)
+    division = TensorWorkDivision({loop: 2}, {loop: owner}, num_cores=2)
+    diagonal = PerCoreView(((0, 2), (1, 2)), ((0, owner), (1, owner)), num_cores=2)
+
+    # Projection may describe a diagonal read. It does not authorize treating
+    # its two accessed cells as the complete four-cell physical buffer.
+    assert (
+        core_mapping_module.decompose_fused_split_view(
+            loop, 2, owner, division, {loop: 2}, (2, 2), (loop, loop), 2
+        )
+        is None
+    )
+    assert (
+        lx_relayout_module.classify_relayout_views(
+            diagonal, PerCoreView((), (), num_cores=2), 2
+        )
+        is None
+    )
+
+
+def test_direct_axis_projection_rejects_noncontiguous_loop_ownership():
+    loop = Symbol("loop")
+    view = PerCoreView(
+        ((0, 2),),
+        ((0, floor(_CORE_ID / 4)),),
+        num_cores=8,
+    )
+
+    with pytest.raises(ValueError, match="not exactly expressible"):
+        work_division_from_view(
+            view,
+            (8,),
+            (Mod(loop + 4 * Mod(loop, 4), 8),),
+            {loop: 8},
+        )
+
+
+def test_direct_axis_projection_proves_and_caches_32k_context():
+    loop = Symbol("loop")
+    view = PerCoreView(
+        ((0, 32),),
+        ((0, Mod(_CORE_ID, 32)),),
+        num_cores=32,
+    )
+    core_mapping_module._direct_axis_ownership_matches.cache_clear()
+
+    first = work_division_from_view(view, (32768,), (loop,), {loop: 32768})
+    first_cache = core_mapping_module._direct_axis_ownership_matches.cache_info()
+    renamed = Symbol("renamed")
+    second = work_division_from_view(
+        view,
+        (32768,),
+        (renamed,),
+        {renamed: 32768},
+    )
+    second_cache = core_mapping_module._direct_axis_ownership_matches.cache_info()
+
+    assert first is not None and second is not None
+    assert (
+        tuple(first.work_slices.values()) == tuple(second.work_slices.values()) == (32,)
+    )
+    assert tuple(first.core_id_to_work_slice.values()) == tuple(
+        second.core_id_to_work_slice.values()
+    )
+    assert first_cache.misses == 1
+    assert second_cache.hits == 1
+
+
+def test_direct_axis_projection_rejects_domains_above_exact_proof_cap():
+    loop = Symbol("loop")
+    view = PerCoreView(
+        ((0, 2),),
+        ((0, floor(_CORE_ID / 4)),),
+        num_cores=8,
+    )
+
+    with pytest.raises(ValueError, match="not exactly expressible"):
+        work_division_from_view(
+            view,
+            (65538,),
+            (loop,),
+            {loop: 65538},
+        )
 
 
 @pytest.mark.parametrize(

@@ -34,6 +34,7 @@ from .. import config
 from ..core_mapping import (
     partition_physical_span_bytes,
     select_partition_division_matching_physical_ownership,
+    work_division_matches_physical_ownership,
 )
 from ..ir import FixedTiledLayout
 from ..logging_utils import get_inductor_logger
@@ -161,12 +162,12 @@ def work_division_from_view(
             split if same_ownership else math.prod(item[1] for item in ownerships)
         )
 
+    loop_extents = {
+        dim: value[0] if isinstance(value, tuple) else value
+        for dim, value in iteration_space.items()
+    }
     if fused_loops:
         dimensions = tuple(dim for dim in iteration_space if dim in splits)
-        loop_extents = {
-            dim: value[0] if isinstance(value, tuple) else value
-            for dim, value in iteration_space.items()
-        }
         candidate = select_partition_division_matching_physical_ownership(
             dimensions,
             splits,
@@ -180,7 +181,18 @@ def work_division_from_view(
         if candidate is None:
             raise ValueError(f"conflicting ownership for loop {fused_loops[0]}")
         return candidate
-    return TensorWorkDivision(splits, core_map, num_cores=view.num_cores)
+    candidate = TensorWorkDivision(splits, core_map, num_cores=view.num_cores)
+    if not work_division_matches_physical_ownership(
+        candidate,
+        loop_extents,
+        device_size,
+        device_coordinates,
+        view.work_slice_dims,
+        view.core_to_slot,
+        view.num_cores,
+    ):
+        raise ValueError("physical ownership is not exactly expressible in loop space")
+    return candidate
 
 
 def materialized_lx_relayouts(
