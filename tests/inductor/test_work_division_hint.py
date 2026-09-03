@@ -13,10 +13,15 @@
 # limitations under the License.
 
 from collections.abc import Sequence
+from contextlib import contextmanager
 from dataclasses import replace
+import json
 import logging
 import logging.handlers
+import os
+from pathlib import Path
 import regex as re
+import subprocess
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch as mock_patch
@@ -66,6 +71,7 @@ from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
 from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
 from torch_spyre._inductor.core_mapping import remap_work_division
 from torch_spyre._inductor.spyre_kernel import simplify_op_spec
+import torch_spyre.execution.async_compile as async_compile_module
 
 _LAUNCH_JOBPLAN = "torch_spyre.execution.kernel_runner.launch_jobplan"
 _PREPARE_KERNEL = "torch_spyre.execution.kernel_runner.prepare_kernel"
@@ -73,6 +79,60 @@ _PREPARE_KERNEL = "torch_spyre.execution.kernel_runner.prepare_kernel"
 
 _declare_tensor_dim = _pnd.declare_tensor_dim
 _name_tensor_dims = _pnd.name_tensor_dims
+
+
+@contextmanager
+def _capture_backend_output_dirs():
+    output_dirs = []
+    get_output_dir = async_compile_module.get_output_dir
+
+    def capture(kernel_name):
+        output_dir = get_output_dir(kernel_name)
+        output_dirs.append(Path(output_dir))
+        return output_dir
+
+    with mock_patch.object(async_compile_module, "get_output_dir", side_effect=capture):
+        yield output_dirs
+
+
+def _assert_lx_only_relayout_payload(output_dirs):
+    # Inspect the backend payload for the same bundle whose values were checked.
+    # This debug lowering is not a second device execution or a timing sample.
+    for output_dir in output_dirs:
+        subprocess.run(
+            ["dxp_standalone", "-d", output_dir, "--use-dxp"],
+            check=True,
+            env={**os.environ, "DXP_DEBUG": "1"},
+        )
+    payloads = [
+        json.loads(path.read_text())
+        for output_dir in output_dirs
+        for path in output_dir.glob("debug/sdsc_*/*.out.out.out.json")
+    ]
+    assert payloads, "DeepTools emitted no debug SDSC payloads"
+    nodes = []
+    pending = list(payloads)
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            nodes.append(value)
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    lx_ops = [
+        node
+        for node in nodes
+        if isinstance(node.get("op"), dict) and node["op"].get("name") == "STCDPOpLx"
+    ]
+    assert len(lx_ops) == 1
+    op_names = [node["name"] for node in nodes if isinstance(node.get("name"), str)]
+    assert not any(
+        token in name.lower()
+        for name in op_names
+        for token in ("dma", "restickify", "stcdpophbm")
+    )
+    labeled_ds = lx_ops[0]["labeledDs_"]
+    assert labeled_ds and all(ds["hbmSize_"] == 0 for ds in labeled_ds)
 
 
 class TestNamedWorkDivisionHint(InductorTestCase):
@@ -989,6 +1049,74 @@ def test_lx_relayout_consumers_share_destination_view(
         not call[1][2]["is_relayout"] for call in lx_finalizer_parity.codegen_calls
     )
     lx_finalizer_parity.assert_complete()
+
+
+@config.patch(
+    {
+        "sencores": 32,
+        "lx_planning": True,
+        "allow_all_ops_in_lx_planning": True,
+        "lx_planner_relayout": True,
+        "layout_solver": "greedy",
+    }
+)
+@pytest.mark.parametrize(
+    "broadcast", [False, True], ids=["gather", "broadcast_2_to_32"]
+)
+def test_grouped_lx_relayout_device(broadcast, lx_finalizer_parity):
+    """Check numerical results, exact core domains, and the emitted LX copy.
+
+    Gather assembles eight key fragments within each head. Broadcast keeps
+    two complete output-column slices and sends each to sixteen consumers.
+    Neither case may silently fall back to an HBM copy.
+    """
+
+    torch.manual_seed(0)
+    if broadcast:
+        batch, query, key, width = 1, 16, 64, 128
+        producer = {"D": 2}
+        consumer = {"Lq": 16, "D": 2}
+        source_cores = 2
+    else:
+        batch, query, key, width = 4, 8, 128, 64
+        producer = {"H": 4, "Lk": 8}
+        consumer = {"H": 4, "Lq": 8}
+        source_cores = 32
+    value = torch.randn(batch, key, width, dtype=torch.float16)
+    attention = torch.randn(batch, query, key, dtype=torch.float16)
+    for name, size in (("H", batch), ("Lk", key), ("Lq", query), ("D", width)):
+        _declare_tensor_dim(name, size)
+
+    def fn(value, attention):
+        with spyre_hint(work_div=producer):
+            hidden = torch.neg(value)
+        with spyre_hint(work_div=consumer):
+            return torch.bmm(attention, hidden)
+
+    device_args = (
+        _name_tensor_dims(value.to("spyre"), ["H", "Lk", "D"]),
+        _name_tensor_dims(attention.to("spyre"), ["H", "Lq", "Lk"]),
+    )
+    torch._inductor.codecache.FxGraphCache.clear()
+    with _capture_backend_output_dirs() as output_dirs:
+        actual, code = run_and_get_code(
+            torch.compile(fn, dynamic=False, options={"epilogue_fusion": False}),
+            *device_args,
+        )
+    torch.testing.assert_close(actual.cpu(), fn(value, attention), rtol=2e-2, atol=2e-1)
+    relayouts = [
+        block
+        for block in "\n".join(code).split("OpSpec(")
+        if "op='identity'" in block[:100]
+        and block.count("allocation={'lx':") == 2
+        and block.count("TensorWorkDivision(") == 2
+    ]
+    assert len(relayouts) == 1
+    domains = re.findall(r"num_cores=(\d+)", relayouts[0])
+    assert domains == [str(source_cores), "32"]
+    assert not lx_finalizer_parity.relayout_demotions
+    lx_finalizer_parity.assert_complete()
+    _assert_lx_only_relayout_payload(output_dirs)
 
 
 @config.patch(
