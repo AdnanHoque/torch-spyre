@@ -49,7 +49,6 @@ from torch_spyre._inductor.pass_utils import (
     op_read_writes,
     _prepare_per_core_view,
     _per_core_view_from_prep,
-    _per_core_view_on_buf,
     _is_matmul_op,
     op_short_name,
 )
@@ -866,56 +865,15 @@ class ScratchpadAllocator:
 
     @staticmethod
     def _partition_footprints(
-        graph: GraphLowering, ncores: dict[str, int]
+        graph: GraphLowering,
+        ncores: dict[str, int],
+        lx_views: dict[str, PerCoreView],
     ) -> dict[str, int]:
-        """Largest physical per-core span for every committed partition."""
+        """Measure the residency judge's accepted physical partitions."""
 
         footprints: dict[str, int] = {}
-        cache: dict = {}
-        for op in graph.operations:
-            for dep in (*op_read_writes(op).writes, *op_read_writes(op).reads):
-                if not isinstance(dep, MemoryDep):
-                    continue
-                num_cores = ncores.get(dep.name, -1)
-                if num_cores < 1:
-                    continue
-                buffer = graph.try_get_buffer(dep.name)
-                if buffer is None:
-                    continue
-                try:
-                    layout = buffer.get_layout()
-                except NotImplementedError:
-                    continue
-                if not isinstance(layout, FixedTiledLayout):
-                    continue
-                view, partial, representable = _per_core_view_on_buf(
-                    op, dep, dep.name, cache
-                )
-                if not representable or partial or view.num_cores != num_cores:
-                    continue
-                device_layout = layout.device_layout
-                footprint = partition_physical_span_bytes(
-                    tuple(int(size) for size in device_layout.device_size),
-                    tuple(int(stride) for stride in device_layout.stride_map),
-                    int(device_layout.elems_per_stick()),
-                    dict(view.work_slice_dims),
-                )
-                # The physical span is the ragged/padded-layout bound.  Keep
-                # the historical equal-share size as a lower bound so this
-                # refinement can never shrink an ordinary LX allocation.
-                full_size = math.prod(device_layout.device_size[:-1]) * BYTES_PER_STICK
-                equal_share = (
-                    math.ceil(full_size / num_cores / _LX_ALLOCATION_GRANULARITY_BYTES)
-                    * _LX_ALLOCATION_GRANULARITY_BYTES
-                )
-                footprint = max(footprint, equal_share)
-                footprints[dep.name] = max(footprints.get(dep.name, 0), footprint)
-
-        # The residency gate bars partitions with no valid view. Keep a padded,
-        # full-buffer span as a conservative value so they cannot look cheap if
-        # a future caller reaches allocation before that verdict.
         for name, num_cores in ncores.items():
-            if num_cores < 1 or name in footprints:
+            if num_cores < 1:
                 continue
             buffer = graph.try_get_buffer(name)
             if buffer is None:
@@ -927,12 +885,29 @@ class ScratchpadAllocator:
             if not isinstance(layout, FixedTiledLayout):
                 continue
             device_layout = layout.device_layout
-            footprints[name] = partition_physical_span_bytes(
+            view = lx_views.get(name)
+            # Do not re-project the operations here: the judge already chose
+            # the physical view. A missing view is ineligible for LX; retain a
+            # full-buffer bound so it can never look artificially cheap.
+            splits = (
+                dict(view.work_slice_dims)
+                if view is not None and view.num_cores == num_cores
+                else {}
+            )
+            footprint = partition_physical_span_bytes(
                 tuple(int(size) for size in device_layout.device_size),
                 tuple(int(stride) for stride in device_layout.stride_map),
                 int(device_layout.elems_per_stick()),
-                {},
+                splits,
             )
+            # Keep the historical equal-share size as a lower bound so this
+            # refinement cannot shrink an ordinary LX allocation.
+            full_size = math.prod(device_layout.device_size[:-1]) * BYTES_PER_STICK
+            equal_share = (
+                math.ceil(full_size / num_cores / _LX_ALLOCATION_GRANULARITY_BYTES)
+                * _LX_ALLOCATION_GRANULARITY_BYTES
+            )
+            footprints[name] = max(footprint, equal_share)
         return footprints
 
     def _determine_in_place(
@@ -1003,7 +978,7 @@ class ScratchpadAllocator:
         ncores, ncores_reasons, lx_views = get_ncores_for_buffers(graph)
         t1 = time.perf_counter()
         mem_usage = mem_usage_by_buf(graph, cache)
-        partition_footprints = self._partition_footprints(graph, ncores)
+        partition_footprints = self._partition_footprints(graph, ncores, lx_views)
         for name, info in mem_usage.items():
             if name in partition_footprints:
                 info["size_per_core"] = partition_footprints[name]
