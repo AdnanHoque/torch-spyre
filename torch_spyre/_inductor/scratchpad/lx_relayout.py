@@ -52,7 +52,12 @@ _REGISTRY = "_spyre_lx_relayout_copies"
 
 @dataclasses.dataclass(frozen=True)
 class RelayoutDimension:
-    """One device dimension's source-to-destination partition geometry."""
+    """One axis's partition refinement, not the transfer graph's fanout.
+
+    ``multiplicity`` measures this axis's split ratio. A broadcast can also
+    add receiving cores without changing any axis splits; its receiver count
+    comes from the source/destination owner maps and shared transfer edges.
+    """
 
     device_dim: int
     source_split: int
