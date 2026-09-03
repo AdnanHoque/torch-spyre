@@ -96,6 +96,42 @@ def test_cooptimizing_allocator_rejects_relayout_results_without_asserts():
         allocator_module.CoOptimizingAllocator._solve(SimpleNamespace(), solver, graph)
 
 
+def test_placement_invariant_ignores_opaque_objects_not_broken_tensor_layouts():
+    from torch._inductor.ir import TorchBindObject
+    import torch_spyre._inductor.scratchpad.allocator as allocator_module
+
+    opaque = TorchBindObject(name="attention_state", value=object())
+    graph = SimpleNamespace(
+        get_output_names=lambda: [],
+        graph_input_names=[opaque.name],
+        try_get_buffer=lambda _name: opaque,
+    )
+    with (
+        patch.object(allocator_module, "get_buffer_users", return_value={}),
+        patch.object(allocator_module, "GraphEditor"),
+        patch.object(
+            allocator_module, "_get_buffer_user_deps", return_value=[opaque.name]
+        ),
+        patch.object(allocator_module, "materialize_lx_relayouts"),
+    ):
+        allocator_module.ScratchpadAllocator._push_allocation(
+            SimpleNamespace(), graph, [], []
+        )
+
+        # Only the known non-tensor object is excluded. Do not turn arbitrary
+        # get_layout failures into a silent exemption from the invariant.
+        def broken_layout():
+            raise NotImplementedError("broken tensor layout")
+
+        graph.try_get_buffer = lambda _name: SimpleNamespace(get_layout=broken_layout)
+        with unittest.TestCase().assertRaisesRegex(
+            NotImplementedError, "broken tensor layout"
+        ):
+            allocator_module.ScratchpadAllocator._push_allocation(
+                SimpleNamespace(), graph, [], []
+            )
+
+
 class CustomPreSchedulingPassesWithOurPasses(CustomPreSchedulingPasses):
     """torch_spyre._inductor.patches.enable_spyre_context sets
     torch._inductor.config._post_fusion_custom_pass to
