@@ -1751,6 +1751,17 @@ def commit_iteration_space_ownership(
     op.iteration_space_ownership = make_iteration_space_ownership(op, splits)
 
 
+def commit_tensor_work_division(op: Operation, ownership: TensorWorkDivision) -> None:
+    """Commit a complete division without regenerating its core order."""
+    symbols = set(iteration_space_from_op(op))
+    if (
+        set(ownership.work_slices) != symbols
+        or set(ownership.core_id_to_work_slice) != symbols
+    ):
+        raise ValueError("committed ownership does not cover the operation loops")
+    op.iteration_space_ownership = ownership
+
+
 def select_work_division_transport_indexes(
     op: Operation, rw: ReadWrites, it_space: dict[sympy.Symbol, sympy.Expr]
 ) -> tuple[sympy.Expr, sympy.Expr]:
@@ -2990,12 +3001,18 @@ def _per_core_view_from_prep(
     prep: Optional[_ViewPrep],
     splits: dict[sympy.Symbol, int] | tuple[dict, dict],
     reduction_splits: Optional[dict[sympy.Symbol, int]] = None,
+    *,
+    ownership: TensorWorkDivision | None = None,
 ) -> tuple[PerCoreView, bool, bool]:
-    """Evaluate a precomputed view for symbol splits or scheduler transport."""
-    num_cores = math.prod(
-        value
-        for group in (splits if isinstance(splits, tuple) else (splits,))
-        for value in group.values()
+    """Evaluate a view from complete ownership or legacy split transport."""
+    num_cores = (
+        ownership.physical_core_count
+        if ownership is not None
+        else math.prod(
+            value
+            for group in (splits if isinstance(splits, tuple) else (splits,))
+            for value in group.values()
+        )
     )
     # 3-tuple: (view, has_partial_reduction, representable). ``representable`` is
     # False only on the give-up returns below (a split that slices this buffer
@@ -3169,23 +3186,28 @@ def _per_core_view_from_prep(
         work_slice_dims[dev_dim] = split
         sym_to_device_dim[sym] = dev_dim
 
-    # Step 4: model the same physical ownership SDSC will emit. LX compatibility
-    # requires producer and consumer to assign each slice to the same physical
-    # core; matching split factors alone is insufficient.
-    num_cores = int(math.prod(per_sym.values()))
+    # Step 4: project the committed core order into device dimensions. Candidate
+    # exploration has no committed record yet and keeps the existing default.
     iter_symbols = tuple(iter_space)
     dim_splits = tuple(int(per_sym[sym]) for sym in iter_symbols)
-    contiguous_dim = (
-        len(dim_splits) - 1
-        if prep.is_matmul and config.core_id_k_fast_emission
-        else None
-    )
-    core_to_slot = core_to_slice_mapping(
-        iter_symbols,
-        dim_splits,
-        num_cores,
-        contiguous_dim=contiguous_dim,
-    )
+    if ownership is not None:
+        if set(ownership.work_slices) != set(iter_symbols) or set(
+            ownership.core_id_to_work_slice
+        ) != set(iter_symbols):
+            return unrepresentable
+        core_to_slot = dict(ownership.core_id_to_work_slice)
+    else:
+        contiguous_dim = (
+            len(dim_splits) - 1
+            if prep.is_matmul and config.core_id_k_fast_emission
+            else None
+        )
+        core_to_slot = core_to_slice_mapping(
+            iter_symbols,
+            dim_splits,
+            num_cores,
+            contiguous_dim=contiguous_dim,
+        )
     # Re-key by the buffer's device-dim index (canonical) instead of the op's
     # iter symbol name. Two ops with the same per-core slicing on this buffer
     # compare equal even if they name their iter axes differently.
@@ -3220,7 +3242,9 @@ def _per_core_view_on_buf(
     callers act on it only for write-deps. ``representable`` is False only on the
     give-up cases (a split that slices this buffer can't be placed on a device
     dim), which cross-op comparisons must treat as a non-match. Pass `cache` to
-    memoize, keyed by (op name, symbol-keyed splits, dep, buf_name).
+    memoize, keyed by the op name, complete symbol-keyed ownership, dependency,
+    and buffer name. Owner formulas and the physical core count are part of the
+    key, so equal split counts with different core orders cannot alias.
 
     The op name is part of the key because the result also depends on op-derived
     write_index / read_index / iter_space / matmul-ness, not just (splits, dep,
@@ -3234,7 +3258,21 @@ def _per_core_view_on_buf(
     splits = ownership.work_slices if ownership is not None else {}
     key = None
     if cache is not None:
-        key = (op.get_name(), frozenset(splits.items()), dep, buf_name)
+        ownership_key = (
+            (
+                ownership.physical_core_count,
+                frozenset(ownership.core_id_to_work_slice.items()),
+            )
+            if ownership is not None
+            else None
+        )
+        key = (
+            op.get_name(),
+            frozenset(splits.items()),
+            ownership_key,
+            dep,
+            buf_name,
+        )
         hit = cache.get(key)
         if hit is not None:
             return hit
@@ -3255,7 +3293,12 @@ def _per_core_view_on_buf(
     reduction_splits = {
         sym: split for sym, split in splits.items() if write_index.coeff(sym) == 0
     }
-    result = _per_core_view_from_prep(prep, splits, reduction_splits)
+    result = _per_core_view_from_prep(
+        prep,
+        splits,
+        reduction_splits,
+        ownership=ownership,
+    )
     if cache is not None:
         cache[key] = result
     return result

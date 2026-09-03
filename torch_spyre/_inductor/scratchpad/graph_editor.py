@@ -16,8 +16,11 @@ from torch.fx.graph import Graph
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ops_handler import WrapperHandler
 from torch_spyre._inductor.pass_utils import (
+    PerCoreView,
     commit_iteration_space_ownership,
+    commit_tensor_work_division,
     copy_op_metadata,
+    device_coordinates,
     iteration_space_from_op,
     invalidate_op_read_writes,
     op_read_writes,
@@ -107,6 +110,7 @@ class GraphEditor:
         *,
         input: bool,
         private: bool = False,
+        lx_view: PerCoreView | None = None,
     ) -> ComputedBuffer:
         """Insert a clone; private clones rewire only ``buffer_users``."""
         if isinstance(buffer, TensorBox):
@@ -183,7 +187,22 @@ class GraphEditor:
         # retain direct symbol ownership instead of round-tripping through index
         # coefficients. A clone has no reduction split.
         metadata_owner = getattr(metadata_source, "iteration_space_ownership", None)
-        if input and metadata_owner is not None:
+        if input and lx_view is not None:
+            from torch_spyre._inductor.scratchpad.lx_relayout import (
+                work_division_from_view,
+            )
+
+            clone_write = next(iter(op_read_writes(new_com_buf).writes))
+            clone_symbols = tuple(iteration_space_from_op(new_com_buf))
+            clone_ownership = work_division_from_view(
+                lx_view,
+                device_coordinates(clone_layout.device_layout, clone_write, None),
+                clone_symbols,
+            )
+            if clone_ownership is None:
+                raise ValueError("LX clone is missing its accepted physical ownership")
+            commit_tensor_work_division(new_com_buf, clone_ownership)
+        elif input and metadata_owner is not None:
             read = next(
                 (
                     dep
@@ -207,7 +226,8 @@ class GraphEditor:
                 sym: metadata_owner.work_slices.get(sym, 1) if metadata_owner else 1
                 for sym in iteration_space_from_op(new_com_buf)
             }
-        commit_iteration_space_ownership(new_com_buf, clone_splits)
+        if not (input and lx_view is not None):
+            commit_iteration_space_ownership(new_com_buf, clone_splits)
 
         if input:
             source_users = []
