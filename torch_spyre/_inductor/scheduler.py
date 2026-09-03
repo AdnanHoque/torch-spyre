@@ -23,7 +23,7 @@ from torch._inductor.utils import (
     sympy_product,
 )
 from torch._inductor.dependencies import MemoryDep
-from torch._inductor.ir import ComputedBuffer
+from torch._inductor.ir import ComputedBuffer, NoneLayout
 from torch._inductor.scheduler import (
     BaseScheduling,
     BaseSchedulerNode,
@@ -42,7 +42,9 @@ from .pass_utils import (
     _is_matmul_op,
     build_operation_alignment_inputs,
     iteration_space,
-    iteration_space_from_op,
+    input_layout_for_operation,
+    is_restickify_coords,
+    restore_restickify_alignment_inputs,
     try_device_coordinates,
 )
 from .core_mapping import finalize_core_mapping_pure
@@ -53,6 +55,7 @@ from .scratchpad.lx_relayout import (
     work_division_from_view,
 )
 from .op_spec import LoopSpec
+from .padding import is_restickify_op
 from . import config as _spyre_config
 from .errors import Unsupported
 
@@ -98,16 +101,18 @@ def _preflight_lx_ownership(
     reads = [dep for dep in node.read_writes.reads if isinstance(dep, MemoryDep)]
     writes = [dep for dep in node.read_writes.writes if isinstance(dep, MemoryDep)]
     entries = []
-    for dep in (*reads, *writes):
-        buffer = V.graph.try_get_buffer(dep.name)
-        if buffer is None:
-            continue
-        try:
+    for is_input, dependencies in ((True, reads), (False, writes)):
+        for dep in dependencies:
+            buffer = V.graph.try_get_buffer(dep.name)
+            if buffer is None:
+                continue
+            if isinstance(getattr(buffer, "layout", None), NoneLayout):
+                continue
             layout = buffer.get_layout()
-        except NotImplementedError:
-            continue
-        if isinstance(layout, FixedTiledLayout):
-            entries.append((dep.name, layout, dep))
+            if is_input:
+                layout = input_layout_for_operation(op, dep.name, layout)
+            if isinstance(layout, FixedTiledLayout):
+                entries.append((dep.name, layout, dep))
 
     if not any("lx" in layout.allocation for _, layout, _ in entries):
         return
@@ -120,19 +125,43 @@ def _preflight_lx_ownership(
         op=op,
         read_writes=node.read_writes,
     )
-    divisions = [
-        work_division_from_view(
-            (
-                layout.lx_view
-                if "lx" in layout.allocation
-                and (constrained_names is None or name in constrained_names)
-                else None
-            ),
-            tensor["coordinates"],
-            tuple(raw_iteration_space),
+    # ``layout.lx_view`` names dimensions in the physical layout carried by the
+    # buffer.  Project that view before restickify rewrites the operation-only
+    # descriptors below.  Codegen does the same when it builds TensorArg, so the
+    # two callers pass divisions on the same symbol basis to the finalizer.
+    divisions = []
+    for (name, layout, _), tensor in zip(entries, alignment_inputs.tensors):
+        constrained = "lx" in layout.allocation and (
+            constrained_names is None or name in constrained_names
         )
-        for (name, layout, _), tensor in zip(entries, alignment_inputs.tensors)
-    ]
+        if constrained and layout.lx_view is None:
+            raise ValueError(f"LX buffer {name} has no physical ownership")
+        divisions.append(
+            work_division_from_view(
+                layout.lx_view if constrained else None,
+                tensor["coordinates"],
+                tuple(alignment_inputs.iteration_space),
+            )
+        )
+    coordinates = [tensor["coordinates"] for tensor in alignment_inputs.tensors]
+    # A coordinate mismatch is a restickify only for an actual pointwise copy.
+    # Other unary operations can use different input/output stick axes but
+    # codegen does not classify them as ReStickifyOpHBM.
+    if (
+        len(coordinates) == 2
+        and is_restickify_op(op, V.graph)
+        and is_restickify_coords(*coordinates)
+    ):
+        stick_sizes = {
+            int(layout.device_layout.elems_per_stick()) for _, layout, _ in entries
+        }
+        if len(stick_sizes) != 1:
+            raise ValueError(
+                f"restickify operands disagree on stick size: {sorted(stick_sizes)}"
+            )
+        alignment_inputs = restore_restickify_alignment_inputs(
+            alignment_inputs, stick_sizes.pop()
+        )
     finalize_core_mapping_pure(
         alignment_inputs,
         divisions,
@@ -148,17 +177,20 @@ def _preflight_lx_culprits(node: SchedulerNode) -> set[str]:
     reads = {
         dep.name
         for dep in node.read_writes.reads
-        if isinstance(dep, MemoryDep) and _lx_view(dep.name) is not None
+        if isinstance(dep, MemoryDep) and _lx_layout(dep.name) is not None
     }
     writes = {
         dep.name
         for dep in node.read_writes.writes
-        if isinstance(dep, MemoryDep) and _lx_view(dep.name) is not None
+        if isinstance(dep, MemoryDep) and _lx_layout(dep.name) is not None
     }
     try:
         _preflight_lx_ownership(node, relayout_copy=False, constrained_names=writes)
     except (Unsupported, ValueError):
-        return writes or reads
+        # A write that cannot express its own committed view gives us no valid
+        # operation map to test the reads against. Drop every LX constraint on
+        # this op so no unresolved read/read conflict can first fail in codegen.
+        return writes | reads
 
     culprits = set()
     for name in reads:
@@ -170,9 +202,22 @@ def _preflight_lx_culprits(node: SchedulerNode) -> set[str]:
             )
         except (Unsupported, ValueError):
             culprits.add(name)
-    # If each input works with the writer alone but the inputs conflict with one
-    # another, keep no arbitrary winner: all conflicting reads fall back to HBM.
-    return culprits or reads
+    # Individual failures do not prove that the remaining reads work together:
+    # two survivors can each agree with the writer yet impose incompatible core
+    # orders on different dimensions. Validate the exact survivor set before
+    # allowing it to reach codegen. If it still conflicts, keep no arbitrary
+    # winner and send every read through the safe HBM path.
+    survivors = reads - culprits
+    if survivors:
+        try:
+            _preflight_lx_ownership(
+                node,
+                relayout_copy=False,
+                constrained_names=writes | survivors,
+            )
+        except (Unsupported, ValueError):
+            return reads
+    return culprits
 
 
 class CountedLoopSchedulerNode(FusedSchedulerNode):
@@ -448,16 +493,38 @@ def build_loop_scheduler_nodes(
     return result
 
 
-def _lx_view(name: str):
+def _lx_layout(name: str):
     buffer = V.graph.try_get_buffer(name)
     if buffer is None:
+        return None
+    # Fallback kernels can register dependency-only buffers whose NoneLayout
+    # intentionally has no tensor descriptor.  Such a buffer cannot be LX
+    # resident, and Buffer.get_layout() raises for it by contract.
+    if isinstance(getattr(buffer, "layout", None), NoneLayout):
         return None
     layout = buffer.get_layout()
     if not isinstance(layout, FixedTiledLayout):
         return None
     if "lx" not in layout.allocation:
         return None
-    return layout.lx_view
+    return layout
+
+
+def _lx_view(name: str):
+    layout = _lx_layout(name)
+    return layout.lx_view if layout is not None else None
+
+
+def _all_scheduler_nodes(
+    items: Sequence[BaseSchedulerNode],
+) -> Iterator[SchedulerNode]:
+    """Yield every leaf operation, including leaves inside counted loops."""
+
+    for item in items:
+        if isinstance(item, FusedSchedulerNode):
+            yield from _all_scheduler_nodes(item.get_nodes())
+        elif isinstance(item, SchedulerNode):
+            yield item
 
 
 def demote_incoherent_lx_buffers(
@@ -473,12 +540,7 @@ def demote_incoherent_lx_buffers(
     if not _spyre_config.lx_planning:
         return nodes
 
-    scheduled = [
-        inner
-        for node in nodes
-        for inner in node.get_nodes()
-        if isinstance(inner, SchedulerNode)
-    ]
+    scheduled = list(_all_scheduler_nodes(nodes))
     plans_by_copy = {
         copy_name: plan
         for copy_name, plan in materialized_lx_relayouts(V.graph).values()
@@ -521,15 +583,15 @@ def demote_incoherent_lx_buffers(
 
     demoted = set()
 
-    def demote(source_name: str, reason: str) -> None:
+    def demote(source_name: str, reason: str) -> bool:
         if source_name in demoted:
-            return
+            return False
         demoted.add(source_name)
         if source_name in relayout_sources:
             # Scheduling supplies the final ownership verdict; the relayout
             # layer owns atomic group fallback and registry cleanup.
             demote_lx_relayout_group(V.graph, source_name, reason)
-            return
+            return True
         buffer = V.graph.try_get_buffer(source_name)
         if buffer is not None:
             layout = buffer.get_layout()
@@ -537,30 +599,65 @@ def demote_incoherent_lx_buffers(
                 layout.allocation.pop("lx", None)
                 layout.lx_view = None
         logger.info("demoted %s out of LX: %s", source_name, reason)
+        return True
 
     for source_name, reason in invalid_sources.items():
         demote(source_name, reason)
 
-    for node in scheduled:
-        touched_lx = []
-        for dep in (*node.read_writes.reads, *node.read_writes.writes):
-            if isinstance(dep, MemoryDep) and _lx_view(dep.name) is not None:
-                touched_lx.append(dep.name)
-        if not touched_lx:
-            continue
-        try:
-            relayout_copy = any(name in plans_by_copy for name in touched_lx)
-            _preflight_lx_ownership(
-                node,
-                relayout_copy=relayout_copy,
-            )
-        except (Unsupported, ValueError) as exc:
-            reason = f"{node.get_name()} LX ownership preflight failed: {exc}"
-            culprits = (
-                set(touched_lx) if relayout_copy else _preflight_lx_culprits(node)
-            )
-            for name in culprits:
-                demote(source_by_copy.get(name, name), reason)
+    # A later consumer can demote a buffer that an earlier node already
+    # preflighted. Re-run until no ownership changes so the final successful
+    # call for every surviving node sees exactly the constraints codegen sees.
+    # Each iteration removes at least one finite LX allocation or terminates.
+    initial_lx_names = {
+        dep.name
+        for node in scheduled
+        for dep in (*node.read_writes.reads, *node.read_writes.writes)
+        if isinstance(dep, MemoryDep) and _lx_layout(dep.name) is not None
+    }
+    seen_lx_nodes: set[int] = set()
+    for _ in range(len(initial_lx_names) + 1):
+        changed = False
+        for node in scheduled:
+            touched_lx = []
+            for candidate_dep in (
+                *node.read_writes.reads,
+                *node.read_writes.writes,
+            ):
+                if (
+                    isinstance(candidate_dep, MemoryDep)
+                    and _lx_layout(candidate_dep.name) is not None
+                ):
+                    touched_lx.append(candidate_dep.name)
+            if touched_lx:
+                seen_lx_nodes.add(id(node))
+            elif id(node) not in seen_lx_nodes:
+                continue
+            try:
+                # The registered destination is also read by its later consumers.
+                # Only the identity node that writes it is the relayout operation;
+                # consumers remain ordinary ops constrained by that destination's
+                # committed view.
+                relayout_copy = any(
+                    isinstance(dep, MemoryDep) and dep.name in plans_by_copy
+                    for dep in node.read_writes.writes
+                )
+                _preflight_lx_ownership(
+                    node,
+                    relayout_copy=relayout_copy,
+                )
+            except (Unsupported, ValueError) as exc:
+                reason = f"{node.get_name()} LX ownership preflight failed: {exc}"
+                culprits = (
+                    set(touched_lx) if relayout_copy else _preflight_lx_culprits(node)
+                )
+                for name in culprits:
+                    changed |= demote(source_by_copy.get(name, name), reason)
+        if not changed:
+            break
+    else:
+        raise RuntimeError(
+            "LX ownership preflight did not reach its monotone demotion fixed point"
+        )
 
     # Keep the carried-reduction contract, but make it consume the same physical
     # record instead of rebuilding core order from scheduler split counts.
@@ -572,22 +669,13 @@ def verify_carried_reduction_ownership(
 ) -> list[BaseSchedulerNode]:
     """Verify the final physical contract of every loop-carried reduction.
 
-    This runs after fusion, LX demotion, and HBM-pool planning.  Earlier split
-    metadata is only an input request; the scheduled per-core views checked
-    here are the ownership codegen will actually emit.
+    This runs after fusion and LX preflight, before HBM-pool planning. Earlier
+    split metadata is only an input request; the committed physical view checked
+    here is the ownership codegen will actually emit.
     """
 
-    def all_scheduler_nodes(
-        items: Sequence[BaseSchedulerNode],
-    ) -> Iterator[SchedulerNode]:
-        for item in items:
-            if isinstance(item, FusedSchedulerNode):
-                yield from all_scheduler_nodes(item.get_nodes())
-            elif isinstance(item, SchedulerNode):
-                yield item
-
     grouped: dict[object, dict[str, SchedulerNode]] = {}
-    for node in all_scheduler_nodes(nodes):
+    for node in _all_scheduler_nodes(nodes):
         record = getattr(node.node, "_carried_reduction_record", None)
         if record is not None:
             grouped.setdefault(record, {})[node.get_name()] = node
@@ -670,73 +758,10 @@ def verify_carried_reduction_ownership(
                     f"{record.accumulator_name}; deps="
                     f"{[(type(candidate).__name__, candidate.name) for candidate in deps]}"
                 )
-            # Equal physical views are necessary but not sufficient.  A
-            # 32-way split over H and a 32-way split over T can have the same
-            # total core count while assigning different logical rows to a
-            # core.  Project the final physical view back into this stage's
-            # scheduled loop symbols, then require the one split to be the
-            # row dimension named by the immutable carried-reduction record.
-            coordinates = try_device_coordinates(layout.device_layout, dep, None)
-            if coordinates is None:
-                raise Unsupported(
-                    f"carried reduction {op_name} {access} cannot map final "
-                    "accumulator coordinates back to operation loops"
-                )
-            try:
-                realized_division = work_division_from_view(
-                    expected_view,
-                    coordinates,
-                    tuple(iteration_space(node)),
-                )
-            except ValueError as exc:
-                raise Unsupported(
-                    f"carried reduction {op_name} {access} cannot project final "
-                    f"ownership into operation loops: {exc}"
-                ) from exc
-            if realized_division is None:
-                raise Unsupported(
-                    f"carried reduction {op_name} {access} has no final work division"
-                )
-
-            # Scheduler dependency extraction alpha-renames operation symbols
-            # (for example, d0 -> c0) without changing dimension order.  The
-            # carried-reduction rewrite is explicitly limited to
-            # order-preserving pointwise stages, so translate the names across
-            # that rename here.  This is not a general positional-remapping
-            # facility: a rank change fails closed, and no other rewrite uses
-            # this path.
-            operation_symbols = tuple(iteration_space_from_op(node.node))
-            scheduled_symbols = tuple(iteration_space(node))
-            if len(operation_symbols) != len(scheduled_symbols):
-                raise Unsupported(
-                    f"carried reduction {op_name} {access} changed iteration rank "
-                    "before final ownership verification"
-                )
-            operation_named_dims = getattr(node.node, "work_div_loop_info", {})
-            named_dims = {
-                scheduled_symbol: operation_named_dims.get(operation_symbol, [])
-                for operation_symbol, scheduled_symbol in zip(
-                    operation_symbols, scheduled_symbols
-                )
-            }
-            row_symbols = [
-                symbol
-                for symbol in realized_division.work_slices
-                if record.row_dim_name in named_dims.get(symbol, [])
-            ]
-            expected_splits = (
-                {row_symbols[0]: record.required_row_split}
-                if len(row_symbols) == 1
-                else None
-            )
-            if realized_division.work_slices != expected_splits:
-                raise Unsupported(
-                    f"carried reduction {op_name} {access} expected only "
-                    f"{record.row_dim_name} split={record.required_row_split}, but "
-                    f"final logical splits are {realized_division.work_slices}"
-                )
-
-        assert expected_view is not None
+            # The row decision was made by carried_reduction_pinned_row before
+            # placement. The universal LX preflight above already proved this
+            # stage can consume the committed physical view. Do not recreate a
+            # symbol correspondence from post-scheduler loop position here.
 
     return nodes
 

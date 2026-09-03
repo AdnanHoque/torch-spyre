@@ -34,12 +34,13 @@ from torch._inductor.ir import (
 from torch_spyre._C import ElementArrangement, SpyreTensorLayout
 from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.ir import FixedTiledLayout
+from torch_spyre._inductor.loop_info import CarriedReductionRecord
 from torch_spyre._inductor.constants import (
     AVGPOOL2D_OP,
     CONV2D_FWD_OP,
     DEPTHWISE_CONV2D_OP,
 )
-from torch_spyre._inductor.pass_utils import SchedNodeArg
+from torch_spyre._inductor.pass_utils import PerCoreView, SchedNodeArg
 from torch_spyre._inductor.scratchpad import allocator as allocator_module
 from torch_spyre._inductor.scratchpad.allocator import (
     CoOptimizingAllocator,
@@ -59,6 +60,7 @@ from torch_spyre._inductor.work_division import (
 from torch_spyre._inductor.work_division_constraints import (
     ConstraintResult,
     WorkDivConstraintContext,
+    carried_reduction_pinned_row,
     collect_work_division_constraints,
     conv_spatial_blocked_vars,
     coordinate_mask_blocked_vars,
@@ -71,6 +73,32 @@ from torch_spyre._inductor.work_division_constraints import (
     restickify_padding_blocked_vars,
     topk_split_domains,
 )
+
+
+def test_carried_reduction_row_is_committed_before_scheduling():
+    row, hidden = Symbol("row"), Symbol("hidden")
+    op = _computed_buffer((64, 64), name="combine")
+    op._carried_reduction_record = CarriedReductionRecord(
+        accumulator_name="fill",
+        row_dim_name="T",
+        required_row_split=8,
+        fill_name="fill",
+        combine_name="combine",
+        drain_name="drain",
+    )
+    # Deliberately put H first. Named ownership, not loop position, selects T.
+    op.work_div_loop_info = {hidden: ["H"], row: ["T"]}
+    output = _tensor_dep("combine", (64, 64), (row, hidden))
+    result = carried_reduction_pinned_row(
+        _make_context(
+            op,
+            output,
+            it_space={hidden: 64, row: 64},
+            it_space_adjusted={hidden: 64, row: 64},
+        )
+    )
+
+    assert result.allowed_splits == {row: frozenset({8})}
 
 
 def _isym(name):
@@ -1594,6 +1622,62 @@ class TestResidencyEdgeMatching(unittest.TestCase):
 
 
 class TestCoOptimizingAllocator(unittest.TestCase):
+    def test_parent_matches_compare_physical_ownership_semantically(self):
+        core_id = sympy.Symbol("core_id")
+        producer_view = PerCoreView(
+            ((0, 4),),
+            ((0, sympy.Mod(core_id, 4)),),
+            num_cores=4,
+        )
+        consumer_view = PerCoreView(
+            ((0, 4),),
+            ((0, core_id - 4 * sympy.floor(core_id / 4)),),
+            num_cores=4,
+        )
+        parent = MagicMock(name="parent")
+        parent.get_name.return_value = "parent"
+        consumer = MagicMock(name="consumer")
+        write = MagicMock(name="write", index=sympy.S.Zero)
+        write.name = "parent"
+        read = MagicMock(name="read", index=sympy.S.Zero)
+        read.name = "parent"
+        division = CoreDivision(output_splits={sympy.Symbol("d"): 4})
+        allocator = CoOptimizingAllocator(MagicMock(), size=1)
+
+        with (
+            patch(
+                "torch_spyre._inductor.scratchpad.allocator.op_read_writes",
+                side_effect=lambda op: MagicMock(
+                    writes=[write] if op is parent else [],
+                    reads=[read] if op is consumer else [],
+                ),
+            ),
+            patch.object(allocator_module, "_is_frame_changing_clone", return_value=False),
+            patch.object(
+                allocator_module,
+                "_view_for_div",
+                side_effect=[
+                    (producer_view, False, True),
+                    (consumer_view, False, True),
+                ],
+            ),
+            patch(
+                "torch_spyre._inductor.scratchpad.allocator._is_matmul_op",
+                return_value=False,
+            ),
+        ):
+            matches = allocator._cd_parent_matches(
+                consumer,
+                [division],
+                ["parent"],
+                {"parent": [division]},
+                {"parent": parent},
+                {},
+                {"parent": None},
+            )
+
+        self.assertEqual(matches, {"parent": [(0, 0)]})
+
     def test_fixed_illegal_split_raises_unsupported(self):
         op = MagicMock(spec=ComputedBuffer, name="fixed_op")
         op.data = MagicMock(spec=Pointwise)

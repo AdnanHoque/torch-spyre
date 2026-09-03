@@ -28,7 +28,9 @@ from torch._inductor.ir import (
     TensorBox,
     ComputedBuffer,
     ExternKernel,
+    MultiOutputLayout,
     MutationLayoutSHOULDREMOVE,
+    NoneLayout,
     Operation,
     Pointwise,
     Reduction,
@@ -54,6 +56,7 @@ from torch_spyre._inductor.work_division import (
     work_division_splits_are_legal,
 )
 from torch_spyre._inductor.errors import Unsupported
+from torch_spyre._inductor.constants import BYTES_PER_STICK
 from torch_spyre._inductor.scratchpad.plan_solver import (
     CoreDivision,
     CoreDivisionBuffer,
@@ -869,7 +872,7 @@ class ScratchpadAllocator:
         num_cores = ncores.get(name, -1)
         if dev_layout is None or num_cores < 1:
             return 0
-        return math.prod(dev_layout.device_size[:-1]) * 128 // num_cores
+        return math.prod(dev_layout.device_size[:-1]) * BYTES_PER_STICK // num_cores
 
     def _determine_in_place(
         self,
@@ -1193,6 +1196,32 @@ class ScratchpadAllocator:
         # the original graph, and post-grad no-op elimination has already run.
         materialize_lx_relayouts(graph, accepted_lx_relayouts)
 
+        # Address and ownership are one placement decision. Check every buffer
+        # that the graph can access after boundary clones and relayout copies
+        # have been inserted; later stages may consume this pair but never
+        # repair a half-written record.
+        for name in _get_buffer_user_deps(graph):
+            buffer = graph.try_get_buffer(name)
+            if buffer is None:
+                continue
+            # Tuple-producing and void fallback ops deliberately have no tensor
+            # descriptor.  Skip only those two known layout classes: any other
+            # get_layout failure is a compiler bug and must remain visible.
+            if isinstance(
+                getattr(buffer, "layout", None), (MultiOutputLayout, NoneLayout)
+            ):
+                continue
+            layout = buffer.get_layout()
+            if not isinstance(layout, FixedTiledLayout):
+                continue
+            has_lx_address = "lx" in layout.allocation
+            has_lx_view = layout.lx_view is not None
+            if has_lx_address != has_lx_view:
+                raise RuntimeError(
+                    f"LX placement for {name} has address={has_lx_address} "
+                    f"but physical ownership={has_lx_view}"
+                )
+
     def _set_one_allocation(
         self,
         buf: TensorBox | ComputedBuffer,
@@ -1364,8 +1393,8 @@ class ResidencyEdge:
         if parent_division.cores_used != consumer_division.cores_used:
             return False
         parent_view = self.parent_view(parent_division)
-        return parent_view is not None and parent_view == self.consumer_view(
-            consumer_division
+        return parent_view is not None and parent_view.same_partition(
+            self.consumer_view(consumer_division)
         )
 
     def match_pairs(
@@ -1383,7 +1412,7 @@ class ResidencyEdge:
             if parent_view is not None
             for j, consumer_view in enumerate(consumer_views)
             if consumer_view is not None
-            and parent_view == consumer_view
+            and parent_view.same_partition(consumer_view)
             and parent_divisions[i].cores_used == consumer_divisions[j].cores_used
         ]
 
@@ -1861,9 +1890,8 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         except (ValueError, RuntimeError):
             cost_expr = None
         result = solver.plan_layout_and_core_divisions(cost_expr)
-        assert not any(buffer.lx_relayout_plans for buffer in result), (
-            "CoOptimizingAllocator does not support LX relayout"
-        )
+        if any(buffer.lx_relayout_plans for buffer in result):
+            raise RuntimeError("CoOptimizingAllocator does not support LX relayout")
         return result
 
     def _extract_op_features(self, graph, output_name, buffers, is_lx):
@@ -2168,7 +2196,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                     graph.operations[last_use].name, []
                 ).append(input_name)
                 dev_layout = graph.get_buffer(input_name).layout.device_layout
-                size = math.prod(dev_layout.device_size[:-1]) * 128
+                size = math.prod(dev_layout.device_size[:-1]) * BYTES_PER_STICK
                 buffers.append(
                     CoreDivisionBuffer(
                         input_name,

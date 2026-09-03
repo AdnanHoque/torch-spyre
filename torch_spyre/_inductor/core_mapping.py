@@ -107,7 +107,10 @@ def derive_core_mapping(
     grouped_splits = dict(grouped_splits or {})
     unknown_dims = grouped_splits.keys() - split_by_dim.keys()
     if unknown_dims:
-        raise ValueError(f"grouped dimensions are not in the operation: {unknown_dims}")
+        raise ValueError(
+            "grouped dimensions are not in the operation: "
+            f"{sorted(map(str, unknown_dims))}"
+        )
     for dim, split in grouped_splits.items():
         if int(split) != split_by_dim[dim]:
             raise ValueError(
@@ -164,33 +167,6 @@ def derive_core_mapping(
     }
 
 
-def derive_partition_mapping(
-    dims: Sequence[Symbol],
-    dim_splits: Sequence[int],
-    num_cores: int,
-) -> dict[Symbol, Expr]:
-    """Derive tensor owners from final partition geometry.
-
-    A partition may have fewer logical owners than physical cores. In that
-    case each owner occupies one contiguous, equal-size core group.
-    """
-
-    dims = tuple(dims)
-    splits = tuple(int(split) for split in dim_splits)
-    owner_count = math.prod(splits)
-    if owner_count <= 0 or num_cores % owner_count:
-        raise ValueError(
-            f"partition owner count must divide num_cores: {owner_count}, {num_cores}"
-        )
-    group_size = num_cores // owner_count
-    core_id = Symbol("core_id")
-    group_id = floor(core_id / group_size)
-    mapping = core_to_slice_mapping(dims, splits, owner_count)
-    return {
-        dim: expression.subs(core_id, group_id) for dim, expression in mapping.items()
-    }
-
-
 def remap_work_division(
     division: TensorWorkDivision,
     dimension_remap: Mapping[Symbol, Sequence[tuple[Symbol, int]]],
@@ -205,7 +181,9 @@ def remap_work_division(
     new_splits: dict[Symbol, int] = {}
     new_core_map: dict[Symbol, Expr] = {}
     for old_dim, split in division.work_slices.items():
-        new_dims = dimension_remap[old_dim]
+        new_dims = dimension_remap.get(old_dim)
+        if new_dims is None:
+            raise ValueError(f"tensor ownership dimension {old_dim} has no alignment")
         remaining_split = int(split)
         split_factors: list[tuple[Symbol, int]] = []
         if len(new_dims) == 1:
@@ -267,7 +245,8 @@ def finalize_tensor_work_divisions(
         unknown_dims = work_slices.keys() - iteration_space.keys()
         if unknown_dims:
             raise ValueError(
-                f"tensor ownership dimensions are not aligned: {unknown_dims}"
+                "tensor ownership dimensions are not aligned: "
+                f"{sorted(map(str, unknown_dims))}"
             )
 
         try:
@@ -354,7 +333,7 @@ def finalize_core_mapping_pure(
         for division in tensor_divisions
     )
     divisions = finalize_tensor_work_divisions(aligned_space, remapped)
-    num_cores = math.prod(int(split) for _, split in aligned_space.values())
+    logical_cores = math.prod(int(split) for _, split in aligned_space.values())
 
     if is_relayout:
         if len(divisions) != 2:
@@ -364,15 +343,77 @@ def finalize_core_mapping_pure(
         destination = divisions[-1]
         if destination is None:
             raise ValueError("LX relayout destination has no committed ownership")
+        # A relayout is the one operation where tensor ownership intentionally
+        # differs from the logical copy loop split. The destination physical
+        # view defines the copy's core map; SuperDSC carries each tensor's own
+        # domain and raises the execution domain to the largest nested domain.
         mapping = dict(destination.core_id_to_work_slice)
-        if not _mapping_satisfies_division(mapping, destination, num_cores):
+        if not _mapping_satisfies_division(
+            mapping, destination, destination.physical_core_count
+        ):
             raise ValueError(
                 "LX relayout destination ownership does not define its operation map"
             )
         source = divisions[0]
-        if source is None or source.physical_core_count != num_cores:
-            raise ValueError("LX relayout source uses a different physical core domain")
+        if source is None:
+            raise ValueError("LX relayout source has no committed ownership")
+        execution_cores = max(
+            logical_cores,
+            source.physical_core_count,
+            destination.physical_core_count,
+        )
+        domains = {
+            "operation": logical_cores,
+            "source": source.physical_core_count,
+            "destination": destination.physical_core_count,
+        }
+        owner_counts = {
+            "source": math.prod(int(split) for split in source.work_slices.values()),
+            "destination": math.prod(
+                int(split) for split in destination.work_slices.values()
+            ),
+        }
+        invalid_domain = next(
+            (
+                name
+                for name, domain in domains.items()
+                if domain <= 0 or execution_cores % domain
+            ),
+            None,
+        )
+        invalid_owners = next(
+            (
+                name
+                for name, owners in owner_counts.items()
+                if owners <= 0 or domains[name] % owners
+            ),
+            None,
+        )
+        if invalid_domain is not None or invalid_owners is not None:
+            raise ValueError(
+                "LX relayout operation and tensor core domains must divide the "
+                f"execution domain; domains={domains}, owners={owner_counts}"
+            )
+        oversized = {
+            name: {
+                str(dim): (int(split), int(aligned_space[dim][0]))
+                for dim, split in division.work_slices.items()
+                if sympify(aligned_space[dim][0]).is_number
+                and int(split) > int(aligned_space[dim][0])
+            }
+            for name, division in (("source", source), ("destination", destination))
+        }
+        oversized = {name: dims for name, dims in oversized.items() if dims}
+        if oversized:
+            raise ValueError(
+                f"LX relayout tensor split exceeds its aligned extent: {oversized}"
+            )
+        if source.same_ownership(destination):
+            raise ValueError(
+                "LX relayout source and destination ownership collapse after alignment"
+            )
     else:
+        num_cores = logical_cores
         mapping = derive_operation_mapping(
             aligned_space,
             divisions,
@@ -458,7 +499,7 @@ def derive_operation_mapping(
             "too many aligned tensor-owned dimensions for bounded core-order "
             f"search: {len(constrained)} > {_MAX_OWNER_PERMUTATION_DIMS}"
         )
-    for order in permutations(constrained):
+    for order in permutations(sorted(constrained, key=str)):
         candidate = derive_core_mapping(
             dims,
             splits,
@@ -484,15 +525,23 @@ def core_mappings_equal(
 
     if left.keys() != right.keys():
         return False
-    if num_cores < 0:
+    if num_cores <= 0:
         return False
     core_id = Symbol("core_id")
     try:
-        return all(
-            int(sympify(left[dim]).subs(core_id, core))
-            == int(sympify(right[dim]).subs(core_id, core))
-            for dim in left
-            for core in range(num_cores)
-        )
+        for dim in left:
+            for core in range(num_cores):
+                values = [
+                    sympify(mapping[dim]).subs(core_id, core)
+                    for mapping in (left, right)
+                ]
+                if any(
+                    value.free_symbols or value.is_integer is not True
+                    for value in values
+                ):
+                    return False
+                if values[0] != values[1]:
+                    return False
+        return True
     except (TypeError, ValueError):
         return False

@@ -16,12 +16,15 @@ import copy
 import dataclasses
 import math
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 import sympy
+from lx_finalizer_parity import _normalize_call
 
 import torch_spyre._inductor.codegen.superdsc as superdsc_module
 import torch_spyre._inductor.pass_utils as pass_utils_module
+import torch_spyre._inductor.spyre_kernel as spyre_kernel_module
 from torch_spyre._C import DataFormats, ElementArrangement
 from torch_spyre._inductor.codegen.superdsc import parse_op_spec
 from torch_spyre._inductor.constants import (
@@ -33,7 +36,7 @@ from torch_spyre._inductor.core_mapping import (
     core_to_slice_mapping,
     derive_core_mapping,
     derive_operation_mapping,
-    derive_partition_mapping,
+    finalize_core_mapping_pure,
     finalize_tensor_work_divisions,
     remap_work_division,
 )
@@ -49,6 +52,7 @@ from torch_spyre._inductor.spyre_kernel import simplify_op_spec
 from torch_spyre._inductor.views import (
     align_tensors,
     align_tensors_pure,
+    build_alignment_inputs,
 )
 
 
@@ -62,9 +66,51 @@ def _coordinates(splits, num_cores, **kwargs):
     ]
 
 
+def test_lx_finalizer_audit_keeps_graph_node_identities_alive(lx_finalizer_parity):
+    def node():
+        operation = SimpleNamespace(get_operation_name=lambda: "pointwise")
+        return SimpleNamespace(node=operation, get_name=lambda: "op0")
+
+    first, second = node(), node()
+    first_identity = lx_finalizer_parity._identity(first)
+    second_identity = lx_finalizer_parity._identity(second)
+
+    assert first_identity != second_identity
+    assert lx_finalizer_parity._node_refs[id(first)] is first
+    assert lx_finalizer_parity._node_refs[id(second)] is second
+
+
 def test_default_mapping_preserves_existing_core_order():
     one_grid = [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2)]
     assert _coordinates((2, 3), 12) == one_grid * 2
+
+
+@pytest.mark.parametrize("slot", [sympy.Rational(1, 2), sympy.Symbol("unresolved")])
+def test_owner_slots_must_be_concrete_integers(slot):
+    dim = sympy.Symbol("dim")
+    division = TensorWorkDivision({dim: 2}, {dim: slot}, num_cores=2)
+    with pytest.raises(ValueError, match="non-integral"):
+        division.to_core_slices(2)
+    assert not core_mappings_equal({dim: slot}, {dim: slot}, 2)
+    view = PerCoreView(((0, 2),), ((0, slot),), num_cores=2)
+    from torch_spyre._inductor.scratchpad.lx_relayout import _core_slices
+
+    with pytest.raises(ValueError, match="non-integral"):
+        _core_slices(view, 2)
+
+
+def test_codegen_rejects_lx_allocation_without_physical_ownership():
+    kernel = spyre_kernel_module.SpyreKernel.__new__(spyre_kernel_module.SpyreKernel)
+    kernel.current_node = SimpleNamespace(node=object())
+    tensor = SimpleNamespace(layout=SimpleNamespace(allocation={"lx": 0}, lx_view=None))
+    with (
+        mock.patch.object(spyre_kernel_module, "iteration_space", return_value={}),
+        pytest.raises(
+            RuntimeError,
+            match="missing_view reached codegen without physical ownership",
+        ),
+    ):
+        kernel.create_tensor_arg(False, "missing_view", tensor)
 
 
 @pytest.mark.parametrize("contiguous_dim", [0, 1, 2])
@@ -130,14 +176,6 @@ def test_late_mapping_derives_contiguous_broadcast_groups():
     )
     coordinates = _mapping_coordinates(mapping, (query, h), 32)
     assert coordinates == [(core % 16, core // 16) for core in range(32)]
-
-
-def test_late_partition_mapping_repeats_contiguous_owners():
-    head = sympy.Symbol("head")
-    mapping = derive_partition_mapping((head,), (4,), 32)
-    assert _mapping_coordinates(mapping, (head,), 32) == [
-        (core // 8,) for core in range(32)
-    ]
 
 
 def test_late_mapping_keeps_shared_destination_after_one_consumer_factors():
@@ -302,7 +340,45 @@ def test_remap_work_division_rejects_conflicting_merged_owner_slots():
         )
 
 
-def test_identity_with_equivalent_owner_spelling_is_not_a_relayout():
+def test_remap_work_division_reports_missing_alignment():
+    old, other = sympy.symbols("old other")
+    division = TensorWorkDivision(
+        {old: 2},
+        {old: sympy.Mod(sympy.Symbol("core_id"), 2)},
+        num_cores=2,
+    )
+
+    with pytest.raises(ValueError, match="old has no alignment"):
+        remap_work_division(division, {other: ((other, 2),)})
+
+
+def test_commit_tensor_work_division_completes_unsplit_loops(monkeypatch):
+    split, local = sympy.symbols("split local")
+    core_id = sympy.Symbol("core_id")
+    op = SimpleNamespace()
+    monkeypatch.setattr(
+        pass_utils_module,
+        "iteration_space_from_op",
+        lambda _: {split: sympy.Integer(8), local: sympy.Integer(64)},
+    )
+
+    pass_utils_module.commit_tensor_work_division(
+        op,
+        TensorWorkDivision(
+            {split: 4},
+            {split: sympy.Mod(core_id, 4)},
+            num_cores=8,
+        ),
+    )
+
+    assert op.iteration_space_ownership == TensorWorkDivision(
+        {split: 4, local: 1},
+        {split: sympy.Mod(core_id, 4), local: sympy.S.Zero},
+        num_cores=8,
+    )
+
+
+def test_certified_identity_fails_if_equivalent_owner_spellings_collapse():
     head = sympy.Symbol("head")
     core_id = sympy.Symbol("core_id")
     base = TensorArg(
@@ -328,9 +404,10 @@ def test_identity_with_equivalent_owner_spelling_is_not_a_relayout():
         ),
     )
 
-    assert not is_lx_relayout_identity(
-        "identity", (base, destination), {LX_RELAYOUT_INFO_KEY: True}
-    )
+    with pytest.raises(ValueError, match="ownership collapsed"):
+        is_lx_relayout_identity(
+            "identity", (base, destination), {LX_RELAYOUT_INFO_KEY: True}
+        )
     different_destination = dataclasses.replace(
         destination,
         work_division=TensorWorkDivision(
@@ -489,7 +566,7 @@ def test_operation_mapping_bounds_aligned_owner_dimension_permutations():
     division = TensorWorkDivision(
         {dim: 2 for dim in dims},
         {
-            dim: sympy.Mod(sympy.floor(core_id / (2**index)), 2)
+            dim: sympy.Mod(sympy.floor(core_id / (2 ** (len(dims) - index - 1))), 2)
             for index, dim in enumerate(dims)
         },
         num_cores=64,
@@ -571,6 +648,233 @@ def test_captured_alignment_inputs_leave_codegen_unchanged(monkeypatch):
     simplify_op_spec(ordinary_path)
 
     assert captured_path == ordinary_path
+
+
+@pytest.mark.parametrize("is_relayout", [False, True])
+def test_preflight_and_codegen_finalize_from_identical_inputs(is_relayout):
+    """The recoverable preflight and codegen must run the same finalization.
+
+    This is the permanent caller-boundary proof: preflight asks the shared input
+    builder to attach the operation's committed splits, while codegen supplies
+    that already-finalized split space. Neither caller may add another ownership
+    derivation.
+    """
+
+    row, column, element = sympy.symbols("row column element")
+    raw_iteration_space = {
+        row: sympy.Integer(4),
+        column: sympy.Integer(4),
+        element: sympy.Integer(64),
+    }
+    index = 256 * row + 64 * column + element
+    read = pass_utils_module.MemoryDep(
+        "source",
+        index,
+        tuple(raw_iteration_space),
+        tuple(raw_iteration_space.values()),
+    )
+    write = pass_utils_module.MemoryDep(
+        "destination",
+        index,
+        tuple(raw_iteration_space),
+        tuple(raw_iteration_space.values()),
+    )
+    read_writes = SimpleNamespace(reads={read}, writes={write})
+    op = SimpleNamespace(
+        op_it_space_splits=({sympy.Integer(256): 2, sympy.Integer(64): 2}, {}),
+        get_name=lambda: "alignment_contract",
+    )
+    device_layout = pass_utils_module.SpyreTensorLayout(
+        [4, 4, 64],
+        [256, 64, 1],
+        DataFormats.SEN169_FP16,
+        ElementArrangement.STANDARD,
+    )
+    accesses = [
+        pass_utils_module.AlignmentAccess(device_layout, read.index),
+        pass_utils_module.AlignmentAccess(device_layout, write.index),
+    ]
+    aligned_iteration_space = pass_utils_module.iteration_space_with_splits(
+        op, read_writes, raw_iteration_space
+    )
+    preflight_inputs = pass_utils_module.build_operation_alignment_inputs(
+        raw_iteration_space,
+        accesses,
+        indirect_sizes={},
+        op=op,
+        read_writes=read_writes,
+    )
+    codegen_inputs = pass_utils_module.build_operation_alignment_inputs(
+        raw_iteration_space,
+        accesses,
+        indirect_sizes={},
+        aligned_iteration_space=aligned_iteration_space,
+    )
+
+    assert preflight_inputs == codegen_inputs
+
+    source_mapping = core_to_slice_mapping((row, column), (2, 2), 4)
+    destination_mapping = core_to_slice_mapping((column, row), (2, 2), 4)
+    source_division = TensorWorkDivision(
+        {row: 2, column: 2},
+        source_mapping,
+        num_cores=4,
+    )
+    destination_division = TensorWorkDivision(
+        {row: 2, column: 2},
+        destination_mapping,
+        num_cores=4,
+    )
+    divisions = (
+        (source_division, destination_division)
+        if is_relayout
+        else (destination_division, destination_division)
+    )
+    kwargs = {
+        "is_matmul": False,
+        "core_id_k_fast": False,
+        "is_relayout": is_relayout,
+    }
+
+    assert finalize_core_mapping_pure(
+        preflight_inputs, divisions, **kwargs
+    ) == finalize_core_mapping_pure(codegen_inputs, divisions, **kwargs)
+    if is_relayout:
+        with pytest.raises(ValueError, match="ownership collapse after alignment"):
+            finalize_core_mapping_pure(
+                preflight_inputs,
+                (destination_division, destination_division),
+                **kwargs,
+            )
+
+
+def test_finalizer_treats_repeated_identical_constraints_idempotently():
+    """ReadWrites may collapse ``x + x`` while codegen keeps both operands."""
+
+    row, column = sympy.symbols("row column")
+    iteration_space = {
+        row: (sympy.Integer(4), 2),
+        column: (sympy.Integer(4), 2),
+    }
+    tensor = {"size": [4, 4, 64], "coordinates": [row, column, sympy.S.Zero]}
+    output = {"size": [4, 4, 64], "coordinates": [row, column, sympy.S.Zero]}
+    one_read = build_alignment_inputs(iteration_space, [tensor, output])
+    repeated_read = build_alignment_inputs(iteration_space, [tensor, tensor, output])
+    mapping = core_to_slice_mapping((row, column), (2, 2), 4)
+    division = TensorWorkDivision(
+        {row: 2, column: 2},
+        mapping,
+        num_cores=4,
+    )
+    equivalent = TensorWorkDivision(
+        division.work_slices,
+        {
+            dim: sympy.Mod(expression + 2, 2, evaluate=False)
+            for dim, expression in mapping.items()
+        },
+        num_cores=4,
+    )
+    kwargs = {
+        "is_matmul": False,
+        "core_id_k_fast": False,
+        "is_relayout": False,
+    }
+
+    unique_result = finalize_core_mapping_pure(
+        one_read,
+        (division, division),
+        **kwargs,
+    )
+    repeated_result = finalize_core_mapping_pure(
+        repeated_read,
+        (division, equivalent, division),
+        **kwargs,
+    )
+
+    assert unique_result[0] == repeated_result[0]
+    assert unique_result[3:] == repeated_result[3:]
+    assert repeated_result[1][0] == repeated_result[1][1] == unique_result[1][0]
+    assert repeated_result[2][0].same_ownership(repeated_result[2][1])
+    assert repeated_result[2][0].same_ownership(unique_result[2][0])
+    assert _normalize_call(one_read, (division, division), kwargs) == _normalize_call(
+        repeated_read, (division, equivalent, division), kwargs
+    )
+    unsplit = sympy.Symbol("unsplit")
+    explicit_unsplit = TensorWorkDivision(
+        {**division.work_slices, unsplit: 1},
+        {**mapping, unsplit: sympy.S.Zero},
+        num_cores=4,
+    )
+    assert _normalize_call(one_read, (division, division), kwargs) == _normalize_call(
+        one_read, (explicit_unsplit, division), kwargs
+    )
+
+
+def test_relayout_supports_distinct_physical_core_domains():
+    """A two-core source can broadcast into a 32-core destination view."""
+
+    head = sympy.Symbol("head")
+    core_id = sympy.Symbol("core_id")
+    inputs = build_alignment_inputs(
+        {head: (sympy.Integer(2), 2)},
+        [
+            {"size": [2, 64], "coordinates": [head, sympy.S.Zero]},
+            {"size": [2, 64], "coordinates": [head, sympy.S.Zero]},
+        ],
+    )
+    source = TensorWorkDivision(
+        {head: 2},
+        {head: sympy.Mod(core_id, 2)},
+        num_cores=2,
+    )
+    destination = TensorWorkDivision(
+        {head: 2},
+        {head: sympy.floor(core_id / 16)},
+        num_cores=32,
+    )
+
+    aligned_space, _, _, mapping, _ = finalize_core_mapping_pure(
+        inputs,
+        (source, destination),
+        is_matmul=False,
+        core_id_k_fast=False,
+        is_relayout=True,
+    )
+
+    assert set(mapping) == set(aligned_space) == {head}
+    assert core_mappings_equal(
+        {head: mapping[head]},
+        {head: sympy.floor(core_id / 16)},
+        32,
+    )
+
+    invalid_source = TensorWorkDivision(
+        {head: 3},
+        {head: sympy.Mod(core_id, 3)},
+        num_cores=3,
+    )
+    with pytest.raises(ValueError, match="core domains must divide"):
+        finalize_core_mapping_pure(
+            inputs,
+            (invalid_source, destination),
+            is_matmul=False,
+            core_id_k_fast=False,
+            is_relayout=True,
+        )
+
+    mismatched_destination = TensorWorkDivision(
+        {head: 4},
+        {head: sympy.Mod(core_id, 4)},
+        num_cores=32,
+    )
+    with pytest.raises(ValueError, match="split exceeds its aligned extent"):
+        finalize_core_mapping_pure(
+            inputs,
+            (source, mismatched_destination),
+            is_matmul=False,
+            core_id_k_fast=False,
+            is_relayout=True,
+        )
 
 
 def _bmm_op_spec(op: str) -> OpSpec:
@@ -708,7 +1012,7 @@ def test_flattened_iteration_span_is_not_a_single_axis_view():
     )
 
     view, partial, representable = pass_utils_module._per_core_view_from_prep(
-        prep, ({512: 16, 1: 2}, {})
+        prep, {heads: 16, flat: 2}
     )
 
     assert not representable
@@ -740,12 +1044,20 @@ def _prepare_compound_axis_view(iter_space, index, repeat_info=None):
         _repeat_info={} if repeat_info is None else repeat_info,
         get_buffer=lambda name: SimpleNamespace(layout=layout),
     )
-    with pass_utils_module.V.set_graph_handler(graph):
+    rw = SimpleNamespace(writes={dep}, reads={dep})
+    with (
+        pass_utils_module.V.set_graph_handler(graph),
+        mock.patch.object(pass_utils_module, "op_read_writes", return_value=rw),
+        mock.patch.object(
+            pass_utils_module,
+            "iteration_space_from_op",
+            return_value=iter_space,
+        ),
+    ):
         prep = pass_utils_module._prepare_per_core_view(
             object(),
             dep,
             "buf",
-            parts=(iter_space, index, index),
         )
     assert prep is not None
     return prep, graph
