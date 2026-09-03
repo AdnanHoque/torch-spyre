@@ -315,22 +315,30 @@ def _unflatten_bmm_batch_dims(
         else None
     )
     rhs_source = rhs_expand.args[0] if rhs_expand is not None else None
-    expanded_value = rhs_expand.meta.get("val") if rhs_expand is not None else None
+    expanded_shape = _node_shape(rhs_expand) if rhs_expand is not None else None
+    rhs_source_shape = (
+        _node_shape(rhs_source) if isinstance(rhs_source, torch.fx.Node) else None
+    )
     if (
-        expanded_value is not None
-        and isinstance(rhs_source, torch.fx.Node)
-        and "val" in rhs_source.meta
+        expanded_shape is not None
+        and rhs_source_shape is not None
+        and len(rhs_source_shape) == len(expanded_shape) == len(rhs_orig_shape)
     ):
-        expanded_shape = tuple(expanded_value.shape)
-        rhs_source_shape = tuple(rhs_source.meta["val"].shape)
+        batch_dims = tuple(zip(rhs_source_shape[:-2], expanded_shape[:-2], strict=True))
+        # No-op expands can wrap a clone that materializes a permuted layout.
+        # Like the reshape proof above, this must not add symbolic shape guards.
         if (
-            len(rhs_source_shape) == len(expanded_shape)
-            and rhs_source_shape[-2:] == expanded_shape[-2:]
+            _shapes_statically_equal(rhs_source_shape[-2:], expanded_shape[-2:])
+            and _shapes_statically_equal(expanded_shape[-2:], rhs_orig_shape[-2:])
             and all(
-                rhs_dim == 1 or rhs_dim == expanded_dim
-                for rhs_dim, expanded_dim in zip(
-                    rhs_source_shape[:-2], expanded_shape[:-2], strict=True
-                )
+                statically_known_true(sym_eq(rhs_dim, 1))
+                or statically_known_true(sym_eq(rhs_dim, expanded_dim))
+                for rhs_dim, expanded_dim in batch_dims
+            )
+            and any(
+                statically_known_true(sym_eq(rhs_dim, 1))
+                and statically_known_true(expanded_dim != 1)
+                for rhs_dim, expanded_dim in batch_dims
             )
         ):
             rhs_orig = rhs_source
