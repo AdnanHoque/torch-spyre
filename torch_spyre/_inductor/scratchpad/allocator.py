@@ -40,6 +40,7 @@ from torch._inductor.ir import (
 from torch._inductor.dependencies import Dep, MemoryDep
 from torch._inductor.graph import GraphLowering
 
+from torch_spyre._C import ElementArrangement
 from torch_spyre._inductor.pass_utils import (
     PerCoreView,
     commit_iteration_space_ownership,
@@ -894,15 +895,24 @@ class ScratchpadAllocator:
                 if view is not None and view.num_cores == num_cores
                 else {}
             )
-            footprint = partition_physical_span_bytes(
-                tuple(int(size) for size in device_layout.device_size),
-                tuple(int(stride) for stride in device_layout.stride_map),
-                int(device_layout.elems_per_stick()),
-                splits,
-            )
+            device_size = tuple(int(size) for size in device_layout.device_size)
+            if not device_size or any(extent <= 0 for extent in device_size):
+                raise ValueError("device extents must be positive")
+            for dim, split in splits.items():
+                if dim < 0 or dim >= len(device_size) or split <= 0:
+                    raise ValueError(f"invalid split {split} on device dimension {dim}")
+            full_size = math.prod(device_size[:-1]) * BYTES_PER_STICK
+            if device_layout.element_arrangement != ElementArrangement.STANDARD:
+                # The one-final-stick partition bound does not prove layouts
+                # such as QFP8WT's two-dimensional stick. Keep the existing
+                # complete-device-buffer bound, without dividing by cores.
+                footprint = full_size
+            else:
+                footprint = partition_physical_span_bytes(
+                    device_size, int(device_layout.elems_per_stick()), splits
+                )
             # Keep the historical equal-share size as a lower bound so this
             # refinement cannot shrink an ordinary LX allocation.
-            full_size = math.prod(device_layout.device_size[:-1]) * BYTES_PER_STICK
             equal_share = (
                 math.ceil(full_size / num_cores / _LX_ALLOCATION_GRANULARITY_BYTES)
                 * _LX_ALLOCATION_GRANULARITY_BYTES

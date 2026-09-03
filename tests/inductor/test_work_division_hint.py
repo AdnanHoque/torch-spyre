@@ -46,7 +46,7 @@ import torch_spyre._inductor.scratchpad.lx_relayout as lx_relayout_module
 import torch_spyre._inductor.scheduler as scheduler_module
 import torch_spyre._inductor.work_division as _wd
 import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
-from torch_spyre._C import DataFormats
+from torch_spyre._C import DataFormats, ElementArrangement
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec, parse_op_spec
 from torch_spyre._inductor.constants import (
     BATCH_MATMUL_OP,
@@ -1273,6 +1273,7 @@ def test_lx_footprint_uses_the_residency_judges_view():
         device_size=(8, 4, 64),
         stride_map=(256, 64, 1),
         elems_per_stick=lambda: 64,
+        element_arrangement=ElementArrangement.STANDARD,
     )
     buffer = SimpleNamespace(get_layout=lambda: layout)
     graph = SimpleNamespace(try_get_buffer=lambda name: buffer)
@@ -1288,6 +1289,83 @@ def test_lx_footprint_uses_the_residency_judges_view():
     assert ScratchpadAllocator._partition_footprints(graph, {"buffer": 8}, {}) == {
         "buffer": 4096
     }
+
+
+@pytest.mark.parametrize(
+    "host_strides",
+    [(128, -1, 65536, 1, 1024), (128, -1, 64, 1024, 1)],
+)
+def test_relayout_footprint_uses_device_storage_not_host_strides(host_strides):
+    # The first layout is the actual restickified K page from serving prefill.
+    # Its old HOST-stride measurement reserved only 256 / 2176 bytes. The
+    # device-storage bound is 8192 / 245760 regardless of the host permutation.
+    layout = object.__new__(FixedTiledLayout)
+    layout.device_layout = SimpleNamespace(
+        device_size=(8, 1, 2, 128, 64),
+        stride_map=host_strides,
+        elems_per_stick=lambda: 64,
+        element_arrangement=ElementArrangement.STANDARD,
+    )
+    source = PerCoreView(
+        ((0, 8), (2, 2), (3, 2)),
+        (
+            (0, Mod(floor(_CORE_ID / 2), 8)),
+            (2, Mod(_CORE_ID, 2)),
+            (3, Mod(floor(_CORE_ID / 16), 2)),
+        ),
+        num_cores=32,
+    )
+    destination = PerCoreView(
+        ((2, 2),), ((2, Mod(floor(_CORE_ID / 16), 2)),), num_cores=32
+    )
+    assert lx_relayout_module.partition_footprint(layout, source) == 8192
+    assert lx_relayout_module.partition_footprint(layout, destination) == 245760
+    plan = LXRelayoutPlan(
+        source_name="source",
+        consumer_names=("consumer",),
+        source_view=source,
+        destination_view=destination,
+        num_cores=32,
+        source_footprint_bytes=lx_relayout_module.partition_footprint(layout, source),
+        destination_footprint_bytes=lx_relayout_module.partition_footprint(
+            layout, destination
+        ),
+    )
+    source_buffer = LifetimeBoundBuffer("source", plan.source_footprint_bytes, [0, 1])
+    destination_buffer = LifetimeBoundBuffer(
+        plan.destination_name, plan.destination_footprint_bytes, [1, 2]
+    )
+    source_buffer.lx_relayout_plans = [plan]
+    source_buffer.address = 524160
+    destination_buffer.address = 524416
+    allocator = ScratchpadAllocator(GreedyLayoutSolver, 2**20)
+    with pytest.raises(RuntimeError, match="overlapping placements"):
+        allocator._allocated_lx_relayout_sources([source_buffer, destination_buffer])
+    destination_buffer.address = source_buffer.address + source_buffer.size
+    assert allocator._allocated_lx_relayout_sources(
+        [source_buffer, destination_buffer]
+    ) == {"source"}
+
+
+@pytest.mark.parametrize("final_extent", [64, 128])
+def test_nonstandard_sticks_keep_ordinary_full_bound_but_reject_relayout(final_extent):
+    # QFP8WT can use two stick axes even when the last extent matches eps.
+    layout = object.__new__(FixedTiledLayout)
+    layout.device_layout = SimpleNamespace(
+        device_size=(8, 2, final_extent),
+        stride_map=(128, 64, 1),
+        elems_per_stick=lambda: 128,
+        element_arrangement=ElementArrangement.QFP8WT,
+    )
+    view = PerCoreView(((0, 8),), ((0, Mod(_CORE_ID, 8)),), num_cores=8)
+    graph = SimpleNamespace(
+        try_get_buffer=lambda name: SimpleNamespace(get_layout=lambda: layout)
+    )
+    assert ScratchpadAllocator._partition_footprints(
+        graph, {"buffer": 8}, {"buffer": view}
+    ) == {"buffer": 2048}
+    with pytest.raises(ValueError, match="standard element arrangement"):
+        lx_relayout_module.partition_footprint(layout, view)
 
 
 def _assert_live_buffers_do_not_share_addresses(graph, buffers, limit):
