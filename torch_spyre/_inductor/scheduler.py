@@ -15,6 +15,7 @@
 from typing import Iterator, Sequence, Union
 
 import sympy
+from torch.fx import Node as FXNode
 
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.utils import (
@@ -62,6 +63,73 @@ from .errors import Unsupported
 logger = get_inductor_logger("scheduler")
 
 
+def _operand_ordered_reads(
+    node: SchedulerNode,
+    reads: list[MemoryDep],
+    raw_iteration_space: dict[sympy.Symbol, sympy.Expr],
+) -> list[MemoryDep]:
+    """Order reads by their use in the emitted operation, not load evaluation.
+
+    A body can load ``partial`` before ``accum`` but return ``accum / partial``.
+    ReadWrites records the first order; TensorArgs use the second. Read the
+    already-scheduled body that codegen executes, with its existing index map.
+    """
+
+    body = node._body
+    symbols = list(raw_iteration_space)
+    indexes = body.indexing_from_args(
+        [symbols[: len(body.iter_vars)], symbols[len(body.iter_vars) :]]
+    )
+    ordered: list[MemoryDep] = []
+    used_indirect = set()
+
+    def visit(value):
+        if not isinstance(value, FXNode):
+            return
+        if value.op == "call_method" and value.target == "load":
+            name, index_node = value.args[1:3]
+            # Dependencies use this node's mutation version; the stored body
+            # still names the original buffer that codegen resolves later.
+            name = node.mutation_renames.get(name, name)
+            index = indexes[index_node.args[0]]
+            used_indirect.update(index.free_symbols & set(body.indirect_vars))
+            matches = [dep for dep in reads if dep.name == name]
+            if len(matches) > 1:
+                matches = [dep for dep in matches if dep.index == index]
+            if len(matches) != 1:
+                raise ValueError(f"cannot match scheduled operand {name}[{index}]")
+            if matches[0] not in ordered:
+                ordered.append(matches[0])
+            return
+        for argument in value.all_input_nodes:
+            visit(argument)
+
+    operations = list(body.root_block.graph.nodes)
+    for operation in operations:
+        if operation.op == "call_method" and operation.target in (
+            "store",
+            "store_reduction",
+            "partial_accumulate",
+        ):
+            index_node = operation.args[2]
+            if isinstance(index_node, FXNode) and index_node.target == "get_index":
+                used_indirect.update(
+                    indexes[index_node.args[0]].free_symbols & set(body.indirect_vars)
+                )
+            visit(operation.args[3])
+    # Indirect index tensors are not children of the stored value: LoopBody
+    # binds them through set_<symbol> submodules. Codegen emits used bindings
+    # first, in their creation order. Unused loads are not operation operands.
+    operands = ordered
+    ordered = []
+    binder_names = {f"set_{symbol}" for symbol in used_indirect}
+    for operation in operations:
+        if operation.op == "call_module" and operation.target in binder_names:
+            for argument in operation.all_input_nodes:
+                visit(argument)
+    return ordered + operands
+
+
 def _ownership_projectable(
     node: SchedulerNode,
     dep: MemoryDep,
@@ -94,11 +162,17 @@ def _preflight_lx_ownership(
 ) -> None:
     """Dry-run the same ownership finalization codegen will consume."""
 
+    if not any(
+        isinstance(dep, MemoryDep) and _lx_layout(dep.name) is not None
+        for dep in (*node.read_writes.reads, *node.read_writes.writes)
+    ):
+        return
     op = node.node
     if not isinstance(op, ComputedBuffer):
         raise ValueError(f"{node.get_name()} has no computed operation")
     raw_iteration_space = iteration_space(node)
     reads = [dep for dep in node.read_writes.reads if isinstance(dep, MemoryDep)]
+    reads = _operand_ordered_reads(node, reads, raw_iteration_space)
     writes = [dep for dep in node.read_writes.writes if isinstance(dep, MemoryDep)]
     entries = []
     for is_input, dependencies in ((True, reads), (False, writes)):

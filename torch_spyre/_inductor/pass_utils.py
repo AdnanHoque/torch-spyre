@@ -1266,6 +1266,15 @@ def build_operation_alignment_inputs(
             for dim in access.index.free_symbols - raw_iteration_space.keys():
                 if dim not in resolved_indirect_sizes and str(dim) in size_by_name:
                     resolved_indirect_sizes[dim] = size_by_name[str(dim)]
+        used_symbols = set().union(*(access.index.free_symbols for access in accesses))
+        # Codegen retains index bindings for the whole kernel, while preflight
+        # sees one operation. Earlier operations' unused bindings are not
+        # inputs to this operation's alignment or ownership proof.
+        resolved_indirect_sizes = {
+            dim: size
+            for dim, size in resolved_indirect_sizes.items()
+            if dim in used_symbols
+        }
 
     repeat_snapshot = {
         symbol: dict(info) for symbol, info in (repeat_info or {}).items()

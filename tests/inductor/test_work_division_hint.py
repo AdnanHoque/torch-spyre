@@ -64,7 +64,12 @@ from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
 from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
 from torch_spyre._inductor.core_mapping import remap_work_division
-from torch_spyre._inductor.spyre_kernel import simplify_op_spec
+from torch_spyre._inductor.spyre_kernel import (
+    PointwiseOp,
+    TensorAccess,
+    _indirect_syms_used,
+    simplify_op_spec,
+)
 
 _LAUNCH_JOBPLAN = "torch_spyre.execution.kernel_runner.launch_jobplan"
 _PREPARE_KERNEL = "torch_spyre.execution.kernel_runner.prepare_kernel"
@@ -601,7 +606,7 @@ def _relayout_plan(source="source", consumers="consumer"):
                 ((0, Symbol("unknown_owner")),),
                 num_cores=2,
             ),
-            "non-concrete owner slot",
+            "non-integral owner slot",
         ),
         (
             PerCoreView(((0, 2),), ((0, Integer(2)),), num_cores=2),
@@ -611,7 +616,7 @@ def _relayout_plan(source="source", consumers="consumer"):
 )
 def test_lx_relayout_partition_validation_fails_closed(view, message):
     with pytest.raises(ValueError, match=message):
-        lx_relayout_module._compatible_partitions(view, _DESTINATION_VIEW, 2)
+        lx_relayout_module._core_slices(view, 2)
 
 
 def test_lx_relayout_activation_policy_is_source_wide():
@@ -1179,6 +1184,103 @@ def test_lx_view_ignores_none_layout_without_hiding_other_layout_errors():
             scheduler_module._lx_view("broken")
 
 
+def test_preflight_uses_operand_order_instead_of_load_evaluation_order():
+    graph = torch.fx.Graph()
+    ops = graph.placeholder("ops")
+    index = graph.call_module("get_index", ("index0",))
+    partial = graph.call_method("load", (ops, "partial", index))
+    accum = graph.call_method("load", (ops, "accum", index))
+    quotient = graph.call_method("truediv", (ops, accum, partial))
+    graph.call_method("store", (ops, "result", index, quotient))
+    loop = Symbol("loop")
+    body = SimpleNamespace(
+        iter_vars=(Symbol("old_loop"),),
+        indirect_vars=(),
+        root_block=SimpleNamespace(graph=graph),
+        indexing_from_args=lambda args: {"index0": args[0][0]},
+    )
+    reads = [
+        SimpleNamespace(name=name, index=loop)
+        for name in ("partial", "accum_before_mutation")
+    ]
+    ordered = scheduler_module._operand_ordered_reads(
+        SimpleNamespace(
+            _body=body, mutation_renames={"accum": "accum_before_mutation"}
+        ),
+        reads,
+        {loop: Integer(16)},
+    )
+    assert [dep.name for dep in ordered] == ["accum_before_mutation", "partial"]
+
+
+def test_preflight_orders_used_index_bindings_before_value_operands():
+    graph = torch.fx.Graph()
+    ops = graph.placeholder("ops")
+    index = graph.call_module("get_index", ("index0",))
+    graph.call_method("load", (ops, "unused", index))
+    index_b = graph.call_method("load", (ops, "index_b", index))
+    index_a = graph.call_method("load", (ops, "index_a", index))
+    graph.call_module("set_indirect9", (index_a,))
+    graph.call_module("set_indirect10", (index_b,))
+    offset_b = graph.call_module("get_index", ("offset_b",))
+    offset_a = graph.call_module("get_index", ("offset_a",))
+    value_b = graph.call_method("load", (ops, "value_b", offset_b))
+    value_a = graph.call_method("load", (ops, "value_a", offset_a))
+    quotient = graph.call_method("truediv", (ops, value_a, value_b))
+    graph.call_method("store", (ops, "result", index, quotient))
+    loop, indirect9, indirect10 = map(Symbol, ("loop", "indirect9", "indirect10"))
+    body = SimpleNamespace(
+        iter_vars=(Symbol("old_loop"),),
+        indirect_vars=(indirect9, indirect10),
+        root_block=SimpleNamespace(graph=graph),
+        indexing_from_args=lambda args: {
+            "index0": args[0][0],
+            "offset_a": indirect9,
+            "offset_b": indirect10,
+        },
+    )
+    reads = [
+        SimpleNamespace(name=name, index=offset)
+        for name, offset in (
+            ("unused", loop),
+            ("index_b", loop),
+            ("index_a", loop),
+            ("value_b", indirect10),
+            ("value_a", indirect9),
+        )
+    ]
+    ordered = scheduler_module._operand_ordered_reads(
+        SimpleNamespace(_body=body, mutation_renames={}), reads, {loop: Integer(16)}
+    )
+    assert [dep.name for dep in ordered] == ["index_a", "index_b", "value_a", "value_b"]
+
+
+def test_codegen_keeps_used_index_bindings_in_creation_order():
+    unused, indirect9, indirect10 = map(
+        Symbol, ("indirect8", "indirect9", "indirect10")
+    )
+    layout = SimpleNamespace()
+    bindings = {
+        symbol: TensorAccess(name, Integer(0), layout)
+        for symbol, name in (
+            (unused, "unused"),
+            (indirect9, "index_a"),
+            (indirect10, "index_b"),
+        )
+    }
+    value = PointwiseOp(
+        "truediv",
+        [
+            TensorAccess("value_b", indirect10, layout),
+            TensorAccess("value_a", indirect9, layout),
+        ],
+    )
+    assert _indirect_syms_used(value, bindings) == [indirect9, indirect10]
+    assert _indirect_syms_used(
+        None, bindings, src_index=indirect10, dst_index=indirect9
+    ) == [indirect9, indirect10]
+
+
 @pytest.mark.parametrize("missing_view", [False, True])
 def test_lx_preflight_uses_the_codegen_input_layout_override(missing_view):
     source = SimpleNamespace(name="source", index=Symbol("source_index"))
@@ -1227,6 +1329,11 @@ def test_lx_preflight_uses_the_codegen_input_layout_override(missing_view):
             SimpleNamespace(graph=SimpleNamespace(try_get_buffer=buffers.get)),
         ),
         mock_patch.object(scheduler_module, "iteration_space", return_value={}),
+        mock_patch.object(
+            scheduler_module,
+            "_operand_ordered_reads",
+            side_effect=lambda _node, reads, _space: reads,
+        ),
         mock_patch.object(
             scheduler_module,
             "build_operation_alignment_inputs",

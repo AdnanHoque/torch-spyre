@@ -636,8 +636,10 @@ def test_captured_alignment_inputs_leave_codegen_unchanged(monkeypatch):
     captured = pass_utils_module.build_operation_alignment_inputs(
         {dim: sympy.Integer(4)},
         [pass_utils_module.AlignmentAccess(SimpleNamespace(device_size=[2, 64]), dim)],
+        indirect_sizes={sympy.Symbol("unused_prior_index"): 67},
         aligned_iteration_space=op_spec.iteration_space,
     )
+    assert captured.indirect_sizes == {}
     # A preceding validation preview must neither consume nor change the input
     # subsequently used by codegen.
     align_tensors_pure(captured)
