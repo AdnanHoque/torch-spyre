@@ -48,6 +48,7 @@ from torch_spyre._inductor.constants import (
     IDENTITY_OP,
 )
 from torch_spyre._inductor.errors import Unsupported
+from torch_spyre._inductor.ir import FixedTiledLayout
 from torch_spyre._inductor.loop_info import CarriedReductionRecord
 from torch_spyre._inductor.scratchpad.lx_relayout import (
     LXRelayoutPlan,
@@ -1136,6 +1137,29 @@ def test_lx_relayout_rejects_invalid_paired_allocation():
     destination.address = 64
     with pytest.raises(RuntimeError, match="overlapping placements"):
         allocator._allocated_lx_relayout_sources([source, destination])
+
+
+def test_lx_footprint_uses_the_residency_judges_view():
+    layout = object.__new__(FixedTiledLayout)
+    layout.device_layout = SimpleNamespace(
+        device_size=(8, 4, 64),
+        stride_map=(256, 64, 1),
+        elems_per_stick=lambda: 64,
+    )
+    buffer = SimpleNamespace(get_layout=lambda: layout)
+    graph = SimpleNamespace(try_get_buffer=lambda name: buffer)
+    view = PerCoreView(
+        ((0, 4), (1, 2)),
+        ((0, floor(_CORE_ID / 2)), (1, Mod(_CORE_ID, 2))),
+        num_cores=8,
+    )
+
+    assert ScratchpadAllocator._partition_footprints(
+        graph, {"buffer": 8}, {"buffer": view}
+    ) == {"buffer": 768}
+    assert ScratchpadAllocator._partition_footprints(graph, {"buffer": 8}, {}) == {
+        "buffer": 4096
+    }
 
 
 def _assert_live_buffers_do_not_share_addresses(graph, buffers, limit):
