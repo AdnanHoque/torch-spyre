@@ -1096,18 +1096,16 @@ def test_lx_relayout_scheduler_demotes_groups_but_not_ordinary_unary():
             get_buffer=buffers.__getitem__,
         )
 
-        def view(node, _dep, name):
-            if name == "ordinary_source":
-                expected = (
-                    _DESTINATION_VIEW if node.name == "ordinary_unary" else _SOURCE_VIEW
-                )
-            else:
-                expected = _SOURCE_VIEW if name == "source" else _DESTINATION_VIEW
-            return (
-                PerCoreView((), ()) if node.name == drift else expected,
-                False,
-                True,
-            )
+        def preflight(node, *, relayout_copy, constrained_names=None):
+            if node.name == "ordinary_unary" and (
+                constrained_names is None
+                or {"ordinary_source", "ordinary_unary"} <= constrained_names
+            ):
+                raise ValueError("ordinary input disagrees with its output")
+            if node.name == drift or (
+                drift == "projection" and node.name == "consumer"
+            ):
+                raise ValueError(f"forced drift in {node.name}")
 
         with (
             mock_patch.object(scheduler_module, "SchedulerNode", _RelayoutNode),
@@ -1115,7 +1113,9 @@ def test_lx_relayout_scheduler_demotes_groups_but_not_ordinary_unary():
             mock_patch.object(scheduler_module, "FixedTiledLayout", SimpleNamespace),
             mock_patch.object(lx_relayout_module, "FixedTiledLayout", SimpleNamespace),
             mock_patch.object(scheduler_module, "V", SimpleNamespace(graph=graph)),
-            mock_patch.object(scheduler_module, "per_core_view_scheduled", view),
+            mock_patch.object(
+                scheduler_module, "_preflight_lx_ownership", side_effect=preflight
+            ),
             mock_patch.object(
                 scheduler_module,
                 "_ownership_projectable",
@@ -1147,7 +1147,7 @@ class _CarriedReductionDep:
 
 
 def _verify_carried_reduction(
-    drift=None, wrong_logical_dim=False, scheduled_rank_mismatch=False
+    missing_view=False, wrong_logical_dim=False, scheduled_rank_mismatch=False
 ):
     accumulator = "fill"
     operation_row = Symbol("d0")
@@ -1175,16 +1175,12 @@ def _verify_carried_reduction(
             operation_other: ["H"],
         }
 
-    layout = _relayout_layout(0, _SOURCE_VIEW)
+    layout = _relayout_layout(0, None if missing_view else _SOURCE_VIEW)
     graph = SimpleNamespace(
         try_get_buffer=lambda name: (
             SimpleNamespace(get_layout=lambda: layout) if name == accumulator else None
         )
     )
-
-    def view(node, _dep, _name):
-        realized = _DESTINATION_VIEW if node.name == drift else _SOURCE_VIEW
-        return realized, False, True
 
     def work_division(_view, _coordinates, _symbols):
         symbol = scheduled_other if wrong_logical_dim else scheduled_row
@@ -1195,7 +1191,6 @@ def _verify_carried_reduction(
         mock_patch.object(scheduler_module, "MemoryDep", _CarriedReductionDep),
         mock_patch.object(scheduler_module, "FixedTiledLayout", SimpleNamespace),
         mock_patch.object(scheduler_module, "V", SimpleNamespace(graph=graph)),
-        mock_patch.object(scheduler_module, "per_core_view_scheduled", view),
         mock_patch.object(
             scheduler_module, "try_device_coordinates", return_value=[scheduled_row]
         ),
@@ -1228,9 +1223,9 @@ def test_carried_reduction_verifier_accepts_matching_final_ownership():
     ]
 
 
-def test_carried_reduction_verifier_rejects_final_ownership_drift():
-    with pytest.raises(Unsupported, match="does not match accumulator ownership"):
-        _verify_carried_reduction(drift="drain")
+def test_carried_reduction_verifier_requires_physical_ownership():
+    with pytest.raises(Unsupported, match="LX address but no physical ownership"):
+        _verify_carried_reduction(missing_view=True)
 
 
 def test_carried_reduction_verifier_rejects_same_count_on_wrong_dimension():

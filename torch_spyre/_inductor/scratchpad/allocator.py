@@ -1054,6 +1054,7 @@ class ScratchpadAllocator:
                     ),
                     [transfer_tick, *consumer_ticks],
                     lifetime_end_override=destination_end,
+                    lx_view=plan.destination_view,
                 )
                 buffers.insert(buffers.index(source), destination)
                 source.paired_with.append(destination)
@@ -1176,25 +1177,35 @@ class ScratchpadAllocator:
                     input=True,
                     lx_view=b.lx_view,
                 )
-                self._set_one_allocation(new_buffer, b.address)
+                self._set_one_allocation(new_buffer, b.address, b.lx_view)
 
             elif b.name in outputs:
                 new_buffer = graph_editor.push_allocation_with_clone(
                     buf, buffer_users[b.name], input=False
                 )
-                self._set_one_allocation(buf, b.address)
+                self._set_one_allocation(buf, b.address, b.lx_view)
                 graph_editor.change_graph_output(buf, new_buffer)
 
             else:
-                self._set_one_allocation(buf, b.address)
+                self._set_one_allocation(buf, b.address, b.lx_view)
 
         # Keep graph mutation last and in pre-scheduling: solver retries require
         # the original graph, and post-grad no-op elimination has already run.
         materialize_lx_relayouts(graph, accepted_lx_relayouts)
 
-    def _set_one_allocation(self, buf: TensorBox | ComputedBuffer, address: int):
+    def _set_one_allocation(
+        self,
+        buf: TensorBox | ComputedBuffer,
+        address: int,
+        lx_view: PerCoreView | None,
+    ) -> None:
+        if lx_view is None:
+            raise RuntimeError(
+                f"LX placement for {buf.get_name()} has no accepted physical ownership"
+            )
         layout = buf.get_layout()
         layout.allocation["lx"] = address
+        layout.lx_view = lx_view
 
 
 def _lx_planning_size() -> int:
@@ -1879,6 +1890,15 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         # pull the selected core division from the dependent buffers when the graph
         # is updated with clones in ``_push_allocation``.
         self._commit_divisions(graph, allocation)
+        _, reasons, views = get_ncores_for_buffers(graph)
+        for buffer in allocation:
+            if buffer.address is None:
+                continue
+            view = views.get(buffer.name)
+            if view is None:
+                reason = reasons.get(buffer.name, "physical ownership was not accepted")
+                raise Unsupported(f"{buffer.name}: {reason}")
+            buffer.lx_view = view
 
     def _get_spill_reasons(
         self,
