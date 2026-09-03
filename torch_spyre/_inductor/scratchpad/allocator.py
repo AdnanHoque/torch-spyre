@@ -26,6 +26,7 @@ import sympy
 import torch
 from torch._inductor.ir import (
     TensorBox,
+    TorchBindObject,
     ComputedBuffer,
     ExternKernel,
     MultiOutputLayout,
@@ -1202,7 +1203,9 @@ class ScratchpadAllocator:
         # repair a half-written record.
         for name in _get_buffer_user_deps(graph):
             buffer = graph.try_get_buffer(name)
-            if buffer is None:
+            if buffer is None or isinstance(buffer, TorchBindObject):
+                # Opaque application objects can be graph dependencies (for
+                # example vLLM attention state), but have no tensor layout.
                 continue
             # Tuple-producing and void fallback ops deliberately have no tensor
             # descriptor.  Skip only those two known layout classes: any other
