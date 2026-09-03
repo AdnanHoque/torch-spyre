@@ -41,6 +41,8 @@ from torch_spyre._inductor.core_mapping import (
     finalize_tensor_work_divisions,
     partition_physical_span_bytes,
     remap_work_division,
+    select_partition_division_matching_physical_ownership,
+    select_unique_partition_division,
     work_division_matches_physical_ownership,
 )
 from torch_spyre._inductor.op_spec import (
@@ -212,12 +214,51 @@ def test_late_mapping_derives_contiguous_broadcast_groups():
     assert coordinates == [(core % 16, core // 16) for core in range(32)]
 
 
+def test_exact_physical_owners_select_one_canonical_dimension_order():
+    batch, kv = sympy.symbols("batch kv")
+    core_id = sympy.Symbol("core_id")
+
+    selected = select_partition_division_matching_physical_ownership(
+        (batch, kv),
+        {batch: 4, kv: 8},
+        {batch: 4, kv: 8},
+        (4, 8),
+        (batch, kv),
+        ((0, 4), (1, 8)),
+        ((0, sympy.floor(core_id / 8)), (1, sympy.Mod(core_id, 8))),
+        32,
+    )
+
+    assert selected is not None
+    assert [
+        (
+            int(selected.core_id_to_work_slice[batch].subs(core_id, core)),
+            int(selected.core_id_to_work_slice[kv].subs(core_id, core)),
+        )
+        for core in range(32)
+    ] == [(core // 8, core % 8) for core in range(32)]
+
+
 def test_late_partition_mapping_repeats_contiguous_owners():
     head = sympy.Symbol("head")
     mapping = derive_partition_mapping((head,), (4,), 32)
     assert _mapping_coordinates(mapping, (head,), 32) == [
         (core // 8,) for core in range(32)
     ]
+
+
+def test_partition_selection_rejects_ambiguous_owner_orders():
+    first, second = sympy.symbols("first second")
+
+    assert (
+        select_unique_partition_division(
+            (first, second),
+            {first: 2, second: 2},
+            4,
+            lambda _candidate: True,
+        )
+        is None
+    )
 
 
 def _canonical_division(extents, splits, num_cores):
@@ -228,47 +269,6 @@ def _canonical_division(extents, splits, num_cores):
         num_cores,
     )
     return TensorWorkDivision(dict(splits), mapping, num_cores=num_cores)
-
-
-def test_exact_fused_axis_projection_accepts_k_4_by_8():
-    fused = sympy.Symbol("fused")
-    division = _canonical_division({fused: 32}, {fused: 32}, 32)
-    core_id = sympy.Symbol("core_id")
-
-    assert work_division_matches_physical_ownership(
-        division,
-        {fused: 32},
-        (4, 8),
-        (sympy.floor(fused / 8), sympy.Mod(fused, 8)),
-        ((0, 4), (1, 8)),
-        ((0, sympy.floor(core_id / 8)), (1, sympy.Mod(core_id, 8))),
-        32,
-    )
-
-
-def test_exact_fused_axis_projection_accepts_v_with_replication():
-    fused, feature = sympy.symbols("fused feature")
-    division = _canonical_division(
-        {fused: 32, feature: 16},
-        {fused: 8, feature: 2},
-        32,
-    )
-    core_id = sympy.Symbol("core_id")
-    fused_slot = sympy.Mod(sympy.floor(core_id / 2), 8)
-
-    assert work_division_matches_physical_ownership(
-        division,
-        {fused: 32, feature: 16},
-        (4, 8, 16),
-        (sympy.floor(fused / 8), sympy.Mod(fused, 8), feature),
-        ((0, 4), (1, 2), (2, 2)),
-        (
-            (0, sympy.floor(fused_slot / 2)),
-            (1, sympy.Mod(fused_slot, 2)),
-            (2, sympy.Mod(sympy.floor(core_id / 16), 2)),
-        ),
-        32,
-    )
 
 
 def test_exact_fused_axis_projection_rejects_disjoint_2_by_2_regions():
@@ -1119,6 +1119,45 @@ def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contig
     assert dict(planner_view.core_to_slot) == sdsc_output_mapping
 
 
+def test_planner_view_uses_committed_owner_order():
+    kv, batch = sympy.symbols("kv batch")
+    core_id = sympy.Symbol("core_id")
+    prep = pass_utils_module._ViewPrep(
+        iter_space={kv: 8, batch: 4},
+        write_index=8 * batch + kv,
+        read_index=8 * batch + kv,
+        dep_coeff={kv: 1, batch: 8},
+        dep_device_coordinates=(batch, kv),
+        device_size=[4, 8],
+        stride_map=[8, 1],
+        elems_per_stick=1,
+        device_stride_to_dim={8: 0, 1: 1},
+        stick_host_stride=None,
+        num_stick_dim=None,
+        num_stick=0,
+        num_stick_stride=0,
+        is_matmul=False,
+    )
+    ownership = TensorWorkDivision(
+        {kv: 8, batch: 4},
+        {kv: sympy.Mod(core_id, 8), batch: sympy.floor(core_id / 8)},
+        num_cores=32,
+    )
+
+    view, partial, representable = pass_utils_module._per_core_view_from_prep(
+        prep,
+        ownership.work_slices,
+        ownership=ownership,
+    )
+
+    assert representable
+    assert not partial
+    assert dict(view.core_to_slot) == {
+        0: sympy.floor(core_id / 8),
+        1: sympy.Mod(core_id, 8),
+    }
+
+
 def test_flattened_iteration_span_is_not_a_single_axis_view():
     heads, flat = sympy.symbols("heads flat")
     prep = pass_utils_module._ViewPrep(
@@ -1314,6 +1353,102 @@ def test_fused_split_view_is_gated_and_preserves_exact_owner_order(monkeypatch):
             num_cores=32,
         )
     )
+
+
+def test_fused_split_view_accepts_v_complete_owned_tuple(monkeypatch):
+    query, fused, feature = sympy.symbols("query fused feature")
+    core_id = sympy.Symbol("core_id")
+    prep = pass_utils_module._ViewPrep(
+        iter_space={query: 2, fused: 32, feature: 16},
+        write_index=16 * fused + feature,
+        read_index=16 * fused + feature,
+        dep_coeff={query: 0, fused: 16, feature: 1},
+        dep_device_coordinates=(
+            sympy.floor(fused / 8),
+            sympy.Mod(fused, 8),
+            feature,
+        ),
+        device_size=[4, 8, 16],
+        stride_map=[-1, -1, 1],
+        elems_per_stick=1,
+        device_stride_to_dim={1: 2},
+        stick_host_stride=1,
+        num_stick_dim=2,
+        num_stick=16,
+        num_stick_stride=1,
+        is_matmul=True,
+    )
+    ownership = TensorWorkDivision(
+        {query: 2, fused: 8, feature: 2},
+        {
+            query: sympy.Mod(core_id, 2),
+            fused: sympy.Mod(sympy.floor(core_id / 2), 8),
+            feature: sympy.floor(core_id / 16),
+        },
+        num_cores=32,
+    )
+
+    monkeypatch.setattr(pass_utils_module.config, "lx_fused_split_views", True)
+    view, partial, representable = pass_utils_module._per_core_view_from_prep(
+        prep,
+        ownership.work_slices,
+        ownership=ownership,
+    )
+
+    fused_slot = sympy.Mod(sympy.floor(core_id / 2), 8)
+    assert representable
+    assert not partial
+    assert view.same_partition(
+        PerCoreView(
+            ((0, 4), (1, 2), (2, 2)),
+            (
+                (0, sympy.floor(fused_slot / 2)),
+                (1, sympy.Mod(fused_slot, 2)),
+                (2, sympy.floor(core_id / 16)),
+            ),
+            num_cores=32,
+        )
+    )
+
+
+def test_fused_split_view_rejects_nonowned_axis_interleaving(monkeypatch):
+    query, fused = sympy.symbols("query fused")
+    core_id = sympy.Symbol("core_id")
+    prep = pass_utils_module._ViewPrep(
+        iter_space={query: 4, fused: 32},
+        write_index=fused,
+        read_index=fused,
+        dep_coeff={query: 0, fused: 1},
+        dep_device_coordinates=(sympy.floor(fused / 8), sympy.Mod(fused, 8)),
+        device_size=[4, 8],
+        stride_map=[-1, -1],
+        elems_per_stick=64,
+        device_stride_to_dim={},
+        stick_host_stride=None,
+        num_stick_dim=None,
+        num_stick=0,
+        num_stick_stride=0,
+        is_matmul=True,
+    )
+    ownership = TensorWorkDivision(
+        {query: 4, fused: 8},
+        {
+            query: sympy.floor(core_id / 8),
+            fused: sympy.Mod(core_id, 8),
+        },
+        num_cores=32,
+    )
+
+    monkeypatch.setattr(pass_utils_module.config, "lx_fused_split_views", True)
+    view, partial, representable = pass_utils_module._per_core_view_from_prep(
+        prep,
+        ownership.work_slices,
+        ownership=ownership,
+    )
+
+    assert not representable
+    assert not partial
+    assert not view.work_slice_dims
 
 
 def _prepare_compound_axis_view(iter_space, index, repeat_info=None):

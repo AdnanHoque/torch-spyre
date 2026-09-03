@@ -705,7 +705,12 @@ def test_grouped_gather_can_contract_two_dimensions():
         num_cores=32,
     )
 
-    classified = lx_relayout_module.classify_relayout_views(source, destination, 32)
+    # Exercise the gather certifier directly.  The unrestricted lowering
+    # selector prefers the more specific gather-plus-broadcast certificate
+    # whenever both match the same owner maps.
+    classified = lx_relayout_module.classify_relayout_views(
+        source, destination, 32, allowed_kinds=("gather",)
+    )
 
     assert classified is not None and classified[0] == "gather"
     assert {
@@ -740,6 +745,71 @@ def test_gather_broadcast_uses_the_complete_owner_maps():
     edges = lx_relayout_module._transfer_edges(source, destination, 32, 32)
     assert {sum(dst == core for _, dst in edges) for core in range(32)} == {32}
     assert {sum(src == core for src, _ in edges) for core in range(32)} == {32}
+
+
+def test_planner_prefers_gather_broadcast_over_overlapping_gather_certificate():
+    m, n = Symbol("m"), Symbol("n")
+    source_view = PerCoreView(
+        ((0, 4), (1, 8)),
+        ((0, floor(_CORE_ID / 8)), (1, Mod(_CORE_ID, 8))),
+        num_cores=32,
+    )
+    destination_view = PerCoreView(
+        ((0, 2), (1, 4)),
+        ((0, floor(_CORE_ID / 16)), (1, Mod(floor(_CORE_ID / 4), 4))),
+        num_cores=32,
+    )
+    source_dep = SimpleNamespace(name="source", is_indirect=lambda: False)
+    weight_dep = SimpleNamespace(name="weight", is_indirect=lambda: False)
+    producer = SimpleNamespace(
+        layout=SimpleNamespace(device_layout=SimpleNamespace(device_size=(4, 8))),
+        data=SimpleNamespace(),
+        get_name=lambda: "source",
+    )
+    consumer = SimpleNamespace(
+        layout=SimpleNamespace(),
+        data=SimpleNamespace(),
+        get_name=lambda: "consumer",
+    )
+    graph = SimpleNamespace(operations=[producer, consumer])
+
+    def read_writes(op):
+        if op is producer:
+            return SimpleNamespace(reads=[], writes=[source_dep])
+        return SimpleNamespace(reads=[source_dep, weight_dep], writes=[])
+
+    with (
+        mock_patch.object(lx_relayout_module, "MemoryDep", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "ComputedBuffer", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "FixedTiledLayout", SimpleNamespace),
+        mock_patch.object(
+            lx_relayout_module, "op_read_writes", side_effect=read_writes
+        ),
+        mock_patch.object(
+            lx_relayout_module,
+            "_per_core_view_on_buf",
+            side_effect=[
+                (source_view, False, True),
+                (destination_view, False, True),
+            ],
+        ),
+        mock_patch.object(lx_relayout_module, "_op_num_cores", return_value=32),
+        mock_patch.object(
+            lx_relayout_module, "_is_matmul_op", side_effect=lambda op: op is consumer
+        ),
+        mock_patch.object(
+            lx_relayout_module, "try_device_coordinates", return_value=(m, n)
+        ),
+        mock_patch.object(
+            lx_relayout_module, "iteration_space_from_op", return_value={m: 4, n: 8}
+        ),
+        mock_patch.object(lx_relayout_module, "is_restickify_op", return_value=False),
+        mock_patch.object(lx_relayout_module, "partition_footprint", return_value=128),
+    ):
+        plans = lx_relayout_module.collect_lx_relayout_plans(graph)
+
+    assert len(plans) == 1
+    assert plans[0].kind == "gather_broadcast"
 
 
 def test_fused_physical_axes_project_to_one_loop_division():

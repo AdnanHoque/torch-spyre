@@ -691,6 +691,10 @@ Environment Variables
      - Permute physical core IDs at SDSC emission so K-collaborator cores
        sit on adjacent ring positions, reducing PSUM chain hops (default
        ``1``)
+   * - ``SPYRE_LX_FUSED_SPLIT_VIEWS``
+     - Experimental: allow the LX ownership proof to express one loop split
+       across several physical tensor dimensions (default ``0``). Unsupported
+       or ambiguous ownership remains in HBM.
    * - ``BUNDLE_SYMBOLIC_ARGS``
      - Emit LPDDR5 tensor addresses as runtime symbols rather than baked
        integers (default ``1``)

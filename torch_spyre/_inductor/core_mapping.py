@@ -19,11 +19,11 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
-from itertools import permutations, product
-from numbers import Integral
-from typing import TYPE_CHECKING
+from itertools import permutations
+from numbers import Integral, product
+from typing import TYPE_CHECKING, Callable
 
-from sympy import Expr, Integer, Mod, Symbol, floor, sympify
+from sympy import Expr, Integer, Mod, Symbol, floor, lambdify, sympify
 
 from .constants import BYTES_PER_STICK
 from .op_spec import TensorWorkDivision
@@ -340,6 +340,7 @@ def decompose_fused_split_view(
     fused_symbol: Symbol,
     fused_split: int,
     fused_slot_expr: Expr,
+    tensor_ownership: TensorWorkDivision,
     loop_extents: Mapping[Symbol, int],
     device_size: Sequence[int],
     device_coordinates: Sequence[Expr],
@@ -381,16 +382,28 @@ def decompose_fused_split_view(
         if fused_slot_expr.free_symbols - {core_id}:
             return None
 
-        # Replicated fused partitions must use the same contiguous owner groups
-        # as the canonical tensor-division contract. Interleaved groups are a
-        # different ownership representation and remain fail-closed.
-        canonical_slot = derive_partition_mapping(
-            (fused_symbol,), (fused_split,), num_cores
-        )[fused_symbol]
-        if any(
-            sympify(fused_slot_expr.subs(core_id, core))
-            != sympify(canonical_slot.subs(core_id, core))
-            for core in range(num_cores)
+        # Judge broadcast multiplicity using the complete tuple of tensor-owned
+        # axes. A V page, for example, is owned by (batch x KV-head, D): either
+        # axis alone looks repeated in non-contiguous groups, while the pair is
+        # one canonical 16-owner partition broadcast to the two query groups.
+        # Operation axes absent from this tensor are deliberately excluded, so
+        # truly interleaved broadcast groups still require a richer ownership
+        # model and remain fail-closed.
+        if (
+            int(tensor_ownership.work_slices.get(fused_symbol, 1)) != fused_split
+            or tensor_ownership.physical_core_count != num_cores
+            or not core_mappings_equal(
+                {fused_symbol: tensor_ownership.core_id_to_work_slice[fused_symbol]},
+                {fused_symbol: fused_slot_expr},
+                num_cores,
+            )
+            or select_unique_partition_division(
+                tuple(tensor_ownership.work_slices),
+                tensor_ownership.work_slices,
+                num_cores,
+                tensor_ownership.same_ownership,
+            )
+            is None
         ):
             return None
 
@@ -513,6 +526,87 @@ def decompose_fused_split_view(
         return None
     except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return None
+
+
+def select_partition_division_matching_physical_ownership(
+    dimensions: Sequence[Symbol],
+    work_slices: Mapping[Symbol, int],
+    loop_extents: Mapping[Symbol, int],
+    device_size: Sequence[int],
+    device_coordinates: Sequence[Expr],
+    physical_splits: Sequence[tuple[int, int]],
+    physical_core_to_slot: Sequence[tuple[int, Expr]],
+    num_cores: int,
+) -> TensorWorkDivision | None:
+    """Return the unique canonical dimension order matching a physical view."""
+
+    return select_unique_partition_division(
+        dimensions,
+        work_slices,
+        num_cores,
+        lambda candidate: work_division_matches_physical_ownership(
+            candidate,
+            loop_extents,
+            device_size,
+            device_coordinates,
+            physical_splits,
+            physical_core_to_slot,
+            num_cores,
+        ),
+    )
+
+
+def select_unique_partition_division(
+    dimensions: Sequence[Symbol],
+    work_slices: Mapping[Symbol, int],
+    num_cores: int,
+    matches: Callable[[TensorWorkDivision], bool],
+) -> TensorWorkDivision | None:
+    """Return the sole standard dimension order accepted by ``matches``.
+
+    This bounded search only tries mappings produced by the existing canonical
+    partition generator. The caller supplies the exact ownership proof; two
+    distinct accepted owner maps are ambiguity and fail closed.
+    """
+
+    split_by_dim = {
+        dim: int(work_slices[dim])
+        for dim in dimensions
+        if int(work_slices.get(dim, 1)) > 1
+    }
+    if set(split_by_dim) != {
+        dim for dim, split in work_slices.items() if int(split) > 1
+    }:
+        return None
+    split_dims = tuple(split_by_dim)
+    if not split_dims or len(split_dims) > _MAX_OWNER_PERMUTATION_DIMS:
+        return None
+
+    # Mapping order and field order are separate. Keep the caller's field order
+    # stable while trying the bounded set of canonical owner formulas.
+    candidate_splits = {dim: int(split) for dim, split in work_slices.items()}
+    accepted: list[TensorWorkDivision] = []
+    for order in permutations(split_dims):
+        try:
+            mapping = derive_partition_mapping(
+                order,
+                tuple(split_by_dim[dim] for dim in order),
+                num_cores,
+            )
+            candidate = TensorWorkDivision(
+                candidate_splits,
+                {dim: mapping.get(dim, Integer(0)) for dim in candidate_splits},
+                num_cores=num_cores,
+            )
+        except ValueError:
+            continue
+        if matches(candidate) and not any(
+            previous.same_ownership(candidate) for previous in accepted
+        ):
+            accepted.append(candidate)
+            if len(accepted) > 1:
+                return None
+    return accepted[0] if accepted else None
 
 
 def core_to_slice_mapping(

@@ -32,9 +32,8 @@ from torch_spyre._C import ElementArrangement
 
 from .. import config
 from ..core_mapping import (
-    derive_partition_mapping,
     partition_physical_span_bytes,
-    work_division_matches_physical_ownership,
+    select_partition_division_matching_physical_ownership,
 )
 from ..ir import FixedTiledLayout
 from ..logging_utils import get_inductor_logger
@@ -164,38 +163,21 @@ def work_division_from_view(
 
     if fused_loops:
         dimensions = tuple(dim for dim in iteration_space if dim in splits)
-        # ``finalize_tensor_work_divisions`` regenerates ownership in mapping
-        # order.  Store the split mapping in the same iteration-space order as
-        # this candidate so finalization recreates the ownership proved below,
-        # even when physical device dimensions appear in a different order.
-        ordered_splits = {dim: splits[dim] for dim in dimensions}
-        try:
-            candidate = TensorWorkDivision(
-                ordered_splits,
-                derive_partition_mapping(
-                    dimensions,
-                    tuple(ordered_splits.values()),
-                    view.num_cores,
-                ),
-                num_cores=view.num_cores,
-            )
-        except ValueError as exc:
-            raise ValueError(
-                f"conflicting ownership for loop {fused_loops[0]}"
-            ) from exc
         loop_extents = {
             dim: value[0] if isinstance(value, tuple) else value
             for dim, value in iteration_space.items()
         }
-        if not work_division_matches_physical_ownership(
-            candidate,
+        candidate = select_partition_division_matching_physical_ownership(
+            dimensions,
+            splits,
             loop_extents,
             device_size,
             device_coordinates,
             view.work_slice_dims,
             view.core_to_slot,
             view.num_cores,
-        ):
+        )
+        if candidate is None:
             raise ValueError(f"conflicting ownership for loop {fused_loops[0]}")
         return candidate
     return TensorWorkDivision(splits, core_map, num_cores=view.num_cores)
@@ -664,7 +646,7 @@ _LOWERING_CERTIFIERS = {
 }
 # More than one certifier may recognize a future transfer.  This order chooses
 # one stable lowering only after every surviving fast path agrees on the edges.
-_LOWERING_PRIORITY = ("broadcast", "gather", "gather_broadcast", "shuffle")
+_LOWERING_PRIORITY = ("broadcast", "gather_broadcast", "gather", "shuffle")
 
 
 def classify_relayout_views(

@@ -3148,10 +3148,12 @@ def _per_core_view_from_prep(
     # has_partial_reduction flag is op-level -- set whenever the op has any
     # reduction-axis split -- and is independent of which dep we're inspecting.
     splits_by_stride: dict[int, tuple[int, "sympy.Symbol"]] = {}
+    tensor_owned_split_symbols: set[sympy.Symbol] = set()
     for sym, split in per_sym.items():
         host_stride = prep.dep_coeff.get(sym, 0)
         if split <= 1 or host_stride == 0:
             continue
+        tensor_owned_split_symbols.add(sym)
         splits_by_stride[host_stride] = (int(split), sym)
 
     device_size = prep.device_size
@@ -3355,10 +3357,19 @@ def _per_core_view_from_prep(
                     for dim, extent in iter_space.items()
                 }
                 if mapping is not None and sym in mapping:
+                    tensor_owned_dimensions = tuple(
+                        dim for dim in iter_space if dim in tensor_owned_split_symbols
+                    )
+                    tensor_ownership = TensorWorkDivision(
+                        {dim: int(per_sym[dim]) for dim in tensor_owned_dimensions},
+                        {dim: mapping[dim] for dim in tensor_owned_dimensions},
+                        num_cores=num_cores,
+                    )
                     decomposed = decompose_fused_split_view(
                         sym,
                         split,
                         mapping[sym],
+                        tensor_ownership,
                         loop_extents,
                         device_size,
                         prep.dep_device_coordinates,
