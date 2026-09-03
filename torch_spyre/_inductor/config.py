@@ -71,6 +71,16 @@ lx_planner_relayout: bool = _get_env_bool("SPYRE_LX_PLANNER_RELAYOUT", True)
 # path remains unchanged.
 lx_fused_split_views: bool = _get_env_bool("SPYRE_LX_FUSED_SPLIT_VIEWS", False)
 
+# Experimental: choose a producer's canonical owner order only when that makes
+# a complete relayout group expressible in every consumer's loop space.
+lx_consumer_anchored_ordering: bool = _get_env_bool(
+    "SPYRE_LX_CONSUMER_ANCHORED_ORDERING", False
+)
+
+# Experimental: allow restickify operands to remain in LX only after exact
+# physical ownership proves each reader consumes the same core's input slice.
+lx_restickify_residency: bool = _get_env_bool("SPYRE_LX_RESTICKIFY_RESIDENCY", False)
+
 allow_all_ops_in_lx_planning: bool = False
 
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))

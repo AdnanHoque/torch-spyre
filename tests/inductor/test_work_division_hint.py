@@ -67,6 +67,7 @@ from torch_spyre._inductor.op_spec import (
     TensorWorkDivision,
 )
 from torch_spyre._inductor.pass_utils import PerCoreView
+import torch_spyre._inductor.scratchpad.allocator as allocator_module
 from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
 from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
@@ -640,6 +641,144 @@ def _relayout_plan(source="source", consumers="consumer"):
     if isinstance(consumers, str):
         consumers = (consumers,)
     return LXRelayoutPlan(source, consumers, _SOURCE_VIEW, _DESTINATION_VIEW, 8)
+
+
+def test_consumer_anchoring_commits_the_unique_accepted_owner_order():
+    kv, batch = Symbol("kv"), Symbol("batch")
+    producer = SimpleNamespace(
+        iteration_space_ownership=TensorWorkDivision(
+            {kv: 8, batch: 4},
+            {kv: floor(_CORE_ID / 4), batch: Mod(_CORE_ID, 4)},
+            num_cores=32,
+        ),
+        get_name=lambda: "source",
+    )
+    graph = SimpleNamespace(operations=[producer])
+
+    def collect(_graph, **kwargs):
+        if overrides := kwargs.get("ownership_overrides"):
+            candidate = overrides["source"]
+            owners = [
+                int(candidate.core_id_to_work_slice[kv].subs(_CORE_ID, core))
+                for core in range(32)
+            ]
+            return [object()] if owners == [core % 8 for core in range(32)] else []
+        kwargs["unprojectable_sources"].append("source")
+        return []
+
+    with (
+        config.patch(
+            {
+                "lx_consumer_anchored_ordering": True,
+                "lx_planner_relayout": True,
+                "co_optimizing_lx_planning": False,
+                "ktir_emitter": False,
+            }
+        ),
+        mock_patch.object(lx_relayout_module, "ComputedBuffer", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "_is_matmul_op", return_value=False),
+        mock_patch.object(
+            lx_relayout_module,
+            "iteration_space_from_op",
+            return_value={kv: 8, batch: 4},
+        ),
+        mock_patch.object(
+            lx_relayout_module,
+            "op_read_writes",
+            return_value=SimpleNamespace(writes=(), reads=()),
+        ),
+        mock_patch.object(
+            lx_relayout_module,
+            "commit_tensor_work_division",
+            side_effect=lambda op, division: setattr(
+                op, "iteration_space_ownership", division
+            ),
+        ),
+        mock_patch.object(
+            lx_relayout_module, "collect_lx_relayout_plans", side_effect=collect
+        ),
+    ):
+        lx_relayout_module.anchor_lx_relayout_ownership(graph)
+
+    committed = producer.iteration_space_ownership
+    assert [
+        int(committed.core_id_to_work_slice[kv].subs(_CORE_ID, core))
+        for core in range(32)
+    ] == [core % 8 for core in range(32)]
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"lx_consumer_anchored_ordering": False},
+        {"lx_planner_relayout": False},
+        {"co_optimizing_lx_planning": True},
+        {"ktir_emitter": True},
+    ],
+)
+def test_consumer_anchoring_is_inert_without_supported_planner(settings):
+    defaults = {
+        "lx_consumer_anchored_ordering": True,
+        "lx_planner_relayout": True,
+        "co_optimizing_lx_planning": False,
+        "ktir_emitter": False,
+    }
+    with (
+        config.patch(defaults | settings),
+        mock_patch.object(lx_relayout_module, "collect_lx_relayout_plans") as collect,
+    ):
+        lx_relayout_module.anchor_lx_relayout_ownership(SimpleNamespace(operations=[]))
+
+    collect.assert_not_called()
+
+
+def test_restickify_lx_read_requires_the_same_physical_owners():
+    allocator = ScratchpadAllocator(GreedyLayoutSolver, 256)
+    expected = PerCoreView(((0, 8),), ((0, Mod(_CORE_ID, 8)),), num_cores=8)
+    wrong = PerCoreView(((0, 8),), ((0, Mod(_CORE_ID + 1, 8)),), num_cores=8)
+    producer = SimpleNamespace(name="source", get_name=lambda: "source")
+    restickify = SimpleNamespace(name="restickify", get_name=lambda: "restickify")
+    graph = SimpleNamespace(operations=[producer, restickify])
+    write = SimpleNamespace(name="source", is_indirect=lambda: False)
+    read = SimpleNamespace(name="source", is_indirect=lambda: False)
+
+    def read_writes(op):
+        if op is producer:
+            return SimpleNamespace(reads=[], writes=[write])
+        return SimpleNamespace(reads=[read], writes=[])
+
+    def prove(write_view, plans=(), *, enabled=True, structural_restickify=True):
+        with (
+            config.patch({"lx_restickify_residency": enabled}),
+            mock_patch.object(
+                allocator_module,
+                "is_restickify_op",
+                return_value=structural_restickify,
+            ),
+            mock_patch.object(allocator_module, "ComputedBuffer", SimpleNamespace),
+            mock_patch.object(allocator_module, "MemoryDep", SimpleNamespace),
+            mock_patch.object(
+                allocator_module, "op_read_writes", side_effect=read_writes
+            ),
+            mock_patch.object(
+                allocator_module,
+                "_per_core_view_on_buf",
+                side_effect=lambda op, *_args: (
+                    write_view if op is producer else expected,
+                    False,
+                    True,
+                ),
+            ),
+        ):
+            return allocator._restickify_barrier(
+                graph, "source", [1], lx_relayout_plans=plans
+            )
+
+    assert prove(expected, enabled=False, structural_restickify=False) is None
+    assert prove(expected, enabled=False) == "read by restickify (cross-frame barrier)"
+    assert prove(expected) is None
+    assert prove(wrong) == "read by restickify (local-read proof failed)"
+    assert prove(wrong, [_relayout_plan("source", "restickify")]) is None
 
 
 def test_lx_relayout_kinds_share_one_edge_derivation():

@@ -695,6 +695,12 @@ Environment Variables
      - Experimental: allow the LX ownership proof to express one loop split
        across several physical tensor dimensions (default ``0``). Unsupported
        or ambiguous ownership remains in HBM.
+   * - ``SPYRE_LX_CONSUMER_ANCHORED_ORDERING``
+     - Experimental: change a producer's core order only when one unique order
+       makes its complete relayout group valid (default ``0``).
+   * - ``SPYRE_LX_RESTICKIFY_RESIDENCY``
+     - Experimental: keep a restickify input in LX only when exact ownership
+       proves that every read stays on the same core (default ``0``).
    * - ``BUNDLE_SYMBOLIC_ARGS``
      - Emit LPDDR5 tensor addresses as runtime symbols rather than baked
        integers (default ``1``)

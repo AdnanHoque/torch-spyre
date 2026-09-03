@@ -49,6 +49,7 @@ from torch_spyre._inductor.pass_utils import (
     op_read_writes,
     _prepare_per_core_view,
     _per_core_view_from_prep,
+    _per_core_view_on_buf,
     _is_matmul_op,
     op_short_name,
 )
@@ -103,6 +104,7 @@ from torch_spyre._inductor.ir import FixedTiledLayout, SpyreEmptyFallback
 from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.loop_info import CarriedReductionRecord
+from torch_spyre._inductor.padding import is_restickify_op
 from torch_spyre._inductor.scratchpad.lx_relayout import (
     LXRelayoutPlan,
     collect_lx_relayout_plans,
@@ -460,6 +462,7 @@ class ScratchpadAllocator:
         division_is_fixed: bool,
         buf_user_deps: dict[str, list[tuple[Operation, MemoryDep]]],
         planned_lx_buffers: frozenset[str] = frozenset(),
+        lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
     ) -> Optional[str]:
         """The first check ``name`` fails, or ``None`` if it clears them all.
 
@@ -508,7 +511,9 @@ class ScratchpadAllocator:
             # (_is_read_advancing_anywhere, e.g. a fixed-write full buffer
             # copied into a nested tile every outer iteration).
             return "tiled (advancing)"
-        restickify = self._restickify_barrier(graph, name, uses)
+        restickify = self._restickify_barrier(
+            graph, name, uses, lx_relayout_plans=lx_relayout_plans
+        )
         if restickify is not None:
             return restickify
         if _extern_kernel_in_live_range(graph, uses):
@@ -549,6 +554,7 @@ class ScratchpadAllocator:
         ncores: Optional[dict[str, int]] = None,
         ncores_reasons: Optional[dict[str, str]] = None,
         division_is_fixed: bool,
+        lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
     ) -> Optional[str]:
         """The residency verdict for a *graph input*, which is pinned by cloning
         it into LX rather than by placing it directly.
@@ -578,7 +584,9 @@ class ScratchpadAllocator:
             return "use is not rewritable to the clone"
         if buffer_not_read_in_full(graph, name):
             return "partial/offset read"
-        restickify = self._restickify_barrier(graph, name, uses)
+        restickify = self._restickify_barrier(
+            graph, name, uses, lx_relayout_plans=lx_relayout_plans
+        )
         if restickify is not None:
             return restickify
         if division_is_fixed and (ncores or {}).get(name, -1) < 0:
@@ -598,6 +606,7 @@ class ScratchpadAllocator:
         ncores: Optional[dict[str, int]] = None,
         ncores_reasons: Optional[dict[str, str]] = None,
         planned_lx_buffers: frozenset[str] = frozenset(),
+        lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
     ) -> dict[str, Optional[str]]:
         """:meth:`_buffer_residency_reason` over ``names``, as ``name -> reason``.
 
@@ -643,6 +652,7 @@ class ScratchpadAllocator:
                 division_is_fixed=division_is_fixed,
                 buf_user_deps=buf_user_deps,
                 planned_lx_buffers=planned_lx_buffers,
+                lx_relayout_plans=lx_relayout_plans,
             )
             for name in names
         }
@@ -665,7 +675,12 @@ class ScratchpadAllocator:
         return []
 
     def _restickify_barrier(
-        self, graph: GraphLowering, name: str, uses: Sequence[int]
+        self,
+        graph: GraphLowering,
+        name: str,
+        uses: Sequence[int],
+        *,
+        lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
     ) -> Optional[str]:
         """The ``residency_reason`` for a buffer a restickify *reads*, else ``None``.
 
@@ -675,18 +690,90 @@ class ScratchpadAllocator:
         it only bites when the input is core-sliced in LX -- so only a buffer a
         restickify reads is barred. The restickify's own output (the use whose op
         *is* this buffer's producer) is a normal core-local write and takes the
-        ordinary residency path. Mirrors
-        ``CoOptimizingAllocator._residency_reason``'s restickify guard so both
-        allocators bar the same buffers; only :class:`CpSatLayoutSolver` acts on
-        it, the gap heuristics ignore ``residency_reason``.
+        ordinary residency path. ``is_restickify_op`` shares the coordinate
+        predicate used by codegen, so residency never depends on an operation's
+        display name. Both placement and joint allocators use this gate; the
+        joint solver still checks the selected producer/consumer views before
+        allowing residency.
         """
-        if any(
-            graph.operations[u].name != name
-            and self._get_op_name(graph.operations[u]) == "restickify"
+        readers = [
+            graph.operations[u]
             for u in uses
-        ):
+            if graph.operations[u].name != name
+            and is_restickify_op(graph.operations[u], graph)
+        ]
+        if not readers:
+            return None
+        if not config.lx_restickify_residency:
             return "read by restickify (cross-frame barrier)"
-        return None
+        if all(
+            self._restickify_read_is_core_local(
+                graph,
+                name,
+                reader,
+                lx_relayout_plans=lx_relayout_plans,
+            )
+            for reader in readers
+        ):
+            return None
+        return "read by restickify (local-read proof failed)"
+
+    def _restickify_read_is_core_local(
+        self,
+        graph: GraphLowering,
+        name: str,
+        reader: Operation,
+        *,
+        lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
+    ) -> bool:
+        """Whether ``reader`` consumes exactly ``name``'s same-core slice.
+
+        The proof compares complete physical owner maps. A relayout destination
+        is synthetic until allocation commits, so in that case the plan's
+        certified destination view is the ownership the private copy provides.
+        """
+
+        reads = [
+            dep
+            for dep in op_read_writes(reader).reads
+            if isinstance(dep, MemoryDep) and dep.name == name
+        ]
+        if len(reads) != 1 or reads[0].is_indirect():
+            return False
+        read_view, partial, representable = _per_core_view_on_buf(
+            reader, reads[0], name
+        )
+        if partial or not representable:
+            return False
+
+        planned_views = [
+            plan.destination_view
+            for plan in lx_relayout_plans
+            if plan.source_name == name and reader.get_name() in plan.consumer_names
+        ]
+        if planned_views:
+            return all(
+                read_view.same_partition(planned_view) for planned_view in planned_views
+            )
+
+        producer = next((op for op in graph.operations if op.get_name() == name), None)
+        if not isinstance(producer, ComputedBuffer):
+            return False
+        writes = [
+            dep
+            for dep in op_read_writes(producer).writes
+            if isinstance(dep, MemoryDep) and dep.name == name
+        ]
+        if len(writes) != 1 or writes[0].is_indirect():
+            return False
+        write_view, write_partial, write_representable = _per_core_view_on_buf(
+            producer, writes[0], name
+        )
+        return (
+            not write_partial
+            and write_representable
+            and write_view.same_partition(read_view)
+        )
 
     def _build_bound_buffers(
         self,
@@ -996,6 +1083,7 @@ class ScratchpadAllocator:
             ncores=ncores,
             ncores_reasons=ncores_reasons,
             planned_lx_buffers=planned_lx_buffers,
+            lx_relayout_plans=lx_relayout_plans,
         )
         in_place = self._determine_in_place(graph, mem_usage, lifetimes, reasons)
         buffers = self._build_bound_buffers(

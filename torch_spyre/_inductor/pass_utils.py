@@ -3420,6 +3420,8 @@ def _per_core_view_on_buf(
     dep: MemoryDep,
     buf_name: str,
     cache: Optional[dict] = None,
+    *,
+    ownership_override: TensorWorkDivision | None = None,
 ) -> tuple[PerCoreView, bool, bool]:
     """Build a PerCoreView describing how `op` slices `buf_name` via `dep`.
 
@@ -3445,7 +3447,7 @@ def _per_core_view_on_buf(
     ``ScratchpadAllocator._cd_parent_matches`` and ``get_ncores_for_buffers``
     share one cache across a producer and consumer of the same buffer).
     """
-    ownership = getattr(op, "iteration_space_ownership", None)
+    ownership = ownership_override or getattr(op, "iteration_space_ownership", None)
     splits = ownership.work_slices if ownership is not None else {}
     key = None
     if cache is not None:
