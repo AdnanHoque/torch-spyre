@@ -41,6 +41,7 @@ from torch_spyre._inductor.op_spec import (
     OpSpec,
     TensorArg,
     TensorWorkDivision,
+    LX_RELAYOUT_INFO_KEY,
     is_lx_relayout_identity,
 )
 from torch_spyre._inductor.pass_utils import PerCoreView, per_core_views_equal
@@ -327,7 +328,23 @@ def test_identity_with_equivalent_owner_spelling_is_not_a_relayout():
         ),
     )
 
-    assert not is_lx_relayout_identity("identity", (base, destination))
+    assert not is_lx_relayout_identity(
+        "identity", (base, destination), {LX_RELAYOUT_INFO_KEY: True}
+    )
+    different_destination = dataclasses.replace(
+        destination,
+        work_division=TensorWorkDivision(
+            {head: 4},
+            {head: sympy.floor(core_id / 2)},
+            num_cores=4,
+        ),
+    )
+    assert not is_lx_relayout_identity("identity", (base, different_destination), {})
+    assert is_lx_relayout_identity(
+        "identity",
+        (base, different_destination),
+        {LX_RELAYOUT_INFO_KEY: True},
+    )
 
 
 def test_late_mapping_rejects_geometry_that_does_not_fill_groups():
@@ -341,7 +358,7 @@ def test_late_mapping_rejects_geometry_that_does_not_fill_groups():
         )
 
 
-def test_final_tensor_ownership_is_derived_from_aligned_buffer_geometry():
+def test_final_tensor_ownership_preserves_committed_core_order():
     extra, shared = sympy.symbols("extra shared")
     core_id = sympy.Symbol("core_id")
     division = TensorWorkDivision(
@@ -358,7 +375,7 @@ def test_final_tensor_ownership_is_derived_from_aligned_buffer_geometry():
 
     assert finalized == TensorWorkDivision(
         {shared: 2},
-        {shared: sympy.Mod(sympy.floor(core_id / 2), 2)},
+        {shared: sympy.Mod(core_id, 2)},
         num_cores=4,
     )
 
@@ -367,7 +384,10 @@ def test_shared_lx_buffer_keeps_owners_across_different_operation_dims():
     producer_extra, producer_shared = sympy.symbols("producer_extra producer_shared")
     consumer_shared, consumer_extra = sympy.symbols("consumer_shared consumer_extra")
     core_id = sympy.Symbol("core_id")
-    owners = sympy.Mod(core_id, 2)
+    # The shared tensor owns contiguous two-core groups. That one physical
+    # order remains valid when producer and consumer spell their loops in a
+    # different order.
+    owners = sympy.floor(core_id / 2)
     producer_division = finalize_tensor_work_divisions(
         {producer_extra: (8, 2), producer_shared: (8, 2)},
         [
@@ -407,20 +427,37 @@ def test_shared_lx_buffer_keeps_owners_across_different_operation_dims():
     )
 
 
-def test_final_tensor_ownership_requires_a_buffer_core_domain():
+def test_final_tensor_ownership_makes_the_inferred_core_domain_explicit():
     shared = sympy.Symbol("shared")
     core_id = sympy.Symbol("core_id")
 
-    with pytest.raises(ValueError, match="physical core domain"):
-        finalize_tensor_work_divisions(
-            {shared: (8, 2)},
-            [
-                TensorWorkDivision(
-                    {shared: 2},
-                    {shared: sympy.Mod(core_id, 2)},
-                )
-            ],
-        )
+    (finalized,) = finalize_tensor_work_divisions(
+        {shared: (8, 2)},
+        [
+            TensorWorkDivision(
+                {shared: 2},
+                {shared: sympy.Mod(core_id, 2)},
+            )
+        ],
+    )
+
+    assert finalized is not None
+    assert finalized.num_cores == 2
+    assert finalized.core_id_to_work_slice == {shared: sympy.Mod(core_id, 2)}
+
+
+def test_operation_mapping_preserves_a_satisfying_default_map():
+    batch, head = sympy.symbols("batch head")
+    core_id = sympy.Symbol("core_id")
+    iteration_space = {batch: (8, 2), head: (16, 4)}
+    default = derive_core_mapping((batch, head), (2, 4), 8)
+    division = TensorWorkDivision(
+        {head: 4},
+        {head: sympy.Mod(sympy.floor(core_id / 2), 4)},
+        num_cores=8,
+    )
+
+    assert derive_operation_mapping(iteration_space, [division]) == default
 
 
 def test_operation_mapping_rejects_conflicting_lx_tensor_owners():

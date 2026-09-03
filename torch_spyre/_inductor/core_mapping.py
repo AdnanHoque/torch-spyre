@@ -19,10 +19,14 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from itertools import permutations
+from typing import TYPE_CHECKING
 
 from sympy import Expr, Integer, Mod, Symbol, floor, sympify
 
 from .op_spec import TensorWorkDivision
+
+if TYPE_CHECKING:
+    from .views import AlignmentInputs
 
 
 _MAX_OWNER_PERMUTATION_DIMS = 5
@@ -248,7 +252,7 @@ def finalize_tensor_work_divisions(
     iteration_space: Mapping[Symbol, tuple[Expr, int]],
     divisions: Sequence[TensorWorkDivision | None],
 ) -> tuple[TensorWorkDivision | None, ...]:
-    """Derive each tensor's owners from its final aligned partition."""
+    """Verify committed tensor owners in the final aligned iteration space."""
 
     result: list[TensorWorkDivision | None] = []
     for division in divisions:
@@ -266,22 +270,127 @@ def finalize_tensor_work_divisions(
                 f"tensor ownership dimensions are not aligned: {unknown_dims}"
             )
 
-        if division.num_cores is None:
+        try:
+            core_map = {dim: division.core_id_to_work_slice[dim] for dim in work_slices}
+        except KeyError as exc:
             raise ValueError(
-                "tensor ownership must carry its physical core domain before alignment"
-            )
-        result.append(
-            TensorWorkDivision(
-                work_slices,
-                derive_partition_mapping(
-                    tuple(work_slices),
-                    tuple(work_slices.values()),
-                    division.num_cores,
-                ),
-                num_cores=division.num_cores,
-            )
+                f"tensor ownership has no owner for {exc.args[0]}"
+            ) from exc
+        verified = TensorWorkDivision(
+            work_slices,
+            core_map,
+            num_cores=division.physical_core_count,
         )
+        verified.to_core_slices(verified.physical_core_count)
+        result.append(verified)
     return tuple(result)
+
+
+def operation_contiguous_dim(
+    iteration_space: Mapping[Symbol, tuple[Expr, int]],
+    *,
+    is_matmul: bool,
+    core_id_k_fast: bool,
+) -> Symbol | None:
+    """Return the one operation dimension selected to vary fastest by core."""
+
+    return (
+        next(reversed(iteration_space))
+        if iteration_space and is_matmul and core_id_k_fast
+        else None
+    )
+
+
+def _mapping_satisfies_division(
+    mapping: Mapping[Symbol, Expr],
+    division: TensorWorkDivision,
+    num_cores: int,
+) -> bool:
+    if division.physical_core_count != num_cores:
+        return False
+    split_dims = {dim for dim, split in division.work_slices.items() if int(split) > 1}
+    if not split_dims <= mapping.keys():
+        return False
+    try:
+        return core_mappings_equal(
+            {dim: mapping[dim] for dim in split_dims},
+            {dim: division.core_id_to_work_slice[dim] for dim in split_dims},
+            num_cores,
+        )
+    except KeyError:
+        return False
+
+
+def finalize_core_mapping_pure(
+    alignment_inputs: "AlignmentInputs",
+    tensor_divisions: Sequence[TensorWorkDivision | None],
+    *,
+    is_matmul: bool,
+    core_id_k_fast: bool,
+    is_relayout: bool,
+) -> tuple[
+    dict[Symbol, tuple[Expr, int]],
+    list[dict[str, list]],
+    tuple[TensorWorkDivision | None, ...],
+    dict[Symbol, Expr],
+    dict[Symbol, tuple[tuple[Symbol, int], ...]],
+]:
+    """Align tensors and adopt their committed physical ownership once.
+
+    The scheduler preflight and codegen call this same pure sequence. It may
+    translate dimension names, but it never chooses new owners for a buffer.
+    """
+
+    from .views import align_tensors_pure
+
+    aligned_space, tensors, dimension_remap = align_tensors_pure(alignment_inputs)
+    if len(tensor_divisions) != len(tensors):
+        raise ValueError(
+            "tensor division count does not match aligned tensor count: "
+            f"{len(tensor_divisions)} != {len(tensors)}"
+        )
+    remapped = tuple(
+        remap_work_division(division, dimension_remap) if division is not None else None
+        for division in tensor_divisions
+    )
+    divisions = finalize_tensor_work_divisions(aligned_space, remapped)
+    num_cores = math.prod(int(split) for _, split in aligned_space.values())
+
+    if is_relayout:
+        if len(divisions) != 2:
+            raise ValueError(
+                "LX relayout finalization requires source and destination ownership"
+            )
+        destination = divisions[-1]
+        if destination is None:
+            raise ValueError("LX relayout destination has no committed ownership")
+        mapping = dict(destination.core_id_to_work_slice)
+        if not _mapping_satisfies_division(mapping, destination, num_cores):
+            raise ValueError(
+                "LX relayout destination ownership does not define its operation map"
+            )
+        source = divisions[0]
+        if source is None or source.physical_core_count != num_cores:
+            raise ValueError("LX relayout source uses a different physical core domain")
+    else:
+        mapping = derive_operation_mapping(
+            aligned_space,
+            divisions,
+            contiguous_dim=operation_contiguous_dim(
+                aligned_space,
+                is_matmul=is_matmul,
+                core_id_k_fast=core_id_k_fast,
+            ),
+        )
+        for division in divisions:
+            if division is not None and not _mapping_satisfies_division(
+                mapping, division, num_cores
+            ):
+                raise ValueError(
+                    "final operation map does not reproduce committed LX ownership"
+                )
+
+    return aligned_space, tensors, divisions, mapping, dimension_remap
 
 
 def derive_operation_mapping(
@@ -327,6 +436,20 @@ def derive_operation_mapping(
             num_cores,
             contiguous_dim=contiguous_dim,
         )
+
+    # Preserve main's operation map whenever it already satisfies the physical
+    # tensor owners. The grouped search below is only needed when it does not.
+    default = derive_core_mapping(
+        dims,
+        splits,
+        num_cores,
+        contiguous_dim=contiguous_dim,
+    )
+    if all(
+        core_mappings_equal({dim: default[dim]}, {dim: expression}, num_cores)
+        for dim, expression in constrained.items()
+    ):
+        return default
 
     # Tensor-owned dimensions occupy the outer, contiguous groups. At most five
     # dimensions can be split on 32 cores, so trying their radix orders is small.
