@@ -29,6 +29,9 @@ from torch_spyre import _C
 from .constants import IDENTITY_OP
 
 
+LX_RELAYOUT_INFO_KEY = "lx_relayout_certified"
+
+
 class IndirectAccess(Function):
     """Sympy function: IndirectAccess(tensor_name) — runtime index read from that tensor at the current iteration point.
 
@@ -285,10 +288,19 @@ class TensorArg:
     work_division: TensorWorkDivision | None = None
 
 
-def is_lx_relayout_identity(op: str, args: Sequence[TensorArg]) -> bool:
-    """An LX identity whose input and output have different owners."""
+def is_lx_relayout_identity(
+    op: str,
+    args: Sequence[TensorArg],
+    op_info: dict[str, Any] | None = None,
+) -> bool:
+    """A planner-certified LX identity moving between different owners."""
 
-    if op != IDENTITY_OP or len(args) != 2:
+    if (
+        op != IDENTITY_OP
+        or len(args) != 2
+        or not op_info
+        or not op_info.get(LX_RELAYOUT_INFO_KEY)
+    ):
         return False
     source, destination = args
     return (

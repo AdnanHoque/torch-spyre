@@ -110,6 +110,21 @@ def materialized_lx_relayouts(
     return getattr(graph, _REGISTRY, {})
 
 
+def materialized_lx_relayout_for_destination(
+    graph: GraphLowering, destination_name: str
+) -> LXRelayoutPlan | None:
+    """Return the certified plan which created one destination copy."""
+
+    return next(
+        (
+            plan
+            for copy_name, plan in materialized_lx_relayouts(graph).values()
+            if copy_name == destination_name
+        ),
+        None,
+    )
+
+
 def _discard_lx_relayout_group(graph: GraphLowering, source_name: str) -> set[str]:
     copies = materialized_lx_relayouts(graph)
     removed = set()

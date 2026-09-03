@@ -49,7 +49,12 @@ from torch_spyre._inductor.scratchpad.lx_relayout import (
     LXRelayoutPlan,
     work_division_from_view,
 )
-from torch_spyre._inductor.op_spec import OpSpec, TensorArg, TensorWorkDivision
+from torch_spyre._inductor.op_spec import (
+    LX_RELAYOUT_INFO_KEY,
+    OpSpec,
+    TensorArg,
+    TensorWorkDivision,
+)
 from torch_spyre._inductor.pass_utils import PerCoreView
 from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
@@ -725,7 +730,13 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
             ),
         ),
     ]
-    spec = OpSpec(IDENTITY_OP, False, {n: (256, 8), m: (64, 1)}, args, {})
+    spec = OpSpec(
+        IDENTITY_OP,
+        False,
+        {n: (256, 8), m: (64, 1)},
+        args,
+        {LX_RELAYOUT_INFO_KEY: True},
+    )
     root, allocations = _compile_spec(spec)
     assert spec.op == IDENTITY_OP
     assert set(root["dscs_"][0]) == {"shuffle"}
@@ -736,8 +747,8 @@ def test_lx_relayout_normalizes_ownership_and_lowers_only_in_superdsc():
     ]
     assert root["numWkSlicesPerDim_"] == {"mb": 1, "x": 8, "out": 1}
     maps = [node["coordinates_"]["coreIdToWkSlice_"] for node in allocations]
-    assert [maps[0][str(i)]["x"] for i in range(8)] == [i % 4 for i in range(8)]
-    assert [maps[0][str(i)]["out"] for i in range(8)] == [i // 4 for i in range(8)]
+    assert [maps[0][str(i)]["x"] for i in range(8)] == [i // 2 for i in range(8)]
+    assert [maps[0][str(i)]["out"] for i in range(8)] == [i % 2 for i in range(8)]
     assert [maps[1][str(i)]["x"] for i in range(8)] == [i % 2 for i in range(8)]
     assert [maps[1][str(i)]["out"] for i in range(8)] == [i // 2 for i in range(8)]
     coord_info = [node["coordinates_"]["coordInfo"] for node in allocations]

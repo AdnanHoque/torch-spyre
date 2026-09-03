@@ -47,13 +47,14 @@ from .constants import (
 )
 from . import config as _spyre_config
 from .core_mapping import (
-    derive_operation_mapping,
-    finalize_tensor_work_divisions,
-    remap_work_division,
+    finalize_core_mapping_pure,
 )
 from .errors import Unsupported
 from .ir import FixedTiledLayout
-from .scratchpad.lx_relayout import work_division_from_view
+from .scratchpad.lx_relayout import (
+    materialized_lx_relayout_for_destination,
+    work_division_from_view,
+)
 from .pass_utils import (
     AlignmentAccess,
     build_operation_alignment_inputs,
@@ -68,13 +69,13 @@ from .pass_utils import (
 )
 from .views import (
     AlignmentInputs,
-    align_tensors,
-    align_tensors_pure,
+    build_alignment_inputs,
     tiling_expr_to_device_expr,
 )
 from .logging_utils import get_inductor_logger
 from .op_spec import (
     IndirectAccess,
+    LX_RELAYOUT_INFO_KEY,
     LoopSpec,
     OpSpec,
     TensorArg,
@@ -982,6 +983,12 @@ class SpyreKernel(Kernel[CSEVariable]):
             and hasattr(ir_node.data, "ranges")
             else None
         )
+        relayout_plan = materialized_lx_relayout_for_destination(
+            V.graph, self.current_node.get_name()
+        )
+        if relayout_plan is not None:
+            op_info = {**op_info, LX_RELAYOUT_INFO_KEY: True}
+
         op_spec = OpSpec(
             op,
             is_reduction,
@@ -1713,76 +1720,48 @@ def simplify_op_spec(
 
     it_space = op_spec.iteration_space
     if alignment_inputs is None:
-        new_op_space_splits, new_tensors, work_division_remap = align_tensors(
+        alignment_inputs = build_alignment_inputs(
             it_space,
             [
                 {"size": arg.device_size, "coordinates": arg.device_coordinates}
                 for arg in op_spec.args
             ],
             indirect_sizes,
-            repeat_info=repeat_info,
+            repeat_info,
         )
-    else:
-        if alignment_inputs.iteration_space != it_space:
-            raise RuntimeError(
-                "captured alignment iteration space changed before codegen"
-            )
-        new_op_space_splits, new_tensors, work_division_remap = align_tensors_pure(
-            alignment_inputs
-        )
+    elif alignment_inputs.iteration_space != it_space:
+        raise RuntimeError("captured alignment iteration space changed before codegen")
+
+    is_relayout = is_lx_relayout_identity(op_spec.op, op_spec.args, op_spec.op_info)
+    (
+        new_op_space_splits,
+        new_tensors,
+        divisions,
+        operation_mapping,
+        _,
+    ) = finalize_core_mapping_pure(
+        alignment_inputs,
+        [arg.work_division for arg in op_spec.args],
+        is_matmul=op_spec.op in MATMUL_REDUCTION_OPS,
+        core_id_k_fast=_spyre_config.core_id_k_fast_emission,
+        is_relayout=is_relayout,
+    )
     op_spec.iteration_space = new_op_space_splits
+    op_spec.core_id_to_work_slice = operation_mapping
 
-    for arg, t in zip(op_spec.args, new_tensors):
-        if arg.work_division is not None:
-            arg.work_division = remap_work_division(
-                arg.work_division, work_division_remap
-            )
-        arg.device_size = t["size"]
-        arg.device_coordinates = t["coordinates"]
+    for arg, tensor, division in zip(op_spec.args, new_tensors, divisions):
+        arg.work_division = division
+        arg.device_size = tensor["size"]
+        arg.device_coordinates = tensor["coordinates"]
 
-        # Apply indirect_access_subs after align_tensors, so that indirect symbols
-        # are decomposed as regular variables before substitution.
+        # Apply indirect_access_subs after alignment, so indirect symbols are
+        # decomposed as regular variables before substitution.
         if indirect_access_subs:
             arg.device_coordinates = [
-                c.xreplace(indirect_access_subs) for c in arg.device_coordinates
+                coordinate.xreplace(indirect_access_subs)
+                for coordinate in arg.device_coordinates
             ]
 
-    _finalize_tensor_work_divisions(op_spec)
-    is_relayout = is_lx_relayout_identity(op_spec.op, op_spec.args)
-    if is_relayout:
-        destination = op_spec.args[-1].work_division
-        assert destination is not None
-        op_spec.core_id_to_work_slice = dict(destination.core_id_to_work_slice)
-    else:
-        _finalize_core_mapping(op_spec, use_tensor_constraints=True)
+    if not is_relayout:
         for arg in op_spec.args:
             arg.work_division = None
-
-
-def _finalize_tensor_work_divisions(op_spec: OpSpec) -> None:
-    """Derive tensor owners from final symbols, never planning-time formulas."""
-    finalized = finalize_tensor_work_divisions(
-        op_spec.iteration_space,
-        [arg.work_division for arg in op_spec.args],
-    )
-    for arg, division in zip(op_spec.args, finalized):
-        arg.work_division = division
-
-
-def _finalize_core_mapping(
-    op_spec: OpSpec, *, use_tensor_constraints: bool = False
-) -> None:
-    """Assign physical cores from an OpSpec's final aligned dimensions."""
-
-    contiguous_dim = (
-        next(reversed(op_spec.iteration_space))
-        if op_spec.iteration_space
-        and op_spec.op in MATMUL_REDUCTION_OPS
-        and _spyre_config.core_id_k_fast_emission
-        else None
-    )
-    op_spec.core_id_to_work_slice = derive_operation_mapping(
-        op_spec.iteration_space,
-        [arg.work_division for arg in op_spec.args] if use_tensor_constraints else (),
-        contiguous_dim=contiguous_dim,
-    )
