@@ -246,6 +246,24 @@ def mem_usage_by_buf(
     return mem_usage
 
 
+def is_empty_tiled_layout(layout: object) -> bool:
+    """A valid empty tensor needs no LX placement or input clone.
+
+    Native stickification preserves zero outer extents. Do not confuse those
+    with malformed negative extents, a missing stick axis, or a zero physical
+    extent on a logically nonempty tensor: those still need strict validation.
+    """
+    if not isinstance(layout, FixedTiledLayout) or 0 not in layout.size:
+        return False
+    device_size = layout.device_layout.device_size
+    return (
+        bool(device_size)
+        and device_size[-1] > 0
+        and all(extent >= 0 for extent in device_size)
+        and 0 in device_size[:-1]
+    )
+
+
 def buffer_not_read_in_full(graph: GraphLowering, buf_name: str) -> bool:
     """True if any consumer reads less than the whole ``buf_name`` (a sliced,
     partial, or multi-offset read), or if the footprint can't be proven to
@@ -541,6 +559,14 @@ def get_ncores_for_buffers(
     accepted_views: dict[str, PerCoreView] = {}
     buf_user_deps = _get_buffer_user_deps(graph)
     for buf_name, users in buf_user_deps.items():
+        layout = getattr(graph.try_get_buffer(buf_name), "layout", None)
+        if is_empty_tiled_layout(layout):
+            # Reject before the unsplit whole-buffer view shortcut and before
+            # positive-partition footprint measurement. The existing rejection
+            # state also prevents publishing an LX view for an input clone.
+            result[buf_name] = -1
+            mismatch_reasons_cache[buf_name] = "empty tensor"
+            continue
         # this dict includes graph input and output
         # _get_buffer_user_deps creates an entry only while appending its first
         # dependency, so every value in this dictionary is non-empty.

@@ -90,6 +90,7 @@ from torch_spyre._inductor.scratchpad.utils import (
     ops_in_offset_mutation_component,
     get_op_pointwise_inputs,
     buffer_not_read_in_full,
+    is_empty_tiled_layout,
     get_ncores_for_buffers,
     _is_tiled_advancing,
     _is_read_advancing_anywhere,
@@ -491,6 +492,10 @@ class ScratchpadAllocator:
             # MultiOutputLayout tuple op). There is nothing to place, and the
             # checks below would raise.
             return "unsized (no device layout)"
+        if is_empty_tiled_layout(op.layout):
+            # The joint solver does not consult the fixed-division judge until
+            # after placement, so it must share this pre-allocation exclusion.
+            return "empty tensor"
         if name in mutated_buffers and not _is_carried_reduction_storage(op):
             return "mutation target"
         # The shared carried-reduction contract names exactly one accumulator
@@ -563,6 +568,8 @@ class ScratchpadAllocator:
         """
         if not clone_at_graph_boundaries():
             return "graph input (no clone)"
+        if is_empty_tiled_layout(getattr(graph.try_get_buffer(name), "layout", None)):
+            return "empty tensor"
         if self._read_count(uses) == 0:
             return "no consumer reads it from LX"
         if self._is_index_or_indirectly_accessed(graph, name, uses, None):

@@ -16,6 +16,7 @@ import math
 import unittest
 from collections import namedtuple
 from contextlib import ExitStack
+from types import SimpleNamespace
 from typing import NamedTuple
 from unittest.mock import MagicMock, patch
 
@@ -27,11 +28,12 @@ from torch._inductor.ir import (
     ComputedBuffer,
     FixedLayout,
     FlexibleLayout,
+    InputBuffer,
     Pointwise,
     Reduction,
 )
 
-from torch_spyre._C import ElementArrangement, SpyreTensorLayout
+from torch_spyre._C import DataFormats, ElementArrangement, SpyreTensorLayout
 from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.ir import FixedTiledLayout
 from torch_spyre._inductor.loop_info import CarriedReductionRecord
@@ -45,8 +47,14 @@ from torch_spyre._inductor.scratchpad import allocator as allocator_module
 from torch_spyre._inductor.scratchpad.allocator import (
     CoOptimizingAllocator,
     CoreDivision,
+    ScratchpadAllocator,
 )
-from torch_spyre._inductor.scratchpad.plan_solver import CoreDivisionBuffer
+from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
+from torch_spyre._inductor.scratchpad.plan_solver import (
+    CoreDivisionBuffer,
+    LifetimeBoundBuffer,
+)
+from torch_spyre._inductor.scratchpad.utils import get_ncores_for_buffers
 from torch_spyre._inductor.work_division import (
     TensorDep,
     _cost_model_matmul_planner,
@@ -143,6 +151,152 @@ def _computed_buffer(shape, name="buf0", reduction_type=None, reduction_ranges=(
     op = ComputedBuffer(name=name, layout=layout, data=data)
     op.operation_name = name
     return op
+
+
+def _empty_eligibility_graph(shape, *, graph_input):
+    """Real layouts/buffers and recorded dependencies; no frontend compilation.
+
+    Both readers remain present even for an empty shape, so missing liveness or
+    a no-consumer shortcut cannot satisfy the intended eligibility assertion.
+    """
+    row, col = _isym("row"), _isym("col")
+    index = shape[1] * row + col
+    buffers = {}
+    operations = []
+    for name in ("value", "reader_a", "reader_b"):
+        layout = _fixed_tiled_layout(shape)
+        if name == "value" and graph_input:
+            buffer = InputBuffer(name=name, layout=layout)
+        else:
+            buffer = ComputedBuffer(
+                name=name,
+                layout=layout,
+                data=Pointwise(
+                    device=torch.device("spyre:0"),
+                    dtype=torch.float16,
+                    inner_fn=lambda _index: sympy.Integer(1),
+                    ranges=list(shape),
+                ),
+            )
+            # Use the normal dependency memo consumed by the allocator. Only
+            # graph plumbing is supplied here; no eligibility or size is mocked.
+            buffer._ts_cached_read_writes = SimpleNamespace(
+                reads=(
+                    {MemoryDep("value", index, (row, col), tuple(shape))}
+                    if name != "value"
+                    else set()
+                ),
+                writes={MemoryDep(name, index, (row, col), tuple(shape))},
+            )
+            operations.append(buffer)
+        buffers[name] = buffer
+    return SimpleNamespace(
+        operations=operations,
+        graph_input_names=["value"] if graph_input else [],
+        try_get_buffer=buffers.get,
+        get_buffer=buffers.__getitem__,
+    )
+
+
+class TestEmptyLxEligibility(unittest.TestCase):
+    def test_empty_native_layouts_are_rejected_before_lx_sizing(self):
+        for shape, device_shape in (((0, 64), (1, 0, 64)), ((64, 0), (0, 64, 64))):
+            for graph_input in (False, True):
+                with self.subTest(shape=shape, graph_input=graph_input):
+                    graph = _empty_eligibility_graph(shape, graph_input=graph_input)
+                    layout = graph.get_buffer("value").layout
+                    self.assertEqual(
+                        tuple(layout.device_layout.device_size), device_shape
+                    )
+                    ncores, reasons, views = get_ncores_for_buffers(graph)
+                    self.assertEqual(
+                        ncores, {name: -1 for name in ("value", "reader_a", "reader_b")}
+                    )
+                    self.assertEqual(set(reasons.values()), {"empty tensor"})
+                    self.assertEqual(views, {})
+                    self.assertEqual(
+                        ScratchpadAllocator._partition_footprints(graph, ncores, views),
+                        {},
+                    )
+
+                    allocator = ScratchpadAllocator(GreedyLayoutSolver, 2**20)
+                    for division_is_fixed in (False, True):
+                        if graph_input:
+                            reason = allocator._input_residency_reason(
+                                graph,
+                                "value",
+                                [0, 1],
+                                ncores=ncores,
+                                ncores_reasons=reasons,
+                                division_is_fixed=division_is_fixed,
+                            )
+                        else:
+                            reason = allocator._buffer_residency_reason(
+                                graph,
+                                "value",
+                                [0, 1, 2],
+                                graph.get_buffer("value"),
+                                mutated_buffers=set(),
+                                graph_output_names=set(),
+                                reinterpret_output_names=set(),
+                                ncores=ncores,
+                                ncores_reasons=reasons,
+                                division_is_fixed=division_is_fixed,
+                                buf_user_deps={},
+                            )
+                        self.assertEqual(reason, "empty tensor")
+                        candidate = LifetimeBoundBuffer(
+                            "value", 0, [0, 1], residency_reason=reason
+                        )
+                        placeable, excluded = GreedyLayoutSolver(
+                            [candidate], 2**20
+                        ).partition()
+                        self.assertEqual(placeable, [])
+                        self.assertEqual(excluded, [candidate])
+                        self.assertIsNone(candidate.address)
+                    self.assertEqual(layout.allocation, {})
+                    self.assertIsNone(layout.lx_view)
+
+    def test_nonempty_native_layout_keeps_its_view_and_footprint(self):
+        for graph_input in (False, True):
+            with self.subTest(graph_input=graph_input):
+                graph = _empty_eligibility_graph((64, 64), graph_input=graph_input)
+                ncores, reasons, views = get_ncores_for_buffers(graph)
+                self.assertEqual(reasons, {})
+                self.assertEqual(
+                    ncores, {name: 1 for name in ("value", "reader_a", "reader_b")}
+                )
+                self.assertEqual(set(views), set(ncores))
+                self.assertEqual(
+                    ScratchpadAllocator._partition_footprints(graph, ncores, views),
+                    {name: 8192 for name in ncores},
+                )
+
+    def test_malformed_device_extents_are_not_empty_tensor_fallbacks(self):
+        cases = (
+            ((64, 64), (1, -1, 64)),
+            ((0, 64), (0, -1, 64)),
+            ((64, 64), (1, 0, 64)),
+            ((0, 64), (1, 64, 0)),
+        )
+        for shape, device_shape in cases:
+            with self.subTest(shape=shape, device_shape=device_shape):
+                graph = _empty_eligibility_graph(shape, graph_input=False)
+                # The native expert constructor allows malformed descriptors;
+                # the eligibility check must not excuse them as empty tensors.
+                graph.get_buffer("value").layout.device_layout = SpyreTensorLayout(
+                    list(device_shape),
+                    [64, 64, 1],
+                    DataFormats.SEN169_FP16,
+                    ElementArrangement.STANDARD,
+                )
+                ncores, reasons, views = get_ncores_for_buffers(graph)
+                self.assertEqual(ncores["value"], 1)
+                self.assertNotIn("value", reasons)
+                with self.assertRaisesRegex(
+                    ValueError, "device extents must be positive"
+                ):
+                    ScratchpadAllocator._partition_footprints(graph, ncores, views)
 
 
 def _make_context(
