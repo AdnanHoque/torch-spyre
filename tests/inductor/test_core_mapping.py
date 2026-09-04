@@ -307,6 +307,37 @@ def test_exact_fused_axis_projection_checks_every_loop_value():
     )
 
 
+@pytest.mark.parametrize(
+    "extent, split, matches",
+    [(129, 3, True), (130, 3, True), (192, 3, True), (129, 2, False), (100, 3, False)],
+)
+def test_exact_projection_proves_stick_axis_loops_in_whole_sticks(
+    extent, split, matches
+):
+    """The inverse proof uses the same whole-stick model as the view builder.
+
+    A loop over the stickified host axis selects a stick and a position within
+    it. Three sticks split three ways give one stick per core whatever the
+    logical tail; two cores cannot own three sticks evenly.
+    """
+    x = sympy.Symbol("x")
+    core_id = sympy.Symbol("core_id")
+    division = TensorWorkDivision({x: split}, {x: core_id}, num_cores=split)
+
+    assert (
+        work_division_matches_physical_ownership(
+            division,
+            {x: extent},
+            (3, 64),
+            (sympy.floor(x / 64), sympy.Mod(x, 64)),
+            ((0, split),),
+            ((0, sympy.Mod(core_id, split)),),
+            split,
+        )
+        is matches
+    )
+
+
 def test_late_mapping_keeps_shared_destination_after_one_consumer_factors():
     h, query, inner = sympy.symbols("h query inner")
     original = derive_core_mapping(

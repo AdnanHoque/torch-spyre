@@ -224,6 +224,9 @@ def work_division_matches_physical_ownership(
                 return False
             physical_dims_by_loop.setdefault(next(iter(matches)), []).append(device_dim)
         concrete_extents = {}
+        within_stick_symbols = (
+            sympify(device_coordinates[-1]).free_symbols if device_coordinates else set()
+        )
         for dim in relevant_dims:
             value = sympify(loop_extents[dim])
             if value.free_symbols or value.is_integer is not True:
@@ -231,6 +234,29 @@ def work_division_matches_physical_ownership(
             concrete_extent = int(value)
             if concrete_extent <= 0:
                 return False
+            within_stick_dim = len(device_size) - 1
+            if (
+                dim in within_stick_symbols
+                and within_stick_dim not in splits
+                and len(physical_dims_by_loop[dim]) == 1
+                and physical_dims_by_loop[dim][0] != within_stick_dim
+            ):
+                # A direct-axis loop over the stickified host axis also selects
+                # the position within a stick. Sticks are atomic: the device
+                # splits whole sticks, so this loop is proved in stick-padded
+                # elements (129 fp16 values are three sticks of 64 slots; a
+                # three-way split owns one stick each, not 43 elements each).
+                # A loop fused across several split axes takes the fused path.
+                elems_per_stick = int(device_size[-1])
+                padded_extent = (
+                    concrete_device_extents[physical_dims_by_loop[dim][0]]
+                    * elems_per_stick
+                )
+                # Only a loop that reaches every stick (the last one possibly in
+                # part) owns whole sticks; a shorter loop keeps the element model
+                # and is rejected below unless it happens to divide evenly.
+                if padded_extent - elems_per_stick < concrete_extent <= padded_extent:
+                    concrete_extent = padded_extent
             concrete_extents[dim] = concrete_extent
         candidate_splits = {
             dim: int(split)
