@@ -1026,6 +1026,75 @@ def test_flattened_iteration_span_is_not_a_single_axis_view():
     assert not view.work_slice_dims
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("captured_k", [False, True])
+def test_stride_selected_compound_view_matches_actual_owned_values(reverse, captured_k):
+    """A successful stride lookup must not hide a fused batch/head split."""
+    flat = sympy.Symbol("flat", integer=True, nonnegative=True)
+    core = sympy.Symbol("core_id")
+    if captured_k:
+        # The saved K access fuses four batches of eight heads. Its stride
+        # selects the head axis, but each of eight partitions owns four heads
+        # of one batch, not one head across all four batches.
+        extent, split = 32, 8
+        coordinates = (sympy.Mod(flat, 8), sympy.floor(flat / 8))
+        device_size, stride_map = [8, 4], [1, 8]
+        stick_host_stride, num_stick_dim, num_stick = None, None, 0
+    else:
+        extent, split = 128, 2
+        coordinates = (sympy.floor(flat / 64), sympy.Mod(flat, 64))
+        device_size, stride_map = [2, 64], [64, 1]
+        stick_host_stride, num_stick_dim, num_stick = 1, 0, 2
+    owner = split - 1 - core if reverse else core
+    prep = pass_utils_module._ViewPrep(
+        iter_space={flat: extent},
+        write_index=flat,
+        read_index=flat,
+        dep_coeff={flat: 1},
+        dep_device_coordinates=coordinates,
+        device_size=device_size,
+        stride_map=stride_map,
+        elems_per_stick=64,
+        device_stride_to_dim={stride: axis for axis, stride in enumerate(stride_map)},
+        stick_host_stride=stick_host_stride,
+        num_stick_dim=num_stick_dim,
+        num_stick=num_stick,
+        num_stick_stride=64 if num_stick else 0,
+        is_matmul=False,
+    )
+    view, partial, representable = pass_utils_module._per_core_view_from_prep(
+        prep,
+        {flat: split},
+        ownership=TensorWorkDivision({flat: split}, {flat: owner}, num_cores=split),
+    )
+    assert not partial
+    if not representable:
+        # The ownership foundation rejects K; the later exact-decomposition
+        # extension may accept it, but must satisfy the same element proof.
+        assert captured_k
+        return
+    physical_splits = dict(view.work_slice_dims)
+    physical_slots = dict(view.core_to_slot)
+    for c in range(split):
+        logical_slot = int(owner.subs(core, c))
+        expected = set(
+            range(
+                logical_slot * (extent // split), (logical_slot + 1) * (extent // split)
+            )
+        )
+        actual = {
+            point
+            for point in range(extent)
+            if all(
+                int(coordinates[axis].subs(flat, point))
+                // (device_size[axis] // factor)
+                == int(physical_slots[axis].subs(core, c))
+                for axis, factor in physical_splits.items()
+            )
+        }
+        assert actual == expected, (c, actual, expected)
+
+
 def _prepare_compound_axis_view(iter_space, index, repeat_info=None):
     device_layout = pass_utils_module.SpyreTensorLayout(
         [1, 1, 8, 16, 64],

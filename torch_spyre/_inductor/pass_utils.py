@@ -3221,6 +3221,48 @@ def _per_core_view_from_prep(
                 dev_dim = num_stick_dim
                 split *= k
 
+        # A stride match proposes one physical axis; it does not prove that a
+        # flattened loop owns that axis's contiguous slices. For example,
+        # f in [0, 32) with coordinates (f % 8, f // 8) cannot put an eight-way
+        # split on the first axis alone. Ordinary stickification (f // 64,
+        # f % 64) is valid when each loop slice covers complete sticks.
+        if (
+            dev_dim is not None
+            and sum(
+                sym in coordinate.free_symbols
+                for coordinate in prep.dep_device_coordinates
+            )
+            > 1
+        ):
+            from .core_mapping import (
+                _DIRECT_AXIS_LOOP,
+                _direct_axis_ownership_matches,
+            )
+
+            extent = iter_space[sym]
+            if isinstance(extent, tuple):
+                extent = extent[0]
+            # Prove every logical partition, independent of the physical core
+            # order. Step 4 preserves that order using the same partition IDs.
+            partition = sympy.Symbol("core_id")
+            if not _direct_axis_ownership_matches(
+                concretize_expr(extent),
+                per_sym[sym],
+                partition,
+                device_size[dev_dim],
+                prep.dep_device_coordinates[dev_dim].xreplace({sym: _DIRECT_AXIS_LOOP}),
+                split,
+                partition,
+                per_sym[sym],
+            ):
+                logger.debug(
+                    "cannot prove stride-selected ownership for iteration %s "
+                    "on device dim %s; require exact decomposition",
+                    sym,
+                    dev_dim,
+                )
+                dev_dim = None
+
         # A reshape can place more than one logical loop symbol on one physical
         # device axis.  Splitting an inner symbol while an unsplit outer symbol
         # also contributes to that axis gives each core several interleaved
