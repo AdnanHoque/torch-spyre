@@ -40,7 +40,6 @@ from torch._inductor.ir import (
 from torch._inductor.dependencies import Dep, MemoryDep
 from torch._inductor.graph import GraphLowering
 
-from torch_spyre._C import ElementArrangement
 from torch_spyre._inductor.pass_utils import (
     PerCoreView,
     commit_iteration_space_ownership,
@@ -54,7 +53,6 @@ from torch_spyre._inductor.pass_utils import (
     op_short_name,
 )
 from torch_spyre._inductor.constants import BYTES_PER_STICK
-from torch_spyre._inductor.core_mapping import partition_physical_span_bytes
 from torch_spyre._inductor.work_division import (
     enumerate_work_division_candidates,
     work_division_splits_are_legal,
@@ -701,7 +699,6 @@ class ScratchpadAllocator:
         ncores: dict[str, int],
         ncores_reasons: dict[str, str],
         lx_views: dict[str, PerCoreView],
-        partition_footprints: dict[str, int],
         lifetime_end_overrides: Optional[dict[str, int]] = None,
     ) -> list[LifetimeBoundBuffer]:
         """Build one :class:`LifetimeBoundBuffer` per buffer, barred or not.
@@ -764,7 +761,7 @@ class ScratchpadAllocator:
                 ncores_reasons=ncores_reasons,
                 division_is_fixed=True,
             )
-            clone_size = partition_footprints.get(input_name, 0)
+            clone_size = self._input_footprint(graph, input_name, ncores)
             buffers.append(
                 LifetimeBoundBuffer(
                     input_name,
@@ -872,60 +869,18 @@ class ScratchpadAllocator:
         )
 
     @staticmethod
-    def _partition_footprints(
-        graph: GraphLowering,
-        ncores: dict[str, int],
-        lx_views: dict[str, PerCoreView],
-    ) -> dict[str, int]:
-        """Measure the residency judge's accepted physical partitions."""
-
-        footprints: dict[str, int] = {}
-        for name, num_cores in ncores.items():
-            if num_cores < 1:
-                continue
-            buffer = graph.try_get_buffer(name)
-            if buffer is None:
-                continue
-            try:
-                layout = buffer.get_layout()
-            except NotImplementedError:
-                continue
-            if not isinstance(layout, FixedTiledLayout):
-                continue
-            device_layout = layout.device_layout
-            view = lx_views.get(name)
-            # Do not re-project the operations here: the judge already chose
-            # the physical view. A missing view is ineligible for LX; retain a
-            # full-buffer bound so it can never look artificially cheap.
-            splits = (
-                dict(view.work_slice_dims)
-                if view is not None and view.num_cores == num_cores
-                else {}
-            )
-            device_size = tuple(int(size) for size in device_layout.device_size)
-            if not device_size or any(extent <= 0 for extent in device_size):
-                raise ValueError("device extents must be positive")
-            for dim, split in splits.items():
-                if dim < 0 or dim >= len(device_size) or split <= 0:
-                    raise ValueError(f"invalid split {split} on device dimension {dim}")
-            full_size = math.prod(device_size[:-1]) * BYTES_PER_STICK
-            if device_layout.element_arrangement != ElementArrangement.STANDARD:
-                # The one-final-stick partition bound does not prove layouts
-                # such as QFP8WT's two-dimensional stick. Keep the existing
-                # complete-device-buffer bound, without dividing by cores.
-                footprint = full_size
-            else:
-                footprint = partition_physical_span_bytes(
-                    device_size, int(device_layout.elems_per_stick()), splits
-                )
-            # Keep the historical equal-share size as a lower bound so this
-            # refinement cannot shrink an ordinary LX allocation.
-            equal_share = (
-                math.ceil(full_size / num_cores / _LX_ALLOCATION_GRANULARITY_BYTES)
-                * _LX_ALLOCATION_GRANULARITY_BYTES
-            )
-            footprints[name] = max(footprint, equal_share)
-        return footprints
+    def _input_footprint(
+        graph: GraphLowering, name: str, ncores: dict[str, int]
+    ) -> int:
+        """Per-core LX footprint of a cloned graph input, or 0 when it has no
+        computable one (in which case ``input_residency_reason`` has already
+        barred it, so the value is never used)."""
+        layout = getattr(graph.get_buffer(name), "layout", None)
+        dev_layout = getattr(layout, "device_layout", None)
+        num_cores = ncores.get(name, -1)
+        if dev_layout is None or num_cores < 1:
+            return 0
+        return math.prod(dev_layout.device_size[:-1]) * BYTES_PER_STICK // num_cores
 
     def _determine_in_place(
         self,
@@ -995,10 +950,6 @@ class ScratchpadAllocator:
         ncores, ncores_reasons, lx_views = get_ncores_for_buffers(graph)
         t1 = time.perf_counter()
         mem_usage = mem_usage_by_buf(graph, cache)
-        partition_footprints = self._partition_footprints(graph, ncores, lx_views)
-        for name, info in mem_usage.items():
-            if name in partition_footprints:
-                info["size_per_core"] = partition_footprints[name]
         for plan in lx_relayout_plans:
             core_counts = {
                 plan.source_name: plan.source_view.num_cores or plan.num_cores,
@@ -1019,10 +970,12 @@ class ScratchpadAllocator:
                     if name == plan.source_name
                     else plan.destination_view
                 )
-                footprint = footprints[name]
-                footprint = footprint or partition_footprints.get(name, 0)
+                # Members are sized by the plan's physical span (device storage
+                # order, padding retained). Ordinary buffers keep the equal-share
+                # size from mem_usage_by_buf, unchanged from before relayouts.
                 # A source shared by multiple relayouts keeps the largest
                 # source bound. Each private destination keeps its own bound.
+                footprint = footprints[name]
                 mem_usage[name]["size_per_core"] = max(
                     mem_usage[name]["size_per_core"], footprint
                 )
@@ -1054,7 +1007,6 @@ class ScratchpadAllocator:
             ncores=ncores,
             ncores_reasons=ncores_reasons,
             lx_views=lx_views,
-            partition_footprints=partition_footprints,
             lifetime_end_overrides=lifetime_end_overrides,
         )
         if lx_relayout_plans:

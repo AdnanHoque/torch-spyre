@@ -213,11 +213,6 @@ class TestEmptyLxEligibility(unittest.TestCase):
                     )
                     self.assertEqual(set(reasons.values()), {"empty tensor"})
                     self.assertEqual(views, {})
-                    self.assertEqual(
-                        ScratchpadAllocator._partition_footprints(graph, ncores, views),
-                        {},
-                    )
-
                     allocator = ScratchpadAllocator(GreedyLayoutSolver, 2**20)
                     for division_is_fixed in (False, True):
                         if graph_input:
@@ -256,7 +251,7 @@ class TestEmptyLxEligibility(unittest.TestCase):
                     self.assertEqual(layout.allocation, {})
                     self.assertIsNone(layout.lx_view)
 
-    def test_nonempty_native_layout_keeps_its_view_and_footprint(self):
+    def test_nonempty_native_layout_keeps_its_view(self):
         for graph_input in (False, True):
             with self.subTest(graph_input=graph_input):
                 graph = _empty_eligibility_graph((64, 64), graph_input=graph_input)
@@ -266,12 +261,13 @@ class TestEmptyLxEligibility(unittest.TestCase):
                     ncores, {name: 1 for name in ("value", "reader_a", "reader_b")}
                 )
                 self.assertEqual(set(views), set(ncores))
-                self.assertEqual(
-                    ScratchpadAllocator._partition_footprints(graph, ncores, views),
-                    {name: 8192 for name in ncores},
-                )
 
-    def test_malformed_device_extents_are_not_empty_tensor_fallbacks(self):
+    def test_zero_or_negative_device_extents_keep_main_eligibility(self):
+        # A nonempty tensor can carry a zero physical extent: a one-stick FP16
+        # tensor quantized to FP8 rescales to zero FP8 sticks. Such layouts,
+        # and malformed negative extents the native constructor allows, are
+        # neither excused as empty tensors nor rejected: ordinary buffers keep
+        # the eligibility and the equal-share sizing they had before relayouts.
         cases = (
             ((64, 64), (1, -1, 64)),
             ((0, 64), (0, -1, 64)),
@@ -281,8 +277,6 @@ class TestEmptyLxEligibility(unittest.TestCase):
         for shape, device_shape in cases:
             with self.subTest(shape=shape, device_shape=device_shape):
                 graph = _empty_eligibility_graph(shape, graph_input=False)
-                # The native expert constructor allows malformed descriptors;
-                # the eligibility check must not excuse them as empty tensors.
                 graph.get_buffer("value").layout.device_layout = SpyreTensorLayout(
                     list(device_shape),
                     [64, 64, 1],
@@ -292,10 +286,6 @@ class TestEmptyLxEligibility(unittest.TestCase):
                 ncores, reasons, views = get_ncores_for_buffers(graph)
                 self.assertEqual(ncores["value"], 1)
                 self.assertNotIn("value", reasons)
-                with self.assertRaisesRegex(
-                    ValueError, "device extents must be positive"
-                ):
-                    ScratchpadAllocator._partition_footprints(graph, ncores, views)
 
 
 def _make_context(
