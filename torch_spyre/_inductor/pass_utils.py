@@ -3242,11 +3242,24 @@ def _per_core_view_from_prep(
             extent = iter_space[sym]
             if isinstance(extent, tuple):
                 extent = extent[0]
+            extent = concretize_expr(extent)
+            padded_extent = num_stick * elems_per_stick
+            if (
+                h == stick_host_stride
+                and padded_extent - elems_per_stick < extent <= padded_extent
+            ):
+                # Sticks are atomic: the device splits whole sticks, so a loop
+                # over the whole stickified axis is proved in stick-padded
+                # elements. 129 fp16 values are three sticks of 64 slots; a
+                # three-way split owns one stick each, not 43 elements each. A
+                # loop that stops short of the last stick keeps the element
+                # model.
+                extent = padded_extent
             # Prove every logical partition, independent of the physical core
             # order. Step 4 preserves that order using the same partition IDs.
             partition = sympy.Symbol("core_id")
             if not _direct_axis_ownership_matches(
-                concretize_expr(extent),
+                extent,
                 per_sym[sym],
                 partition,
                 device_size[dev_dim],

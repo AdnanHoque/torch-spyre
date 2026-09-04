@@ -1095,6 +1095,52 @@ def test_stride_selected_compound_view_matches_actual_owned_values(reverse, capt
         assert actual == expected, (c, actual, expected)
 
 
+@pytest.mark.parametrize(
+    "extent, split, representable",
+    [(129, 3, True), (192, 3, True), (129, 2, False), (100, 3, False)],
+)
+def test_stick_axis_split_is_proved_in_whole_sticks(extent, split, representable):
+    """A loop over the stickified axis owns whole sticks, padding included.
+
+    129 fp16 values occupy three sticks of 64 slots. The exact proof must
+    partition those three sticks, not 43 host elements at a time; a
+    43-element piece crosses a stick boundary and would reject a layout the
+    device expresses exactly. Two cores cannot own three sticks evenly, and a
+    loop that stops short of the last stick keeps the element model.
+    """
+    flat = sympy.Symbol("flat", integer=True, nonnegative=True)
+    core = sympy.Symbol("core_id")
+    coordinates = (sympy.floor(flat / 64), sympy.Mod(flat, 64))
+    prep = pass_utils_module._ViewPrep(
+        iter_space={flat: extent},
+        write_index=flat,
+        read_index=flat,
+        dep_coeff={flat: 1},
+        dep_device_coordinates=coordinates,
+        device_size=[3, 64],
+        stride_map=[64, 1],
+        elems_per_stick=64,
+        device_stride_to_dim={64: 0, 1: 1},
+        stick_host_stride=1,
+        num_stick_dim=0,
+        num_stick=3,
+        num_stick_stride=64,
+        is_matmul=False,
+    )
+    view, partial, is_representable = pass_utils_module._per_core_view_from_prep(
+        prep,
+        {flat: split},
+        ownership=TensorWorkDivision({flat: split}, {flat: core}, num_cores=split),
+    )
+    assert not partial
+    assert is_representable == representable
+    if not representable:
+        return
+    assert dict(view.work_slice_dims) == {0: split}
+    slot = dict(view.core_to_slot)[0]
+    assert [int(slot.subs(core, c)) for c in range(split)] == list(range(split))
+
+
 def _prepare_compound_axis_view(iter_space, index, repeat_info=None):
     device_layout = pass_utils_module.SpyreTensorLayout(
         [1, 1, 8, 16, 64],
