@@ -1652,7 +1652,9 @@ class TestCoOptimizingAllocator(unittest.TestCase):
                     reads=[read] if op is consumer else [],
                 ),
             ),
-            patch.object(allocator_module, "_is_frame_changing_clone", return_value=False),
+            patch.object(
+                allocator_module, "_is_frame_changing_clone", return_value=False
+            ),
             patch.object(
                 allocator_module,
                 "_view_for_div",
