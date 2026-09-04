@@ -76,7 +76,7 @@ from torch_spyre._inductor.work_division_constraints import (
 
 
 def test_carried_reduction_row_is_committed_before_scheduling():
-    row, hidden = Symbol("row"), Symbol("hidden")
+    row, hidden = _isym("row"), _isym("hidden")
     op = _computed_buffer((64, 64), name="combine")
     op._carried_reduction_record = CarriedReductionRecord(
         accumulator_name="fill",
