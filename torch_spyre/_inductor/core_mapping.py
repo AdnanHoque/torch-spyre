@@ -225,7 +225,9 @@ def work_division_matches_physical_ownership(
             physical_dims_by_loop.setdefault(next(iter(matches)), []).append(device_dim)
         concrete_extents = {}
         within_stick_symbols = (
-            sympify(device_coordinates[-1]).free_symbols if device_coordinates else set()
+            sympify(device_coordinates[-1]).free_symbols
+            if device_coordinates
+            else set()
         )
         for dim in relevant_dims:
             value = sympify(loop_extents[dim])
