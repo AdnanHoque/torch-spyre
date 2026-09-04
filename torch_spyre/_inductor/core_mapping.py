@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from functools import lru_cache
 from itertools import permutations
+from numbers import Integral
 from typing import TYPE_CHECKING
 
-from sympy import Expr, Integer, Mod, Symbol, floor, sympify
+from sympy import Expr, Integer, Mod, Symbol, floor, lambdify, sympify
 
 from .op_spec import TensorWorkDivision
 
@@ -30,6 +32,120 @@ if TYPE_CHECKING:
 
 
 _MAX_OWNER_PERMUTATION_DIMS = 5
+
+
+_MAX_EXACT_DIRECT_AXIS_POINTS = 1 << 16
+_DIRECT_AXIS_LOOP = Symbol("direct_axis_loop", integer=True, nonnegative=True)
+
+
+@lru_cache(maxsize=256)
+def _direct_axis_ownership_matches(
+    loop_extent: int,
+    candidate_split: int,
+    candidate_slot_expr: Expr,
+    device_extent: int,
+    device_coordinate: Expr,
+    physical_split: int,
+    physical_slot_expr: Expr,
+    num_cores: int,
+) -> bool:
+    """Exactly prove one loop's ownership of one physical device axis.
+
+    Compiling the symbolic coordinate once keeps large canonical axes cheap.
+    The cache key contains the complete logical and physical ownership claim,
+    so differently ordered owners can never share a result.
+    """
+
+    try:
+        if (
+            loop_extent <= 0
+            or loop_extent > _MAX_EXACT_DIRECT_AXIS_POINTS
+            or candidate_split <= 0
+            or physical_split <= 0
+            or loop_extent % candidate_split
+            or device_extent <= 0
+            or device_extent % physical_split
+            or candidate_split != physical_split
+            or num_cores <= 0
+        ):
+            return False
+
+        core_id = Symbol("core_id")
+        candidate_slot_expr = sympify(candidate_slot_expr)
+        physical_slot_expr = sympify(physical_slot_expr)
+        device_coordinate = sympify(device_coordinate)
+        if (
+            candidate_slot_expr.free_symbols - {core_id}
+            or physical_slot_expr.free_symbols - {core_id}
+            or device_coordinate.free_symbols != {_DIRECT_AXIS_LOOP}
+        ):
+            return False
+
+        candidate_slots = []
+        physical_slots = []
+        for core in range(num_cores):
+            candidate_value = sympify(candidate_slot_expr.subs(core_id, core))
+            physical_value = sympify(physical_slot_expr.subs(core_id, core))
+            if (
+                candidate_value.free_symbols
+                or candidate_value.is_integer is not True
+                or physical_value.free_symbols
+                or physical_value.is_integer is not True
+            ):
+                return False
+            candidate_slot = int(candidate_value)
+            physical_slot = int(physical_value)
+            if not 0 <= candidate_slot < candidate_split or not (
+                0 <= physical_slot < physical_split
+            ):
+                return False
+            candidate_slots.append(candidate_slot)
+            physical_slots.append(physical_slot)
+
+        coordinate = lambdify(_DIRECT_AXIS_LOOP, device_coordinate, modules="math")
+        loop_partition_width = loop_extent // candidate_split
+        physical_partition_width = device_extent // physical_split
+        physical_slot_by_partition: dict[int, int] = {}
+        for point in range(loop_extent):
+            coordinate_value = coordinate(point)
+            if not isinstance(coordinate_value, Integral):
+                return False
+            coordinate_value = int(coordinate_value)
+            if not 0 <= coordinate_value < device_extent:
+                return False
+            partition = point // loop_partition_width
+            physical_slot = coordinate_value // physical_partition_width
+            previous = physical_slot_by_partition.setdefault(partition, physical_slot)
+            if previous != physical_slot:
+                return False
+
+        if (
+            len(physical_slot_by_partition) != candidate_split
+            or len(set(physical_slot_by_partition.values())) != candidate_split
+        ):
+            return False
+        return all(
+            {
+                core
+                for core, slot in enumerate(physical_slots)
+                if slot == physical_slot_by_partition[partition]
+            }
+            == {core for core, slot in enumerate(candidate_slots) if slot == partition}
+            for partition in range(candidate_split)
+        )
+    except (
+        AttributeError,
+        ImportError,
+        KeyError,
+        NameError,
+        NotImplementedError,
+        OverflowError,
+        SyntaxError,
+        TypeError,
+        ValueError,
+        ZeroDivisionError,
+    ):
+        return False
 
 
 def core_to_slice_mapping(
