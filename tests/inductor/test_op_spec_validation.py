@@ -63,7 +63,7 @@ def _mark_as_lx_relayout(op: OpSpec) -> None:
     destination.work_division = TensorWorkDivision(
         {_C_ROW: 4}, {_C_ROW: _CORE_ID}, num_cores=4
     )
-    op.op_info[LX_RELAYOUT_INFO_KEY] = True
+    op.op_info[LX_RELAYOUT_INFO_KEY] = "broadcast"
 
 
 def _make_tensor_arg(is_input: bool = True, arg_index: int = 0) -> TensorArg:

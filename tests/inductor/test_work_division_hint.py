@@ -831,7 +831,7 @@ def test_completed_reduction_routes_survive_alignment_unchanged():
                 ),
             ),
         ],
-        {LX_RELAYOUT_INFO_KEY: True},
+        {LX_RELAYOUT_INFO_KEY: "broadcast"},
         producer_consumers=planned_routes,
     )
 
