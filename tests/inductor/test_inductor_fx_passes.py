@@ -308,6 +308,45 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
                     for node in graph.nodes
                 )
 
+    def test_unflatten_bmm_elides_decomposition_broadcast_clone(self):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch_spyre._inductor.temp_passes import bmm_unflatten_pass
+
+        def fn(x, w):
+            return x @ w
+
+        # Only one batch axis broadcasts: flattening the expanded batch axes
+        # needs a clone. With w[1,1,K,N], both strides are zero and it need not.
+        graph = make_fx(fn)(
+            torch.zeros(4, 8, 32, 128), torch.zeros(1, 8, 128, 64)
+        ).graph
+        bmm = next(
+            node
+            for node in graph.nodes
+            if node.op == "call_function" and node.target == torch.ops.aten.bmm.default
+        )
+        rhs_clone = bmm.args[1].args[0]
+        assert rhs_clone.target == torch.ops.aten.clone.default
+        rhs_expand = rhs_clone.args[0]
+        assert rhs_expand.target == torch.ops.aten.expand.default
+        rhs_source = rhs_expand.args[0]
+        assert rhs_source.op == "placeholder"
+
+        assert bmm_unflatten_pass.apply(graph) == 1
+        graph.lint()
+        matmul = next(
+            node
+            for node in graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.spyre.batched_matmul.default
+        )
+        assert matmul.args[1] is rhs_source
+        assert tuple(matmul.args[1].meta["val"].shape) == (1, 8, 128, 64)
+        assert not any(
+            node.op == "call_function" and node.target == torch.ops.aten.clone.default
+            for node in graph.nodes
+        )
+
     def test_unflatten_bmm_broadcast_does_not_add_shape_guards(self):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch_spyre._inductor.temp_passes import bmm_unflatten_pass
