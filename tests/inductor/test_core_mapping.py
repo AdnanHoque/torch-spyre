@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import copy
+import dataclasses
 import math
 from types import SimpleNamespace
 
@@ -34,8 +35,15 @@ from torch_spyre._inductor.core_mapping import (
     derive_operation_mapping,
     derive_partition_mapping,
     finalize_tensor_work_divisions,
+    remap_work_division,
 )
-from torch_spyre._inductor.op_spec import OpSpec, TensorArg, TensorWorkDivision
+from torch_spyre._inductor.op_spec import (
+    OpSpec,
+    TensorArg,
+    TensorWorkDivision,
+    is_lx_relayout_identity,
+)
+from torch_spyre._inductor.pass_utils import PerCoreView, per_core_views_equal
 from torch_spyre._inductor.spyre_kernel import simplify_op_spec
 from torch_spyre._inductor.views import (
     align_tensors,
@@ -51,6 +59,52 @@ def _coordinates(splits, num_cores, **kwargs):
         tuple(int(mapping[dim].subs(core_id, core)) for dim in dims)
         for core in range(num_cores)
     ]
+
+
+_CORE_ID = sympy.Symbol("core_id")
+
+
+def test_owner_maps_compare_physical_owners_not_sympy_spelling():
+    """Equivalent spellings compare equal; unsplit dimensions describe nothing."""
+
+    head, local = sympy.symbols("head local")
+    same = _CORE_ID - 4 * sympy.floor(_CORE_ID / 4)
+    reordered = sympy.floor(_CORE_ID / 2)
+    left = TensorWorkDivision(
+        {head: 4, local: 1}, {head: sympy.Mod(_CORE_ID, 4), local: sympy.S.Zero}
+    )
+    equivalent = TensorWorkDivision({head: 4}, {head: same}, num_cores=4)
+
+    assert left.physical_core_count == 4
+    assert left != equivalent and left.same_ownership(equivalent)
+    assert not left.same_ownership(
+        TensorWorkDivision({head: 4}, {head: reordered}, num_cores=4)
+    )
+
+    view = PerCoreView(((0, 4),), ((0, sympy.Mod(_CORE_ID, 4)),), num_cores=8)
+    equivalent_view = PerCoreView(
+        ((0, 4), (1, 1)), ((0, same), (1, sympy.S.Zero)), num_cores=8
+    )
+    assert view != equivalent_view and view.same_partition(equivalent_view)
+    assert per_core_views_equal(view, equivalent_view)
+    assert per_core_views_equal(None, None)
+    assert not view.same_partition(
+        PerCoreView(((0, 4),), ((0, reordered),), num_cores=8)
+    )
+
+
+@pytest.mark.parametrize("slot", [sympy.Rational(1, 2), sympy.Symbol("unresolved")])
+def test_owner_slots_must_be_concrete_integers(slot):
+    dim = sympy.Symbol("dim")
+    division = TensorWorkDivision({dim: 2}, {dim: slot}, num_cores=2)
+    with pytest.raises(ValueError, match="non-integral"):
+        division.to_core_slices(2)
+    assert not core_mappings_equal({dim: slot}, {dim: slot}, 2)
+    view = PerCoreView(((0, 2),), ((0, slot),), num_cores=2)
+    from torch_spyre._inductor.scratchpad.lx_relayout import _core_slices
+
+    with pytest.raises(ValueError, match="non-integral"):
+        _core_slices(view, 2)
 
 
 def test_default_mapping_preserves_existing_core_order():
@@ -168,6 +222,80 @@ def test_group_topology_does_not_follow_final_loop_reordering():
     )
 
 
+def test_remap_work_division_accepts_equivalent_merged_owner_slots():
+    first, second, merged = sympy.symbols("first second merged")
+    core_id = sympy.Symbol("core_id")
+    division = TensorWorkDivision(
+        {first: 4, second: 4},
+        {
+            first: sympy.Mod(core_id, 4),
+            second: core_id - 4 * sympy.floor(core_id / 4),
+        },
+        num_cores=8,
+    )
+
+    remapped = remap_work_division(
+        division,
+        {first: ((merged, 4),), second: ((merged, 4),)},
+    )
+
+    assert remapped.physical_core_count == 8
+    assert remapped.work_slices == {merged: 4}
+    assert core_mappings_equal(
+        {merged: remapped.core_id_to_work_slice[merged]},
+        {merged: sympy.Mod(core_id, 4)},
+        8,
+    )
+
+
+def test_remap_work_division_rejects_conflicting_merged_owner_slots():
+    first, second, merged = sympy.symbols("first second merged")
+    core_id = sympy.Symbol("core_id")
+    division = TensorWorkDivision(
+        {first: 4, second: 4},
+        {
+            first: sympy.Mod(core_id, 4),
+            second: sympy.floor(core_id / 2),
+        },
+        num_cores=8,
+    )
+
+    with pytest.raises(ValueError, match="conflicting normalized ownership"):
+        remap_work_division(
+            division,
+            {first: ((merged, 4),), second: ((merged, 4),)},
+        )
+
+
+def test_identity_with_equivalent_owner_spelling_is_not_a_relayout():
+    head = sympy.Symbol("head")
+    core_id = sympy.Symbol("core_id")
+    base = TensorArg(
+        True,
+        0,
+        DataFormats.SEN169_FP16,
+        [4, 64],
+        [head, head],
+        {"lx": 0},
+        work_division=TensorWorkDivision(
+            {head: 4},
+            {head: sympy.Mod(core_id, 4)},
+            num_cores=4,
+        ),
+    )
+    destination = dataclasses.replace(
+        base,
+        is_input=False,
+        work_division=TensorWorkDivision(
+            {head: 4},
+            {head: core_id - 4 * sympy.floor(core_id / 4)},
+            num_cores=4,
+        ),
+    )
+
+    assert not is_lx_relayout_identity("identity", (base, destination))
+
+
 def test_late_mapping_rejects_geometry_that_does_not_fill_groups():
     h, query = sympy.symbols("h query")
     with pytest.raises(ValueError, match="does not match operation split"):
@@ -281,6 +409,28 @@ def test_operation_mapping_rejects_conflicting_lx_tensor_owners():
         derive_operation_mapping(
             {shared: (8, 2), extra: (8, 2)},
             divisions,
+        )
+
+
+def test_operation_mapping_bounds_aligned_owner_dimension_permutations():
+    dims = sympy.symbols("d0:6")
+    core_id = sympy.Symbol("core_id")
+    division = TensorWorkDivision(
+        {dim: 2 for dim in dims},
+        {
+            dim: sympy.Mod(sympy.floor(core_id / (2**index)), 2)
+            for index, dim in enumerate(dims)
+        },
+        num_cores=64,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="too many aligned tensor-owned dimensions.*6 > 5",
+    ):
+        derive_operation_mapping(
+            {dim: (sympy.Integer(2), 2) for dim in dims},
+            [division],
         )
 
 
