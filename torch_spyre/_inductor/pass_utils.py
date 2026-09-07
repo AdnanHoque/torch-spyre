@@ -2763,6 +2763,35 @@ class PerCoreView:
     core_to_slot: tuple[tuple[int, Expr], ...]
     num_cores: int | None = None
 
+    def same_partition(self, other: object) -> bool:
+        """Whether both views assign every physical core the same buffer slice."""
+
+        if not isinstance(other, PerCoreView):
+            return False
+        from .core_mapping import same_owner_maps
+
+        def cores(view: PerCoreView) -> int:
+            if view.num_cores is not None:
+                return view.num_cores
+            return math.prod(split for _, split in view.work_slice_dims)
+
+        return same_owner_maps(
+            dict(self.work_slice_dims),
+            dict(self.core_to_slot),
+            cores(self),
+            dict(other.work_slice_dims),
+            dict(other.core_to_slot),
+            cores(other),
+        )
+
+
+def per_core_views_equal(left: PerCoreView | None, right: PerCoreView | None) -> bool:
+    """None-aware physical-partition comparison."""
+
+    if left is None or right is None:
+        return left is right
+    return left.same_partition(right)
+
 
 def _is_matmul_op(op: Operation) -> bool:
     return (
