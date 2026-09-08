@@ -201,6 +201,7 @@ def test_emission_consumes_the_kernels_prepared_before_pooling():
     operations and binds only what HBM pooling decided afterwards."""
 
     prepared, emitted = {}, []
+    emitted_arguments = {}
     real_prepare = scheduler_module.SuperDSCScheduling.prepare_kernel
     real_codegen = SpyreKernel.codegen_kernel
 
@@ -217,7 +218,10 @@ def test_emission_consumes_the_kernels_prepared_before_pooling():
 
     def codegen_kernel(kernel):
         emitted.append((kernel, operation_ids(kernel)))
-        return real_codegen(kernel)
+        result = real_codegen(kernel)
+        # python_argdefs needs the active graph's dtype lookup.
+        emitted_arguments[id(kernel)] = kernel.args.python_argdefs()[1]
+        return result
 
     def fn(x, y):
         a = x + y
@@ -253,7 +257,7 @@ def test_emission_consumes_the_kernels_prepared_before_pooling():
     # of the actual argument list.
     pooled = set()
     for kernel, _ in emitted:
-        call_args = kernel.args.python_argdefs()[1]
+        call_args = emitted_arguments[id(kernel)]
         for name, arg in kernel.spyre_kernel_args:
             if "hbm_pool" in arg.allocation:
                 pooled.add(name)
