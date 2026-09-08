@@ -823,10 +823,15 @@ def test_fused_split_view_is_gated_and_preserves_exact_owner_order(monkeypatch):
         iter_space={fused: 32},
         write_index=fused,
         dep_coeff={fused: 1},
-        dep_device_coordinates=(sympy.floor(fused / 8), sympy.Mod(fused, 8)),
-        device_size=[4, 8],
-        stride_map=[-1, -1],
+        dep_device_coordinates=(
+            sympy.floor(fused / 8),
+            sympy.Mod(fused, 8),
+            sympy.S.Zero,
+        ),
+        device_size=[4, 8, 1],
+        stride_map=[-1, -1, 1],
         device_stride_to_dim={},
+        elems_per_stick=1,
     )
 
     monkeypatch.setattr(pass_utils_module.config, "lx_planner_relayout", False)
@@ -878,8 +883,8 @@ def test_fused_split_view_checks_complete_owned_tuple(monkeypatch, feature_owned
             2,
             sympy.floor(_CORE_ID / 16),
         )
-        sizes.append(16)
-        coords.append(feature)
+        sizes.extend((16, 1))
+        coords.extend((feature, sympy.Integer(0)))
         kwargs = dict(
             elems_per_stick=1,
             stick_host_stride=1,
@@ -894,7 +899,7 @@ def test_fused_split_view_checks_complete_owned_tuple(monkeypatch, feature_owned
         dep_coeff={dim: index.coeff(dim) for dim in space},
         dep_device_coordinates=tuple(coords),
         device_size=sizes,
-        stride_map=[-1, -1, 1] if feature_owned else [-1, -1],
+        stride_map=[-1, -1, 1, 1] if feature_owned else [-1, -1],
         device_stride_to_dim={1: 2} if feature_owned else {},
         is_matmul=True,
         **kwargs,
@@ -965,6 +970,31 @@ def _prepare_compound_axis_view(iter_space, index, repeat_info=None):
         )
     assert prep is not None
     return prep, graph
+
+
+@pytest.mark.parametrize("flat_split", [4, 8, 16, 32])
+def test_fused_view_keeps_sticks_whole(monkeypatch, flat_split):
+    head, flat = sympy.symbols("head flat", integer=True, nonnegative=True)
+    prep, _ = _prepare_compound_axis_view({head: 16, flat: 512}, 512 * head + flat)
+    splits = {head: 1, flat: flat_split}
+    ownership = TensorWorkDivision(
+        splits,
+        {head: sympy.Integer(0), flat: sympy.Mod(_CORE_ID, flat_split)},
+        flat_split,
+    )
+    monkeypatch.setattr(pass_utils_module.config, "lx_planner_relayout", True)
+    view, partial, representable = pass_utils_module._per_core_view_from_prep(
+        prep, splits, ownership=ownership
+    )
+    # A 512-value row has eight whole sticks, never sixteen half-sticks.
+    assert not partial and representable == (flat_split <= 8)
+    if representable:
+        assert (
+            core_mapping_module.partition_physical_span_bytes(
+                prep.device_size, prep.elems_per_stick, dict(view.work_slice_dims)
+            )
+            > 0
+        )
 
 
 def test_direct_axis_proof_budget_boundary():

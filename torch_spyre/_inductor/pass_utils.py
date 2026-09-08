@@ -3261,7 +3261,11 @@ def _per_core_view_from_prep(
             if decomposed is not None:
                 decomposed_splits, decomposed_slots = decomposed
                 new_dims = {device_dim for device_dim, _ in decomposed_splits}
-                if new_dims.isdisjoint(work_slice_dims):
+                if len(device_size) - 1 in new_dims:
+                    decomposition_reasons.append(
+                        "cannot emit: fused ownership splits the final stick dimension"
+                    )
+                elif new_dims.isdisjoint(work_slice_dims):
                     work_slice_dims.update(decomposed_splits)
                     decomposed_core_to_slot.update(decomposed_slots)
                     continue
