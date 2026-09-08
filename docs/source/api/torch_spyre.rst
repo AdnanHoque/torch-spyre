@@ -679,9 +679,8 @@ Environment Variables
        consumer-compatible producer ordering and same-core restickify
        residency (default ``1``). Set ``0`` to disable these optional
        optimizations; ownership and capacity checks remain active. Allocator
-       selection and the LX budget are unchanged. The latter three features
-       previously needed separate experimental opt-ins; they now follow
-       this switch. Unsupported ownership or insufficient space still uses HBM.
+       selection and the LX budget are unchanged. Unsupported ownership or
+       insufficient space still uses HBM.
    * - ``CO_OPTIMIZING_LX_PLANNING``
      - Use the co-optimizing LX allocator strategy (default ``0``)
    * - ``HBM_POOL_PLANNING``
