@@ -1261,6 +1261,97 @@ def test_lx_relayout_planner_uses_projected_read_ownership(reader):
             assert plans[0].destination_view.same_partition(destination_view)
 
 
+@pytest.mark.parametrize("proposed", [False, True])
+def test_lx_relayout_planner_checks_effective_projected_ownership(proposed):
+    m, n = Symbol("m"), Symbol("n")
+    source_view = PerCoreView(
+        ((1, 32),),
+        ((1, Mod(_CORE_ID, 32)),),
+        num_cores=32,
+    )
+    destination_view = PerCoreView(
+        ((0, 32),),
+        ((0, Mod(_CORE_ID, 32)),),
+        num_cores=32,
+    )
+    coordinates = [m, n] if proposed else [m, m]
+    space = {m: 32, n: 32} if proposed else {m: 32}
+    source_work_division = work_division_from_view(
+        source_view, [32, 32], coordinates, space
+    )
+    destination_work_division = work_division_from_view(
+        destination_view, [32, 32], coordinates, space
+    )
+    assert source_view != destination_view
+    assert source_work_division.same_ownership(destination_work_division) != proposed
+
+    source_dep = SimpleNamespace(name="source", is_indirect=lambda: False)
+    producer = SimpleNamespace(
+        layout=SimpleNamespace(device_layout=SimpleNamespace(device_size=[32, 32])),
+        data=SimpleNamespace(),
+        get_name=lambda: "source",
+    )
+    consumer = SimpleNamespace(
+        layout=SimpleNamespace(),
+        data=SimpleNamespace(),
+        get_name=lambda: "consumer",
+    )
+    graph = SimpleNamespace(operations=[producer, consumer])
+    overrides = (
+        {"source": source_work_division, "consumer": destination_work_division}
+        if proposed
+        else {}
+    )
+
+    def read_writes(op):
+        if op is producer:
+            return SimpleNamespace(reads=[], writes=[source_dep])
+        return SimpleNamespace(reads=[source_dep], writes=[])
+
+    with (
+        mock_patch.object(lx_relayout_module, "MemoryDep", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "ComputedBuffer", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "FixedTiledLayout", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "Pointwise", SimpleNamespace),
+        mock_patch.object(
+            lx_relayout_module, "op_read_writes", side_effect=read_writes
+        ),
+        mock_patch.object(
+            lx_relayout_module,
+            "_per_core_view_on_buf",
+            side_effect=[
+                (source_view, False, True),
+                (destination_view, False, True),
+            ],
+        ) as views,
+        mock_patch.object(
+            lx_relayout_module, "_op_num_cores", return_value=1 if proposed else 32
+        ),
+        mock_patch.object(
+            lx_relayout_module, "try_device_coordinates", return_value=coordinates
+        ),
+        mock_patch.object(
+            lx_relayout_module, "iteration_space_from_op", return_value=space
+        ),
+        mock_patch.object(lx_relayout_module, "is_restickify_op", return_value=False),
+        mock_patch.object(lx_relayout_module, "partition_footprint", return_value=128),
+    ):
+        plans = lx_relayout_module.collect_lx_relayout_plans(
+            graph, ownership_overrides=overrides
+        )
+        assert len(plans) == int(proposed)
+        assert [call.kwargs["ownership_override"] for call in views.call_args_list] == [
+            overrides.get("source"),
+            overrides.get("consumer"),
+        ]
+        if proposed:
+            assert plans[0].source_view.same_partition(source_view)
+            assert plans[0].destination_view.same_partition(destination_view)
+            assert plans[0].num_cores == 32
+        assert not hasattr(producer, "iteration_space_ownership")
+        assert not hasattr(consumer, "iteration_space_ownership")
+
+
 def _completed_route_spec(
     source, destination, shape, coords, space, routes, destination_offset
 ):
@@ -2195,6 +2286,16 @@ def test_completed_reduction_split_is_independent_of_output_split():
 
         op.iteration_space_ownership.work_slices[n] = 1
         assert get_split(op, SimpleNamespace(), "result") == 4
+        candidate = TensorWorkDivision(
+            {m: 2, n: 1, k: 2},
+            {m: floor(_CORE_ID / 2), n: Integer(0), k: Mod(_CORE_ID, 2)},
+            num_cores=4,
+        )
+        assert (
+            get_split(op, SimpleNamespace(), "result", ownership_override=candidate)
+            == 2
+        )
+        assert op.iteration_space_ownership.work_slices[k] == 4
 
 
 @config.patch({"sencores": 8})
