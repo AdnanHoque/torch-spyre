@@ -435,11 +435,10 @@ def prepare_spyre_kernels(
 def verify_carried_reduction_ownership(
     nodes: list[BaseSchedulerNode],
 ) -> list[BaseSchedulerNode]:
-    """Verify the final physical contract of every loop-carried reduction.
+    """Require carried-reduction stages and their committed LX ownership to survive.
 
-    This runs after fusion, kernel preparation, and HBM-pool planning. Earlier
-    split metadata is only an input request; the committed physical view checked
-    here is the ownership codegen will actually emit.
+    Kernel preparation already proved each access against the physical view.
+    After HBM-pool planning, check that the stages, accesses, and view still exist.
     """
 
     grouped: dict[object, dict[str, SchedulerNode]] = {}
@@ -486,8 +485,7 @@ def verify_carried_reduction_ownership(
             (record.combine_name, "write"),
             (record.drain_name, "read"),
         )
-        expected_view = layout.lx_view
-        if expected_view is None:
+        if layout.lx_view is None:
             raise Unsupported(
                 f"carried reduction accumulator {record.accumulator_name} has "
                 "an LX address but no physical ownership"

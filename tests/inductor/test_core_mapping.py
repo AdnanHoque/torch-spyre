@@ -795,6 +795,14 @@ def _prepare_compound_axis_view(iter_space, index, repeat_info=None):
     return prep, graph
 
 
+def test_direct_axis_proof_budget_boundary():
+    prove = core_mapping_module.direct_axis_ownership_failure
+    point = core_mapping_module._LOOP_POINT
+    assert prove(65536, 1, point, 65536, 1) is None
+    assert prove(65537, 1, point, 65537, 1).startswith("proof limit:")
+    assert prove(8, 2, sympy.Mod(point, 4), 8, 2).startswith("ownership mismatch:")
+
+
 def test_prepare_per_core_view_does_not_record_repeat_info():
     head, flat = sympy.symbols("head flat", integer=True, nonnegative=True)
     prior = sympy.Symbol("prior")

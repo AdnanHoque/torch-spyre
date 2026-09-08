@@ -1320,7 +1320,7 @@ def _verify_carried_reduction(missing_view=False):
         return scheduler_module.verify_carried_reduction_ownership(nodes)
 
 
-def test_carried_reduction_verifier_accepts_matching_final_ownership():
+def test_carried_reduction_verifier_accepts_preserved_stages_and_view():
     assert [node.name for node in _verify_carried_reduction()] == [
         "fill",
         "combine",
