@@ -81,6 +81,7 @@ from .pass_utils import format_operations, finalize_work_division_for_scheduler
 from .scratchpad.allocator import (
     scratchpad_planning,
 )
+from .scratchpad.lx_relayout import anchor_lx_relayout_ownership
 from .fusion import spyre_fuse_nodes
 from .scheduler import (
     build_loop_scheduler_nodes,
@@ -413,6 +414,11 @@ def _maybe_scratchpad_planning(graph: GraphLowering) -> None:
     scratchpad_planning(graph)
 
 
+@_runs(anchor_lx_relayout_ownership)
+def _maybe_anchor_lx_relayout_ownership(graph: GraphLowering) -> None:
+    anchor_lx_relayout_ownership(graph)
+
+
 class CustomPreSchedulingPasses:
     """
     Spyre-specific passes that run on the GraphLowering immediately before the
@@ -492,6 +498,7 @@ class CustomPreSchedulingPasses:
             # Core Division
             span_reduction,
             _distribute_work,
+            _maybe_anchor_lx_relayout_ownership,
             #
             # LX Planning
             _maybe_scratchpad_planning,
