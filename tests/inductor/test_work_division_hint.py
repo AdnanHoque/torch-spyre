@@ -2044,12 +2044,6 @@ def test_completed_reduction_can_copy_to_its_sixteen_consumers():
     assert set(destination_map) == {str(c) for c in range(16)}
 
 
-if __name__ == "__main__":
-    from torch._inductor.test_case import run_tests
-
-    run_tests()
-
-
 def aot_backend(gm: GraphModule, example_inputs: Sequence[InputType]):
     decompositions = get_decompositions(
         [
