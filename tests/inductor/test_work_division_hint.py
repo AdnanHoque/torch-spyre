@@ -584,7 +584,7 @@ def _relayout_plan(source="source", consumers="consumer"):
                 ((0, Symbol("unknown_owner")),),
                 num_cores=2,
             ),
-            "non-concrete owner slot",
+            "non-integral owner slot",
         ),
         (
             PerCoreView(((0, 2),), ((0, Integer(2)),), num_cores=2),
