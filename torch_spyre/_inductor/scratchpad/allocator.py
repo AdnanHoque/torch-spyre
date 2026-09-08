@@ -551,7 +551,6 @@ class ScratchpadAllocator:
         ncores: Optional[dict[str, int]] = None,
         ncores_reasons: Optional[dict[str, str]] = None,
         division_is_fixed: bool,
-        lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
     ) -> Optional[str]:
         """The residency verdict for a *graph input*, which is pinned by cloning
         it into LX rather than by placing it directly.
@@ -581,9 +580,7 @@ class ScratchpadAllocator:
             return "use is not rewritable to the clone"
         if buffer_not_read_in_full(graph, name):
             return "partial/offset read"
-        restickify = self._restickify_barrier(
-            graph, name, uses, lx_relayout_plans=lx_relayout_plans
-        )
+        restickify = self._restickify_barrier(graph, name, uses)
         if restickify is not None:
             return restickify
         if division_is_fixed and (ncores or {}).get(name, -1) < 0:
