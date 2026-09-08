@@ -1006,7 +1006,9 @@ def test_work_selection_prices_both_graph_boundary_copies():
         for n in names
     ]
     buf = SimpleNamespace(
-        layout=SimpleNamespace(device_layout=SimpleNamespace(device_size=[2, 64])),
+        layout=SimpleNamespace(
+            device_layout=SpyreTensorLayout([2, 64], [64, 1], DataFormats.SEN169_FP16)
+        ),
         get_dtype=lambda: torch.float16,
     )
     graph = SimpleNamespace(
