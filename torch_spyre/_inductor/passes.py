@@ -416,6 +416,8 @@ def _maybe_scratchpad_planning(graph: GraphLowering) -> None:
 
 @_runs(anchor_lx_relayout_ownership)
 def _maybe_anchor_lx_relayout_ownership(graph: GraphLowering) -> None:
+    if not config.lx_planning:
+        return
     anchor_lx_relayout_ownership(graph)
 
 
