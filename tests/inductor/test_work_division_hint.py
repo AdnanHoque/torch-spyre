@@ -876,7 +876,190 @@ def test_consumer_anchoring_commits_the_unique_accepted_owner_order():
     ] == [core % 8 for core in range(32)]
 
 
-def test_restickify_lx_read_requires_the_same_physical_owners():
+def test_compact_proposals_keep_cores_hints_and_reduction_splits():
+    g, m, n, k = [Symbol(s, integer=True) for s in ("g", "m", "n", "k")]
+    axes = [g, m, n, k]
+
+    def op(name, splits, matmul):
+        return SimpleNamespace(
+            get_name=lambda: name,
+            matmul=matmul,
+            data=SimpleNamespace(),
+            layout=SimpleNamespace(),
+            iteration_space_ownership=TensorWorkDivision(dict(zip(axes, splits)), {}),
+        )
+
+    matmul = op("matmul", [1, 16, 2, 1], True)
+    neighbor = op("neighbor", [1, 32, 1, 1], False)
+    hinted = op("hinted", [1, 32, 1, 1], False)
+    reduced = op("reduced", [1, 8, 2, 2], True)
+    dynamic = op("dynamic", [1, 16, 2, 1], True)
+
+    def context(o, _cores):
+        domains = {g: [1, 2, 4], m: [1, 2, 4, 8, 16, 32], n: [1, 2], k: [1, 2]}
+        return SimpleNamespace(
+            op=o,
+            axes=axes,
+            it_space_adjusted={g: 4, m: 512, n: 2, k: 2},
+            reduction_vars=[k],
+            tensor_deps=[SimpleNamespace(device_coords=[g, m, n, Integer(0)])],
+            factor_domain=lambda v: domains[v],
+            is_legal=lambda splits: math.prod(splits.values()) == 32
+            and all(splits[v] in domains[v] for v in axes),
+        )
+
+    with (
+        mock_patch.object(allocator_module, "ComputedBuffer", SimpleNamespace),
+        mock_patch.object(allocator_module, "FixedTiledLayout", SimpleNamespace),
+        mock_patch.object(allocator_module, "Pointwise", SimpleNamespace),
+        mock_patch.object(
+            allocator_module, "_has_work_div_hint", side_effect=lambda o: o is hinted
+        ),
+        mock_patch.object(
+            allocator_module, "_is_matmul_op", side_effect=lambda o: o.matmul
+        ),
+        mock_patch.object(
+            allocator_module, "work_division_context_for_op", side_effect=context
+        ),
+        mock_patch.object(
+            allocator_module,
+            "iteration_space_from_op",
+            side_effect=lambda o: dict.fromkeys(axes, g if o is dynamic else 128),
+        ),
+        mock_patch.object(
+            allocator_module,
+            "make_iteration_space_ownership",
+            side_effect=lambda o, splits: TensorWorkDivision(splits, {}),
+        ),
+    ):
+        proposals = allocator_module._compact_work_division_proposals(
+            SimpleNamespace(operations=[matmul, neighbor, hinted, reduced, dynamic])
+        )
+    winner = next(p for p in proposals if p["matmul"].work_slices[g] == 4)
+    assert list(winner["matmul"].work_slices.values()) == [4, 4, 2, 1]
+    assert list(winner["neighbor"].work_slices.values()) == [4, 8, 1, 1]
+    assert list(winner["reduced"].work_slices.values()) == [4, 2, 2, 2]
+    assert all("hinted" not in p for p in proposals)
+    assert all("dynamic" not in p for p in proposals)
+    assert list(matmul.iteration_space_ownership.work_slices.values()) == [1, 16, 2, 1]
+
+
+@pytest.mark.parametrize(
+    "costs,selected",
+    [
+        ([10.0, 9.0], True),
+        ([10.0, 10.0], False),
+        ([10.0, 11.0], False),
+        ([math.nan], False),
+        ([math.inf], False),
+        ([RuntimeError("unresolvable cost")], False),
+        ([10.0, math.nan], False),
+        ([10.0, -1.0], False),
+        ([10.0, RuntimeError("unresolvable cost")], False),
+    ],
+)
+def test_work_selection_requires_a_priced_improvement(costs, selected):
+    division = TensorWorkDivision({}, {})
+    op = SimpleNamespace(get_name=lambda: "out")
+    graph = SimpleNamespace(operations=[op])
+    candidate = {"out": division}
+    allocator = ScratchpadAllocator(GreedyLayoutSolver, 256)
+    with (
+        mock_patch.object(
+            allocator_module,
+            "_compact_work_division_proposals",
+            return_value=[candidate],
+        ),
+        mock_patch.object(allocator_module, "commit_tensor_work_division") as commit,
+        mock_patch.object(allocator, "_prepare_fixed_buffers", return_value=[]),
+        mock_patch.object(allocator, "_build_solver") as solver,
+        mock_patch.object(
+            allocator, "_finalize_lx_relayout_allocation", return_value=[]
+        ),
+        mock_patch.object(allocator, "_allocation_cost", side_effect=costs) as cost,
+    ):
+        # No graph ownership is committed while either trial is being solved.
+        solver.return_value.plan_layout.side_effect = lambda: (
+            commit.assert_not_called() or []
+        )
+        allocator._select_work_division(graph)
+        assert cost.call_count == len(costs)
+        if selected:
+            commit.assert_called_once_with(op, division)
+        else:
+            commit.assert_not_called()
+
+
+def test_work_selection_prices_both_graph_boundary_copies():
+    import torch_spyre._inductor.cost_model as cost_model
+
+    names = ["input", "output", "internal", "unplaced"]
+    view = PerCoreView((), (), num_cores=1)
+    allocation = [
+        SimpleNamespace(name=n, address=None if n == "unplaced" else 0, lx_view=view)
+        for n in names
+    ]
+    buf = SimpleNamespace(
+        layout=SimpleNamespace(device_layout=SimpleNamespace(device_size=[2, 64])),
+        get_dtype=lambda: torch.float16,
+    )
+    graph = SimpleNamespace(
+        operations=[],
+        graph_input_names=["input"],
+        get_output_names=lambda: ["output", "unplaced"],
+        get_buffer=lambda _: buf,
+    )
+    with (
+        mock_patch.object(cost_model, "predict_by_bundle", return_value=0),
+        mock_patch.object(cost_model, "predict_ops", return_value=7) as price,
+    ):
+        assert ScratchpadAllocator._allocation_cost(graph, allocation, [], {}) == 14
+    copies = [call.args[0][0] for call in price.call_args_list]
+    assert [[arg.is_lx for arg in c.args] for c in copies] == [
+        [False, True],
+        [True, False],
+    ]
+    assert all(c.out_elems == 128 and c.dtype_bytes == 2 for c in copies)
+
+
+@pytest.mark.parametrize(
+    "shape", [(1, 1, 128, 128), (8, 64, 128, 128), (4, 512, 128, 128), (4, 65, 96, 130)]
+)
+def test_automatic_work_selection_device(shape):
+    """Unhinted decode, prefill and stick-tail chains use the normal compiler."""
+    torch.manual_seed(0xAFFE)
+    batch, rows, inner, cols = shape
+    args = [
+        torch.randn(batch, rows, inner, dtype=torch.float16) * 0.1,
+        torch.randn(batch, inner, cols, dtype=torch.float16) * 0.1,
+        torch.randn(batch, cols, 128, dtype=torch.float16) * 0.1,
+    ]
+
+    def fn(a, b, v):
+        return (a @ b).softmax(-1) @ v
+
+    expected = fn(*[a.float() for a in args])
+    device_args = [a.to("spyre") for a in args]
+    outputs = []
+    for enabled in (False, True):
+        torch._dynamo.reset()
+        with config.patch(
+            {
+                "sencores": 32,
+                "lx_planning": True,
+                "allow_all_ops_in_lx_planning": True,
+                "lx_planner_relayout": enabled,
+                "layout_solver": "greedy",
+            }
+        ):
+            result = torch.compile(fn)(*device_args).cpu().float()
+        torch.testing.assert_close(result, expected, atol=5e-3, rtol=1e-2)
+        outputs.append(result)
+    torch.testing.assert_close(outputs[0], outputs[1], atol=5e-3, rtol=1e-2)
+
+
+@pytest.mark.parametrize("proposed", [False, True])
+def test_restickify_lx_read_requires_the_same_physical_owners(proposed):
     allocator = ScratchpadAllocator(GreedyLayoutSolver, 256)
     expected = PerCoreView(((0, 8),), ((0, Mod(_CORE_ID, 8)),), num_cores=8)
     wrong = PerCoreView(((0, 8),), ((0, Mod(_CORE_ID + 1, 8)),), num_cores=8)
@@ -885,6 +1068,7 @@ def test_restickify_lx_read_requires_the_same_physical_owners():
     graph = SimpleNamespace(operations=[producer, restickify])
     write = SimpleNamespace(name="source", is_indirect=lambda: False)
     read = SimpleNamespace(name="source", is_indirect=lambda: False)
+    overrides = {"source": object(), "restickify": object()} if proposed else {}
 
     def read_writes(op):
         if op is producer:
@@ -892,6 +1076,10 @@ def test_restickify_lx_read_requires_the_same_physical_owners():
         return SimpleNamespace(reads=[read], writes=[])
 
     def prove(write_view, plans=(), *, enabled=True, structural_restickify=True):
+        def view(op, *_args, ownership_override=None):
+            assert ownership_override is overrides.get(op.get_name())
+            return write_view if op is producer else expected, False, True
+
         with (
             config.patch({"lx_planner_relayout": enabled}),
             mock_patch.object(
@@ -907,15 +1095,15 @@ def test_restickify_lx_read_requires_the_same_physical_owners():
             mock_patch.object(
                 allocator_module,
                 "_per_core_view_on_buf",
-                side_effect=lambda op, *_args: (
-                    write_view if op is producer else expected,
-                    False,
-                    True,
-                ),
+                side_effect=view,
             ),
         ):
             return allocator._restickify_barrier(
-                graph, "source", [1], lx_relayout_plans=plans
+                graph,
+                "source",
+                [1],
+                lx_relayout_plans=plans,
+                ownership_overrides=overrides,
             )
 
     assert prove(expected, enabled=False, structural_restickify=False) is None
