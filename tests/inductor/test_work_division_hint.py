@@ -43,6 +43,7 @@ from torch._inductor.ir import NoneLayout
 from torch._inductor.utils import run_and_get_code, InputType
 
 from torch_spyre._inductor import config, spyre_hint
+import torch_spyre._inductor.core_mapping as core_mapping_module
 import torch_spyre._inductor.scratchpad.lx_relayout as lx_relayout_module
 import torch_spyre._inductor.scheduler as scheduler_module
 import torch_spyre._inductor.work_division as _wd
@@ -694,7 +695,7 @@ def _allocation_graph(*operation_names):
             32,
             True,
         ),
-        # Combined gather/broadcast is not enabled at this level.
+        # Gather then broadcast: every completed slice reaches several cores.
         (
             _view({2: 32}, {2: Mod(_CORE_ID, 32)}, 32),
             _view(
@@ -702,7 +703,7 @@ def _allocation_graph(*operation_names):
             ),
             32,
             32,
-            False,
+            True,
         ),
         # A larger domain need not replicate slices evenly: each source feeds
         # four cores and each destination core has one source.
@@ -847,6 +848,25 @@ def test_work_division_from_view_examples(
     assert division is not None
     assert division.work_slices == expected
     assert division.physical_core_count == view.num_cores
+
+
+def test_diagonal_access_cannot_become_a_complete_relayout_source():
+    loop = Symbol("loop")
+    owner = Mod(_CORE_ID, 2)
+    division = TensorWorkDivision({loop: 2}, {loop: owner}, num_cores=2)
+    diagonal = PerCoreView(((0, 2), (1, 2)), ((0, owner), (1, owner)), num_cores=2)
+
+    # Projection may describe a diagonal read. It does not authorize treating
+    # its two accessed cells as the complete four-cell physical buffer.
+    assert (
+        core_mapping_module.decompose_fused_split_view(
+            loop, 2, owner, division, {loop: 2}, (2, 2), (loop, loop), 2
+        )
+        is None
+    )
+    assert not lx_relayout_module.movement_supported(
+        diagonal, PerCoreView((), (), num_cores=2), 2, 2
+    )
 
 
 def test_lx_relayout_activation_policy_is_source_wide():

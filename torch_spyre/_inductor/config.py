@@ -62,7 +62,7 @@ ktir_emitter: bool = os.environ.get("TORCH_SPYRE_KTIR", "0") == "1"
 # A .mlir declaring the target device, passed to the backend compiler.
 ktir_device_mlir: str = os.environ.get("KTIR_DEVICE_MLIR", "")
 
-# Enable certified LX ownership changes.
+# Enable certified LX ownership changes, including exact fused-axis views.
 # Set SPYRE_LX_PLANNER_RELAYOUT=0 to disable these optional optimizations, not
 # ownership validation. This does not change the allocator or LX memory budget.
 lx_planner_relayout: bool = _get_env_bool("SPYRE_LX_PLANNER_RELAYOUT", True)

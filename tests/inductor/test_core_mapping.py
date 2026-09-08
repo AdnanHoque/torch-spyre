@@ -195,6 +195,46 @@ def test_late_partition_mapping_repeats_contiguous_owners():
 
 
 @pytest.mark.parametrize(
+    ("extent", "split", "device_size", "accepted", "owner"),
+    [
+        # A 98-wide axis must not lose f = 98 to floating-point rounding.
+        (784, 16, (8, 98), ((0, 8), (1, 2)), lambda c: (c // 2, c % 2)),
+        # The fused budget counts states: 1020 + 4 fits, 1024 + 4 does not.
+        (1020, 4, (4, 255), ((0, 4),), lambda c: (c,)),
+        (1024, 4, (4, 256), None, None),
+    ],
+)
+def test_fused_decomposition_is_exact_and_bounded(
+    extent, split, device_size, accepted, owner
+):
+    division = TensorWorkDivision({_FUSED: split}, {_FUSED: _CORE_ID}, num_cores=split)
+    reasons = []
+    result = core_mapping_module.decompose_fused_split_view(
+        _FUSED,
+        split,
+        _CORE_ID,
+        division,
+        {_FUSED: extent},
+        device_size,
+        (sympy.floor(_FUSED / device_size[1]), sympy.Mod(_FUSED, device_size[1])),
+        split,
+        rejection_reasons=reasons,
+    )
+    if accepted is None:
+        assert result is None
+        assert reasons == [
+            f"proof limit: fused decomposition needs {extent + split} states; "
+            "limit is 1024"
+        ]
+        return
+    assert result is not None and result[0] == accepted
+    assert [
+        tuple(int(slot.subs(_CORE_ID, c)) for _, slot in result[1])
+        for c in range(split)
+    ] == [owner(c) for c in range(split)]
+
+
+@pytest.mark.parametrize(
     ("coords", "extent", "split", "sizes"),
     [
         ((_FUSED, _FUSED), 4, 2, (4, 4)),
@@ -685,6 +725,113 @@ def test_stride_selected_compound_view_matches_actual_owned_values(reverse, capt
             )
         }
         assert actual == expected, (c, actual, expected)
+
+
+def test_fused_split_view_is_gated_and_preserves_exact_owner_order(monkeypatch):
+    fused = sympy.Symbol("fused")
+    prep = _view_prep(
+        iter_space={fused: 32},
+        write_index=fused,
+        dep_coeff={fused: 1},
+        dep_device_coordinates=(sympy.floor(fused / 8), sympy.Mod(fused, 8)),
+        device_size=[4, 8],
+        stride_map=[-1, -1],
+        device_stride_to_dim={},
+    )
+
+    monkeypatch.setattr(pass_utils_module.config, "lx_planner_relayout", False)
+    disabled_view, disabled_partial, disabled_representable = (
+        pass_utils_module._per_core_view_from_prep(prep, {fused: 32})
+    )
+    assert not disabled_representable
+    assert not disabled_partial
+    assert not disabled_view.work_slice_dims
+
+    monkeypatch.setattr(pass_utils_module.config, "lx_planner_relayout", True)
+    enabled_view, enabled_partial, enabled_representable = (
+        pass_utils_module._per_core_view_from_prep(prep, {fused: 32})
+    )
+    assert enabled_representable
+    assert not enabled_partial
+    assert enabled_view.work_slice_dims == ((0, 4), (1, 8))
+    assert enabled_view.same_partition(
+        PerCoreView(
+            ((0, 4), (1, 8)),
+            (
+                (0, sympy.floor(sympy.Symbol("core_id") / 8)),
+                (1, sympy.Mod(sympy.Symbol("core_id"), 8)),
+            ),
+            num_cores=32,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "feature_owned", [True, False], ids=["v_owned_tuple", "interleaved"]
+)
+def test_fused_split_view_checks_complete_owned_tuple(monkeypatch, feature_owned):
+    query, fused, feature = sympy.symbols("query fused feature")
+    qsplit = 2 if feature_owned else 4
+    space, sizes = {query: qsplit, fused: 32}, [4, 8]
+    splits = {query: qsplit, fused: 8}
+    slots = {
+        query: sympy.Mod(_CORE_ID, 2) if feature_owned else sympy.floor(_CORE_ID / 8),
+        fused: sympy.Mod(sympy.floor(_CORE_ID / 2), 8)
+        if feature_owned
+        else sympy.Mod(_CORE_ID, 8),
+    }
+    coords = [sympy.floor(fused / 8), sympy.Mod(fused, 8)]
+    kwargs = {}
+    if feature_owned:
+        space[feature], splits[feature], slots[feature] = (
+            16,
+            2,
+            sympy.floor(_CORE_ID / 16),
+        )
+        sizes.append(16)
+        coords.append(feature)
+        kwargs = dict(
+            elems_per_stick=1,
+            stick_host_stride=1,
+            num_stick_dim=2,
+            num_stick=16,
+            num_stick_stride=1,
+        )
+    index = 16 * fused + feature if feature_owned else fused
+    prep = _view_prep(
+        iter_space=space,
+        write_index=index,
+        dep_coeff={dim: index.coeff(dim) for dim in space},
+        dep_device_coordinates=tuple(coords),
+        device_size=sizes,
+        stride_map=[-1, -1, 1] if feature_owned else [-1, -1],
+        device_stride_to_dim={1: 2} if feature_owned else {},
+        is_matmul=True,
+        **kwargs,
+    )
+    ownership = TensorWorkDivision(splits, slots, num_cores=32)
+    monkeypatch.setattr(pass_utils_module.config, "lx_planner_relayout", True)
+    view, partial, representable = pass_utils_module._per_core_view_from_prep(
+        prep,
+        splits,
+        ownership=ownership,
+    )
+    assert representable == feature_owned and not partial
+    if feature_owned:
+        fslot = sympy.Mod(sympy.floor(_CORE_ID / 2), 8)
+        assert view.same_partition(
+            PerCoreView(
+                ((0, 4), (1, 2), (2, 2)),
+                (
+                    (0, sympy.floor(fslot / 2)),
+                    (1, sympy.Mod(fslot, 2)),
+                    (2, sympy.floor(_CORE_ID / 16)),
+                ),
+                num_cores=32,
+            )
+        )
+    else:
+        assert not view.work_slice_dims
 
 
 def _prepare_compound_axis_view(iter_space, index, repeat_info=None):
