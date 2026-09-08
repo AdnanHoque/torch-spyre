@@ -172,6 +172,7 @@ def test_a_pooled_mutation_destination_leaves_the_external_argument_list():
     pooled = _layout(False)
     pooled.allocation = {"hbm_pool": 4096}  # filled in after preparation
     layouts = {"destination": pooled, "result": _layout(False), "alias": Mock()}
+    emitted = []
     graph = SimpleNamespace(
         get_buffer={
             name: SimpleNamespace(get_layout=lambda layout=layout: layout)
@@ -179,7 +180,7 @@ def test_a_pooled_mutation_destination_leaves_the_external_argument_list():
         }.get,
         removed_buffers=OrderedSet(),
         scheduler=SimpleNamespace(mutation_real_name={"alias": "destination"}),
-        wrapper_code=None,
+        wrapper_code=SimpleNamespace(writeline=emitted.append),
         get_dtype=lambda name: None,
     )
 
@@ -188,8 +189,21 @@ def test_a_pooled_mutation_destination_leaves_the_external_argument_list():
         kernel.store_buffer_names.add("alias")
         kernel.args.output("alias")  # registered as "destination"
         kernel.args.output("result")
-        kernel.remove_kernel_local_buffers()
-        assert kernel.args.python_argdefs()[1] == ["result"]
+        kernel.args.input("dead_index")  # simplified away after registration
+        destination_arg = Mock(allocation=pooled.allocation)
+        result_arg = Mock(allocation={"hbm": 0})
+        # The destination was registered before pooling and remains in this
+        # prepared list; only emission knows it no longer needs an external arg.
+        kernel.spyre_kernel_args = [
+            ("destination", destination_arg),
+            ("result", result_arg),
+        ]
+        kernel.codegen_kernel()
+        assert "destination" not in kernel.args.python_argdefs()[1]
+        assert kernel._live_call_arg_names == ["result"]
+        assert result_arg.arg_index == 0
+        kernel.call_kernel("prepared")
+        assert emitted == ["prepared.run(result)"]
 
 
 # --- the real compile -------------------------------------------------------
@@ -219,8 +233,9 @@ def test_emission_consumes_the_kernels_prepared_before_pooling():
     def codegen_kernel(kernel):
         emitted.append((kernel, operation_ids(kernel)))
         result = real_codegen(kernel)
-        # python_argdefs needs the active graph's dtype lookup.
-        emitted_arguments[id(kernel)] = kernel.args.python_argdefs()[1]
+        # This is the same filtered ordering used by arg_index and .run().
+        assert kernel._live_call_arg_names is not None
+        emitted_arguments[id(kernel)] = kernel._live_call_arg_names.copy()
         return result
 
     def fn(x, y):
