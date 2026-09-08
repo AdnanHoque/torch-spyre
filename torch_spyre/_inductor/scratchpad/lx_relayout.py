@@ -498,6 +498,13 @@ def collect_lx_relayout_plans(
     ownership_overrides: Mapping[str, TensorWorkDivision] | None = None,
     unprojectable_sources: list[str] | None = None,
 ) -> list[LXRelayoutPlan]:
+    """Certify movement under committed or proposed operation ownership.
+
+    Overrides apply to both writes and reads, including their physical core
+    domains and reduction splits. This lets selection price a whole proposal
+    without committing any operation or changing the graph.
+    """
+
     if not config.lx_planner_relayout or config.ktir_emitter:
         return []
     if materialized_lx_relayouts(graph):
@@ -522,16 +529,23 @@ def collect_lx_relayout_plans(
             or (write := _single_write(producer, source_name)) is None
         ):
             continue
+        source_ownership = (ownership_overrides or {}).get(source_name)
         source_view, partial, representable = _per_core_view_on_buf(
             producer,
             write,
             source_name,
             cache,
-            ownership_override=(ownership_overrides or {}).get(source_name),
+            ownership_override=source_ownership,
         )
-        source_num_cores = _op_num_cores(producer)
+        source_num_cores = (
+            source_ownership.physical_core_count
+            if source_ownership is not None
+            else _op_num_cores(producer)
+        )
         reduction = (
-            completed_reduction_split_on_buf(producer, write, source_name)
+            completed_reduction_split_on_buf(
+                producer, write, source_name, ownership_override=source_ownership
+            )
             if partial
             else None
         )
@@ -609,10 +623,19 @@ def collect_lx_relayout_plans(
             if any(d.is_indirect() for d in deps):
                 rejection_reason = "cannot emit: consumer uses indirect access"
                 break
+            consumer_ownership = (ownership_overrides or {}).get(consumer_name)
             view, consumer_partial, representable = _per_core_view_on_buf(
-                consumer, dep, source_name, cache
+                consumer,
+                dep,
+                source_name,
+                cache,
+                ownership_override=consumer_ownership,
             )
-            consumer_num_cores = _op_num_cores(consumer)
+            consumer_num_cores = (
+                consumer_ownership.physical_core_count
+                if consumer_ownership is not None
+                else _op_num_cores(consumer)
+            )
             if view is None or consumer_partial or not representable:
                 rejection_reason = (
                     "cannot represent: consumer ownership is partial or unrepresentable"
