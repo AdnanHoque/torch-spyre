@@ -18,6 +18,7 @@ from dataclasses import replace
 import json
 import logging
 import logging.handlers
+import math
 import os
 from pathlib import Path
 import regex as re
@@ -1118,7 +1119,11 @@ def test_unhinted_moe_down_route_uses_the_production_hbm_fallback():
     specs = [spec for kernel in kernels for spec in _iter_op_specs(kernel.op_specs)]
     bmm_specs = [spec for spec in specs if spec.op == BATCH_MATMUL_OP]
     assert len(bmm_specs) == 1
-    assert [split for _, split in bmm_specs[0].iteration_space.values()] == [4, 4, 2]
+    # Alignment can append range-1 loops for elided device dimensions. Check
+    # the requested T4/H4/K2 division, not the number of aligned loop symbols.
+    splits = [split for _, split in bmm_specs[0].iteration_space.values()]
+    assert [split for split in splits if split > 1] == [4, 4, 2]
+    assert math.prod(splits) == config.sencores
     down_arg = next(arg for arg in bmm_specs[0].args if not arg.is_input)
     assert set(down_arg.allocation) == {"hbm_pool"}
     assert down_arg.work_division is None
