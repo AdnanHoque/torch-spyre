@@ -596,7 +596,9 @@ the bundle cost includes the resulting HBM traffic and added LX transfers. Only
 the winning choice is committed, before scheduling. This is a bounded heuristic,
 not an exhaustive search or a guarantee of lower measured latency.
 This initial policy considers only operations with static iteration extents,
-and runs only when the alternative changes a matmul. Input loads and graph-output
+and runs only when the alternative changes an ordinary matmul. FP8 matmul
+divisions are unchanged: their compute is not yet covered by this cost extractor.
+Input loads and graph-output
 drains are included even when the buffer
 is placed in LX. A tie, unavailable prediction or failed candidate placement
 keeps the existing choice; a baseline that cannot be priced is never replaced.

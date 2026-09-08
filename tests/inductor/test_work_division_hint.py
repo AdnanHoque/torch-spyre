@@ -52,6 +52,7 @@ from torch_spyre._C import DataFormats, SpyreTensorLayout
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec, parse_op_spec
 from torch_spyre._inductor.constants import (
     BATCH_MATMUL_OP,
+    BATCH_MATMUL_FP8_OP,
     IDENTITY_OP,
 )
 from torch_spyre._inductor.errors import Unsupported
@@ -884,7 +885,7 @@ def test_compact_proposals_keep_cores_hints_and_reduction_splits():
         return SimpleNamespace(
             get_name=lambda: name,
             matmul=matmul,
-            data=SimpleNamespace(),
+            data=SimpleNamespace(reduction_type=BATCH_MATMUL_OP if matmul else None),
             layout=SimpleNamespace(),
             iteration_space_ownership=TensorWorkDivision(dict(zip(axes, splits)), {}),
         )
@@ -894,6 +895,8 @@ def test_compact_proposals_keep_cores_hints_and_reduction_splits():
     hinted = op("hinted", [1, 32, 1, 1], False)
     reduced = op("reduced", [1, 8, 2, 2], True)
     dynamic = op("dynamic", [1, 16, 2, 1], True)
+    fp8 = op("fp8", [1, 16, 2, 1], True)
+    fp8.data.reduction_type = BATCH_MATMUL_FP8_OP
 
     def context(o, _cores):
         domains = {g: [1, 2, 4], m: [1, 2, 4, 8, 16, 32], n: [1, 2], k: [1, 2]}
@@ -933,7 +936,9 @@ def test_compact_proposals_keep_cores_hints_and_reduction_splits():
         ),
     ):
         proposals = allocator_module._compact_work_division_proposals(
-            SimpleNamespace(operations=[matmul, neighbor, hinted, reduced, dynamic])
+            SimpleNamespace(
+                operations=[matmul, neighbor, hinted, reduced, dynamic, fp8]
+            )
         )
     winner = next(p for p in proposals if p["matmul"].work_slices[g] == 4)
     assert list(winner["matmul"].work_slices.values()) == [4, 4, 2, 1]
@@ -941,6 +946,7 @@ def test_compact_proposals_keep_cores_hints_and_reduction_splits():
     assert list(winner["reduced"].work_slices.values()) == [4, 2, 2, 2]
     assert all("hinted" not in p for p in proposals)
     assert all("dynamic" not in p for p in proposals)
+    assert all("fp8" not in p for p in proposals)
     assert list(matmul.iteration_space_ownership.work_slices.values()) == [1, 16, 2, 1]
 
 
