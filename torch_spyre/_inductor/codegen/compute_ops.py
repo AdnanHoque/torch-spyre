@@ -195,7 +195,7 @@ def core_idx_to_slice_offset(
 def num_bytes(df: DataFormats) -> int:
     """Try to avoid using this method; it is a bad API due to sub-byte datatypes"""
     num_elems = df.elems_per_stick()
-    if num_elems > 128:
+    if num_elems > BYTES_PER_STICK:
         raise RuntimeError(f"sub-byte dataformat {df}")
     return BYTES_PER_STICK // num_elems
 
