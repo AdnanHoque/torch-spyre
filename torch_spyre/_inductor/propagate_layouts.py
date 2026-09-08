@@ -676,7 +676,7 @@ def _clone_layout(
 
     # Case 2: Find alternative dimension to swap with the current stick dimension.
     # Keep clone's existing single-target policy. Optional input_stl_choices
-    # are currently supplied only by the opt-in standard batch-matmul path;
+    # are currently supplied only by the enabled standard batch-matmul path;
     # extending clone's candidate construction is separate work.
     out_coords = host_coordinates(output, output_dep, None)
     in_layout = args[0].layout

@@ -301,7 +301,7 @@ class TestOfferIndexedSelectionLayouts(unittest.TestCase):
                 ElementArrangement.STANDARD,
             )
 
-    def test_default_off_leaves_candidates_untouched(self):
+    def test_opt_out_leaves_candidates_untouched(self):
         graph = _graph([self.op, self.bmm], self.layout)
         self.assertEqual(self._offer(graph, flag=False), [self.generic])
 
@@ -379,7 +379,8 @@ class TestOfferIndexedSelectionLayouts(unittest.TestCase):
                 self.assertEqual(self._offer(graph), [self.generic])
 
     def test_fp8_consumer_stays_on_ordinary_candidates(self):
-        self.bmm.data.reduction_type = BATCH_MATMUL_FP8_OP
+        # Reduction is frozen in the native-backed test environment.
+        object.__setattr__(self.bmm.data, "reduction_type", BATCH_MATMUL_FP8_OP)
         graph = _graph([self.op, self.bmm], self.layout)
         self.assertEqual(self._offer(graph), [self.generic])
 
