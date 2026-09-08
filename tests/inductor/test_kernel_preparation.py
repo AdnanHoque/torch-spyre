@@ -157,6 +157,41 @@ def test_a_rejected_attempt_demotes_restarts_and_keeps_the_final_kernels():
         assert node.prepared_kernel is kernels[node.name]
 
 
+def test_a_pooled_mutation_destination_leaves_the_external_argument_list():
+    """Emission prunes a pooled destination registered through a mutation alias.
+
+    Preparation runs before HBM pooling, so an operation that writes a padded
+    intermediate registers it as an external argument. ``KernelArgs.output``
+    resolves ``mutation_real_name``, so the alias lands in
+    ``store_buffer_names`` while the real destination lands in
+    ``output_buffers``. Emission skips a pooled tensor's descriptor argument,
+    so the same tensor must leave the call argument list, or the wrapper passes
+    one argument more than the bundle declares.
+    """
+
+    pooled = _layout(False)
+    pooled.allocation = {"hbm_pool": 4096}  # filled in after preparation
+    layouts = {"destination": pooled, "result": _layout(False), "alias": Mock()}
+    graph = SimpleNamespace(
+        get_buffer={
+            name: SimpleNamespace(get_layout=lambda layout=layout: layout)
+            for name, layout in layouts.items()
+        }.get,
+        removed_buffers=OrderedSet(),
+        scheduler=SimpleNamespace(mutation_real_name={"alias": "destination"}),
+        wrapper_code=None,
+        get_dtype=lambda name: None,
+    )
+
+    with V.set_graph_handler(graph):
+        kernel = SpyreKernel()
+        kernel.store_buffer_names.add("alias")
+        kernel.args.output("alias")  # registered as "destination"
+        kernel.args.output("result")
+        kernel.remove_kernel_local_buffers()
+        assert kernel.args.python_argdefs()[1] == ["result"]
+
+
 # --- the real compile -------------------------------------------------------
 
 

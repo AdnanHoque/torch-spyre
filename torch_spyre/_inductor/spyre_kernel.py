@@ -1037,9 +1037,17 @@ class SpyreKernel(Kernel[CSEVariable]):
         """Remove scratchpad and pool buffers from the kernel's argument list.
 
         HBM pooling runs after the kernel is prepared, so this runs again at
-        emission for the intermediates pooled in between.
+        emission for the intermediates pooled in between. ``KernelArgs.output``
+        resolves mutation aliases, so its real destination may appear only in
+        ``output_buffers``, not in the recorded stores or inputs.
         """
-        for name in OrderedSet([*self.store_buffer_names, *self.args.input_buffers]):
+        for name in OrderedSet(
+            [
+                *self.store_buffer_names,
+                *self.args.input_buffers,
+                *self.args.output_buffers,
+            ]
+        ):
             buf = V.graph.get_buffer(name)
             if buf is None:
                 continue
@@ -1047,11 +1055,13 @@ class SpyreKernel(Kernel[CSEVariable]):
             if isinstance(layout, FixedTiledLayout) and (
                 "lx" in layout.allocation or "hbm_pool" in layout.allocation
             ):
-                # A name can be registered on both legs; each is pruned alone.
+                # A name can be registered on several legs; each is pruned alone.
                 if name in self.store_buffer_names:
                     self.remove_buffer(name)
                 if name in self.args.input_buffers:
                     self.args.input_buffers[name] = REMOVED  # type: ignore[assignment]
+                if name in self.args.output_buffers:
+                    self.args.output_buffers[name] = REMOVED
 
     def load(self, name: str, index: sympy.Expr):
         """Codegen a load from an InputBuffer"""
