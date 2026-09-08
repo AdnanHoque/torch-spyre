@@ -3380,6 +3380,8 @@ def completed_reduction_split_on_buf(
     op: Operation,
     dep: MemoryDep,
     buf_name: str,
+    *,
+    ownership_override: TensorWorkDivision | None = None,
 ) -> int | None:
     """Return the committed reduction split for a matmul result.
 
@@ -3390,7 +3392,7 @@ def completed_reduction_split_on_buf(
     if not _is_matmul_op(op):
         return None
     prep = _prepare_per_core_view(op, dep, buf_name)
-    ownership = getattr(op, "iteration_space_ownership", None)
+    ownership = ownership_override or getattr(op, "iteration_space_ownership", None)
     if prep is None or ownership is None:
         return None
     reduction_splits = [
