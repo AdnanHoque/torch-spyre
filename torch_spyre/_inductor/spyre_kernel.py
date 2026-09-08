@@ -1150,7 +1150,7 @@ class SpyreKernel(Kernel[CSEVariable]):
 
             if indirect_syms_used:
                 # Gather/scatter: coordinates are built with raw indirect symbols here;
-                # indirect_access_subs is applied later in codegen_kernel → simplify_op_spec.
+                # create_op_spec applies indirect_access_subs during simplification.
                 # Only add the indirect tensors that this specific operation uses.
                 args = [
                     self.create_tensor_arg(
@@ -1797,7 +1797,7 @@ def simplify_op_spec(
 
 
 def _finalize_tensor_work_divisions(op_spec: OpSpec) -> None:
-    """Derive tensor owners from final symbols, never planning-time formulas."""
+    """Verify committed tensor owners in the final aligned iteration space."""
     finalized = finalize_tensor_work_divisions(
         op_spec.iteration_space,
         [arg.work_division for arg in op_spec.args],
