@@ -681,6 +681,22 @@ def _allocation_graph(*operation_names):
     )
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_lx_anchor_pass_respects_planning_switch(enabled):
+    from torch_spyre._inductor import passes
+
+    graph = SimpleNamespace()
+    with (
+        config.patch({"lx_planning": enabled}),
+        mock_patch.object(passes, "anchor_lx_relayout_ownership") as anchor,
+    ):
+        passes._maybe_anchor_lx_relayout_ownership(graph)
+    if enabled:
+        anchor.assert_called_once_with(graph)
+    else:
+        anchor.assert_not_called()
+
+
 def test_consumer_anchoring_commits_the_unique_accepted_owner_order():
     kv, batch = Symbol("kv"), Symbol("batch")
     producer = SimpleNamespace(
