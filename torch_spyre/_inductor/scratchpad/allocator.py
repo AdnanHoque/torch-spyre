@@ -40,6 +40,8 @@ from torch._inductor.graph import GraphLowering
 from torch_spyre._inductor.pass_utils import (
     PerCoreView,
     commit_iteration_space_ownership,
+    make_iteration_space_ownership,
+    commit_tensor_work_division,
     concretize_expr,
     indirect_info_from_op,
     iteration_space_from_op,
@@ -51,9 +53,12 @@ from torch_spyre._inductor.pass_utils import (
     op_short_name,
 )
 from torch_spyre._C import get_device_size_in_bytes
+from torch_spyre._inductor.op_spec import TensorWorkDivision
 from torch_spyre._inductor.work_division import (
     enumerate_work_division_candidates,
     work_division_splits_are_legal,
+    work_division_context_for_op,
+    _has_work_div_hint,
 )
 from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.scratchpad.plan_solver import (
@@ -318,6 +323,17 @@ class ScratchpadAllocator:
                 logger.debug("Recollect LX relayout plans after allocator pre-passes")
             lx_relayout_plans = None
         self._run_passes(self.pre_optimization_passes, graph)
+        if config.lx_planner_relayout and getattr(
+            self.layout_planning, "supports_paired_buffers", False
+        ):
+            if self._select_work_division(graph):
+                # A committed proposal replaces the anchored owner order the
+                # incoming plans were proved against.
+                if lx_relayout_plans is not None:
+                    logger.debug(
+                        "Recollect LX relayout plans after work-division selection"
+                    )
+                lx_relayout_plans = None
         buffers = self._prepare_buffers(graph, lx_relayout_plans=lx_relayout_plans)
         solver = self._build_solver(buffers)
         allocation = self._solve(solver, graph)
@@ -341,6 +357,15 @@ class ScratchpadAllocator:
         *,
         lx_relayout_plans: list[LXRelayoutPlan] | None = None,
     ) -> Sequence[Any]:
+        return self._prepare_fixed_buffers(graph, lx_relayout_plans=lx_relayout_plans)
+
+    def _prepare_fixed_buffers(
+        self,
+        graph: GraphLowering,
+        *,
+        ownership_overrides: dict[str, TensorWorkDivision] | None = None,
+        lx_relayout_plans: list[LXRelayoutPlan] | None = None,
+    ) -> Sequence[Any]:
         """Buffers to hand the solver. Base: fixed-division LifetimeBoundBuffers."""
         assert self.layout_planning is not None
         if not getattr(self.layout_planning, "supports_paired_buffers", False):
@@ -354,9 +379,15 @@ class ScratchpadAllocator:
                     "LX relayout is not supported by %s; continuing without relayout",
                     solver_name,
                 )
-            return self._generate_buffers(graph)
-        if lx_relayout_plans is None:
-            plans = collect_lx_relayout_plans(graph)
+            return self._generate_buffers(
+                graph, ownership_overrides=ownership_overrides
+            )
+        if lx_relayout_plans is None or ownership_overrides is not None:
+            # A trial prices its own candidate ownership: never reuse plans
+            # proved against the committed order.
+            plans = collect_lx_relayout_plans(
+                graph, ownership_overrides=ownership_overrides
+            )
         elif not config.lx_planner_relayout or config.ktir_emitter:
             plans = []
         else:
@@ -365,9 +396,150 @@ class ScratchpadAllocator:
                     "LX relayout planning requires an unmaterialized graph"
                 )
             plans = lx_relayout_plans
-        buffers = self._generate_buffers(graph, lx_relayout_plans=plans)
+        buffers = self._generate_buffers(
+            graph, lx_relayout_plans=plans, ownership_overrides=ownership_overrides
+        )
         self._append_lx_relayout_destinations(graph, buffers)
         return buffers
+
+    def _select_work_division(self, graph: GraphLowering) -> bool:
+        """Price bounded whole-graph proposals with actual paired placement.
+
+        Neither trials nor their solver allocations touch graph ownership or
+        layouts. Keep the current choice on ties; commit only the winner, then
+        the normal allocation path materializes it. No scheduler-time search.
+        Changed ops may replace an earlier anchored order: each trial must
+        re-certify and price that loss, not assume anchoring still holds.
+
+        Returns whether any ownership was committed, so a caller holding plans
+        proved against the previous owner order knows to discard them.
+        """
+        proposals = _compact_work_division_proposals(graph)
+        if not proposals:
+            return False
+        best, best_cost = {}, math.inf
+        for overrides in ({}, *proposals):
+            try:
+                buffers = self._prepare_fixed_buffers(
+                    graph, ownership_overrides=overrides
+                )
+                solver = self._build_solver(buffers)
+                # This is the fixed-division placement path. A future joint
+                # solver must not opt in via supports_paired_buffers alone.
+                allocation = solver.plan_layout()
+                plans = self._finalize_lx_relayout_allocation(allocation)
+            except (SolveError, Unsupported) as error:
+                logger.debug("LX work-division trial unavailable: %s", error)
+                if not overrides:
+                    return False
+                continue
+            try:
+                cost = self._allocation_cost(graph, allocation, plans, overrides)
+            except (ArithmeticError, TypeError, ValueError, RuntimeError) as error:
+                # Cost extraction is best-effort, not a compilation requirement.
+                # Ownership/placement assertions above remain outside this catch.
+                logger.debug("LX work-division cost unavailable: %s", error)
+                cost = math.inf
+            if not math.isfinite(cost) or cost < 0:
+                if not overrides:
+                    # An unknown baseline cannot justify changing it.
+                    return False
+                continue
+            logger.info(
+                "LX work-division trial: cost_ns=%.1f changed_ops=%d relayouts=%d",
+                cost,
+                len(overrides),
+                len(plans),
+            )
+            if cost < best_cost:
+                best, best_cost = overrides, cost
+        for op in graph.operations:
+            if op.get_name() in best:
+                commit_tensor_work_division(op, best[op.get_name()])
+        logger.info(
+            "LX work-division selected: changed_ops=%d cost_ns=%.1f",
+            len(best),
+            best_cost,
+        )
+        # Empty ``best`` means the unchanged baseline won: nothing committed.
+        return bool(best)
+
+    @staticmethod
+    def _allocation_cost(graph, allocation, plans, overrides) -> float:
+        from torch_spyre._inductor.dump_cost_model import (
+            extract_op_features,
+            _per_core_run,
+        )
+        from torch_spyre._inductor.cost_model import (
+            ArgTraffic,
+            OpFeatures,
+            predict_by_bundle,
+            predict_ops,
+            relayout_ns,
+        )
+
+        is_lx = {b.name: b.address is not None for b in allocation}
+        features = {
+            op.get_name(): extract_op_features(
+                op,
+                overrides[op.get_name()].work_slices
+                if op.get_name() in overrides
+                else None,
+                is_lx,
+            )
+            for op in graph.operations
+            if isinstance(op, ComputedBuffer)
+            and isinstance(op.layout, FixedTiledLayout)
+        }
+        cost = predict_by_bundle(graph.operations, features, params=_COST_PARAMS)
+        for plan in plans:
+            source = features[plan.source_name]
+            dims = list(
+                graph.get_buffer(plan.source_name).layout.device_layout.device_size
+            )
+            run, split = min(
+                (
+                    _per_core_run(view, dims)
+                    for view in (plan.source_view, plan.destination_view)
+                ),
+                key=lambda pair: (pair[0], -pair[1]),
+            )
+            copy = OpFeatures(
+                name="lx_relayout",
+                is_reduction=False,
+                out_elems=source.out_elems,
+                cores=plan.num_cores,
+                dtype_bytes=source.dtype_bytes,
+                args=[],
+                is_lx_relayout=True,
+                relayout_run_elems=run,
+                relayout_split=split,
+            )
+            cost += relayout_ns(copy, _COST_PARAMS)
+        # Mirror _push_allocation: inputs need an HBM load and graph outputs
+        # need an HBM drain, even when the intermediate itself lives in LX.
+        inputs, outputs = set(graph.graph_input_names), set(graph.get_output_names())
+        for b in allocation:
+            if b.address is None or b.name not in inputs | outputs:
+                continue
+            assert b.lx_view is not None, "allocated boundary lacks physical ownership"
+            is_input = b.name in inputs
+            buf = graph.get_buffer(b.name)
+            dims = list(buf.layout.device_layout.device_size)
+            elems = math.prod(dims)
+            copy = OpFeatures(
+                name="clone",
+                is_reduction=False,
+                out_elems=elems,
+                cores=b.lx_view.num_cores,
+                dtype_bytes=buf.get_dtype().itemsize,
+                args=[
+                    ArgTraffic(b.name, "input", not is_input, elems),
+                    ArgTraffic(b.name, "output", is_input, elems),
+                ],
+            )
+            cost += predict_ops([copy], _COST_PARAMS)
+        return float(cost)
 
     def _solve(self, solver: MemoryPlanSolver, graph: GraphLowering) -> Sequence[Any]:
         """Assign LX addresses. Base: placement-only ``plan_layout``."""
@@ -511,6 +683,7 @@ class ScratchpadAllocator:
         buf_user_deps: dict[str, list[tuple[Operation, MemoryDep]]],
         planned_lx_buffers: frozenset[str] = frozenset(),
         lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
+        ownership_overrides: dict[str, TensorWorkDivision] | None = None,
     ) -> Optional[str]:
         """The first check ``name`` fails, or ``None`` if it clears them all.
 
@@ -561,7 +734,11 @@ class ScratchpadAllocator:
             # copied into a nested tile every outer iteration).
             return "tiled (advancing)"
         restickify = self._restickify_barrier(
-            graph, name, uses, lx_relayout_plans=lx_relayout_plans
+            graph,
+            name,
+            uses,
+            lx_relayout_plans=lx_relayout_plans,
+            ownership_overrides=ownership_overrides,
         )
         if restickify is not None:
             return restickify
@@ -620,6 +797,7 @@ class ScratchpadAllocator:
         ncores: Optional[dict[str, int]] = None,
         ncores_reasons: Optional[dict[str, str]] = None,
         division_is_fixed: bool,
+        ownership_overrides: dict[str, TensorWorkDivision] | None = None,
     ) -> Optional[str]:
         """The residency verdict for a *graph input*, which is pinned by cloning
         it into LX rather than by placing it directly.
@@ -655,7 +833,9 @@ class ScratchpadAllocator:
             return "use is not rewritable to the clone"
         if buffer_not_read_in_full(graph, name):
             return "partial/offset read"
-        restickify = self._restickify_barrier(graph, name, uses)
+        restickify = self._restickify_barrier(
+            graph, name, uses, ownership_overrides=ownership_overrides
+        )
         if restickify is not None:
             return restickify
         if division_is_fixed and (ncores or {}).get(name, -1) < 0:
@@ -676,6 +856,7 @@ class ScratchpadAllocator:
         ncores_reasons: Optional[dict[str, str]] = None,
         planned_lx_buffers: frozenset[str] = frozenset(),
         lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
+        ownership_overrides: dict[str, TensorWorkDivision] | None = None,
     ) -> dict[str, Optional[str]]:
         """:meth:`_buffer_residency_reason` over ``names``, as ``name -> reason``.
 
@@ -703,7 +884,9 @@ class ScratchpadAllocator:
             or isinstance(getattr(go, "data", None), ReinterpretView)
         }
         if division_is_fixed and ncores is None:
-            ncores, ncores_reasons, _ = get_ncores_for_buffers(graph)
+            ncores, ncores_reasons, _ = get_ncores_for_buffers(
+                graph, ownership_overrides=ownership_overrides
+            )
         ncores = ncores or {}
         ncores_reasons = ncores_reasons or {}
         buf_user_deps = _get_buffer_user_deps(graph)
@@ -722,6 +905,7 @@ class ScratchpadAllocator:
                 buf_user_deps=buf_user_deps,
                 planned_lx_buffers=planned_lx_buffers,
                 lx_relayout_plans=lx_relayout_plans,
+                ownership_overrides=ownership_overrides,
             )
             for name in names
         }
@@ -750,6 +934,7 @@ class ScratchpadAllocator:
         uses: Sequence[int],
         *,
         lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
+        ownership_overrides: dict[str, TensorWorkDivision] | None = None,
     ) -> Optional[str]:
         """The ``residency_reason`` for a buffer a restickify *reads*, else ``None``.
 
@@ -781,6 +966,7 @@ class ScratchpadAllocator:
                 name,
                 reader,
                 lx_relayout_plans=lx_relayout_plans,
+                ownership_overrides=ownership_overrides,
             )
             for reader in readers
         ):
@@ -794,6 +980,7 @@ class ScratchpadAllocator:
         reader: Operation,
         *,
         lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
+        ownership_overrides: dict[str, TensorWorkDivision] | None = None,
     ) -> bool:
         """Whether ``reader`` consumes exactly ``name``'s same-core slice.
 
@@ -802,6 +989,7 @@ class ScratchpadAllocator:
         certified destination view is the ownership the private copy provides.
         """
 
+        ownership_overrides = ownership_overrides or {}
         reads = [
             dep
             for dep in op_read_writes(reader).reads
@@ -810,7 +998,10 @@ class ScratchpadAllocator:
         if len(reads) != 1 or reads[0].is_indirect():
             return False
         read_view, partial, representable = _per_core_view_on_buf(
-            reader, reads[0], name
+            reader,
+            reads[0],
+            name,
+            ownership_override=ownership_overrides.get(reader.get_name()),
         )
         if partial or not representable:
             return False
@@ -836,7 +1027,10 @@ class ScratchpadAllocator:
         if len(writes) != 1 or writes[0].is_indirect():
             return False
         write_view, write_partial, write_representable = _per_core_view_on_buf(
-            producer, writes[0], name
+            producer,
+            writes[0],
+            name,
+            ownership_override=ownership_overrides.get(producer.get_name()),
         )
         return (
             not write_partial
@@ -856,6 +1050,7 @@ class ScratchpadAllocator:
         ncores_reasons: dict[str, str],
         lx_views: dict[str, PerCoreView],
         lifetime_end_overrides: Optional[dict[str, int]] = None,
+        ownership_overrides: dict[str, TensorWorkDivision] | None = None,
     ) -> list[LifetimeBoundBuffer]:
         """Build one :class:`LifetimeBoundBuffer` per buffer, barred or not.
 
@@ -916,6 +1111,7 @@ class ScratchpadAllocator:
                 ncores=ncores,
                 ncores_reasons=ncores_reasons,
                 division_is_fixed=True,
+                ownership_overrides=ownership_overrides,
             )
             clone_size = self._input_footprint(graph, input_name, ncores)
             buffers.append(
@@ -1092,6 +1288,8 @@ class ScratchpadAllocator:
         timings: Optional[dict[str, float]] = None,
         lifetimes: Optional[dict[str, list[int]]] = None,
         lx_relayout_plans: Sequence[LXRelayoutPlan] = (),
+        *,
+        ownership_overrides: dict[str, TensorWorkDivision] | None = None,
     ) -> list[LifetimeBoundBuffer]:
         # Compute the graph-wide residency facts + mem_usage once and share; the
         # helpers below treat them read-only. `lifetimes` is split-invariant, so
@@ -1103,9 +1301,13 @@ class ScratchpadAllocator:
         if lifetimes is None:
             lifetimes = calculate_liveness(graph)
         lifetime_end_overrides = counted_loop_lifetime_end_overrides(graph)
-        ncores, ncores_reasons, lx_views = get_ncores_for_buffers(graph)
+        ncores, ncores_reasons, lx_views = get_ncores_for_buffers(
+            graph, cache, ownership_overrides=ownership_overrides
+        )
         t1 = time.perf_counter()
-        mem_usage = mem_usage_by_buf(graph, cache)
+        mem_usage = mem_usage_by_buf(
+            graph, cache, ownership_overrides=ownership_overrides
+        )
         for plan in lx_relayout_plans:
             name = plan.source_name
             if name not in mem_usage:
@@ -1138,6 +1340,7 @@ class ScratchpadAllocator:
             ncores_reasons=ncores_reasons,
             planned_lx_buffers=planned_lx_buffers,
             lx_relayout_plans=lx_relayout_plans,
+            ownership_overrides=ownership_overrides,
         )
         in_place = self._determine_in_place(graph, mem_usage, lifetimes, reasons)
         buffers = self._build_bound_buffers(
@@ -1150,6 +1353,7 @@ class ScratchpadAllocator:
             ncores_reasons=ncores_reasons,
             lx_views=lx_views,
             lifetime_end_overrides=lifetime_end_overrides,
+            ownership_overrides=ownership_overrides,
         )
         if lx_relayout_plans:
             by_name = {buffer.name: buffer for buffer in buffers}
@@ -1634,6 +1838,61 @@ def _legal_split_options(
 
 
 DEFAULT_VARIANT_CAP = 6
+
+
+def _compact_work_division_proposals(graph) -> list[dict[str, TensorWorkDivision]]:
+    """One whole-graph proposal: move parallelism to the outer physical axis.
+
+    This is a proposal, not a correspondence proof. The ordinary view judge
+    and relayout planner certify every edge. Keep hints, reduction splits,
+    core counts and hard domains; decline compound coordinates without guessing.
+    """
+    overrides = {}
+    changed_matmul = False
+    for op in graph.operations:
+        if (
+            not isinstance(op, ComputedBuffer)
+            or not isinstance(op.layout, FixedTiledLayout)
+            or not isinstance(op.data, (Pointwise, Reduction))
+            or _has_work_div_hint(op)
+        ):
+            continue
+        # The initial policy prices static shapes only; unknown extents retain
+        # the ordinary planner's choice rather than becoming guessed integers.
+        if not all(
+            isinstance(size, (int, sympy.Integer))
+            for size in iteration_space_from_op(op).values()
+        ):
+            continue
+        try:
+            ctx = work_division_context_for_op(op, config.sencores)
+        except Unsupported:
+            continue
+        coords = ctx.tensor_deps[-1].device_coords
+        if not coords or coords[0] not in ctx.axes:
+            continue
+        target = coords[0]
+        if target in ctx.reduction_vars:
+            continue
+        seed = _seed_splits(op)
+        donors = [v for v in ctx.axes if v != target and v not in ctx.reduction_vars]
+        if not donors:
+            continue
+        donor = max(donors, key=lambda v: seed[v])
+        factor = math.gcd(
+            concretize_expr(ctx.it_space_adjusted[target]), seed[donor] * seed[target]
+        )
+        if factor <= seed[target] or factor % seed[target]:
+            continue
+        splits = dict(seed)
+        splits[target], splits[donor] = factor, seed[donor] // (factor // seed[target])
+        if ctx.is_legal(splits):
+            overrides[op.get_name()] = make_iteration_space_ownership(op, splits)
+            changed_matmul |= _is_matmul_op(op)
+    # Limit this initial policy to matmul chains, including their neighbours.
+    return [overrides] if changed_matmul else []
+
+
 # Try larger batch factors first. Keeping more of the batch axis whole offers
 # the same reconciliation benefit with fewer co-optimization candidates.
 _FACTORED_B_FACTORS: tuple[int, ...] = (8, 4, 2)
