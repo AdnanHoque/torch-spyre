@@ -14,7 +14,6 @@
 
 import functools
 import logging
-import math
 import time
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -50,7 +49,7 @@ from torch_spyre._inductor.pass_utils import (
     _is_matmul_op,
     op_short_name,
 )
-from torch_spyre._inductor.constants import BYTES_PER_STICK
+from torch_spyre._C import get_device_size_in_bytes
 from torch_spyre._inductor.work_division import (
     enumerate_work_division_candidates,
     work_division_splits_are_legal,
@@ -928,7 +927,7 @@ class ScratchpadAllocator:
         num_cores = ncores.get(name, -1)
         if dev_layout is None or num_cores < 1:
             return 0
-        return math.prod(dev_layout.device_size[:-1]) * BYTES_PER_STICK // num_cores
+        return get_device_size_in_bytes(dev_layout) // num_cores
 
     def _determine_in_place(
         self,
@@ -2225,7 +2224,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                     graph.operations[last_use].name, []
                 ).append(input_name)
                 dev_layout = graph.get_buffer(input_name).layout.device_layout
-                size = math.prod(dev_layout.device_size[:-1]) * BYTES_PER_STICK
+                size = get_device_size_in_bytes(dev_layout)
                 buffers.append(
                     CoreDivisionBuffer(
                         input_name,

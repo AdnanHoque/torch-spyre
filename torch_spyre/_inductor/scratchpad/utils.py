@@ -29,7 +29,7 @@ from torch.utils._sympy.value_ranges import ValueRanges, bound_sympy
 
 import sympy
 
-from torch_spyre._inductor.constants import BYTES_PER_STICK
+from torch_spyre._C import get_device_size_in_bytes
 from torch_spyre._inductor.ir import FixedTiledLayout
 from torch_spyre._inductor.pass_utils import (
     PerCoreView,
@@ -236,7 +236,7 @@ def mem_usage_by_buf(
             }
             continue
         dev_layout = layout.device_layout
-        dev_size = math.prod(dev_layout.device_size[:-1]) * BYTES_PER_STICK
+        dev_size = get_device_size_in_bytes(dev_layout)
         mem_usage[buf_name] = {
             "size": dev_size,
             "size_per_core": dev_size // num_cores,
