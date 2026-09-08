@@ -52,7 +52,7 @@ from torch_spyre._inductor.pass_utils import (
     _is_matmul_op,
     op_short_name,
 )
-from torch_spyre._inductor.constants import BYTES_PER_STICK
+from torch_spyre._inductor.constants import BATCH_MATMUL_OP, BYTES_PER_STICK
 from torch_spyre._inductor.op_spec import TensorWorkDivision
 from torch_spyre._inductor.work_division import (
     enumerate_work_division_candidates,
@@ -472,6 +472,8 @@ class ScratchpadAllocator:
                 ],
             )
             cost += predict_ops([copy], _COST_PARAMS)
+        # Coerce here so an unresolved symbolic cost reaches the caller's
+        # optional-cost fallback, not its later finiteness check.
         return float(cost)
 
     def _solve(self, solver: MemoryPlanSolver, graph: GraphLowering) -> Sequence[Any]:
@@ -1764,6 +1766,8 @@ def _compact_work_division_proposals(graph) -> list[dict[str, TensorWorkDivision
             or not isinstance(op.layout, FixedTiledLayout)
             or not isinstance(op.data, (Pointwise, Reduction))
             or _has_work_div_hint(op)
+            # extract_op_features prices ordinary matmul compute, not FP8.
+            or (_is_matmul_op(op) and op.data.reduction_type != BATCH_MATMUL_OP)
         ):
             continue
         # The initial policy prices static shapes only; unknown extents retain
