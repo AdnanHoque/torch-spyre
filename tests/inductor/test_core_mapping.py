@@ -991,7 +991,7 @@ def test_fused_view_keeps_sticks_whole(monkeypatch, flat_split):
     if representable:
         assert (
             core_mapping_module.partition_physical_span_bytes(
-                prep.device_size, prep.elems_per_stick, dict(view.work_slice_dims)
+                prep.device_size, DataFormats.SEN169_FP16, dict(view.work_slice_dims)
             )
             > 0
         )
