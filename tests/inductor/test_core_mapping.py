@@ -621,7 +621,9 @@ def test_planner_and_sdsc_use_the_same_mapping(
         ownership, num_cores=None
     ).physical_core_count == math.prod(dim_splits)
     prep = _view_prep(
-        iter_space={dim: extent for dim, (extent, _) in op_spec.iteration_space.items()},
+        iter_space={
+            dim: extent for dim, (extent, _) in op_spec.iteration_space.items()
+        },
         write_index=dims[0],
         dep_coeff={dims[0]: 1, dims[1]: 2, dims[2]: 0},
         dep_device_coordinates=(dims[0], dims[1]),
