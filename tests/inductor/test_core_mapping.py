@@ -126,6 +126,8 @@ def test_owner_evaluation_reuse_keeps_domain_and_range_checks():
     assert not core_mappings_equal(direct, wrapped, 8)
     with pytest.raises(ValueError, match="outside split 2 on core 2"):
         core_mapping_module.owner_slots(direct, {dim: 2}, 4)
+    with pytest.raises(ValueError, match="owner slot -1 outside split 2 on core 0"):
+        core_mapping_module.owner_slots({dim: sympy.S.NegativeOne}, {dim: 2}, 4)
     assert not core_mappings_equal(direct, direct, 0)
     evaluate.cache_clear()
 
@@ -589,7 +591,10 @@ def _bmm_op_spec(op: str) -> OpSpec:
 
 @pytest.mark.parametrize("op", [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP])
 @pytest.mark.parametrize("reduction_contiguous", [False, True])
-def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contiguous):
+@pytest.mark.parametrize("dim_splits", [(2, 4, 4), (1, 1, 4)])
+def test_planner_and_sdsc_use_the_same_mapping(
+    monkeypatch, op, reduction_contiguous, dim_splits
+):
     class FakeReduction:
         def __init__(self, reduction_type):
             self.reduction_type = reduction_type
@@ -613,7 +618,23 @@ def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contig
 
     op_spec = _bmm_op_spec(op)
     dims = tuple(op_spec.iteration_space)
-    splits = dict(zip(dims, (2, 4, 4)))
+    splits = dict(zip(dims, dim_splits))
+    op_spec.iteration_space = {
+        dim: (extent, splits[dim])
+        for dim, (extent, _) in op_spec.iteration_space.items()
+    }
+    monkeypatch.setattr(
+        pass_utils_module,
+        "iteration_space_from_op",
+        lambda _: {dim: extent for dim, (extent, _) in op_spec.iteration_space.items()},
+    )
+    ownership = pass_utils_module.make_iteration_space_ownership(
+        FakeComputedBuffer(op), splits
+    )
+    assert ownership.num_cores == math.prod(dim_splits)
+    assert dataclasses.replace(
+        ownership, num_cores=None
+    ).physical_core_count == math.prod(dim_splits)
     prep = pass_utils_module._ViewPrep(
         iter_space=op_spec.iteration_space,
         write_index=dims[0],
@@ -630,8 +651,8 @@ def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contig
         num_stick_stride=0,
         is_matmul=pass_utils_module._is_matmul_op(FakeComputedBuffer(op)),
     )
-    planner_view, _, representable = pass_utils_module._per_core_view_from_prep(
-        prep, splits, {dims[2]: 4}
+    planner_view, partial, representable = pass_utils_module._per_core_view_from_prep(
+        prep, ownership.work_slices, {dims[2]: dim_splits[2]}
     )
 
     op_spec.core_id_to_work_slice = derive_operation_mapping(
@@ -642,9 +663,15 @@ def test_planner_and_sdsc_use_the_same_mapping(monkeypatch, op, reduction_contig
     sdsc_output_mapping = {
         device_dim: sdsc_spec.core_id_to_work_slice[renamed[dim]]
         for device_dim, dim in enumerate(dims[:2])
+        if splits[dim] > 1
     }
     assert representable
+    assert partial
+    assert planner_view.num_cores == ownership.num_cores
     assert dict(planner_view.core_to_slot) == sdsc_output_mapping
+    if dim_splits[:2] == (1, 1):
+        assert planner_view.work_slice_dims == ()
+        assert not planner_view.same_partition(PerCoreView((), (), num_cores=1))
 
 
 def test_flattened_iteration_span_is_not_a_single_axis_view():

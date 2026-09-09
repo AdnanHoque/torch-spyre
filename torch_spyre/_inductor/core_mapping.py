@@ -27,6 +27,8 @@ from sympy import Expr, Integer, Mod, Symbol, floor, sympify
 from .op_spec import TensorWorkDivision
 
 
+# pass_utils imports this module; keep its PerCoreView type out of this layer.
+# TensorWorkDivision imports the comparator only when its method is called.
 _MAX_OWNER_PERMUTATION_DIMS = 5
 
 

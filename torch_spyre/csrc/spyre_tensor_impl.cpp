@@ -41,6 +41,8 @@ int64_t elems_per_stick(const DataFormats& df) {
       df == DataFormats::BOOL || df == DataFormats::BFLOAT16) {
     return getNumElemsInStick(df);
   }
+  // Capability queries use zero for unsupported geometry; storage sizing below
+  // rejects it rather than allocating an unknown format.
   return 0;
 }
 
@@ -300,7 +302,7 @@ void SpyreTensorImpl::shallow_copy_from(
   this->spyre_layout = spyre_impl->spyre_layout;
 }
 
-uint64_t get_device_size_in_bytes(SpyreTensorLayout stl) {
+uint64_t get_device_size_in_bytes(const SpyreTensorLayout& stl) {
   return get_device_size_in_bytes(stl.device_size, stl.device_dtype);
 }
 

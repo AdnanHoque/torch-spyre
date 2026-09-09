@@ -397,7 +397,7 @@ PYBIND11_MODULE(_C, m) {
 
   m.def("get_spyre_tensor_layout", &spyre::get_spyre_tensor_layout);
   m.def("get_device_size_in_bytes",
-        py::overload_cast<spyre::SpyreTensorLayout>(
+        py::overload_cast<const spyre::SpyreTensorLayout&>(
             &spyre::get_device_size_in_bytes),
         py::arg("layout"),
         "Return padded storage bytes for a layout with known device geometry.");

@@ -175,6 +175,7 @@ class TensorWorkDivision:
 
         if not isinstance(other, TensorWorkDivision):
             return False
+        # core_mapping imports this module's TensorWorkDivision.
         from .core_mapping import same_owner_maps
 
         return same_owner_maps(
