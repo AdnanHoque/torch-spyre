@@ -689,12 +689,128 @@ def test_lx_anchor_pass_respects_planning_switch(enabled):
     with (
         config.patch({"lx_planning": enabled}),
         mock_patch.object(passes, "anchor_lx_relayout_ownership") as anchor,
+        mock_patch.object(passes, "scratchpad_planning") as allocate,
     ):
-        passes._maybe_anchor_lx_relayout_ownership(graph)
+        passes._maybe_scratchpad_planning(graph)
     if enabled:
         anchor.assert_called_once_with(graph)
+        allocate.assert_called_once_with(graph, lx_relayout_plans=anchor.return_value)
     else:
         anchor.assert_not_called()
+        allocate.assert_not_called()
+
+
+@pytest.mark.parametrize("plans", [[], [_relayout_plan()]])
+@pytest.mark.parametrize("prepass", [False, True])
+def test_allocator_reuses_only_unmodified_plans(plans, prepass):
+    graph = _allocation_graph()
+    allocator = ScratchpadAllocator(
+        GreedyLayoutSolver,
+        256,
+        pre_optimization_passes=[SimpleNamespace(apply_pass=lambda graph: None)]
+        if prepass
+        else [],
+    )
+    with (
+        config.patch({"lx_planner_relayout": True, "ktir_emitter": False}),
+        mock_patch.object(
+            allocator_module, "collect_lx_relayout_plans", return_value=[]
+        ) as collect,
+        mock_patch.object(allocator, "_generate_buffers", return_value=[]) as generate,
+        mock_patch.object(allocator, "_append_lx_relayout_destinations"),
+        mock_patch.object(allocator, "_build_solver", side_effect=StopIteration),
+        pytest.raises(StopIteration),
+    ):
+        allocator.plan_allocation(graph, lx_relayout_plans=plans)
+    assert collect.call_count == int(prepass)
+    assert generate.call_args.kwargs["lx_relayout_plans"] is (
+        collect.return_value if prepass else plans
+    )
+
+
+def test_plan_reuse_keeps_materialization_guard_and_retry_recollects():
+    graph = _allocation_graph()
+    allocator = ScratchpadAllocator(GreedyLayoutSolver, 256)
+    with (
+        config.patch({"lx_planner_relayout": True, "ktir_emitter": False}),
+        mock_patch.object(
+            allocator_module,
+            "materialized_lx_relayouts",
+            return_value={"copy": object()},
+        ),
+        pytest.raises(RuntimeError, match="unmaterialized graph"),
+    ):
+        allocator._prepare_buffers(graph, lx_relayout_plans=[])
+    with (
+        mock_patch.object(
+            allocator, "plan_allocation", side_effect=allocator_module.SolveError
+        ),
+        mock_patch.object(allocator_module, "ScratchpadAllocator") as fallback,
+    ):
+        allocator_module.scratchpad_planning(graph, allocator, lx_relayout_plans=[])
+    fallback.return_value.plan_allocation.assert_called_once_with(graph)
+
+
+@pytest.mark.parametrize("plans", [[], [_relayout_plan()]])
+@pytest.mark.parametrize(
+    "disabled",
+    [None, "lx_planner_relayout", "co_optimizing_lx_planning", "ktir_emitter"],
+)
+def test_anchor_returns_unchanged_plans(plans, disabled):
+    flags = {
+        "lx_planner_relayout": True,
+        "co_optimizing_lx_planning": False,
+        "ktir_emitter": False,
+    }
+    if disabled:
+        flags[disabled] = not flags[disabled]
+    with (
+        config.patch(flags),
+        mock_patch.object(
+            lx_relayout_module, "collect_lx_relayout_plans", return_value=plans
+        ) as collect,
+    ):
+        result = lx_relayout_module.anchor_lx_relayout_ownership(_allocation_graph())
+    assert result is (None if disabled else plans)
+    assert collect.call_count == int(disabled is None)
+
+
+@pytest.mark.parametrize("mode", ["unsupported_solver", "off", "ktir"])
+def test_fixed_plan_handoff_keeps_feature_gates(mode):
+    factory = SimpleNamespace(supports_paired_buffers=mode != "unsupported_solver")
+    allocator = ScratchpadAllocator(factory, 256)
+    graph = _allocation_graph()
+    with (
+        config.patch(
+            {"lx_planner_relayout": mode != "off", "ktir_emitter": mode == "ktir"}
+        ),
+        mock_patch.object(allocator_module, "collect_lx_relayout_plans") as collect,
+        mock_patch.object(allocator, "_generate_buffers", return_value=[]) as generate,
+        mock_patch.object(allocator, "_append_lx_relayout_destinations"),
+    ):
+        allocator._prepare_buffers(graph, lx_relayout_plans=[_relayout_plan()])
+    collect.assert_not_called()
+    assert generate.call_args.kwargs == (
+        {} if mode == "unsupported_solver" else {"lx_relayout_plans": []}
+    )
+
+
+def test_joint_allocation_does_not_consume_fixed_plan_handoff():
+    allocator = allocator_module.CoOptimizingAllocator(GreedyLayoutSolver, 256)
+    graph = _allocation_graph()
+    with (
+        mock_patch.object(
+            allocator, "_determine_in_place_division_invariant", return_value={}
+        ),
+        mock_patch.object(allocator, "_division_map", return_value={}),
+        mock_patch.object(
+            allocator, "_build_cd_bound_buffers", return_value=[]
+        ) as build,
+        mock_patch.object(allocator_module, "collect_lx_relayout_plans") as collect,
+    ):
+        allocator._prepare_buffers(graph, lx_relayout_plans=[_relayout_plan()])
+    collect.assert_not_called()
+    build.assert_called_once_with(graph, {}, {})
 
 
 def test_consumer_anchoring_commits_the_unique_accepted_owner_order():
@@ -751,7 +867,7 @@ def test_consumer_anchoring_commits_the_unique_accepted_owner_order():
             lx_relayout_module, "collect_lx_relayout_plans", side_effect=collect
         ),
     ):
-        lx_relayout_module.anchor_lx_relayout_ownership(graph)
+        assert lx_relayout_module.anchor_lx_relayout_ownership(graph) is None
 
     committed = producer.iteration_space_ownership
     assert [
