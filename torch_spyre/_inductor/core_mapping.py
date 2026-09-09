@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from functools import lru_cache
 from itertools import permutations
 from typing import Any
 
@@ -29,13 +30,23 @@ from .op_spec import TensorWorkDivision
 _MAX_OWNER_PERMUTATION_DIMS = 5
 
 
+# Room for 128 distinct formulas on a 32-core device; eviction only repeats work.
+@lru_cache(maxsize=4096)
+def _owner_at_core(expression: Expr, core: int) -> Expr:
+    """Reuse pure substitution, not a validity or ownership decision.
+
+    One core at a time preserves callers' short-circuit and error ordering.
+    No buffer, layout, split count or graph state participates in this result.
+    """
+    return expression.subs(Symbol("core_id"), core)
+
+
 def owner_slots(
     slots: Mapping[Any, Expr], splits: Mapping[Any, int], num_cores: int
 ) -> tuple[dict[Any, int], ...]:
     """Evaluate owner formulas on every core: one slot per split dimension.
 
-    This is the one place symbolic owners become per-core integers. A slot
-    that is not a concrete integer inside its split raises ``ValueError``.
+    A slot that is not a concrete integer inside its split raises ``ValueError``.
     """
 
     if num_cores <= 0:
@@ -45,12 +56,11 @@ def owner_slots(
             "ownership split and owner-slot dimensions differ: "
             f"{sorted(map(str, splits))} != {sorted(map(str, slots))}"
         )
-    core_id = Symbol("core_id")
     rows = []
     for core in range(num_cores):
         row = {}
         for dim, split in splits.items():
-            value = sympify(slots[dim]).subs(core_id, core)
+            value = _owner_at_core(sympify(slots[dim]), core)
             if value.free_symbols or value.is_integer is not True:
                 raise ValueError(f"non-integral owner slot {value} on core {core}")
             if not 0 <= int(value) < int(split):
@@ -427,12 +437,11 @@ def core_mappings_equal(
         return False
     if num_cores <= 0:
         return False
-    core_id = Symbol("core_id")
     try:
         for dim in left:
             for core in range(num_cores):
                 values = [
-                    sympify(mapping[dim]).subs(core_id, core)
+                    _owner_at_core(sympify(mapping[dim]), core)
                     for mapping in (left, right)
                 ]
                 if any(

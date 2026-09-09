@@ -21,6 +21,7 @@ import pytest
 import sympy
 
 import torch_spyre._inductor.codegen.superdsc as superdsc_module
+import torch_spyre._inductor.core_mapping as core_mapping_module
 import torch_spyre._inductor.pass_utils as pass_utils_module
 from torch_spyre._C import DataFormats, ElementArrangement
 from torch_spyre._inductor.codegen.superdsc import parse_op_spec
@@ -100,11 +101,48 @@ def test_owner_slots_must_be_concrete_integers(slot):
     with pytest.raises(ValueError, match="non-integral"):
         division.to_core_slices(2)
     assert not core_mappings_equal({dim: slot}, {dim: slot}, 2)
+    with pytest.raises(ValueError, match=f"non-integral owner slot {slot} on core 0"):
+        core_mapping_module.owner_slots({dim: slot}, {dim: 2}, 2)
     view = PerCoreView(((0, 2),), ((0, slot),), num_cores=2)
     from torch_spyre._inductor.scratchpad.lx_relayout import _core_slices
 
     with pytest.raises(ValueError, match="non-integral"):
         _core_slices(view, 2)
+
+
+def test_owner_evaluation_reuse_keeps_domain_and_range_checks():
+    dim = sympy.Symbol("dim")
+    direct = {dim: _CORE_ID}
+    wrapped = {dim: sympy.Mod(_CORE_ID, 4)}
+    evaluate = core_mapping_module._owner_at_core
+    evaluate.cache_clear()
+    assert core_mappings_equal(direct, wrapped, 4)
+    misses = evaluate.cache_info().misses
+    assert core_mapping_module.owner_slots(direct, {dim: 4}, 4) == tuple(
+        {dim: core} for core in range(4)
+    )
+    assert evaluate.cache_info().misses == misses
+    # Reusing earlier points must not hide a difference on a larger domain.
+    assert not core_mappings_equal(direct, wrapped, 8)
+    with pytest.raises(ValueError, match="outside split 2 on core 2"):
+        core_mapping_module.owner_slots(direct, {dim: 2}, 4)
+    assert not core_mappings_equal(direct, direct, 0)
+    evaluate.cache_clear()
+
+
+def test_owner_evaluation_keeps_short_circuit_order():
+    class FailsOnLaterCore(sympy.Function):
+        @classmethod
+        def eval(cls, value):
+            if value == 1:
+                raise NotImplementedError("later core must not be evaluated")
+            if value == 0:
+                return sympy.Integer(0)
+
+    dim = sympy.Symbol("dim")
+    assert not core_mappings_equal(
+        {dim: FailsOnLaterCore(_CORE_ID)}, {dim: sympy.Integer(1)}, 2
+    )
 
 
 def test_default_mapping_preserves_existing_core_order():
