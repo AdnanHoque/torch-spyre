@@ -405,20 +405,14 @@ def _distribute_work(graph: GraphLowering) -> None:
     work_distribution(graph, preassigned_ops)
 
 
-@_runs(scratchpad_planning)
+@_runs(anchor_lx_relayout_ownership, scratchpad_planning)
 def _maybe_scratchpad_planning(graph: GraphLowering) -> None:
     if not config.lx_planning:
         return
     # The allocator (and its layout solver) is selected from config by
     # scratchpad_planning -> select_allocator; no allocator wiring here.
-    scratchpad_planning(graph)
-
-
-@_runs(anchor_lx_relayout_ownership)
-def _maybe_anchor_lx_relayout_ownership(graph: GraphLowering) -> None:
-    if not config.lx_planning:
-        return
-    anchor_lx_relayout_ownership(graph)
+    plans = anchor_lx_relayout_ownership(graph)
+    scratchpad_planning(graph, lx_relayout_plans=plans)
 
 
 class CustomPreSchedulingPasses:
@@ -500,7 +494,6 @@ class CustomPreSchedulingPasses:
             # Core Division
             span_reduction,
             _distribute_work,
-            _maybe_anchor_lx_relayout_ownership,
             #
             # LX Planning
             _maybe_scratchpad_planning,

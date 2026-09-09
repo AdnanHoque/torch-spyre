@@ -105,6 +105,7 @@ from torch_spyre._inductor.padding import is_restickify_op
 from torch_spyre._inductor.scratchpad.lx_relayout import (
     LXRelayoutPlan,
     collect_lx_relayout_plans,
+    materialized_lx_relayouts,
     materialize_lx_relayouts,
 )
 from torch_spyre._inductor.cost_model import CostParams
@@ -292,7 +293,12 @@ class ScratchpadAllocator:
         assert self.layout_planning is not None
         return self.layout_planning(buffers, self.size)
 
-    def plan_allocation(self, graph: GraphLowering):
+    def plan_allocation(
+        self,
+        graph: GraphLowering,
+        *,
+        lx_relayout_plans: list[LXRelayoutPlan] | None = None,
+    ):
         """Run pre-passes, assign LX addresses to eligible buffers, then run post-passes.
 
         This is a template method: the skeleton (pre-passes ->
@@ -306,8 +312,13 @@ class ScratchpadAllocator:
             graph: Lowered graph whose buffers will be assigned LX scratchpad
                 addresses where viable.
         """
+        if self.pre_optimization_passes:
+            # A pre-pass may change layouts or ownership: reuse no earlier proof.
+            if lx_relayout_plans is not None:
+                logger.debug("Recollect LX relayout plans after allocator pre-passes")
+            lx_relayout_plans = None
         self._run_passes(self.pre_optimization_passes, graph)
-        buffers = self._prepare_buffers(graph)
+        buffers = self._prepare_buffers(graph, lx_relayout_plans=lx_relayout_plans)
         solver = self._build_solver(buffers)
         allocation = self._solve(solver, graph)
         accepted_lx_relayouts = self._finalize_lx_relayout_allocation(allocation)
@@ -324,7 +335,12 @@ class ScratchpadAllocator:
         for p in passes:
             p.apply_pass(graph)
 
-    def _prepare_buffers(self, graph: GraphLowering) -> Sequence[Any]:
+    def _prepare_buffers(
+        self,
+        graph: GraphLowering,
+        *,
+        lx_relayout_plans: list[LXRelayoutPlan] | None = None,
+    ) -> Sequence[Any]:
         """Buffers to hand the solver. Base: fixed-division LifetimeBoundBuffers."""
         assert self.layout_planning is not None
         if not getattr(self.layout_planning, "supports_paired_buffers", False):
@@ -339,7 +355,16 @@ class ScratchpadAllocator:
                     solver_name,
                 )
             return self._generate_buffers(graph)
-        plans = collect_lx_relayout_plans(graph)
+        if lx_relayout_plans is None:
+            plans = collect_lx_relayout_plans(graph)
+        elif not config.lx_planner_relayout or config.ktir_emitter:
+            plans = []
+        else:
+            if materialized_lx_relayouts(graph):
+                raise RuntimeError(
+                    "LX relayout planning requires an unmaterialized graph"
+                )
+            plans = lx_relayout_plans
         buffers = self._generate_buffers(graph, lx_relayout_plans=plans)
         self._append_lx_relayout_destinations(graph, buffers)
         return buffers
@@ -1951,7 +1976,13 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         self.layout_planning: Optional[CoreDivisionSolverFactory] = layout_planning
         self.prune = prune
 
-    def _prepare_buffers(self, graph: GraphLowering) -> Sequence[Any]:
+    def _prepare_buffers(
+        self,
+        graph: GraphLowering,
+        *,
+        lx_relayout_plans: list[LXRelayoutPlan] | None = None,
+    ) -> Sequence[Any]:
+        # Joint selection derives its own divisions; fixed-division plans do not apply.
         in_place = self._determine_in_place_division_invariant(graph)
         buffers = self._build_cd_bound_buffers(
             graph, in_place, self._division_map(graph)
@@ -2681,6 +2712,8 @@ def select_allocator() -> ScratchpadAllocator:
 def scratchpad_planning(
     graph: GraphLowering,
     allocator: Optional[ScratchpadAllocator] = None,
+    *,
+    lx_relayout_plans: list[LXRelayoutPlan] | None = None,
 ) -> None:
     """Assign LX scratchpad addresses to eligible buffers in a lowered graph.
 
@@ -2691,11 +2724,14 @@ def scratchpad_planning(
         graph: Lowered graph to plan scratchpad memory for.
         allocator: Allocator strategy to use. Defaults to the config-selected
             allocator (see :func:`select_allocator`).
+        lx_relayout_plans: Plans from immediately preceding ownership anchoring.
+            None requests collection; an empty list is a completed empty result.
+            The caller must not mutate the graph between collection and this call.
     """
     if allocator is None:
         allocator = select_allocator()
     try:
-        allocator.plan_allocation(graph)
+        allocator.plan_allocation(graph, lx_relayout_plans=lx_relayout_plans)
     except SolveError:
         # When a solve error arises we assume a strong excpetion guarentee
         # meaning despite the solver failing. The allocator has not mutated

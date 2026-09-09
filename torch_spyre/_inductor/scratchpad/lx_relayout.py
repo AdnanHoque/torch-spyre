@@ -720,14 +720,15 @@ def collect_lx_relayout_plans(
     return result
 
 
-def anchor_lx_relayout_ownership(graph: GraphLowering) -> None:
+def anchor_lx_relayout_ownership(graph: GraphLowering) -> list[LXRelayoutPlan] | None:
     """Choose the unique canonical producer order accepted by its consumers.
 
     Work-division split counts are already final here. This pass only changes
     their canonical owner order, and only when the ordinary relayout planner
     proves one unique order makes the complete source group expressible. The
     allocator records the accepted physical view; kernel preparation consumes
-    it without choosing another owner order.
+    it without choosing another owner order. Return the collected plans for
+    immediate allocation only if no ownership changed; otherwise recollect.
     """
 
     if (
@@ -735,10 +736,12 @@ def anchor_lx_relayout_ownership(graph: GraphLowering) -> None:
         or config.co_optimizing_lx_planning
         or config.ktir_emitter
     ):
-        return
+        return None
 
     unprojectable_sources: list[str] = []
-    collect_lx_relayout_plans(graph, unprojectable_sources=unprojectable_sources)
+    plans: list[LXRelayoutPlan] | None = collect_lx_relayout_plans(
+        graph, unprojectable_sources=unprojectable_sources
+    )
     operations = {op.get_name(): op for op in graph.operations}
 
     def direct_consumers_match(
@@ -834,11 +837,13 @@ def anchor_lx_relayout_ownership(graph: GraphLowering) -> None:
             )
             continue
         commit_tensor_work_division(producer, selected)
+        plans = None
         logger.debug(
             "consumer-anchored LX ownership source=%s mapping=%s",
             source_name,
             selected.core_id_to_work_slice,
         )
+    return plans
 
 
 def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) -> None:
