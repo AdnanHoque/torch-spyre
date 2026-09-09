@@ -703,7 +703,8 @@ def test_lx_anchor_pass_respects_planning_switch(enabled):
 
 @pytest.mark.parametrize("plans", [[], [_relayout_plan()]])
 @pytest.mark.parametrize("prepass", [False, True])
-def test_allocator_reuses_only_unmodified_plans(plans, prepass):
+@pytest.mark.parametrize("committed", [False, True])
+def test_allocator_reuses_only_unmodified_plans(plans, prepass, committed):
     graph = _allocation_graph()
     allocator = ScratchpadAllocator(
         GreedyLayoutSolver,
@@ -719,13 +720,14 @@ def test_allocator_reuses_only_unmodified_plans(plans, prepass):
         ) as collect,
         mock_patch.object(allocator, "_generate_buffers", return_value=[]) as generate,
         mock_patch.object(allocator, "_append_lx_relayout_destinations"),
+        mock_patch.object(allocator, "_select_work_division", return_value=committed),
         mock_patch.object(allocator, "_build_solver", side_effect=StopIteration),
         pytest.raises(StopIteration),
     ):
         allocator.plan_allocation(graph, lx_relayout_plans=plans)
-    assert collect.call_count == int(prepass)
+    assert collect.call_count == int(prepass or committed)
     assert generate.call_args.kwargs["lx_relayout_plans"] is (
-        collect.return_value if prepass else plans
+        collect.return_value if prepass or committed else plans
     )
 
 
@@ -792,7 +794,9 @@ def test_fixed_plan_handoff_keeps_feature_gates(mode):
         allocator._prepare_buffers(graph, lx_relayout_plans=[_relayout_plan()])
     collect.assert_not_called()
     assert generate.call_args.kwargs == (
-        {} if mode == "unsupported_solver" else {"lx_relayout_plans": []}
+        {"ownership_overrides": None}
+        if mode == "unsupported_solver"
+        else {"lx_relayout_plans": [], "ownership_overrides": None}
     )
 
 
@@ -953,6 +957,7 @@ def test_compact_proposals_keep_cores_hints_and_reduction_splits():
 @pytest.mark.parametrize(
     "costs,selected",
     [
+        ([], False),
         ([10.0, 9.0], True),
         ([10.0, 10.0], False),
         ([10.0, 11.0], False),
@@ -974,7 +979,7 @@ def test_work_selection_requires_a_priced_improvement(costs, selected):
         mock_patch.object(
             allocator_module,
             "_compact_work_division_proposals",
-            return_value=[candidate],
+            return_value=[candidate] if costs else [],
         ),
         mock_patch.object(allocator_module, "commit_tensor_work_division") as commit,
         mock_patch.object(allocator, "_prepare_fixed_buffers", return_value=[]),
@@ -988,7 +993,7 @@ def test_work_selection_requires_a_priced_improvement(costs, selected):
         solver.return_value.plan_layout.side_effect = lambda: (
             commit.assert_not_called() or []
         )
-        allocator._select_work_division(graph)
+        assert allocator._select_work_division(graph) is selected
         assert cost.call_count == len(costs)
         if selected:
             commit.assert_called_once_with(op, division)

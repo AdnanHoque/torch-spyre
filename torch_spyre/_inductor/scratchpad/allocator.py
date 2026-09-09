@@ -2247,7 +2247,8 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         *,
         lx_relayout_plans: list[LXRelayoutPlan] | None = None,
     ) -> Sequence[Any]:
-        # Joint selection derives its own divisions; fixed-division plans do not apply.
+        # Joint selection derives its own divisions; fixed-division plans do
+        # not apply.
         in_place = self._determine_in_place_division_invariant(graph)
         buffers = self._build_cd_bound_buffers(
             graph, in_place, self._division_map(graph)
