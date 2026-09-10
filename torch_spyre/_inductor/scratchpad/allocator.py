@@ -44,6 +44,7 @@ from torch_spyre._inductor.pass_utils import (
     make_iteration_space_ownership,
     commit_tensor_work_division,
     concretize_expr,
+    device_coordinates,
     indirect_info_from_op,
     iteration_space_from_op,
     op_read_writes,
@@ -51,9 +52,10 @@ from torch_spyre._inductor.pass_utils import (
     _per_core_view_from_prep,
     _per_core_view_on_buf,
     _is_matmul_op,
+    per_core_views_equal,
     op_short_name,
 )
-from torch_spyre._C import get_device_size_in_bytes
+from torch_spyre._C import DataFormats, get_device_size_in_bytes
 from torch_spyre._inductor.constants import BATCH_MATMUL_OP
 from torch_spyre._inductor.op_spec import TensorWorkDivision
 from torch_spyre._inductor.work_division import (
@@ -114,6 +116,7 @@ from torch_spyre._inductor.scratchpad.lx_relayout import (
     collect_lx_relayout_plans,
     materialized_lx_relayouts,
     materialize_lx_relayouts,
+    work_division_from_view,
 )
 from torch_spyre._inductor.cost_model import CostParams
 
@@ -416,7 +419,7 @@ class ScratchpadAllocator:
         Returns whether any ownership was committed, so a caller holding plans
         proved against the previous owner order knows to discard them.
         """
-        proposals = _compact_work_division_proposals(graph)
+        proposals = _placement_work_division_proposals(graph)
         if not proposals:
             return False
         best, best_cost = {}, math.inf
@@ -1842,6 +1845,178 @@ def _legal_split_options(
 
 
 DEFAULT_VARIANT_CAP = 6
+
+
+def _placement_work_division_proposals(graph) -> list[dict[str, TensorWorkDivision]]:
+    """Bound the existing chooser to compact/stage/compact-plus-stage options.
+
+    Each stage proposal uses the readers of that same trial. Do not combine
+    cached stage proposals with newly divided readers. These dictionaries are
+    trial inputs only; _select_work_division remains the only winning commit.
+    """
+    compact = _compact_work_division_proposals(graph)
+    proposals = list(compact)
+    for base in ({}, *compact):
+        stages = _reader_compatible_input_stage_proposal(graph, base)
+        if stages:
+            proposals.append({**base, **stages})
+    return proposals
+
+
+def _reader_compatible_input_stage_proposal(
+    graph: GraphLowering,
+    ownership_overrides: dict[str, TensorWorkDivision],
+) -> dict[str, TensorWorkDivision]:
+    """Propose stages matching every reader, without choosing or committing.
+
+    Use each trial's reader ownership, not the graph's old ownership. Eligibility
+    proves that the candidate can be represented; the existing placement/cost
+    selector must still price producer reads, computation, transfers and spills.
+    The cost extractor currently covers ordinary 16-bit matmuls and stages
+    whose host and device storage widths agree. This is a cost/coverage fence,
+    not a representation restriction. Unknown uses and partial writes decline.
+    """
+    if (
+        not config.consumer_compatible_input_staging
+        or not config.lx_planning
+        or not config.lx_planner_relayout
+        or config.co_optimizing_lx_planning
+        or config.ktir_emitter
+    ):
+        return {}
+
+    proposals: dict[str, TensorWorkDivision] = {}
+    outputs = set(graph.get_output_names())
+    uses = {id(op): op_read_writes(op) for op in graph.operations}
+    unavailable: set[str] = set()
+    aliased_or_mutated: set[str] = set()
+    writers: dict[str, int] = {}
+    for op in graph.operations:
+        # An opaque alias/mutation contract is not evidence of an external,
+        # immutable input. Do not refine anything in that graph.
+        if not callable(getattr(op, "get_mutation_names", None)) or not callable(
+            getattr(op, "get_inputs_that_alias_output", None)
+        ):
+            return {}
+        aliased_or_mutated.update(op.get_mutation_names())
+        aliased_or_mutated.update(op.get_inputs_that_alias_output())
+        unavailable.update(dep.name for dep in uses[id(op)].writes)
+        for dep in uses[id(op)].writes:
+            writers[dep.name] = writers.get(dep.name, 0) + 1
+    unavailable.update(aliased_or_mutated)
+
+    for producer in graph.operations:
+        if (
+            not isinstance(producer, ComputedBuffer)
+            or not isinstance(producer.data, Pointwise)
+            or not isinstance(producer.layout, FixedTiledLayout)
+            or producer.get_dtype() not in (torch.float16, torch.bfloat16)
+            or producer.layout.device_layout.device_dtype != DataFormats.SEN169_FP16
+            or getattr(producer, "loop_info", None) is not None
+            or producer.get_name() in outputs
+            or producer.get_name() in aliased_or_mutated
+            or writers.get(producer.get_name()) != 1
+            or producer.get_mutation_names()
+            or producer.get_inputs_that_alias_output()
+        ):
+            continue
+        name = producer.get_name()
+        rw = uses[id(producer)]
+        if len(rw.reads) != 1 or len(rw.writes) != 1:
+            continue
+        read, write = next(iter(rw.reads)), next(iter(rw.writes))
+        if (
+            not isinstance(read, MemoryDep)
+            or not isinstance(write, MemoryDep)
+            or read.name not in graph.graph_input_names
+            or read.name in unavailable
+            or write.name != name
+            or _has_work_div_hint(producer)
+        ):
+            continue
+        readers = [
+            (op, dep)
+            for op in graph.operations
+            for dep in uses[id(op)].reads
+            if dep.name == name
+        ]
+        ownership = ownership_overrides.get(
+            name, getattr(producer, "iteration_space_ownership", None)
+        )
+        if not readers or ownership is None:
+            continue
+        views = []
+        for consumer, dep in readers:
+            if (
+                not isinstance(dep, MemoryDep)
+                or not isinstance(consumer, ComputedBuffer)
+                or not _is_matmul_op(consumer)
+                or consumer.data.reduction_type != BATCH_MATMUL_OP
+                or consumer.get_dtype() not in (torch.float16, torch.bfloat16)
+                or consumer.get_mutation_names()
+                or consumer.get_inputs_that_alias_output()
+            ):
+                break
+            # This is an input view. The helper's reduction flag describes
+            # the consumer's OUTPUT, not an incomplete input: a K-split
+            # matmul still reads complete activation pieces. Its output's
+            # completed-sum handoff remains the relayout planner's job.
+            view, _, valid = _per_core_view_on_buf(
+                consumer,
+                dep,
+                name,
+                ownership_override=ownership_overrides.get(consumer.get_name()),
+            )
+            if view is None or not valid:
+                break
+            views.append(view)
+        if len(views) != len(readers) or any(
+            not per_core_views_equal(views[0], view) for view in views[1:]
+        ):
+            continue
+        wanted = views[0]
+        if wanted.num_cores != ownership.physical_core_count:
+            continue
+        try:
+            candidate = work_division_from_view(
+                wanted,
+                producer.layout.device_layout.device_size,
+                device_coordinates(producer.layout.device_layout, write, None),
+                iteration_space_from_op(producer),
+            )
+        except (ValueError, Unsupported) as exc:
+            logger.debug("keep input stage %s: projection declined: %s", name, exc)
+            continue
+        if candidate is None:
+            continue
+        try:
+            context = work_division_context_for_op(producer, max_cores=config.sencores)
+        except Unsupported as exc:
+            logger.debug("keep input stage %s: legal domain declined: %s", name, exc)
+            continue
+        if not context.is_legal(dict(candidate.work_slices)):
+            continue
+        actual, partial, valid = _per_core_view_on_buf(
+            producer, write, name, ownership_override=candidate
+        )
+        if (
+            actual is None
+            or partial
+            or not valid
+            or not per_core_views_equal(actual, wanted)
+        ):
+            continue
+        current, _, current_valid = _per_core_view_on_buf(
+            producer, write, name, ownership_override=ownership
+        )
+        if (
+            current_valid
+            and current is not None
+            and per_core_views_equal(current, actual)
+        ):
+            continue
+        proposals[name] = candidate
+    return proposals
 
 
 def _compact_work_division_proposals(graph) -> list[dict[str, TensorWorkDivision]]:

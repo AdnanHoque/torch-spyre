@@ -978,7 +978,7 @@ def test_work_selection_requires_a_priced_improvement(costs, selected):
     with (
         mock_patch.object(
             allocator_module,
-            "_compact_work_division_proposals",
+            "_placement_work_division_proposals",
             return_value=[candidate] if costs else [],
         ),
         mock_patch.object(allocator_module, "commit_tensor_work_division") as commit,
