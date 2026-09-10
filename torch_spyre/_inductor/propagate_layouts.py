@@ -1557,7 +1557,7 @@ def _offer_indexed_selection_layouts(
 ) -> list[SpyreTensorLayout]:
     """Offer entry-contiguous candidates for an indexed selection feeding batch matmuls.
 
-    Off by default (``config.indexed_selection_consumer_layout``). For each
+    Enabled by default (``config.indexed_selection_consumer_layout``). For each
     already-accepted candidate -- whose stick choice the input checks above have
     validated -- build the layout that keeps every selected entry contiguous
     (see ``_entry_contiguous_stl``), then require (1) the selection's own write
