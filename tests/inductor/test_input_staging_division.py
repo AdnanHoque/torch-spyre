@@ -161,7 +161,9 @@ def test_proposes_both_readers_using_real_coordinate_projection(case):
     assert int(candidate.core_id_to_work_slice[H].subs(C, 1)) == 1
 
 
-def test_generated_hint_applicability_reaches_the_real_presence_check(case, monkeypatch):
+def test_generated_hint_applicability_reaches_the_real_presence_check(
+    case, monkeypatch
+):
     from torch_spyre._inductor.propagate_hints import exclude_op_hint_keys
     from torch_spyre._inductor.work_division import _has_work_div_hint
 
