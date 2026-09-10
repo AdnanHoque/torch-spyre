@@ -161,6 +161,26 @@ def test_proposes_both_readers_using_real_coordinate_projection(case):
     assert int(candidate.core_id_to_work_slice[H].subs(C, 1)) == 1
 
 
+def test_generated_hint_applicability_reaches_the_real_presence_check(case, monkeypatch):
+    from torch_spyre._inductor.propagate_hints import exclude_op_hint_keys
+    from torch_spyre._inductor.work_division import _has_work_div_hint
+
+    origin = torch.fx.Graph().placeholder("activation")
+    origin.meta["custom"] = {
+        "_hint_0": {"work_div": {"T": 32}},
+        "_hint_1": {"work_div": {"H": 4}},
+    }
+    case.stage.origins = (origin,)
+    case.left.origins = (origin,)
+    monkeypatch.setattr(am, "_has_work_div_hint", _has_work_div_hint)
+    # Real user constraints still exclude a stage, even without resolved names.
+    assert am._reader_compatible_input_stage_proposal(case.graph, {}) == {}
+    exclude_op_hint_keys(case.stage, "work_div")
+    assert set(am._reader_compatible_input_stage_proposal(case.graph, {})) == {"stage"}
+    assert _has_work_div_hint(case.left)
+    assert case.committed == []
+
+
 def test_trial_reader_ownership_is_used_without_committing(case):
     left, right = object(), object()
     overrides = {"left": left, "right": right}
