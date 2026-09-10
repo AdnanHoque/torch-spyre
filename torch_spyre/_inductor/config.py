@@ -104,6 +104,13 @@ async_dxp_compile: bool = os.getenv("SPYRE_ASYNC_DXP_COMPILE", "0").lower() in (
 
 allow_all_ops_in_lx_planning: bool = False
 
+# Offer reader-compatible input stages to the existing placement-aware chooser.
+# These are candidates, never forced splits or residency. The relayout and
+# paired-solver prerequisites still apply; this switch only removes candidates.
+consumer_compatible_input_staging: bool = os.getenv(
+    "SPYRE_CONSUMER_COMPATIBLE_INPUT_STAGING", "1"
+).lower() in ("1", "true", "yes")
+
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
