@@ -786,10 +786,7 @@ def anchor_lx_relayout_ownership(graph: GraphLowering) -> list[LXRelayoutPlan] |
                 consumer, dep, source_name
             )
             # Only the read partition matters, even if this reader splits its sum.
-            if (
-                not consumer_representable
-                or not view.same_partition(source_view)
-            ):
+            if not consumer_representable or not view.same_partition(source_view):
                 logger.debug(
                     "direct LX owner mismatch source=%s consumer=%s",
                     source_name,
