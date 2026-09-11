@@ -1294,7 +1294,11 @@ def generate_sdsc(
     )
     consumer_core_ids = tuple(
         sorted(
-            core for _, consumers in sdsc_spec.producer_consumers for core in consumers
+            {
+                core
+                for _, consumers in sdsc_spec.producer_consumers
+                for core in consumers
+            }
         )
     )
     return (
