@@ -1358,11 +1358,21 @@ def test_unhinted_moe_down_route_preserves_the_chosen_split(enabled):
     OFF retains the HBM boundary. No change to the chooser is required.
     """
 
-    torch.manual_seed(0)
     experts, tokens, intermediate, hidden = 2, 64, 128, 256
-    activations = torch.randn(experts, tokens, intermediate, dtype=torch.float16) * 0.01
-    weights = torch.randn(experts, intermediate, hidden, dtype=torch.float16) * 0.01
-    routes = torch.randn(experts, tokens, 1, dtype=torch.float16) * 0.01
+    # Distinct, exact normal FP16 sums: a lost piece cannot pass as rounding.
+    rows = torch.arange(experts * tokens)
+    tags = (2.0 ** (rows // 16 - 4) * (1 + 2 * ((rows // 8) % 2))).half()
+    activations = (
+        tags.reshape(experts, tokens, 1).expand(-1, -1, intermediate).contiguous()
+    )
+    column_tags = (1 + 2 * (torch.arange(hidden) // 64)).half()
+    amplitudes = (2 ** (torch.arange(intermediate) // 64)).half()
+    weights = (
+        (amplitudes[:, None] * column_tags / intermediate)[None]
+        .expand(experts, -1, -1)
+        .contiguous()
+    )
+    routes = torch.full((experts, tokens, 1), 0.5, dtype=torch.float16)
     for name, size in (
         ("E", experts),
         ("T", tokens),
@@ -1384,7 +1394,7 @@ def test_unhinted_moe_down_route_preserves_the_chosen_split(enabled):
     )
     torch._inductor.codecache.FxGraphCache.clear()
     with (
-        config.patch(lx_planner_relayout=enabled),
+        config.patch(lx_planner_relayout=enabled, core_id_k_fast_emission=True),
         _emitted_kernels() as kernels,
         _capture_backend_output_dirs() as directories,
     ):
@@ -1393,7 +1403,7 @@ def test_unhinted_moe_down_route_preserves_the_chosen_split(enabled):
             *device_args,
         )
     torch.testing.assert_close(
-        actual.cpu(), fn(activations, weights, routes), rtol=0.05, atol=1e-6
+        actual.cpu(), fn(activations, weights, routes), rtol=0, atol=0
     )
     specs = [spec for kernel in kernels for spec in _iter_op_specs(kernel.op_specs)]
     bmm_specs = [spec for spec in specs if spec.op == BATCH_MATMUL_OP]
