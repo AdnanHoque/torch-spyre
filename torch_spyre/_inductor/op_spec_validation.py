@@ -30,9 +30,11 @@ Invariants checked:
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from collections.abc import Sequence
 import functools
 import inspect
+import math
 import textwrap
 
 import regex
@@ -40,6 +42,7 @@ from typing import NoReturn
 import sympy
 
 from . import config, constants
+from .core_mapping import owner_slots, transfer_edges
 from .dtype_ops import DtypeOpTable
 from .logging_utils import get_inductor_logger
 from .op_spec import (
@@ -271,6 +274,7 @@ def _check_completed_reduction_route(op_spec: OpSpec, stage: str) -> None:
     destination_count = destination_division.physical_core_count
     sources: set[int] = set()
     destinations: set[int] = set()
+    edges: set[tuple[int, int]] = set()
     for source, consumers in routes:
         if source in sources:
             reject(
@@ -294,11 +298,12 @@ def _check_completed_reduction_route(op_spec: OpSpec, stage: str) -> None:
                     f"{config.sencores} configured cores",
                 )
         for consumer in consumers:
-            if consumer in destinations:
+            if (source, consumer) in edges:
                 reject(
-                    "each destination core must have exactly one source",
-                    f"Destination core {consumer} appears more than once",
+                    "completed-reduction edges must be unique",
+                    f"Duplicate edge {source} -> {consumer}",
                 )
+            edges.add((source, consumer))
             destinations.add(consumer)
     expected = set(range(destination_count))
     if destinations != expected:
@@ -312,6 +317,41 @@ def _check_completed_reduction_route(op_spec: OpSpec, stage: str) -> None:
             "completed-reduction routes require uniform fanout",
             f"Got fanouts {sorted(fanouts)}",
         )
+    # Planning constructs these copies over one shared iteration domain; the
+    # identity marker alone does not prove that. Intersect those
+    # partitions just as the planner does; several writers supply disjoint pieces,
+    # never partial sums that still need adding.
+    try:
+        source_rows = owner_slots(
+            source_division.core_id_to_work_slice,
+            source_division.work_slices,
+            source_count,
+        )
+        destination_rows = owner_slots(
+            destination_division.core_id_to_work_slice,
+            destination_division.work_slices,
+            destination_count,
+        )
+    except ValueError as error:
+        reject("invalid completed-reduction ownership", str(error))
+    groups: dict[tuple, list[int]] = {}
+    for core, row in enumerate(source_rows):
+        groups.setdefault(tuple(row.items()), []).append(core)
+    # Planning proves contiguous K-fast groups: only their last core writes.
+    if len(groups) != math.prod(source_division.work_slices.values()) or sources != {
+        group[-1] for group in groups.values()
+    }:
+        reject("completed-reduction sources must cover every terminal owner")
+    expected_edges = transfer_edges(
+        source_division.work_slices,
+        destination_division.work_slices,
+        {core: source_rows[core] for core in sources},
+        dict(enumerate(destination_rows)),
+    )
+    if edges != expected_edges:
+        reject("completed-reduction routes must match ownership intersections")
+    if len(set(Counter(d for _, d in edges).values())) != 1:
+        reject("completed-reduction routes require uniform fanin")
 
 
 def _check_mandatory_fields(op_spec: OpSpec, stage: str) -> None:

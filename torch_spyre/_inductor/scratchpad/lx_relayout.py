@@ -42,6 +42,7 @@ from ..core_mapping import (
     _MAX_EXACT_OWNERSHIP_POINTS,
     _EVALUATION_ERRORS,
     select_unique_partition_division,
+    transfer_edges,
 )
 from ..ir import FixedTiledLayout
 from ..logging_utils import get_inductor_logger
@@ -314,10 +315,6 @@ def partition_footprint(layout: FixedTiledLayout, view: PerCoreView) -> int:
     )
 
 
-def _overlap(a: int, an: int, b: int, bn: int) -> bool:
-    return a * bn < (b + 1) * an and b * an < (a + 1) * bn
-
-
 def movement_supported(
     source: PerCoreView,
     destination: PerCoreView,
@@ -358,7 +355,7 @@ def movement_supported(
             return False
     source_map = _core_slices(source, num_cores)
     destination_map = _core_slices(destination, destination_num_cores)
-    edges = _transfer_edges(
+    edges = transfer_edges(
         source_splits, destination_splits, source_map, destination_map
     )
     fanout = [sum(src == core for src, _ in edges) for core in range(num_cores)]
@@ -388,24 +385,6 @@ def movement_supported(
     )
 
 
-def _transfer_edges(source_splits, destination_splits, source_map, destination_map):
-    """The same ownership intersections serve ordinary and completed-result copies."""
-    return {
-        (s_core, d_core)
-        for s_core, s_slice in source_map.items()
-        for d_core, d_slice in destination_map.items()
-        if all(
-            _overlap(
-                s_slice.get(dim, 0),
-                source_splits.get(dim, 1),
-                d_slice.get(dim, 0),
-                destination_splits.get(dim, 1),
-            )
-            for dim in source_splits.keys() | destination_splits.keys()
-        )
-    }
-
-
 def derive_completed_reduction_routes(
     source: PerCoreView,
     destination: PerCoreView,
@@ -415,8 +394,8 @@ def derive_completed_reduction_routes(
 
     The terminal is the last core of each contiguous K-fast group even when
     OUT is split. Earlier cores never write their result buffers. Full-domain
-    broadcasts retain the existing K2/K3/K4 contract; the smaller-domain
-    one-to-one extension is limited to the device-checked K2/K4 writer rule.
+    copies may assemble disjoint pieces from several completed writers. The
+    smaller-domain one-to-one extension retains the K2/K4 writer rule.
     """
     source_count, destination_count = source.num_cores, destination.num_cores
     splits, target = dict(source.work_slice_dims), dict(destination.work_slice_dims)
@@ -431,8 +410,12 @@ def derive_completed_reduction_routes(
             destination_count == source_count
             or (destination_count == owners and reduction_split in (2, 4))
         )
-        or any(
-            target.get(d, 1) % splits.get(d, 1) for d in splits.keys() | target.keys()
+        or (
+            destination_count != source_count
+            and any(
+                target.get(d, 1) % splits.get(d, 1)
+                for d in splits.keys() | target.keys()
+            )
         )
     ):
         raise ValueError("unsupported completed-reduction ownership geometry")
@@ -441,26 +424,32 @@ def derive_completed_reduction_routes(
     groups: dict[tuple, list[int]] = {}
     for core, row in source_map.items():
         groups.setdefault(tuple(sorted(row.items())), []).append(core)
-    if len(
-        {tuple(sorted(row.items())) for row in target_map.values()}
-    ) != destination_count or any(
-        group != list(range(group[0], group[0] + reduction_split))
-        for group in groups.values()
+    if (
+        len(groups) != owners
+        or len({tuple(sorted(row.items())) for row in target_map.values()})
+        != destination_count
+        or any(
+            group != list(range(group[0], group[0] + reduction_split))
+            for group in groups.values()
+        )
     ):
         raise ValueError(
             "completed-reduction owners require contiguous source groups and distinct destinations"
         )
     terminals = {group[-1] for group in groups.values()}
-    edges = _transfer_edges(splits, target, source_map, target_map)
+    edges = transfer_edges(splits, target, source_map, target_map)
     routes: dict[int, list[int]] = {core: [] for core in sorted(terminals)}
+    fanins = set()
     for destination_core in range(destination_count):
         writers = [s for s, d in edges if d == destination_core and s in terminals]
-        if len(writers) != 1:
-            raise ValueError("each destination must read exactly one completed result")
-        routes[writers[0]].append(destination_core)
+        if not writers or (destination_count != source_count and len(writers) != 1):
+            raise ValueError("destination has unsupported completed-result coverage")
+        fanins.add(len(writers))
+        for writer in writers:
+            routes[writer].append(destination_core)
     counts = {len(consumers) for consumers in routes.values()}
-    if 0 in counts or len(counts) != 1:
-        raise ValueError("completed-reduction routes require uniform fanout")
+    if 0 in counts or len(counts) != 1 or len(fanins) != 1:
+        raise ValueError("completed-reduction routes require uniform fanin and fanout")
     return tuple((core, tuple(consumers)) for core, consumers in routes.items())
 
 

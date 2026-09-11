@@ -1881,7 +1881,7 @@ def _finalize_tensor_work_divisions(
     )
     producer_ids = tuple(source for source, _ in producer_consumers)
     consumer_ids = tuple(
-        sorted(core for _, consumers in producer_consumers for core in consumers)
+        sorted({core for _, consumers in producer_consumers for core in consumers})
     )
     for index, arg in enumerate(args):
         override = arg.work_division
