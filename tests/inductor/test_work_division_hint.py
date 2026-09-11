@@ -1348,14 +1348,14 @@ def test_lx_relayout_read_expansion_device(reader, enabled):
         "layout_solver": "greedy",
     }
 )
-def test_unhinted_moe_down_route_uses_the_production_hbm_fallback():
-    """Record the production choice for an unhinted E=2 down->route edge.
+@pytest.mark.parametrize("enabled", [False, True])
+def test_unhinted_moe_down_route_preserves_the_chosen_split(enabled):
+    """Keep the chosen E=2 down->route split while changing only its storage.
 
     The only hint creates the two-expert loop; there is deliberately no work
-    division hint. At this shape the cost model splits T=4, H=4, and the F
-    reduction=2. Since the output cannot own the reduction split, the existing
-    fail-closed path keeps down->route in HBM. The full 8x4 LX acceptance gate
-    belongs to the composed MoE stack, where its ownership proposer exists.
+    division hint. The cost model chooses T=4, H=4 and reduction=2 in both
+    modes. ON gathers four finished H pieces into each reader's row slice;
+    OFF retains the HBM boundary. No change to the chooser is required.
     """
 
     torch.manual_seed(0)
@@ -1383,13 +1383,17 @@ def test_unhinted_moe_down_route_uses_the_production_hbm_fallback():
         _name_tensor_dims(routes.to("spyre"), ["E", "T", "R"]),
     )
     torch._inductor.codecache.FxGraphCache.clear()
-    with _emitted_kernels() as kernels:
+    with (
+        config.patch(lx_planner_relayout=enabled),
+        _emitted_kernels() as kernels,
+        _capture_backend_output_dirs() as directories,
+    ):
         actual, _ = run_and_get_code(
             torch.compile(fn, dynamic=False, options={"epilogue_fusion": False}),
             *device_args,
         )
     torch.testing.assert_close(
-        actual.cpu(), fn(activations, weights, routes), rtol=0.05, atol=0.05
+        actual.cpu(), fn(activations, weights, routes), rtol=0.05, atol=1e-6
     )
     specs = [spec for kernel in kernels for spec in _iter_op_specs(kernel.op_specs)]
     bmm_specs = [spec for spec in specs if spec.op == BATCH_MATMUL_OP]
@@ -1400,6 +1404,25 @@ def test_unhinted_moe_down_route_uses_the_production_hbm_fallback():
     assert [split for split in splits if split > 1] == [4, 4, 2]
     assert math.prod(splits) == config.sencores
     down_arg = next(arg for arg in bmm_specs[0].args if not arg.is_input)
+    if enabled:
+        copies = [spec for spec in specs if spec.producer_consumers]
+        assert len(copies) == 1
+        copy = copies[0]
+        assert set(down_arg.allocation) == {"lx"}
+        assert copy.args[0].allocation == down_arg.allocation
+        assert set(copy.args[-1].allocation) == {"lx"}
+        assert [core for core, _ in copy.producer_consumers] == list(range(1, 32, 2))
+        assert collections.Counter(
+            core for _, readers in copy.producer_consumers for core in readers
+        ) == {core: 4 for core in range(32)}
+        assert any(
+            arg.is_input and arg.allocation == copy.args[-1].allocation
+            for spec in specs
+            if spec.op != IDENTITY_OP
+            for arg in spec.args
+        )
+        _assert_lx_only_relayout_payload(directories)
+        return
     assert set(down_arg.allocation) == {"hbm_pool"}
     assert down_arg.work_division is None
     down_address = down_arg.allocation["hbm_pool"]
