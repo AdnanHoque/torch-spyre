@@ -189,7 +189,7 @@ class TestValidateOpSpecsHappyPath(unittest.TestCase):
 
 class TestValidateOpSpecsErrors(unittest.TestCase):
     @config.patch({"sencores": 4})
-    def test_completed_reduction_route_must_cover_each_destination_once(self):
+    def test_completed_reduction_route_must_cover_every_destination(self):
         op = _make_valid_op_spec("identity")
         op.args = [op.args[0], op.args[-1]]
         _mark_as_lx_relayout(op)
@@ -198,7 +198,8 @@ class TestValidateOpSpecsErrors(unittest.TestCase):
         with self.assertRaises(OpSpecValidationError) as ctx:
             validate_op_specs([op], stage="test")
 
-        self.assertIn("exactly one source", str(ctx.exception))
+        # Multiple writers may contribute, but destination 3 is still missing.
+        self.assertIn("cover every destination core", str(ctx.exception))
 
     def test_unexpected_type_in_list(self):
         with self.assertRaises(OpSpecValidationError) as ctx:
