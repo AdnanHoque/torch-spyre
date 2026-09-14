@@ -28,6 +28,7 @@ from torch._inductor.ir import (
     MutationLayoutSHOULDREMOVE,
     Operation,
     Pointwise,
+    Reduction,
 )
 from torch_spyre._C import ElementArrangement
 
@@ -612,7 +613,7 @@ def collect_lx_relayout_plans(
             if any(d.is_indirect() for d in deps):
                 rejection_reason = "cannot emit: consumer uses indirect access"
                 break
-            view, _, representable = _per_core_view_on_buf(
+            view, consumer_partial, representable = _per_core_view_on_buf(
                 consumer, dep, source_name, cache
             )
             consumer_num_cores = _op_num_cores(consumer)
@@ -652,9 +653,15 @@ def collect_lx_relayout_plans(
                     "cannot emit: matmul consumer does not have two inputs"
                 )
                 break
-            if not is_matmul and not isinstance(consumer.data, Pointwise):
+            # Non-matmul split-reduction readers are outside this admission change.
+            if not (
+                is_matmul
+                or isinstance(consumer.data, Pointwise)
+                or (isinstance(consumer.data, Reduction) and not consumer_partial)
+            ):
                 rejection_reason = (
-                    "cannot emit: consumer is neither pointwise nor matmul"
+                    "cannot emit: consumer is neither pointwise, matmul, "
+                    "nor an unsplit reduction"
                 )
                 break
 
@@ -665,11 +672,8 @@ def collect_lx_relayout_plans(
                     "broadcast the source"
                 )
             elif reduction is None and destination_owners < source_num_cores:
-                if not is_matmul:
-                    rejection_reason = (
-                        "cannot emit: grouped gather requires a matmul consumer"
-                    )
-                    break
+                # The copy assembles complete input values. Its ownership
+                # proof does not depend on what arithmetic reads them next.
                 failure = (
                     "cannot emit: grouped destination does not evenly contract "
                     "the source"

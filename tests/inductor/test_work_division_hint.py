@@ -890,11 +890,25 @@ def test_lx_relayout_activation_policy_is_source_wide():
 
 @config.patch({"sencores": 32, "lx_planner_relayout": True})
 @pytest.mark.parametrize(
-    "reader", ["collapsed", "split_matmul", "pointwise", "reduction"]
+    "reader",
+    [
+        "collapsed",
+        "split_matmul",
+        "pointwise",
+        "gather",
+        "reduction",
+        "split_reduction",
+        "unsupported",
+    ],
 )
 def test_lx_relayout_planner_uses_projected_read_ownership(reader):
+    class ReductionReader:
+        pass
+
     m, n = Symbol("m"), Symbol("n")
-    source_cores = 32 if reader == "collapsed" else 8
+    source_cores = (
+        32 if reader in ("collapsed", "gather", "reduction", "split_reduction") else 8
+    )
     if reader == "collapsed":
         source_view = _view({1: 32}, {1: Mod(_CORE_ID, 32)}, 32)
         destination_view = _view({0: 32}, {0: Mod(_CORE_ID, 32)}, 32)
@@ -905,6 +919,16 @@ def test_lx_relayout_planner_uses_projected_read_ownership(reader):
         ).same_ownership(
             work_division_from_view(destination_view, [32, 32], coordinates, space)
         )
+    elif reader == "gather":
+        source_view = _view(
+            {0: 8, 1: 4}, {0: Mod(_CORE_ID, 8), 1: floor(_CORE_ID / 8)}, 32
+        )
+        destination_view = _view({0: 8}, {0: Mod(_CORE_ID, 8)}, 32)
+        coordinates, space = [m, n], {m: 32, n: 32}
+    elif reader in ("reduction", "split_reduction"):
+        source_view = _view({1: 32}, {1: Mod(_CORE_ID, 32)}, 32)
+        destination_view = _view({0: 32}, {0: Mod(_CORE_ID, 32)}, 32)
+        coordinates, space = [m, n], {m: 32, n: 32}
     else:
         source_view = _view({0: 8}, {0: _CORE_ID}, 8)
         destination_view = _view(
@@ -920,7 +944,13 @@ def test_lx_relayout_planner_uses_projected_read_ownership(reader):
     )
     consumer = SimpleNamespace(
         layout=SimpleNamespace(),
-        data=object() if reader == "reduction" else SimpleNamespace(),
+        data=(
+            ReductionReader()
+            if reader in ("reduction", "split_reduction")
+            else object()
+            if reader == "unsupported"
+            else SimpleNamespace()
+        ),
         get_name=lambda: "consumer",
     )
     graph = SimpleNamespace(operations=[producer, consumer])
@@ -938,6 +968,7 @@ def test_lx_relayout_planner_uses_projected_read_ownership(reader):
         mock_patch.object(lx_relayout_module, "ComputedBuffer", SimpleNamespace),
         mock_patch.object(lx_relayout_module, "FixedTiledLayout", SimpleNamespace),
         mock_patch.object(lx_relayout_module, "Pointwise", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "Reduction", ReductionReader),
         mock_patch.object(
             lx_relayout_module, "op_read_writes", side_effect=read_writes
         ),
@@ -946,7 +977,7 @@ def test_lx_relayout_planner_uses_projected_read_ownership(reader):
             "_per_core_view_on_buf",
             side_effect=[
                 (source_view, False, True),
-                (destination_view, reader == "split_matmul", True),
+                (destination_view, reader in ("split_matmul", "split_reduction"), True),
             ],
         ),
         mock_patch.object(
@@ -969,7 +1000,7 @@ def test_lx_relayout_planner_uses_projected_read_ownership(reader):
         mock_patch.object(lx_relayout_module, "partition_footprint", return_value=128),
     ):
         plans = lx_relayout_module.collect_lx_relayout_plans(graph)
-        if reader in ("collapsed", "reduction"):
+        if reader in ("collapsed", "split_reduction", "unsupported"):
             assert plans == []
         else:
             assert len(plans) == 1
@@ -1886,6 +1917,64 @@ def test_completed_reduction_broadcast_device(
         ) == {core: out_split // consumer_out for core in range(32)}
         _assert_lx_only_relayout_payload(directories)
         assert "producer_consumers=" in "\n".join(code)
+
+
+@config.patch(
+    {
+        "sencores": 32,
+        "lx_planning": True,
+        "allow_all_ops_in_lx_planning": True,
+        "layout_solver": "greedy",
+    }
+)
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("stage", ["center", "sum", "softmax"])
+def test_grouped_softmax_relayout_device(enabled, stage):
+    """Gather complete statistics and exponentials, never partial max/sum."""
+    for name, size in (("H", 8), ("G", 4), ("T", 512)):
+        _declare_tensor_dim(name, size)
+    host = (torch.arange(8 * 4 * 512).reshape(8, 4, 512).remainder(3) - 1).half()
+
+    def fn(x):
+        if stage == "sum":
+            with spyre_hint(work_div={"H": 8, "G": 1, "T": 4}):
+                values = x.abs()
+            with spyre_hint(work_div={"H": 8, "G": 4, "T": 1}):
+                return values.sum(-1, keepdim=True)
+        with spyre_hint(work_div={"H": 8, "G": 4, "T": 1}):
+            maximum = x.amax(-1, keepdim=True)
+        with spyre_hint(work_div={"H": 8, "G": 1, "T": 4}):
+            centered = x - maximum
+            if stage == "center":
+                return centered
+            exp = centered.exp()
+        with spyre_hint(work_div={"H": 8, "G": 4, "T": 1}):
+            total = exp.sum(-1, keepdim=True)
+        with spyre_hint(work_div={"H": 8, "G": 1, "T": 4}):
+            return exp / total
+
+    torch._dynamo.reset()
+    device = _name_tensor_dims(host.to("spyre"), ["H", "G", "T"])
+    with config.patch(lx_planner_relayout=enabled), _emitted_kernels() as kernels:
+        actual = torch.compile(fn, dynamic=False)(device)
+    tolerance = (
+        dict(rtol=0.01, atol=0.0001) if stage == "softmax" else dict(rtol=0, atol=0)
+    )
+    torch.testing.assert_close(actual.cpu(), fn(host), **tolerance)
+    specs = [spec for kernel in kernels for spec in _iter_op_specs(kernel.op_specs)]
+    copies = [spec for spec in specs if spec.op == "identity"]
+    assert len(copies) == ((3 if stage == "softmax" else 1) if enabled else 0)
+    if enabled:
+        # Only the graph input and returned result cross HBM. Max/sum each
+        # consume a full context row locally, so no completed-writer rule is used.
+        assert sum("hbm" in arg.allocation for spec in specs for arg in spec.args) == (
+            2 if stage == "sum" else 3
+        )
+        assert not any(
+            "hbm_pool" in arg.allocation for spec in specs for arg in spec.args
+        )
+        assert all("lx" in arg.allocation for spec in copies for arg in spec.args)
+        assert all(not spec.producer_consumers for spec in copies)
 
 
 def test_completed_reduction_split_is_independent_of_output_split():
