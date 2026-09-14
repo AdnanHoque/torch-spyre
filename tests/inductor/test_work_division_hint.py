@@ -813,7 +813,10 @@ def test_joint_allocation_does_not_consume_fixed_plan_handoff():
     build.assert_called_once_with(graph, {}, {})
 
 
-def test_consumer_anchoring_commits_the_unique_accepted_owner_order():
+@pytest.mark.parametrize(
+    "mode", ["copy", "direct", "split_reader", "unrepresentable_reader"]
+)
+def test_consumer_anchoring_commits_the_unique_accepted_owner_order(mode):
     kv, batch = Symbol("kv"), Symbol("batch")
     producer = SimpleNamespace(
         iteration_space_ownership=TensorWorkDivision(
@@ -823,10 +826,33 @@ def test_consumer_anchoring_commits_the_unique_accepted_owner_order():
         ),
         get_name=lambda: "source",
     )
-    graph = SimpleNamespace(operations=[producer])
+    original = producer.iteration_space_ownership
+    consumer = SimpleNamespace(get_name=lambda: "consumer")
+    dep = SimpleNamespace(name="source", is_indirect=lambda: False)
+    graph = SimpleNamespace(operations=[producer, consumer])
+    expected = _view({0: 8, 1: 4}, {0: Mod(_CORE_ID, 8), 1: floor(_CORE_ID / 8)}, 32)
+
+    def per_core_view(op, *args, **kwargs):
+        if op is consumer:
+            return expected, mode == "split_reader", mode != "unrepresentable_reader"
+        candidate = kwargs["ownership_override"]
+        return (
+            _view(
+                {0: 8, 1: 4},
+                {
+                    0: candidate.core_id_to_work_slice[kv],
+                    1: candidate.core_id_to_work_slice[batch],
+                },
+                32,
+            ),
+            False,
+            True,
+        )
 
     def collect(_graph, **kwargs):
         if overrides := kwargs.get("ownership_overrides"):
+            if mode != "copy":
+                return []
             candidate = overrides["source"]
             owners = [
                 int(candidate.core_id_to_work_slice[kv].subs(_CORE_ID, core))
@@ -845,6 +871,7 @@ def test_consumer_anchoring_commits_the_unique_accepted_owner_order():
             }
         ),
         mock_patch.object(lx_relayout_module, "ComputedBuffer", SimpleNamespace),
+        mock_patch.object(lx_relayout_module, "MemoryDep", SimpleNamespace),
         mock_patch.object(lx_relayout_module, "_is_matmul_op", return_value=False),
         mock_patch.object(
             lx_relayout_module,
@@ -854,7 +881,15 @@ def test_consumer_anchoring_commits_the_unique_accepted_owner_order():
         mock_patch.object(
             lx_relayout_module,
             "op_read_writes",
-            return_value=SimpleNamespace(writes=(), reads=()),
+            side_effect=lambda op: SimpleNamespace(
+                writes=[dep] if op is producer and mode != "copy" else [],
+                reads=[dep] if op is consumer and mode != "copy" else [],
+            ),
+        ),
+        mock_patch.object(
+            lx_relayout_module,
+            "_per_core_view_on_buf",
+            side_effect=per_core_view,
         ),
         mock_patch.object(
             lx_relayout_module,
@@ -867,9 +902,13 @@ def test_consumer_anchoring_commits_the_unique_accepted_owner_order():
             lx_relayout_module, "collect_lx_relayout_plans", side_effect=collect
         ),
     ):
-        assert lx_relayout_module.anchor_lx_relayout_ownership(graph) is None
+        result = lx_relayout_module.anchor_lx_relayout_ownership(graph)
+        assert result == ([] if mode == "unrepresentable_reader" else None)
 
     committed = producer.iteration_space_ownership
+    if mode == "unrepresentable_reader":
+        assert committed is original
+        return
     assert [
         int(committed.core_id_to_work_slice[kv].subs(_CORE_ID, core))
         for core in range(32)
