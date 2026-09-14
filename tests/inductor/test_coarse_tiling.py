@@ -1637,6 +1637,50 @@ class TestCodegenOpSpecListRoundtrip(unittest.TestCase):
 # ===========================================================================
 
 
+class TestIterationSpaceDependencies(unittest.TestCase):
+    def test_ordering_reads_preserve_dimensions_and_dependencies(self):
+        from torch._inductor.ir import ComputedBuffer
+
+        from torch_spyre._inductor.pass_utils import (
+            iteration_space,
+            iteration_space_from_op,
+        )
+
+        x, y, r = sympy.symbols("x y r", integer=True)
+        write = inductor_deps.MemoryDep("out", x * 16 + y, (x, y), (8, 16))
+        # Deliberately list the reduction dimension first in the read: output
+        # dimensions must still come first, in write order, with no duplicates.
+        read = inductor_deps.MemoryDep(
+            "in", r * 128 + x * 16 + y, (r, y, x), (32, 16, 8)
+        )
+        weak = inductor_deps.WeakDep("prior", "out")
+        star = inductor_deps.StarDep("whole_buffer")
+        for data, expected in (
+            (_make_reduction([8, 16], [32]), [(x, 8), (y, 16), (r, 32)]),
+            (_make_pointwise([8, 16]), [(x, 8), (y, 16)]),
+        ):
+            for reads in ((read,), (weak, read), (star, read), (read, star, weak)):
+                with self.subTest(reduction=len(expected) == 3, reads=reads):
+                    rw = inductor_deps.ReadWrites(
+                        reads=OrderedSet(reads),
+                        writes=OrderedSet([write]),
+                        index_exprs=OrderedSet(),
+                    )
+                    op = MagicMock(spec=ComputedBuffer)
+                    op.data = data
+                    op.get_read_writes.return_value = rw
+                    node = SimpleNamespace(node=op, read_writes=rw)
+                    original_reads, original_writes = rw.reads, rw.writes
+                    for result in (iteration_space(node), iteration_space_from_op(op)):
+                        self.assertEqual(list(result.items()), expected)
+                    self.assertIs(rw.reads, original_reads)
+                    self.assertIs(rw.writes, original_writes)
+                    self.assertEqual(tuple(rw.reads), reads)
+                    self.assertEqual(tuple(rw.writes), (write,))
+                    for actual, original in zip(rw.reads, reads):
+                        self.assertIs(actual, original)
+
+
 class TestDivideRanges(unittest.TestCase):
     def setUp(self):
         gm = fx.symbolic_trace(lambda: None)
