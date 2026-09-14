@@ -782,14 +782,11 @@ def anchor_lx_relayout_ownership(graph: GraphLowering) -> list[LXRelayoutPlan] |
         if partial or not representable:
             return False
         for consumer, dep in readers:
-            view, consumer_partial, consumer_representable = _per_core_view_on_buf(
+            view, _, consumer_representable = _per_core_view_on_buf(
                 consumer, dep, source_name
             )
-            if (
-                consumer_partial
-                or not consumer_representable
-                or not view.same_partition(source_view)
-            ):
+            # Only the read partition matters, even if this reader splits its sum.
+            if not consumer_representable or not view.same_partition(source_view):
                 logger.debug(
                     "direct LX owner mismatch source=%s consumer=%s",
                     source_name,
