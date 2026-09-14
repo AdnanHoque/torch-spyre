@@ -261,7 +261,9 @@ def _check_completed_reduction_route(op_spec: OpSpec, stage: str) -> None:
     def reject(message: str, detail: str = "") -> NoReturn:
         raise OpSpecValidationError(op_spec, message, detail, stage)
 
-    if not is_lx_relayout_identity(op_spec.op, op_spec.args, op_spec.op_info):
+    if not is_lx_relayout_identity(
+        op_spec.op, op_spec.args, op_spec.op_info, op_spec.producer_consumers
+    ):
         reject(
             "completed-reduction routes require a certified LX identity copy",
             f"Got op={op_spec.op!r}, args={len(op_spec.args)}",
@@ -337,7 +339,8 @@ def _check_completed_reduction_route(op_spec: OpSpec, stage: str) -> None:
     groups: dict[tuple, list[int]] = {}
     for core, row in enumerate(source_rows):
         groups.setdefault(tuple(row.items()), []).append(core)
-    # Planning proves contiguous K-fast groups: only their last core writes.
+    # Supported maps place the final reduction slice on the highest core of
+    # each output partition, including non-contiguous plain-reduction groups.
     if len(groups) != math.prod(source_division.work_slices.values()) or sources != {
         group[-1] for group in groups.values()
     }:

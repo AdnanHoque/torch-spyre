@@ -1935,7 +1935,11 @@ def _finalize_tensor_work_divisions(
             if not is_lx_relayout
             else num_cores % tensor_cores == 0
             and tensor_cores % tensor_owners == 0
-            and (active_core_ids is None or tensor_owners == len(active_core_ids))
+            and (
+                active_core_ids is None
+                or (tensor_owners if index == 0 else tensor_cores)
+                == len(active_core_ids)
+            )
         )
         if not valid:
             raise ValueError(
@@ -1948,7 +1952,9 @@ def _finalize_tensor_work_divisions(
 def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     is_matmul = _is_matmul(op_spec.op)
     is_conv2d = _is_conv(op_spec.op)
-    is_relayout = is_lx_relayout_identity(op_spec.op, op_spec.args, op_spec.op_info)
+    is_relayout = is_lx_relayout_identity(
+        op_spec.op, op_spec.args, op_spec.op_info, op_spec.producer_consumers
+    )
     is_restickify = op_spec.op == RESTICKIFY_OP
     is_pool = _is_pool(op_spec.op)
     is_conv = _is_conv(op_spec.op)

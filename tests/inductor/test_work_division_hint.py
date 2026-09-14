@@ -1977,6 +1977,284 @@ def test_grouped_softmax_relayout_device(enabled, stage):
         assert all(not spec.producer_consumers for spec in copies)
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("adjacent", [False, True])
+def test_completed_softmax_writers_follow_reduction_slices(reverse, adjacent):
+    from torch_spyre._inductor import pass_utils
+
+    h, t = Symbol("h"), Symbol("t")
+    slot = Mod(_CORE_ID, 4) if adjacent else floor(_CORE_ID / 8)
+    head = floor(_CORE_ID / 4) if adjacent else Mod(_CORE_ID, 8)
+    ownership = TensorWorkDivision(
+        {h: 8, t: 4}, {h: head, t: 3 - slot if reverse else slot}, 32
+    )
+    op = SimpleNamespace(iteration_space_ownership=ownership)
+    prep = SimpleNamespace(iter_space=(h, t), write_index=h)
+    with (
+        mock_patch.object(
+            pass_utils, "supports_split_plain_reduction", return_value=True
+        ),
+        mock_patch.object(pass_utils, "_prepare_per_core_view", return_value=prep),
+    ):
+        writers = pass_utils.completed_plain_reduction_writers(op, None, "stat")
+    expected = (
+        tuple(range(0 if reverse else 3, 32, 4))
+        if adjacent
+        else tuple(range(8) if reverse else range(24, 32))
+    )
+    assert writers == expected
+    view = _view({0: 8}, {0: head}, 32)
+    if reverse:
+        # No current builder emits descending reduction slots. Locate their
+        # writers correctly, but keep them outside the supported copy contract.
+        with pytest.raises(ValueError, match="ascending core order"):
+            lx_relayout_module.derive_completed_reduction_routes(
+                view, view, 4, writers=writers
+            )
+        return
+    routes = lx_relayout_module.derive_completed_reduction_routes(
+        view, view, 4, writers=writers
+    )
+    assert routes == tuple(
+        (
+            writer,
+            tuple(range(writer // 4 * 4, writer // 4 * 4 + 4))
+            if adjacent
+            else tuple(range(writer % 8, 32, 8)),
+        )
+        for writer in writers
+    )
+    with pytest.raises(ValueError, match="one writer per source partition"):
+        lx_relayout_module.derive_completed_reduction_routes(
+            view, view, 4, writers=writers[:-1]
+        )
+
+    spec = _completed_route_spec(
+        view,
+        view,
+        [8, 4, 64],
+        [h, t, Integer(0)],
+        {h: (Integer(8), 8), t: (Integer(4), 1)},
+        routes,
+        4096,
+    )
+    from torch_spyre._inductor.op_spec_validation import (
+        _check_completed_reduction_route,
+        OpSpecValidationError,
+    )
+
+    _check_completed_reduction_route(spec, "test")
+    with pytest.raises(OpSpecValidationError):
+        _check_completed_reduction_route(
+            replace(spec, producer_consumers=routes[:-1]), "test"
+        )
+    root, _ = _compile_spec(spec)
+    assert root["coreFoldProp_"]["factor_"] == 32
+    assert root["prodConsList"] == {str(w): list(readers) for w, readers in routes}
+    from torch_spyre._inductor.spyre_kernel import (
+        _check_completed_plain_reduction_writers,
+    )
+
+    producer = SimpleNamespace(
+        args=[SimpleNamespace(device_coordinates=[h])],
+        iteration_space={h: (8, 8), t: (512, 4)},
+        core_id_to_work_slice=dict(ownership.core_id_to_work_slice),
+    )
+    plans = [SimpleNamespace(producer_consumers=routes)]
+    _check_completed_plain_reduction_writers(producer, plans)
+    producer.core_id_to_work_slice[t] = 3 - producer.core_id_to_work_slice[t]
+    with pytest.raises(Unsupported, match="writers changed during preparation"):
+        _check_completed_plain_reduction_writers(producer, plans)
+    producer.core_id_to_work_slice = None
+    with pytest.raises(Unsupported, match="prepared core mapping"):
+        _check_completed_plain_reduction_writers(producer, plans)
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [None, "fp32", "bf16", "mean", "multi_axis", "symbolic", "loop", "ktir"],
+)
+def test_completed_softmax_support_keeps_other_fences(unsupported):
+    from torch_spyre._inductor import pass_utils
+
+    op = SimpleNamespace(
+        data=SimpleNamespace(
+            reduction_type="mean" if unsupported == "mean" else "sum",
+            reduction_ranges=[512, 2]
+            if unsupported == "multi_axis"
+            else [Symbol("T") if unsupported == "symbolic" else 512],
+            get_dtype=lambda: {"fp32": torch.float32, "bf16": torch.bfloat16}.get(
+                unsupported, torch.float16
+            ),
+        ),
+        loop_info=object() if unsupported == "loop" else None,
+    )
+    with (
+        mock_patch.object(pass_utils, "ComputedBuffer", SimpleNamespace),
+        mock_patch.object(pass_utils, "Reduction", SimpleNamespace),
+        config.patch(ktir_emitter=unsupported == "ktir"),
+    ):
+        assert pass_utils.supports_split_plain_reduction(op) == (unsupported is None)
+
+
+@config.patch(
+    {
+        "sencores": 32,
+        "lx_planning": True,
+        "allow_all_ops_in_lx_planning": True,
+        "layout_solver": "greedy",
+    }
+)
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("stage", ["max", "sum", "softmax"])
+@pytest.mark.parametrize("axis", [-1, 1])
+def test_completed_softmax_relayout_device(enabled, stage, axis):
+    """Four context slices combine natively, then share the finished statistic."""
+    for name, size in (("H", 8), ("G", 4), ("T", 512)):
+        _declare_tensor_dim(name, size)
+    host = ((torch.arange(8 * 4 * 512).reshape(8, 4, 512) % 5) - 2).half()
+    host += torch.arange(4).repeat_interleave(128).reshape(1, 1, 512).half()
+    if axis == 1:
+        host = host.transpose(1, 2).contiguous()
+
+    def fn(x):
+        with spyre_hint(work_div={"H": 8, "G": 1, "T": 4}):
+            if stage == "sum":
+                return x - x.sum(axis, keepdim=True)
+            centered = x - x.amax(axis, keepdim=True)
+            if stage == "max":
+                return centered
+            exp = centered.exp()
+            return exp / exp.sum(axis, keepdim=True)
+
+    torch._dynamo.reset()
+    args = _name_tensor_dims(
+        host.to("spyre"), ["H", "G", "T"] if axis == -1 else ["H", "T", "G"]
+    )
+    with (
+        torch._inductor.config.patch(force_disable_caches=True),
+        config.patch(lx_planner_relayout=enabled),
+        _emitted_kernels() as kernels,
+        _capture_backend_output_dirs() as directories,
+    ):
+        actual = torch.compile(fn, dynamic=False)(args).cpu()
+    for directory in directories:
+        for file in directory.glob("sdsc_*.json"):
+            for root in json.loads(file.read_text()).values():
+                assert all(
+                    dsc["numCoreletsUsed_"] == 1
+                    for group in root["dscs_"]
+                    for dsc in group.values()
+                )
+    expected = (
+        torch.softmax(host.float(), axis).half() if stage == "softmax" else fn(host)
+    )
+    torch.testing.assert_close(
+        actual,
+        expected,
+        rtol=0.01 if stage == "softmax" else 0,
+        atol=0.0001 if stage == "softmax" else 0,
+    )
+    specs = [spec for kernel in kernels for spec in _iter_op_specs(kernel.op_specs)]
+    reductions = [spec for spec in specs if spec.op in ("max", "sum")]
+    assert len(reductions) == (2 if stage == "softmax" else 1)
+    assert all(list(spec.iteration_space.values())[-1][1] == 4 for spec in reductions)
+    copies = [spec for spec in specs if spec.producer_consumers]
+    assert len(copies) == (len(reductions) if enabled else 0)
+    if enabled:
+        assert all(
+            spec.producer_consumers
+            == tuple((h + 24, tuple(range(h, 32, 8))) for h in range(8))
+            for spec in copies
+        )
+        assert all("lx" in arg.allocation for spec in copies for arg in spec.args)
+        assert not any(
+            "hbm_pool" in arg.allocation for spec in specs for arg in spec.args
+        )
+
+
+@config.patch(
+    {
+        "sencores": 32,
+        "lx_planning": True,
+        "allow_all_ops_in_lx_planning": True,
+        "layout_solver": "greedy",
+    }
+)
+@pytest.mark.parametrize("enabled", [False, True])
+def test_completed_softmax_attention_device(enabled):
+    """QK -> split max/sum -> PV; this is the compute chain, not the page loader."""
+    for name, size in (("H", 8), ("G", 4), ("T", 512), ("D", 128)):
+        _declare_tensor_dim(name, size)
+    q = ((torch.arange(8 * 4 * 128).reshape(8, 4, 128) % 17 - 8) / 16).half()
+    k = ((torch.arange(8 * 128 * 512).reshape(8, 128, 512) % 19 - 9) / 16).half()
+    v = ((torch.arange(8 * 512 * 128).reshape(8, 512, 128) % 23 - 11) / 16).half()
+
+    def fn(q, k, v):
+        with spyre_hint(work_div={"H": 8, "G": 1, "T": 4, "D": 1}):
+            scores = (q @ k) / math.sqrt(128)
+            exp = (scores - scores.amax(-1, keepdim=True)).exp()
+            p = exp / exp.sum(-1, keepdim=True)
+            result = p @ v
+        with spyre_hint(work_div={"H": 8, "G": 4, "D": 1}):
+            return -result
+
+    torch._dynamo.reset()
+    args = [
+        _name_tensor_dims(x.to("spyre"), names)
+        for x, names in (
+            (q, ["H", "G", "D"]),
+            (k, ["H", "D", "T"]),
+            (v, ["H", "T", "D"]),
+        )
+    ]
+    with (
+        torch._inductor.config.patch(force_disable_caches=True),
+        config.patch(lx_planner_relayout=enabled),
+        _emitted_kernels() as kernels,
+    ):
+        actual = torch.compile(fn, dynamic=False)(*args).cpu()
+    expected = -(
+        torch.softmax((q.float() @ k.float()) / math.sqrt(128), -1) @ v.float()
+    ).half()
+    torch.testing.assert_close(actual, expected, rtol=0.01, atol=0.001)
+    specs = [spec for kernel in kernels for spec in _iter_op_specs(kernel.op_specs)]
+    completed = [spec for spec in specs if spec.producer_consumers]
+    assert len(completed) == (3 if enabled else 0)
+    if enabled:
+        assert all("lx" in arg.allocation for spec in completed for arg in spec.args)
+        assert not any(
+            "hbm_pool" in arg.allocation for spec in specs for arg in spec.args
+        )
+
+
+@config.patch({"sencores": 32, "layout_solver": "greedy", "lx_planning": True})
+@pytest.mark.parametrize("enabled", [False, True])
+def test_completed_softmax_unhinted_device(enabled):
+    """The supported native split is legal with relayout both OFF and ON."""
+    host = ((torch.arange(8 * 512).reshape(8, 1, 512) % 31 - 15) / 8).half()
+    torch._dynamo.reset()
+    with (
+        torch._inductor.config.patch(force_disable_caches=True),
+        config.patch(lx_planner_relayout=enabled),
+        _emitted_kernels() as kernels,
+    ):
+        actual = torch.compile(lambda x: torch.softmax(x, -1), dynamic=False)(
+            host.to("spyre")
+        ).cpu()
+    torch.testing.assert_close(
+        actual, torch.softmax(host.float(), -1).half(), rtol=0.01, atol=0.0001
+    )
+    reductions = [
+        spec
+        for kernel in kernels
+        for spec in _iter_op_specs(kernel.op_specs)
+        if spec.op in ("max", "sum")
+    ]
+    assert len(reductions) == 2
+    assert all(list(spec.iteration_space.values())[-1][1] == 4 for spec in reductions)
+
+
 def test_completed_reduction_split_is_independent_of_output_split():
     m, n, k = Symbol("m"), Symbol("n"), Symbol("k")
     prep = SimpleNamespace(
