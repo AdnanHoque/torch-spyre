@@ -1115,7 +1115,7 @@ class ScratchpadAllocator:
             lx_views[name] = plan.source_view
             # Only sources exist in the graph here. Each private destination
             # receives its own view and bound in _append_lx_relayout_destinations.
-            # Shared sources keep the largest physical span; ordinary buffers
+            # Shared sources keep the largest packed footprint; ordinary buffers
             # keep mem_usage_by_buf's equal-share size unchanged.
             mem_usage[name]["size_per_core"] = max(
                 mem_usage[name]["size_per_core"], plan.source_footprint_bytes
