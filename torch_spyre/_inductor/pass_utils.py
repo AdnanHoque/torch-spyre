@@ -3563,6 +3563,8 @@ def completed_reduction_split_on_buf(
 
     The completed value is on the last reduction slice regardless of OUT.
     Retain the output-axis ambiguity check when certifying this geometry.
+    Other reductions need their own native-combine and finished-writer rules;
+    a partial output alone does not establish this matmul contract.
     """
 
     if not _is_matmul_op(op):

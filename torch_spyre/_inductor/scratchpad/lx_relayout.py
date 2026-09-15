@@ -377,6 +377,14 @@ def movement_supported(
     )
 
 
+# Validated completed-piece routes, not hardware reduction-width limits:
+# K2/K4 on 32 cores on device; K3 on synthetic 2*K-core views on host only.
+# Three cannot divide a 32-core producer domain. Larger splits remain untested.
+_COMPLETED_REDUCTION_SPLITS = (2, 3, 4)
+# Copies to fewer cores have device coverage for this one-writer form only.
+_COMPACT_COMPLETED_REDUCTION_SPLITS = (2, 4)
+
+
 def derive_completed_reduction_routes(
     source: PerCoreView,
     destination: PerCoreView,
@@ -388,6 +396,7 @@ def derive_completed_reduction_routes(
     OUT is split. Earlier cores never write their result buffers. Full-domain
     copies may assemble disjoint pieces from several completed writers. The
     smaller-domain one-to-one extension retains the K2/K4 writer rule.
+
     """
     source_count, destination_count = source.num_cores, destination.num_cores
     splits, target = dict(source.work_slice_dims), dict(destination.work_slice_dims)
@@ -395,12 +404,15 @@ def derive_completed_reduction_routes(
     if (
         source_count is None
         or destination_count is None
-        or reduction_split not in (2, 3, 4)
+        or reduction_split not in _COMPLETED_REDUCTION_SPLITS
         or owners * reduction_split != source_count
         or math.prod(target.values()) != destination_count
         or not (
             destination_count == source_count
-            or (destination_count == owners and reduction_split in (2, 4))
+            or (
+                destination_count == owners
+                and reduction_split in _COMPACT_COMPLETED_REDUCTION_SPLITS
+            )
         )
         or (
             destination_count != source_count
