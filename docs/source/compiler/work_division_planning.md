@@ -566,13 +566,23 @@ proof for pointwise and matmul readers. Existing core-domain, capacity,
 lifetime and whole-source fallback restrictions still apply; this does
 not change the work chooser's policy.
 
-After a split reduction, only the last core in each contiguous reduction group
-holds a finished output piece. A copy over the full core domain can collect
-disjoint pieces from several such writers; it does not add those pieces.
+After a split matmul reduction, only the last core in each contiguous reduction
+group holds a finished output piece. For example, one writer may hold output
+columns 0-63 and another columns 64-127. A reader needing columns 0-127 copies
+both pieces into their corresponding positions; it does not add them together.
 The backend's existing reduction has already added the partial answers.
-Routes must cover the requested pieces exactly, with uniform numbers of writers
-per reader and readers per writer. Smaller-domain copies retain their existing
-one-writer rule.
+
+Every reader must receive all its requested pieces exactly once. The current
+route builder also requires each reader to use the same number of writers and
+each writer to serve the same number of readers. In the example, every reader
+collects two pieces; uneven cases such as one reader needing one writer and
+another needing two are outside this supported geometry. Copies to fewer cores
+retain the narrower rule of one completed writer per reader. These are limits
+of the current copy contract, not a requirement of reduction arithmetic.
+
+This completed-result handoff currently recognizes matmul producers. Other
+reductions need their own supported native-combine and finished-writer rules
+before the same copying machinery can safely be reused.
 
 Each pass plans one op at a time. When two adjacent ops share a tensor
 but select different per-core splits for it, the LX scratchpad planner
