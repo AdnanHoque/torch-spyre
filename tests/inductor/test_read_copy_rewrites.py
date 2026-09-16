@@ -14,6 +14,7 @@
 
 """Saved candidates undergo the same non-weight transforms as live consumers."""
 
+import dataclasses
 from types import SimpleNamespace
 
 import pytest
@@ -148,5 +149,30 @@ def test_retile_then_two_relayouts_compose_without_rewriting_bank():
     rewrite._replace_loop_input(op, "first_move", "second_move")
     assert read(op._read_copy_elision_record.direct_inner_fn) == (
         ("second_move", 8 * ROW + COL),
+        ("bank", 64 * ROW + COL),
+    )
+
+
+def test_rewrites_preserve_recorded_direct_loop_advances():
+    # Explicit-loop copies now save advances before the loop dimension is
+    # removed. Rewriting another operand must not discard those source facts.
+    original = dataclasses.replace(
+        record(),
+        direct_tiled_dims_per_level=(((0, sympy.Integer(1)),),),
+        direct_squeezed_advance_per_level=(((sympy.Integer(64), sympy.Integer(1)),),),
+    )
+    op = operation()
+    op._read_copy_elision_record = _retile_elision_record(
+        original, {"activation": info()}
+    )
+    editor()._replace_loop_input(op, "activation", "moved_activation")
+    updated = op._read_copy_elision_record
+    assert updated.direct_tiled_dims_per_level == original.direct_tiled_dims_per_level
+    assert (
+        updated.direct_squeezed_advance_per_level
+        == original.direct_squeezed_advance_per_level
+    )
+    assert read(updated.direct_inner_fn) == (
+        ("moved_activation", 8 * ROW + COL),
         ("bank", 64 * ROW + COL),
     )
