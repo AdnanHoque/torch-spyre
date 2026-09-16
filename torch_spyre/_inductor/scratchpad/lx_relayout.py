@@ -629,26 +629,17 @@ def lx_solver_relayout() -> bool:
     return config.layout_solver in ("greedy", "cpsat")
 
 
-# Validated completed-piece routes, not hardware reduction-width limits:
-# K2/K4 on 32 cores on device; K3 on synthetic 2*K-core views on host only.
-# Three cannot divide a 32-core producer domain. Larger splits remain untested.
-_COMPLETED_REDUCTION_SPLITS = (2, 3, 4)
-# Copies to fewer cores have device coverage for this one-writer form only.
-_COMPACT_COMPLETED_REDUCTION_SPLITS = (2, 4)
-
-
 def derive_completed_reduction_routes(
     source: PerCoreView,
     destination: PerCoreView,
     reduction_split: int,
 ) -> tuple[tuple[int, tuple[int, ...]], ...]:
-    """Read only the last slice's completed value; the backend already sums it.
+    """Select finished producers, then intersect producer/consumer partitions.
 
-    The terminal is the last core of each contiguous K-fast group even when
-    OUT is split. Earlier cores never write their result buffers. Full-domain
-    copies may assemble disjoint pieces from several completed writers. The
-    smaller-domain one-to-one extension retains the K2/K4 writer rule.
-
+    A matmul writes its completed piece on the last core of each contiguous
+    K-fast group. Other cores' buffers are unwritten, not additional copies.
+    The remaining producer map uses the same intersections as ordinary copies:
+    several producers may supply disjoint pieces, never unfinished sums.
     """
     source_count, destination_count = source.num_cores, destination.num_cores
     splits, target = dict(source.work_slice_dims), dict(destination.work_slice_dims)
@@ -656,16 +647,10 @@ def derive_completed_reduction_routes(
     if (
         source_count is None
         or destination_count is None
-        or reduction_split not in _COMPLETED_REDUCTION_SPLITS
+        or reduction_split <= 1
         or owners * reduction_split != source_count
         or math.prod(target.values()) != destination_count
-        or not (
-            destination_count == source_count
-            or (
-                destination_count == owners
-                and reduction_split in _COMPACT_COMPLETED_REDUCTION_SPLITS
-            )
-        )
+        or destination_count not in (source_count, owners)
         or (
             destination_count != source_count
             and any(
@@ -692,12 +677,13 @@ def derive_completed_reduction_routes(
         raise ValueError(
             "completed-reduction owners require contiguous source groups and distinct destinations"
         )
-    terminals = {group[-1] for group in groups.values()}
+    # Mask unfinished producers before the common ownership intersection.
+    source_map = {group[-1]: source_map[group[-1]] for group in groups.values()}
     edges = transfer_edges(splits, target, source_map, target_map)
-    routes: dict[int, list[int]] = {core: [] for core in sorted(terminals)}
+    routes: dict[int, list[int]] = {core: [] for core in sorted(source_map)}
     fanins = set()
     for destination_core in range(destination_count):
-        writers = [s for s, d in edges if d == destination_core and s in terminals]
+        writers = [s for s, d in edges if d == destination_core]
         if not writers or (destination_count != source_count and len(writers) != 1):
             raise ValueError("destination has unsupported completed-result coverage")
         fanins.add(len(writers))

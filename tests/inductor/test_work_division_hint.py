@@ -1961,7 +1961,7 @@ def test_carried_reduction_stages_compile_to_a_drain():
     assert "coarse_tile_reduction_drain" in "\n".join(code)
 
 
-@pytest.mark.parametrize("k", [2, 3, 4])
+@pytest.mark.parametrize("k", [2, 3, 4, 8, 16, 32])
 def test_completed_reduction_reads_only_terminal_writers(k):
     source = _view({0: 2}, {0: floor(_CORE_ID / k)}, 2 * k)
     destination = _view(
@@ -1984,11 +1984,29 @@ def test_completed_reduction_reads_only_terminal_writers(k):
         with pytest.raises(ValueError):
             derive(bad_source, bad_target, k)
     compact = _view({0: 2}, {0: _CORE_ID}, 2)
-    if k == 3:
-        with pytest.raises(ValueError):
-            derive(source, compact, k)
-    else:
-        assert derive(source, compact, k) == ((k - 1, (0,)), (2 * k - 1, (1,)))
+    assert derive(source, compact, k) == ((k - 1, (0,)), (2 * k - 1, (1,)))
+
+
+def test_relayout_splits_rows_and_collects_columns():
+    # An 8x8 tensor: producers hold 4x2 pieces, consumers need 2x4 pieces.
+    # Row-major core numbering: producer 0 feeds consumers 0 and 2;
+    # consumer 0 collects columns from producers 0 and 1.
+    producer = _view({0: 2, 1: 4}, {0: floor(_CORE_ID / 4), 1: Mod(_CORE_ID, 4)}, 8)
+    consumer = _view({0: 4, 1: 2}, {0: floor(_CORE_ID / 2), 1: Mod(_CORE_ID, 2)}, 8)
+    assert lx_relayout_module.movement_supported(producer, consumer, 8, 8)
+    edges = lx_relayout_module.transfer_edges(
+        dict(producer.work_slice_dims),
+        dict(consumer.work_slice_dims),
+        lx_relayout_module._core_slices(producer, 8),
+        lx_relayout_module._core_slices(consumer, 8),
+    )
+    assert edges == {
+        (p, c)
+        for p, consumers in enumerate(
+            [(0, 2), (0, 2), (1, 3), (1, 3), (4, 6), (4, 6), (5, 7), (5, 7)]
+        )
+        for c in consumers
+    }
 
 
 @config.patch(
@@ -2055,29 +2073,34 @@ def test_carried_reduction_after_tiled_pointwise_producer():
         (4, 2, 1, False),
         (2, 4, 1, False),
         (2, 4, 2, True),
+        (8, 1, 1, False),
+        (16, 1, 1, False),
+        (32, 1, 1, False),
     ],
 )
 @pytest.mark.parametrize("enabled", [False, True])
-def test_completed_reduction_broadcast_device(
+def test_completed_reduction_relayout_device(
     k, out_split, consumer_out, matmul_reader, enabled
 ):
     """Distinct exact sums catch copying a partial answer or an unwritten core."""
-    rows, reduction, columns = 512, 256, max(128, 64 * out_split)
+    rows, reduction, columns = 512, max(256, 64 * k), max(128, 64 * out_split)
     row_ids = torch.arange(rows)
     tags = (2.0 ** (row_ids // 32 - 5) * (1 + 2 * ((row_ids // 16) % 2))).half()[
         :, None
     ]
     column_tags = (1 + 2 * (torch.arange(columns) // 64)).half()[None, :]
-    amplitudes = 2 ** (torch.arange(reduction) // (reduction // k))
+    # Repeat four exact amplitudes so large K splits cannot overflow FP16.
+    amplitudes = 2 ** ((torch.arange(reduction) // (reduction // k)) % 4)
+    mean_amplitude = amplitudes.float().mean().item()
     x = tags.expand(rows, reduction).contiguous()
     weight = amplitudes[:, None].half() * column_tags / reduction
-    expected = -tags * column_tags * ((2**k - 1) / k)
+    expected = -tags * column_tags * mean_amplitude
     torch.testing.assert_close(
         -(x.float() @ weight.float()), expected.float(), rtol=0, atol=0
     )
     rhs = torch.full((columns, 64), 1 / columns, dtype=torch.float16)
     if matmul_reader:
-        expected = (tags * column_tags.mean() * ((2**k - 1) / k)).expand(rows, 64)
+        expected = (tags * column_tags.mean() * mean_amplitude).expand(rows, 64)
     for name, size in (("M", rows), ("K", reduction), ("N", columns), ("P", 64)):
         _declare_tensor_dim(name, size)
 
