@@ -433,8 +433,9 @@ def work_division_from_view(
         tuple(loop for loop in iteration_space if loop in splits),
         splits,
         n,
-        lambda division: owner_slots(division.core_id_to_work_slice, splits, n)
-        == expected_rows,
+        lambda division: (
+            owner_slots(division.core_id_to_work_slice, splits, n) == expected_rows
+        ),
     )
     if candidate is None:
         raise ValueError("no unique certified canonical mapping for fused ownership")
