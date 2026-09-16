@@ -76,7 +76,7 @@ class LXRelayoutPlan:
     num_cores: int
     source_footprint_bytes: int = 0
     destination_footprint_bytes: int = 0
-    producer_consumers: tuple[tuple[int, tuple[int, ...]], ...] = ()
+    completed_producer_cores: tuple[int, ...] = ()
     source_address: int | None = None
     destination_address: int | None = None
 
@@ -1178,7 +1178,7 @@ def collect_lx_relayout_plans(
                     num_cores=source_num_cores,
                     source_footprint_bytes=source_footprint,
                     destination_footprint_bytes=destination_footprint,
-                    producer_consumers=routes,
+                    completed_producer_cores=tuple(core for core, _ in routes),
                 )
                 for (
                     destination_view,

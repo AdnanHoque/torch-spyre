@@ -1287,19 +1287,8 @@ def generate_sdsc(
             extra["allocateNode_"] = alloc_node
         return extra
 
-    active_core_ids = (
-        tuple(source for source, _ in sdsc_spec.producer_consumers)
-        if sdsc_spec.producer_consumers
-        else tuple(range(sdsc_spec.num_cores))
-    )
-    consumer_core_ids = tuple(
-        sorted(
-            {
-                core
-                for _, consumers in sdsc_spec.producer_consumers
-                for core in consumers
-            }
-        )
+    active_core_ids = sdsc_spec.completed_producer_cores or tuple(
+        range(sdsc_spec.num_cores)
     )
     return (
         {
@@ -1333,16 +1322,6 @@ def generate_sdsc(
                 "coreIdToDscSchedule": {
                     str(c): [[-1, 0, 0, 0]] for c in active_core_ids
                 },
-                **(
-                    {
-                        "prodConsList": {
-                            str(source): list(consumers)
-                            for source, consumers in sdsc_spec.producer_consumers
-                        }
-                    }
-                    if sdsc_spec.producer_consumers
-                    else {}
-                ),
                 "dscs_": [
                     {
                         sdsc_spec.opfunc: {
@@ -1554,13 +1533,9 @@ def generate_sdsc(
                                                     tensor.work_division.num_cores
                                                     or sdsc_spec.num_cores
                                                 ).items()
-                                                if not sdsc_spec.producer_consumers
-                                                or int(core)
-                                                in (
-                                                    active_core_ids
-                                                    if i == 0
-                                                    else consumer_core_ids
-                                                )
+                                                if i != 0
+                                                or not sdsc_spec.completed_producer_cores
+                                                or int(core) in active_core_ids
                                             }
                                             if sdsc_spec.opfunc == "shuffle"
                                             and tensor.work_division is not None

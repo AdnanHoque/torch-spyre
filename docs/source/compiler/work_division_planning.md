@@ -587,10 +587,11 @@ No addition takes place in this copy. The reduction over K was completed by
 the producer; splitting N divided the finished output into column pieces.
 
 Planning first selects the producer cores holding finished values. It then
-uses the same partition intersections as ordinary LX copies. The
-`producer_consumers` field is an adjacency list: here `3 -> [0,...,7]` and
-`7 -> [0,...,7]`. Tensor divisions determine which bytes each edge copies;
-the list does not mean every consumer receives a whole producer buffer.
+uses the same partition intersections as ordinary LX copies. The frontend
+records only the finished producer cores, here `(3, 7)`, and exposes only
+those cores as holders of the input. The existing backend derives the
+connections and byte ranges from the producer and consumer placements.
+There is no separate producer-consumer list stored or emitted by the frontend.
 
 Different dimensions can require different movements in one copy. For an
 8×8 tensor, a 2×4 producer partition holds 4×2 pieces; a 4×2 consumer partition
@@ -602,7 +603,7 @@ Completed-result copies use the same intersections, subject to the limits below.
 **Current limits:**
 
 - The producer must have a supported native reduction and a proven finished
-  core for each output piece. This path admits matmuls with contiguous K-fast
+  core for each output piece. This path admits single-corelet matmuls with contiguous K-fast
   groups; other reductions need their own finished-producer rule, not a new
   copying mechanism.
 - Every consumer must receive its requested pieces exactly once. Each

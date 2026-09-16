@@ -1234,7 +1234,7 @@ def _completed_route_spec(
             ),
         ],
         {LX_RELAYOUT_INFO_KEY: True},
-        producer_consumers=routes,
+        completed_producer_cores=tuple(core for core, _ in routes),
     )
 
 
@@ -1665,15 +1665,16 @@ def test_unhinted_moe_down_route_preserves_the_chosen_split(enabled):
     assert math.prod(splits) == config.sencores
     down_arg = next(arg for arg in bmm_specs[0].args if not arg.is_input)
     if enabled:
-        copies = [spec for spec in specs if spec.producer_consumers]
+        copies = [spec for spec in specs if spec.completed_producer_cores]
         assert len(copies) == 1
         copy = copies[0]
         assert set(down_arg.allocation) == {"lx"}
         assert copy.args[0].allocation == down_arg.allocation
         assert set(copy.args[-1].allocation) == {"lx"}
-        assert [core for core, _ in copy.producer_consumers] == list(range(1, 32, 2))
+        assert copy.completed_producer_cores == tuple(range(1, 32, 2))
+        native_routes = _assert_lx_only_relayout_payload(directories)
         assert collections.Counter(
-            core for _, readers in copy.producer_consumers for core in readers
+            core for readers in native_routes.values() for core in readers
         ) == {core: 4 for core in range(32)}
         assert any(
             arg.is_input and arg.allocation == copy.args[-1].allocation
@@ -1681,7 +1682,6 @@ def test_unhinted_moe_down_route_preserves_the_chosen_split(enabled):
             if spec.op != IDENTITY_OP
             for arg in spec.args
         )
-        _assert_lx_only_relayout_payload(directories)
         return
     assert set(down_arg.allocation) == {"hbm_pool"}
     assert down_arg.work_division is None
@@ -2131,16 +2131,21 @@ def test_completed_reduction_relayout_device(
         for file in directory.glob("sdsc_*.json")
         for root in json.loads(file.read_text()).values()
     ]
-    copies = [root for root in roots if root.get("prodConsList")]
+    assert all("prodConsList" not in root for root in roots)
+    copies = [
+        root
+        for root in roots
+        if "shuffle" in root["dscs_"][0]
+        and set(root["coreIdToDsc_"]) == {str(c) for c in range(k - 1, 32, k)}
+    ]
     assert len(copies) == int(enabled)
     if enabled:
-        routes = copies[0]["prodConsList"]
+        routes = _assert_lx_only_relayout_payload(directories)
         assert sorted(map(int, routes)) == list(range(k - 1, 32, k))
         assert collections.Counter(
             c for readers in routes.values() for c in readers
         ) == {core: out_split // consumer_out for core in range(32)}
-        _assert_lx_only_relayout_payload(directories)
-        assert "producer_consumers=" in "\n".join(code)
+        assert "completed_producer_cores=" in "\n".join(code)
 
 
 def test_completed_reduction_split_is_independent_of_output_split():
@@ -2192,8 +2197,8 @@ def test_completed_reduction_routes_survive_alignment_unchanged():
     root, allocations = _compile_spec(spec)
 
     assert set(root["dscs_"][0]) == {"shuffle"}
-    assert spec.producer_consumers == planned_routes
-    assert root["prodConsList"] == {"3": [0, 1, 2, 3], "7": [4, 5, 6, 7]}
+    assert spec.completed_producer_cores == (3, 7)
+    assert "prodConsList" not in root
     assert root["numCoresUsed_"] == 2
     source_map, destination_map = [
         node["coordinates_"]["coreIdToWkSlice_"] for node in allocations
@@ -2233,14 +2238,15 @@ def test_completed_reduction_can_copy_to_its_sixteen_consumers():
     )
 
     _check_completed_reduction_route(spec, "test")
-    for invalid in (routes[:-1], ((1, (16,)), *routes[1:])):
+    producers = spec.completed_producer_cores
+    for invalid in (producers[:-1], (32, *producers[1:])):
         with pytest.raises(OpSpecValidationError):
             _check_completed_reduction_route(
-                replace(spec, producer_consumers=invalid), "test"
+                replace(spec, completed_producer_cores=invalid), "test"
             )
     root, allocations = _compile_spec(spec)
     assert root["coreFoldProp_"]["factor_"] == 32
-    assert root["prodConsList"] == {str(2 * c + 1): [c] for c in range(16)}
+    assert "prodConsList" not in root
     source_map, destination_map = [
         allocation["coordinates_"]["coreIdToWkSlice_"] for allocation in allocations
     ]
@@ -2283,20 +2289,18 @@ def test_completed_reduction_gathers_finished_output_halves():
     )
 
     _check_completed_reduction_route(spec, "test")
+    producers = spec.completed_producer_cores
     for invalid in (
-        routes[:-1],
-        ((1, (0, 0, 8, 16, 24)), *routes[1:]),
-        ((0, routes[0][1]), *routes[1:]),
-        ((1, routes[1][1]), (3, routes[0][1]), *routes[2:]),
+        producers[:-1],
+        (1, *producers),
+        (0, *producers[1:]),
     ):
         with pytest.raises(OpSpecValidationError):
             _check_completed_reduction_route(
-                replace(spec, producer_consumers=invalid), "test"
+                replace(spec, completed_producer_cores=invalid), "test"
             )
     root, allocations = _compile_spec(spec)
-    assert root["prodConsList"] == {
-        str(core): list(readers) for core, readers in routes
-    }
+    assert "prodConsList" not in root
     assert root["numCoresUsed_"] == 16
     source_map, destination_map = [
         allocation["coordinates_"]["coreIdToWkSlice_"] for allocation in allocations

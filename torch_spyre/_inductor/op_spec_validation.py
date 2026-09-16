@@ -254,8 +254,8 @@ def _validate_op_spec(op_spec: OpSpec, stage: str, loop_depth: int) -> None:
 def _check_completed_reduction_route(op_spec: OpSpec, stage: str) -> None:
     """Validate the completed-reduction route certified during planning."""
 
-    routes = op_spec.producer_consumers
-    if not routes:
+    producers = op_spec.completed_producer_cores
+    if not producers:
         return
 
     def reject(message: str, detail: str = "") -> NoReturn:
@@ -272,51 +272,14 @@ def _check_completed_reduction_route(op_spec: OpSpec, stage: str) -> None:
         reject("completed-reduction routes require both tensor divisions")
     source_count = source_division.physical_core_count
     destination_count = destination_division.physical_core_count
-    sources: set[int] = set()
-    destinations: set[int] = set()
-    edges: set[tuple[int, int]] = set()
-    for source, consumers in routes:
-        if source in sources:
-            reject(
-                "completed-reduction source cores must be unique",
-                f"Duplicate source core {source}",
-            )
-        sources.add(source)
-        if not consumers:
-            reject(
-                "each completed-reduction source must feed a consumer",
-                f"Source core {source} has no consumers",
-            )
-        for core, domain in [
-            (source, source_count),
-            *((consumer, destination_count) for consumer in consumers),
-        ]:
-            if not isinstance(core, int) or not 0 <= core < domain <= config.sencores:
-                reject(
-                    "completed-reduction routes must name configured cores",
-                    f"Got core {core!r} for tensor domain {domain} / "
-                    f"{config.sencores} configured cores",
-                )
-        for consumer in consumers:
-            if (source, consumer) in edges:
-                reject(
-                    "completed-reduction edges must be unique",
-                    f"Duplicate edge {source} -> {consumer}",
-                )
-            edges.add((source, consumer))
-            destinations.add(consumer)
-    expected = set(range(destination_count))
-    if destinations != expected:
-        reject(
-            "completed-reduction routes must cover every destination core",
-            f"Got {sorted(destinations)}, expected {sorted(expected)}",
-        )
-    fanouts = {len(consumers) for _, consumers in routes}
-    if len(fanouts) != 1:
-        reject(
-            "completed-reduction routes require uniform fanout",
-            f"Got fanouts {sorted(fanouts)}",
-        )
+    if not 0 < destination_count <= config.sencores or any(
+        not isinstance(core, int) or not 0 <= core < source_count <= config.sencores
+        for core in producers
+    ):
+        reject("completed-reduction producers must name configured cores")
+    sources = set(producers)
+    if len(sources) != len(producers):
+        reject("completed-reduction source cores must be unique")
     # Planning constructs these copies over one shared iteration domain; the
     # identity marker alone does not prove that. Intersect those
     # partitions just as the planner does; several writers supply disjoint pieces,
@@ -342,14 +305,18 @@ def _check_completed_reduction_route(op_spec: OpSpec, stage: str) -> None:
         group[-1] for group in groups.values()
     }:
         reject("completed-reduction sources must cover every terminal owner")
-    expected_edges = transfer_edges(
+    edges = transfer_edges(
         source_division.work_slices,
         destination_division.work_slices,
         {core: source_rows[core] for core in sources},
         dict(enumerate(destination_rows)),
     )
-    if edges != expected_edges:
-        reject("completed-reduction routes must match ownership intersections")
+    if {s for s, _ in edges} != sources or {d for _, d in edges} != set(
+        range(destination_count)
+    ):
+        reject("completed-reduction routes must cover every producer and consumer")
+    if len(set(Counter(s for s, _ in edges).values())) != 1:
+        reject("completed-reduction routes require uniform fanout")
     if len(set(Counter(d for _, d in edges).values())) != 1:
         reject("completed-reduction routes require uniform fanin")
 

@@ -81,7 +81,7 @@ def _op(
     tiled_symbol_trip_counts=None,
     symbolic_dim_bounds=None,
     node_output_ranges=None,
-    producer_consumers=(),
+    completed_producer_cores=(),
 ) -> OpSpec:
     return OpSpec(
         op=op,
@@ -97,7 +97,7 @@ def _op(
             {} if symbolic_dim_bounds is None else symbolic_dim_bounds
         ),
         node_output_ranges=node_output_ranges,
-        producer_consumers=producer_consumers,
+        completed_producer_cores=completed_producer_cores,
         debug_handle=handle,
     )
 
@@ -140,17 +140,19 @@ class TestKernelProvenanceDescriptor:
     def test_completed_reduction_route_changes_bundle_identity(self):
         ordinary = build_kernel_provenance_descriptor([_op(None)])
         routed = build_kernel_provenance_descriptor(
-            [_op(None, producer_consumers=((3, (0, 1, 2, 3)),))]
+            [_op(None, completed_producer_cores=(3,))]
         )
 
         assert ordinary.key != routed.key
 
     def test_completed_reduction_route_survives_generated_wrapper(self):
-        routes = ((3, (0, 1, 2, 3)), (7, (4, 5, 6, 7)))
+        producers = (3, 7)
 
-        (result,) = _generated_wrapper_roundtrip([_op(None, producer_consumers=routes)])
+        (result,) = _generated_wrapper_roundtrip(
+            [_op(None, completed_producer_cores=producers)]
+        )
 
-        assert result.producer_consumers == routes
+        assert result.completed_producer_cores == producers
 
     def test_builds_bundle_identity_without_handles(self):
         specs = [
