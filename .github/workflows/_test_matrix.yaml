@@ -112,6 +112,14 @@ on:
       # checkout, the build_torch_spyre wheel job, and install-prebuilt-torch-spyre;
       # run the suite against the baked dir. DEFAULT false → the normal PR/nightly
       # callers (tests.yml / tests-nightly.yml) are byte-for-byte unchanged.
+      component:
+        description: >
+          Component to stamp on v2 ingest rows. Defaults to this repo's own product; set it
+          when this matrix runs ANOTHER component's suite, so the rows (and the test_case_id
+          they hash into) name the suite's real owner.
+        required: false
+        type: string
+        default: torch-spyre
       run_id:
         description: >
           UUID identifying this TEST RUN, minted by the dispatching orchestrator above the
@@ -762,6 +770,7 @@ jobs:
           branch: ${{ inputs.ref || github.event.pull_request.head.sha || github.ref_name }}
           sha: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
           gha-run-id: ${{ github.run_id }}
+          component: ${{ inputs.component || 'torch-spyre' }}
           # The orchestrator's uuid when this run was Jenkins-dispatched; empty otherwise,
           # and the ingest then falls back to hashing its own run coordinate.
           run-id: ${{ inputs.run_id }}
