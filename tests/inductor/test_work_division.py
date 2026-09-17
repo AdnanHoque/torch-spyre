@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 import sympy
 import torch
 from sympy import Symbol
-from torch._inductor.dependencies import MemoryDep
+from torch._inductor.dependencies import MemoryDep, StarDep, WeakDep
 from torch._inductor.ir import (
     ComputedBuffer,
     FixedLayout,
@@ -1842,6 +1842,26 @@ class TestResidencyEdgeMatching(unittest.TestCase):
                     ),
                     reason,
                 )
+
+    def test_residency_edge_requires_coordinate_dependencies(self):
+        producer = self.op_by_name["plain"]
+        memory = self.rw[producer].writes[0]
+        for dependency in (StarDep("plain"), WeakDep("plain", "consumer")):
+            for reads in ([dependency], [dependency, memory]):
+                for writes in ([dependency], [dependency, memory]):
+                    with self.subTest(reads=reads, writes=writes):
+                        with (
+                            self._patches(),
+                            patch.object(self.rw[producer], "writes", writes),
+                        ):
+                            edge = allocator_module.build_residency_edge(
+                                "plain", producer, self.consumer_op, reads, None, {}
+                            )
+                        if memory in reads and memory in writes:
+                            self.assertIs(edge.read_dep, memory)
+                            self.assertIs(edge.write_dep, memory)
+                        else:
+                            self.assertIsNone(edge)
 
     def test_no_consumer_op_matches_nothing(self):
         allocator = CoOptimizingAllocator(MagicMock(), size=1)
