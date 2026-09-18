@@ -375,6 +375,12 @@ class OpFeatures:
     # ``cores / owners`` via a future ``relayout_owners`` feature, not by a bytes
     # field).
     is_lx_relayout: bool = False
+    # Stores with a known contiguous, indirect row write.
+    is_indirect_store: bool = False
+    # Existing candidate identities let the solver price each core count without
+    # dividing by a decision variable.
+    store_division: sympy.Symbol | None = None
+    store_cores_by_division: tuple[tuple[int, int], ...] = ()
     # Per-core contiguous run, in ELEMENTS, of the finer (governing) of the two
     # PerCoreViews: (device_size[d] // split[d]) * prod(device_size[d+1:]) for the
     # innermost split dim d. The 10x-at-fixed-bytes variable.
@@ -863,6 +869,11 @@ class CostParams:
     red_bw_cores_g: dict = dataclasses.field(
         default_factory=lambda: {1: 0.11, 2: 0.22, 4: 0.43, 8: 0.54, 16: 0.54, 32: 1.0}
     )
+    # Initial rate for contiguous indirect row stores, in GB/s per writing core.
+    # Fitted to FP16 cache writes (256/512 rows, 128 values per row). This captures
+    # the large 1-to-many-core gain, not the smaller measured 4-vs-16 ranking.
+    # The shared bus remains capped at bw_peak_gbps; 0 disables this correction.
+    store_gbps_per_core: float = 30.0
     # Ops that stream a FULL input plus a small BROADCAST operand (loaded once) -- copy
     # (x+const), bcast, bcastcol, mulbcast -- run FASTER than a plain 1R:1W op (~118 vs
     # ~105 GB/s; mechanism open). NOT `write` (both operands broadcast, no full input).
@@ -1797,6 +1808,37 @@ def _lazy_min(r, w):
     return min(r, w)
 
 
+def _store_core_excess_ns(ops: list, p: "CostParams"):
+    """Extra write time when the writing cores cannot saturate the shared bus.
+
+    The base model already charges W/peak. Add only W/min(peak, cores*rate)
+    minus that charge. Tabulate undecided core counts using the existing
+    division identities; keep HBM bytes symbolic until placement is chosen.
+    """
+    rate, peak = p.store_gbps_per_core, p.bw_peak_gbps
+    if rate <= 0:
+        return 0.0
+
+    def per_byte(cores):
+        return max(0.0, 1.0 / min(peak, cores * rate) - 1.0 / peak)
+
+    total = 0.0
+    for op in ops:
+        if not op.is_indirect_store or op.is_matmul:
+            continue
+        if _is_sym(op.cores):
+            if op.store_division is None or not op.store_cores_by_division:
+                continue  # Retain the old estimate if candidates are unavailable.
+            factor = sum(
+                sympy.KroneckerDelta(op.store_division, index) * per_byte(cores)
+                for index, cores in op.store_cores_by_division
+            )
+        else:
+            factor = per_byte(op.cores)
+        total += op.write_bytes() * factor
+    return total
+
+
 def predict_ops(ops: list, params: CostParams | None = None) -> float:
     """Predicted device latency (ns) for a bundle of ops (one fused kernel).
 
@@ -1913,6 +1955,8 @@ def predict_ops(ops: list, params: CostParams | None = None) -> float:
         mem = (r + w) / p.bw_peak_gbps + p.rw_turnaround_ns_per_byte * _lazy_min(r, w)
     else:
         mem = (r + w) / p.bw_peak_gbps + p.rw_turnaround_ns_per_byte * _lazy_min(r, w)
+    # Replace the stores' peak-rate charge with the writing cores' limited rate.
+    mem = mem + _store_core_excess_ns(ops, p)
     # Sharing slows delivery of these same reads; it does not add HBM bytes.
     # Apply the same subsequent bandwidth derates as the base and replica reads.
     # Both matmul models use this input-delivery cost. The bundled model's
@@ -2275,6 +2319,12 @@ def explain(ops: list, params: CostParams | None = None) -> str:
                 f"  | {a.elems} elems x {o.dtype_bytes}B = {a.elems * o.dtype_bytes} B"
                 f" (hbm counted: {counted} B){lf}{rp}{bc}{bd}"
             )
+    store_extra = _store_core_excess_ns(ops, p)
+    if store_extra:
+        lines.append(
+            f"     indirect-store core limit: +{store_extra / 1000:.2f} us "
+            "(before bandwidth adjustments and compute overlap)"
+        )
     if any(getattr(o, "is_matmul", False) for o in ops) and p.use_bundled_cost_model:
         return _explain_matmul_bundled(lines, ops, p)
     if any(getattr(o, "is_matmul", False) for o in ops):
@@ -2340,6 +2390,8 @@ def explain(ops: list, params: CostParams | None = None) -> str:
                 eff, eff_rows, eff_cols = e, rpc, _op_cols(o)
     t = predict_ops(ops, p)
     parts = "(R+W)/BW_PEAK + a*min(R,W)"
+    if store_extra:
+        parts += " + store_core_excess"
     if eff < 1.0:
         parts = f"[{parts}] / eff_underfill"
     clone = _clone_in_bytes(ops)
@@ -2366,7 +2418,8 @@ def explain(ops: list, params: CostParams | None = None) -> str:
         )
         lines.append(
             f"     eff_underfill = min({p.coarse_underfill_cap}, {shape}) = {eff:.3f}"
-            f"  -> (base+turn)/eff = {(base + turn) / eff / 1000:.2f} us"
+            f"  -> (base+turn+store_core_excess)/eff = "
+            f"{(base + turn + store_extra) / eff / 1000:.2f} us"
         )
     lines.append(f"     => T_model = {t / 1000:.2f} us")
     return "\n".join(lines)

@@ -736,7 +736,11 @@ def _relayout_logger():
 
 
 def extract_op_features(
-    op, work_slices=None, is_lx: Optional[Mapping[str, bool]] = None
+    op,
+    work_slices=None,
+    is_lx: Optional[Mapping[str, bool]] = None,
+    core_divisions=None,
+    division_symbol=None,
 ) -> OpFeatures:
     """Build OpFeatures for one ComputedBuffer op (best-effort).
 
@@ -877,6 +881,14 @@ def extract_op_features(
     if not is_reduction and loop_trip == 1 and out_is_lx is not True:
         out_write_elems = _indirect_write_elems(op, out_elems)
 
+    # Use the same resolved axes as `cores`, not a candidate's raw split product.
+    store_cores_by_division: tuple[tuple[int, int], ...] = ()
+    if out_write_elems is not None and division_symbol is not None and core_divisions:
+        store_cores_by_division = tuple(
+            (index, math.prod(cd.splits.get(key, 1) for key in slices))
+            for index, cd in enumerate(core_divisions)
+        )
+
     args: list = []
     # Output arg (device-sized).
     args.append(
@@ -986,6 +998,10 @@ def extract_op_features(
         is_lx_relayout=_rl[0],
         relayout_run_elems=_rl[1],
         relayout_split=_rl[2],
+        store_division=division_symbol if out_write_elems is not None else None,
+        store_cores_by_division=store_cores_by_division,
+        # The byte-count check defines which store geometry gets the rate estimate.
+        is_indirect_store=out_write_elems is not None,
     )
     if is_matmul:
         axes = _matmul_axes_for_split_cost(features)
