@@ -2328,12 +2328,21 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         every arg is stamped with its symbolic placement as it is built.
         """
         from torch_spyre._inductor.dump_cost_model import extract_op_features
+        from torch_spyre._inductor.scratchpad.plan_solver import division_symbol
         from torch_spyre._inductor.scratchpad.sa_cooptimizer import _work_slices
 
         op = graph.get_buffer(output_name)
-        division = CoreDivision(splits=buffers[output_name].sym_core_divs)
+        buffer = buffers[output_name]
+        division = CoreDivision(splits=buffer.sym_core_divs)
         ws = _work_slices(op, division)
-        return extract_op_features(op, ws, is_lx)
+        # Let the cost model tabulate store rates over the existing candidate menu.
+        return extract_op_features(
+            op,
+            ws,
+            is_lx,
+            core_divisions=buffer.core_divisions,
+            division_symbol=division_symbol(buffer.name),
+        )
 
     def _finalize_lx_relayout_allocation(
         self,

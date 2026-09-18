@@ -570,3 +570,110 @@ def test_the_per_arg_io_breakdown_sums_to_its_own_total():
     counted = sum(a["hbm_counted"] for o in dcm.LAST_IO["ops"] for a in o["args"])
     # The clone-in load of the resident input, plus the write of the HBM output.
     assert counted == dcm.LAST_IO["hbm_bytes"] == 2 * BYTES
+
+
+def _indirect_store(cores=1, is_lx=False, **kwargs):
+    return OpFeatures(
+        name="store",
+        is_reduction=False,
+        out_elems=65536,
+        cores=cores,
+        dtype_bytes=2,
+        is_indirect_store=True,
+        args=[ArgTraffic("cache", "output", is_lx, 65536, is_boundary=False)],
+        **kwargs,
+    )
+
+
+def test_store_core_rate_and_saturation():
+    params = CostParams()
+    assert params.store_gbps_per_core == 30.0
+    for cores in (1, 2, 4, 5, 8, 16, 32):
+        store = _indirect_store(cores)
+        expected = store.write_bytes() * (
+            1 / min(params.bw_peak_gbps, cores * 30) - 1 / params.bw_peak_gbps
+        )
+        assert cost_model._store_core_excess_ns([store], params) == pytest.approx(
+            expected
+        )
+    assert cost_model._store_core_excess_ns([_indirect_store(5)], params) == 0
+    assert (
+        cost_model._store_core_excess_ns(
+            [_indirect_store()], CostParams(store_gbps_per_core=0)
+        )
+        == 0
+    )
+
+
+def test_store_rate_does_not_change_other_ops():
+    store = _indirect_store()
+    store.is_indirect_store = False
+    for reduction in (False, True):
+        store.is_reduction = reduction
+        assert cost_model.predict_ops([store]) == cost_model.predict_ops(
+            [store], CostParams(store_gbps_per_core=0)
+        )
+    store.is_matmul = store.is_indirect_store = True
+    assert cost_model._store_core_excess_ns([store], CostParams()) == 0
+
+
+def test_store_symbolic_cost_matches_concrete_and_cp_sat():
+    from ortools.sat.python import cp_model
+    from torch_spyre._inductor.scratchpad.ilp_solver_ortools import _SympyExprToCpSat
+    from torch_spyre._inductor.scratchpad.plan_solver import division_symbol
+
+    params = CostParams()
+    division = division_symbol("store")
+    resident, cores_symbol = sympy.symbols("resident cores", integer=True)
+    menu = tuple(enumerate((1, 2, 4, 8, 16, 32)))
+    feature = _indirect_store(
+        cores_symbol, resident, store_division=division, store_cores_by_division=menu
+    )
+    expression = cost_model._store_core_excess_ns([feature], params)
+    assert expression.has(resident, division)
+    assert expression.subs(resident, 1) == 0
+    expression = expression.subs(resident, 0)
+    for index, cores in menu:
+        expected = cost_model._store_core_excess_ns([_indirect_store(cores)], params)
+        assert float(expression.subs(division, index)) == pytest.approx(expected)
+        model = cp_model.CpModel()
+        chosen = model.new_int_var(0, len(menu) - 1, division.name)
+        literals = []
+        for i, _ in menu:
+            literal = model.new_bool_var(f"chosen_{i}")
+            model.add(chosen == i).only_enforce_if(literal)
+            model.add(chosen != i).only_enforce_if(literal.Not())
+            literals.append(literal)
+        symbols = {
+            division.name: chosen,
+            f"_division_of_{division.name}": SimpleNamespace(
+                division_is=literals.__getitem__
+            ),
+        }
+        # The bundle's compute/memory overlap also wraps this cost in Min.
+        wrapped = cost_model._lazy_min(sympy.Integer(1000000), expression)
+        converted = _SympyExprToCpSat(model, symbols, {}).convert(wrapped)
+        assert converted is not None
+        model.add(chosen == index)
+        model.minimize(converted)
+        solver = cp_model.CpSolver()
+        assert solver.solve(model) == cp_model.OPTIMAL
+        assert solver.objective_value == pytest.approx(expected, abs=1)
+    feature.store_cores_by_division = ()
+    assert cost_model._store_core_excess_ns([feature], params) == 0
+
+
+def test_store_cost_composes_with_bundle_and_is_reported(monkeypatch):
+    store = _indirect_store()
+    # Store and reduction may coexist in a bundle; only the store is adjusted.
+    reduction = _writer("buf9", is_boundary=False, resident=True)
+    reduction.is_reduction = True
+    bundles = [[store, reduction]]
+    monkeypatch.setattr(cost_model, "group_features_by_bundle", lambda *_: bundles)
+    before = cost_model.predict_by_bundle([], {}, CostParams(store_gbps_per_core=0))
+    after = cost_model.predict_by_bundle([], {}, CostParams())
+    extra = cost_model._store_core_excess_ns([store], CostParams())
+    assert after - before == pytest.approx(extra)
+    assert f"indirect-store core limit: +{extra / 1000:.2f} us" in cost_model.explain(
+        [store]
+    )
