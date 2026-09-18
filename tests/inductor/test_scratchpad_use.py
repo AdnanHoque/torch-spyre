@@ -1469,7 +1469,7 @@ class TestSolveErrorFallback(unittest.TestCase):
                     "plan_allocation",
                     autospec=True,
                 ) as fallback,
-                self.assertLogs(allocator_module.logger, level="WARNING") as logs,
+                self.assertLogs(allocator_module.logger, level="INFO") as logs,
             ):
                 allocator_module.scratchpad_planning(
                     graph, failing, lx_relayout_plans=[]
@@ -1482,6 +1482,7 @@ class TestSolveErrorFallback(unittest.TestCase):
         self.assertIs(greedy.layout_planning, GreedyLayoutSolver)
         self.assertIs(greedy.post_optimization_passes, post_passes)
         self.assertIs(replanned, graph)
+        self.assertEqual([record.levelname for record in logs.records], ["INFO"])
         self.assertIn("falling back to greedy", "\n".join(logs.output))
 
 

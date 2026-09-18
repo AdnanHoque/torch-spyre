@@ -1359,7 +1359,10 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
                 model.minimize(sum(hbm_terms))
                 status = solver.Solve(model)
                 if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-                    raise SolveError("CP-SAT memory planner found no feasible plan")
+                    raise SolveError(
+                        f"CP-SAT returned {solver.StatusName(status)} without a plan "
+                        f"after {solver.WallTime():.2f}s"
+                    )
                 # Lock in the residency optimum (the traffic value, not just the
                 # count) so the parallelism step can never trade a spill for
                 # parallelism. Rounding avoids loss of precision as the objective is
@@ -1383,7 +1386,10 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
                 model.maximize(sum(core_terms))
                 status = solver.Solve(model)
                 if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-                    raise SolveError("CP-SAT memory planner found no feasible plan")
+                    raise SolveError(
+                        f"CP-SAT returned {solver.StatusName(status)} without a plan "
+                        f"after {solver.WallTime():.2f}s"
+                    )
                 occupancy = round(solver.ObjectiveValue())
 
                 # Shape balance: holding the parallelism optimum (the objective is
@@ -1396,7 +1402,10 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
                 model.minimize(sum(core_cost_terms))
                 status = solver.Solve(model)
                 if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-                    raise SolveError("CP-SAT memory planner found no feasible plan")
+                    raise SolveError(
+                        f"CP-SAT returned {solver.StatusName(status)} without a plan "
+                        f"after {solver.WallTime():.2f}s"
+                    )
 
         final_tensors = self._extract(solver, tensors)
 

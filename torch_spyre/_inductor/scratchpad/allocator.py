@@ -3368,7 +3368,7 @@ def scratchpad_planning(
         # adds LxContextSwitchingPass under the same flag that lets residency skip
         # the extern-kernel liveness guard, so dropping it would leave LX buffers
         # unprotected across FallbackKernel calls.
-        logger.warning(
+        logger.info(
             "LX layout solve failed with layout_solver=%s (%s); falling back to "
             "greedy LX placement with the committed work divisions",
             config.layout_solver,
