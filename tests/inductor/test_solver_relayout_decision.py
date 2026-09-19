@@ -44,7 +44,6 @@ pytest.importorskip("ortools")
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.pass_utils import PerCoreView
-from torch_spyre._inductor import config
 from torch_spyre._inductor.scratchpad.allocator import CoOptimizingAllocator
 from torch_spyre._inductor.scratchpad.ilp_solver_ortools import CpSatLayoutSolver
 from torch_spyre._inductor.scratchpad.lx_relayout import (
