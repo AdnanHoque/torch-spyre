@@ -112,7 +112,7 @@ lx_solver_relayout_groups_per_edge: int = int(
 # 120 s limit) and no exposed parameter shortens it, while search on the raw
 # model finds a feasible plan within seconds. 0 disables this count threshold.
 lx_solver_relayout_presolve_max_copies: int = int(
-    os.getenv("SPYRE_LX_SOLVER_RELAYOUT_PRESOLVE_MAX_COPIES", "64")
+    os.getenv("SPYRE_LX_SOLVER_RELAYOUT_PRESOLVE_MAX_COPIES", "0")
 )
 
 # Submit independent DXP kernel compilations to Inductor's subprocess pool and
