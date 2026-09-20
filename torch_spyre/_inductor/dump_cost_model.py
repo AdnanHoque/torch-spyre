@@ -47,6 +47,7 @@ from .pass_utils import (
     apply_splits_from_index_coeff,
     iteration_space_from_op,
 )
+from .scratchpad.plan_solver import CoreDivisionBuffer, division_symbol
 
 logger = get_logger("cost_model")
 
@@ -738,9 +739,9 @@ def _relayout_logger():
 def extract_op_features(
     op,
     work_slices=None,
+    buffers: Optional[Mapping[str, CoreDivisionBuffer]] = None,
+    *,
     is_lx: Optional[Mapping[str, bool]] = None,
-    core_divisions=None,
-    division_symbol=None,
 ) -> OpFeatures:
     """Build OpFeatures for one ComputedBuffer op (best-effort).
 
@@ -748,16 +749,16 @@ def extract_op_features(
     planning. Otherwise committed pre-scheduler ownership is used, falling back
     to legacy coefficient-keyed Scheduler transport after finalization.
 
-    ``is_lx`` is a name -> residency map (e.g. a co-optimizer's per-buffer
-    symbolic ``sym_is_lx``) consulted for each arg (the op's own output and
-    every input read); a name absent from the map -- or an empty map -- falls
-    back to the arg's committed layout.
+    ``buffers`` supplies each arg's symbolic residency and the output's candidate
+    divisions. Missing buffers use their committed layouts. ``is_lx`` overrides
+    residency when pricing a specific placement, such as a relayout candidate.
 
     Each arg is also stamped with ``is_boundary``: whether ITS traffic crosses the
     graph boundary, resolved against the arg's own role, so a buffer that is both a
     graph input and a graph output (a returned view of an input; a mutated input that
     is returned) needs no special case.
     """
+    buffers = buffers or {}
     is_lx = is_lx or {}
     boundary = _graph_boundary_names()
     graph_inputs, graph_outputs = boundary if boundary is not None else (None, None)
@@ -789,7 +790,13 @@ def extract_op_features(
     if is_reduction:
         reduction_cores = max(1, cores // max(1, out_elems))
 
-    out_is_lx = is_lx.get(op.name, _mem_of_layout(op.get_layout()) == "lx")
+    output_buffer = buffers.get(op.name)
+    out_is_lx = is_lx.get(
+        op.name,
+        output_buffer.sym_is_lx
+        if output_buffer is not None
+        else _mem_of_layout(op.get_layout()) == "lx",
+    )
 
     # Matmul (batchmatmul reduction): compute-bound -> extra additive compute term. Pull
     # MACs (M*N*K), the per-core M tile (pt_eff), and the K-split k (-> reduction_cores,
@@ -882,11 +889,13 @@ def extract_op_features(
         out_write_elems = _indirect_write_elems(op, out_elems)
 
     # Use the same resolved axes as `cores`, not a candidate's raw split product.
+    store_division = None
     store_cores_by_division: tuple[tuple[int, int], ...] = ()
-    if out_write_elems is not None and division_symbol is not None and core_divisions:
+    if out_write_elems is not None and output_buffer is not None:
+        store_division = division_symbol(output_buffer.name)
         store_cores_by_division = tuple(
             (index, math.prod(cd.splits.get(key, 1) for key in slices))
-            for index, cd in enumerate(core_divisions)
+            for index, cd in enumerate(output_buffer.core_divisions)
         )
 
     args: list = []
@@ -948,7 +957,11 @@ def extract_op_features(
                 dims, in_elems, in_logical = list(out_dims), out_elems, []
             inp_is_lx = False
         else:
-            inp_is_lx = is_lx.get(name, mem == "lx")
+            input_buffer = buffers.get(name)
+            inp_is_lx = is_lx.get(
+                name,
+                input_buffer.sym_is_lx if input_buffer is not None else mem == "lx",
+            )
         args.append(
             ArgTraffic(
                 name=name,
@@ -998,7 +1011,7 @@ def extract_op_features(
         is_lx_relayout=_rl[0],
         relayout_run_elems=_rl[1],
         relayout_split=_rl[2],
-        store_division=division_symbol if out_write_elems is not None else None,
+        store_division=store_division,
         store_cores_by_division=store_cores_by_division,
         # The byte-count check defines which store geometry gets the rate estimate.
         is_indirect_store=out_write_elems is not None,

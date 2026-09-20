@@ -514,6 +514,64 @@ def _stamps(op, graph):
     return {(a.role, a.name): a.is_boundary for a in feats.args}
 
 
+def test_extractor_reads_residency_and_store_divisions_from_buffers(monkeypatch):
+    from torch._inductor.virtualized import V
+    from torch_spyre._inductor.scratchpad.plan_solver import (
+        CoreDivision,
+        CoreDivisionBuffer,
+        division_symbol,
+    )
+
+    row, other, cores = sympy.symbols("row other cores", integer=True)
+    output = CoreDivisionBuffer(
+        "buf1",
+        128,
+        [0],
+        core_divisions=[CoreDivision(splits={row: n, other: 2}) for n in (1, 4, 8)],
+    )
+    source = CoreDivisionBuffer("buf0", 128, [0])
+    buffers = {b.name: b for b in (output, source)}
+    op = _extractable_op("buf1", ["buf0", "outside"])
+    rw = op.get_read_writes()
+    rw.writes.append(SimpleNamespace(index=row))
+    op.get_read_writes = lambda: rw
+    monkeypatch.setattr(dcm, "iteration_space_from_op", lambda _: {row: 64})
+    graph = _StubGraph(inputs=[], outputs=[])
+    graph.get_buffer = lambda name: _extractable_op(name, [])
+    # Store geometry is covered separately; this checks the buffer-data wiring.
+    monkeypatch.setattr(dcm, "_indirect_write_elems", lambda *_: 32)
+    with V.set_graph_handler(graph):
+        feature = dcm.extract_op_features(op, {row: cores}, buffers)
+    residency = {a.name: a.is_lx for a in feature.args}
+    assert residency == {
+        "op_buf1": output.sym_is_lx,
+        "buf0": source.sym_is_lx,
+        "outside": False,
+    }
+    assert feature.store_division == division_symbol(output.name)
+    assert feature.cores == cores
+    assert feature.store_cores_by_division == ((0, 1), (1, 4), (2, 8))
+
+
+@pytest.mark.parametrize("placement", [None, {"buf0": True, "buf1": False}])
+def test_extractor_without_buffers_keeps_committed_or_explicit_placement(placement):
+    from torch._inductor.virtualized import V
+
+    op = _extractable_op("buf1", ["buf0"])
+    op.get_layout().allocation = {"lx": 0}
+    graph = _StubGraph(inputs=[], outputs=[])
+    graph.get_buffer = lambda name: _extractable_op(name, [])
+    with V.set_graph_handler(graph):
+        feature = dcm.extract_op_features(op, is_lx=placement)
+    assert {a.name: a.is_lx for a in feature.args} == (
+        {"op_buf1": True, "buf0": False}
+        if placement is None
+        else {"op_buf1": False, "buf0": True}
+    )
+    assert feature.store_division is None
+    assert feature.store_cores_by_division == ()
+
+
 def test_the_extractor_stamps_reads_of_graph_inputs():
     """Covers the wiring itself: without this, the stamping line could be deleted and
     every other test in this file would still pass."""
