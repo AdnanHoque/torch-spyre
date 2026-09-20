@@ -29,6 +29,7 @@ import math
 import os
 from typing import Mapping, Optional
 
+import sympy
 from torch._inductor.ir import ComputedBuffer, MutationLayoutSHOULDREMOVE
 
 
@@ -41,7 +42,12 @@ from .cost_model import (
     max,
 )
 from .logging_utils import get_logger, warn_once
-from .pass_utils import apply_splits_from_index_coeff, iteration_space_from_op
+from .pass_utils import (
+    _build_indirect_store_subs,
+    apply_splits_from_index_coeff,
+    iteration_space_from_op,
+)
+from .scratchpad.plan_solver import CoreDivisionBuffer, division_symbol
 
 logger = get_logger("cost_model")
 
@@ -625,6 +631,105 @@ def _writes_graph_output(op, graph_outputs: set) -> bool | None:
     return False
 
 
+def _stored_elems(it_space: dict, stick_vars: dict, out_elems: int) -> int | None:
+    """Elements a store writes, from its loop nest, or None to keep the committed
+    charge. Counted from the nest, not the flat index: a row loop reaching the
+    index only through an indirect slot symbol has no coefficient there.
+    ``stick_vars`` maps stick symbols to elements per stick, with ``it_space``
+    counting them in sticks (the ``adjust_it_space_for_sticks`` form), so each row
+    pads on its own: 3 x 100 fp16 is 384, not one flat 320.
+    """
+    if not it_space:
+        return None
+    elems = 1
+    for _, extent in it_space.items():
+        if getattr(extent, "free_symbols", None):
+            return None
+        elems *= _int(extent, 0)
+    for sym, elems_per_stick in stick_vars.items():
+        if sym in it_space:
+            elems *= elems_per_stick
+    if elems <= 0 or elems >= out_elems:
+        return None
+    return elems
+
+
+def _unit_stride_stick_var(stick_expr, elems_per_stick):
+    """The stick variable a store's coordinate proves, or None to keep the
+    committed charge.
+
+    Only a unit-stride form counts: a bare symbol, or ``Mod(symbol, eps)``.
+    ``Mod(3*d1, 64)`` and ``Mod(d1 + 5, 64)`` pass the generic stick-expression
+    helper but are strided / offset stores whose rows do not start at stick 0,
+    so per-row rounding would not be the physical store. A constant proves no
+    stick variable at all, so there would be nothing to pad.
+    """
+    if isinstance(stick_expr, sympy.Mod):
+        inner, modulus = stick_expr.args
+        return inner if inner.is_symbol and modulus == elems_per_stick else None
+    return stick_expr if stick_expr.is_symbol else None
+
+
+def _indirect_write_elems(op, out_elems: int) -> int | None:
+    """Traffic of an indirect mutation's store, or None to keep the committed
+    whole-destination charge (a mutation's buffer IS its destination). Admits one
+    indirect write whose stick coordinate is a unit-stride stick variable (see
+    _unit_stride_stick_var) -- the geometry where each row's stored elements start
+    at stick 0, so per-row rounding is the physical store. Strided or offset
+    stick coordinates, symbolic ranges, and unknown or column-dependent slot
+    loads keep the committed charge.
+    """
+    try:
+        if not isinstance(op.get_layout(), MutationLayoutSHOULDREMOVE):
+            return None
+        rw = op.get_read_writes()
+        writes = list(rw.writes)
+        if len(writes) != 1 or not writes[0].is_indirect():
+            return None
+        dep = writes[0]
+        from .work_division import (
+            TensorDep,
+            _resolve_layout,
+            adjust_it_space_for_sticks,
+        )
+
+        td = TensorDep(dep, _resolve_layout(op))
+        stl = td.layout.device_layout
+        stick_var = _unit_stride_stick_var(td.device_coords[-1], stl.elems_per_stick())
+        if stick_var is None:
+            return None
+        try:
+            it_space = iteration_space_from_op(op)
+        except Exception:  # noqa: BLE001 - non-pointwise store: its own loops
+            it_space = dict(dep.ranges)
+        # Modulo can hide a stride of eps + 1; check the full access as well.
+        if (
+            stick_var not in it_space
+            or stick_var in (dep.index - stick_var).free_symbols
+        ):
+            return None
+        # A slot chosen separately for each column breaks contiguous rows.
+        # The existing helper's unresolved placeholders still contain tmpN;
+        # require actual index loads expressed in known loop variables.
+        slots, _ = _build_indirect_store_subs(op)
+        for symbol in dep.index.free_symbols - set(dep.ranges):
+            load = slots.get(symbol)
+            if not isinstance(load, sympy.Indexed):
+                return None
+            # Check all uses if the same index buffer is read more than once.
+            indices = [read.index for read in rw.reads if read.name == load.base.name]
+            if not indices or any(
+                stick_var in index.free_symbols
+                or not index.free_symbols <= set(dep.ranges)
+                for index in indices
+            ):
+                return None
+        adjusted, stick_vars = adjust_it_space_for_sticks(it_space, [td])
+        return _stored_elems(adjusted, stick_vars, out_elems)
+    except Exception:  # noqa: BLE001 - best-effort feature extraction
+        return None
+
+
 def _relayout_logger():
     from .logging_utils import get_inductor_logger
 
@@ -632,7 +737,11 @@ def _relayout_logger():
 
 
 def extract_op_features(
-    op, work_slices=None, is_lx: Optional[Mapping[str, bool]] = None
+    op,
+    work_slices=None,
+    buffers: Optional[Mapping[str, CoreDivisionBuffer]] = None,
+    *,
+    is_lx: Optional[Mapping[str, bool]] = None,
 ) -> OpFeatures:
     """Build OpFeatures for one ComputedBuffer op (best-effort).
 
@@ -640,16 +749,16 @@ def extract_op_features(
     planning. Otherwise committed pre-scheduler ownership is used, falling back
     to legacy coefficient-keyed Scheduler transport after finalization.
 
-    ``is_lx`` is a name -> residency map (e.g. a co-optimizer's per-buffer
-    symbolic ``sym_is_lx``) consulted for each arg (the op's own output and
-    every input read); a name absent from the map -- or an empty map -- falls
-    back to the arg's committed layout.
+    ``buffers`` supplies each arg's symbolic residency and the output's candidate
+    divisions. Missing buffers use their committed layouts. ``is_lx`` overrides
+    residency when pricing a specific placement, such as a relayout candidate.
 
     Each arg is also stamped with ``is_boundary``: whether ITS traffic crosses the
     graph boundary, resolved against the arg's own role, so a buffer that is both a
     graph input and a graph output (a returned view of an input; a mutated input that
     is returned) needs no special case.
     """
+    buffers = buffers or {}
     is_lx = is_lx or {}
     boundary = _graph_boundary_names()
     graph_inputs, graph_outputs = boundary if boundary is not None else (None, None)
@@ -681,7 +790,13 @@ def extract_op_features(
     if is_reduction:
         reduction_cores = max(1, cores // max(1, out_elems))
 
-    out_is_lx = is_lx.get(op.name, _mem_of_layout(op.get_layout()) == "lx")
+    output_buffer = buffers.get(op.name)
+    out_is_lx = is_lx.get(
+        op.name,
+        output_buffer.sym_is_lx
+        if output_buffer is not None
+        else _mem_of_layout(op.get_layout()) == "lx",
+    )
 
     # Matmul (batchmatmul reduction): compute-bound -> extra additive compute term. Pull
     # MACs (M*N*K), the per-core M tile (pt_eff), and the K-split k (-> reduction_cores,
@@ -765,6 +880,24 @@ def extract_op_features(
         out_factor = 1 if tiles_out_dim else loop_trip
     in_factor = 1 if (tiles_out_dim or is_tiled_red) else loop_trip
 
+    # Traffic of an indirect mutation's store (see _indirect_write_elems). Symbolic
+    # residency is the chooser's form and must not block it: indirect buffers are
+    # never LX-resident, so is_lx is 0 in every legal solution. `out_elems` itself
+    # stays the committed device size, which also sizes the compute terms.
+    out_write_elems = None
+    if not is_reduction and loop_trip == 1 and out_is_lx is not True:
+        out_write_elems = _indirect_write_elems(op, out_elems)
+
+    # Use the same resolved axes as `cores`, not a candidate's raw split product.
+    store_division = None
+    store_cores_by_division: tuple[tuple[int, int], ...] = ()
+    if out_write_elems is not None and output_buffer is not None:
+        store_division = division_symbol(output_buffer.name)
+        store_cores_by_division = tuple(
+            (index, math.prod(cd.splits.get(key, 1) for key in slices))
+            for index, cd in enumerate(output_buffer.core_divisions)
+        )
+
     args: list = []
     # Output arg (device-sized).
     args.append(
@@ -772,7 +905,9 @@ def extract_op_features(
             name=op.get_operation_name(),
             role="output",
             is_lx=out_is_lx,
-            elems=out_elems,
+            # `dims`/`logical` stay the destination's: they describe the buffer
+            # this write lands in, while `elems` counts the bytes it moves.
+            elems=out_elems if out_write_elems is None else out_write_elems,
             dims=list(out_dims),
             logical=list(out_size),
             loop_factor=out_factor,
@@ -822,7 +957,11 @@ def extract_op_features(
                 dims, in_elems, in_logical = list(out_dims), out_elems, []
             inp_is_lx = False
         else:
-            inp_is_lx = is_lx.get(name, mem == "lx")
+            input_buffer = buffers.get(name)
+            inp_is_lx = is_lx.get(
+                name,
+                input_buffer.sym_is_lx if input_buffer is not None else mem == "lx",
+            )
         args.append(
             ArgTraffic(
                 name=name,
@@ -872,6 +1011,10 @@ def extract_op_features(
         is_lx_relayout=_rl[0],
         relayout_run_elems=_rl[1],
         relayout_split=_rl[2],
+        store_division=store_division,
+        store_cores_by_division=store_cores_by_division,
+        # The byte-count check defines which store geometry gets the rate estimate.
+        is_indirect_store=out_write_elems is not None,
     )
     if is_matmul:
         axes = _matmul_axes_for_split_cost(features)

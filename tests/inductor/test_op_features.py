@@ -178,7 +178,7 @@ class SymbolicTiledFeatureTest(TestCase):
 
     #: One residency symbol PER BUFFER NAME, matching ``LifetimeBoundBuffer.sym_is_lx``
     #: (plan_solver.py) and how ``dump_cost_model.extract_op_features`` looks each arg's
-    #: own buffer name up in the co-optimizer's ``is_lx`` map (dump_cost_model.py:700) --
+    #: own buffer name up in the co-optimizer's buffer map --
     #: two different buffers get two DIFFERENT symbols, not one shared symbol.
     @staticmethod
     def _sym_is_lx(name: str) -> sympy.Symbol:

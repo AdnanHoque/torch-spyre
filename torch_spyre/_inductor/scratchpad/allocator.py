@@ -2213,7 +2213,6 @@ class CoOptimizingAllocator(ScratchpadAllocator):
     def _solve(self, solver: MemoryPlanSolver, graph: GraphLowering) -> Sequence[Any]:
         assert isinstance(solver, CoreDivisionLayoutSolver)
         bufmap = {buf.name: buf for buf in solver.buffers}
-        is_lx = {name: buf.sym_is_lx for name, buf in bufmap.items()}
 
         # Keyed by buffer name, which is what ``predict_by_bundle`` needs to match
         # features to the ops in each estimated bundle. ``mem_usage_by_buf`` keys
@@ -2228,7 +2227,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             if output_name not in bufmap:
                 continue
             op_features[output_name] = self._extract_op_features(
-                graph, output_name, bufmap, is_lx
+                graph, output_name, bufmap
             )
 
         from torch_spyre._inductor.cost_model import predict_bundles
@@ -2316,24 +2315,24 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             )
         return result
 
-    def _extract_op_features(self, graph, output_name, buffers, is_lx):
+    def _extract_op_features(self, graph, output_name, buffers):
         """Build symbolic OpFeatures for one ComputedBuffer op (best-effort).
 
         Same extraction as dump_cost_model.extract_op_features, but keyed off
         each buffer's *symbolic* core-division vars (sym_core_divs) instead of
         concrete values, so the resulting OpFeatures can be fed to
         predict_ops() to build a cost expression over the solver's own
-        decision variables. Residency is likewise symbolic: ``is_lx`` (the
-        name -> ``sym_is_lx`` map) is passed straight into the extractor so
-        every arg is stamped with its symbolic placement as it is built.
+        decision variables. The extractor reads each arg's symbolic residency
+        and the output's candidate divisions directly from ``buffers``.
         """
         from torch_spyre._inductor.dump_cost_model import extract_op_features
         from torch_spyre._inductor.scratchpad.sa_cooptimizer import _work_slices
 
         op = graph.get_buffer(output_name)
-        division = CoreDivision(splits=buffers[output_name].sym_core_divs)
+        buffer = buffers[output_name]
+        division = CoreDivision(splits=buffer.sym_core_divs)
         ws = _work_slices(op, division)
-        return extract_op_features(op, ws, is_lx)
+        return extract_op_features(op, ws, buffers)
 
     def _finalize_lx_relayout_allocation(
         self,
@@ -3236,7 +3235,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                         extract_op_features(
                             consumer_op,
                             _work_slices(consumer_op, consumer_divs[j]),
-                            is_lx,
+                            is_lx=is_lx,
                         )
                     ],
                     params=_COST_PARAMS,
