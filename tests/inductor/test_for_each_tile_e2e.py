@@ -27,12 +27,13 @@ Minimum coverage per docs/superpowers/specs/2026-09-09-while-loop-lowering-desig
    page per trip from inside the body the way paged attention does.
 4. Multiple independent carries: covered by test_carry_mode_online_softmax
    (carry = (m, denom, acc), an online-softmax flash-attention inner loop).
-Case 5 (nested for_each_tile) has partial coverage: TestForEachTileNestedMapE2E
-covers the pure map/map (no carry) two-level shape, both at a small debug
-size and at a multi-stick tile size; the carry-bearing nested shapes remain
-in test_for_each_tile_lowering.py's TestConsumeTileDimMarkers (IR-level) and
-this file's test_carry_mode_split_k. Case 6 (deliberate-decline) is still
-open, tracked as a follow-on item.
+Case 5 (nested for_each_tile) covers pure map/map nesting in
+TestForEachTileNestedMapE2E, map/carry nesting in
+test_batched_map_over_online_softmax_carry, and carry/carry nesting (depth=2
+and depth=3) in TestForEachTileNestedCarryE2E. The map/carry case stages
+full K/V buffers in the outer batch map, then slices those staged buffers in
+the inner Lk carry, exercising per-level ownership of input advances. Case 6
+(deliberate-decline) is still open, tracked as a follow-on item.
 
 test_map_mode_split_m (map mode: Kind.SLICE + Kind.INVARIANT operands, a
 stacking carry, no user carry) passes end to end with verified numerics and
@@ -58,6 +59,7 @@ import torch_spyre  # noqa: F401  registers the "spyre" device
 from torch_spyre.constants import DEVICE_NAME
 
 from tests.inductor.for_each_tile_fixtures import (
+    batched_online_softmax_fn,
     STICK_COLS,
     STICK_ROWS,
     abs_add_mul_tiled_fn,
@@ -70,6 +72,8 @@ from tests.inductor.for_each_tile_fixtures import (
     matmul_inputs,
     nested_add_outer_row_inner_col_fn,
     nested_add_outer_row_inner_col_reference,
+    nested_split_m_then_k_fn,
+    nested_split_m_then_k_reference,
     online_softmax_fn,
     online_softmax_reference,
     paged_gather_fn,
@@ -83,6 +87,14 @@ from tests.inductor.for_each_tile_fixtures import (
     softmax_row_tiled_reference,
     split_k_fn,
     split_m_fn,
+    triple_nested_stardep_inner_fn,
+    triple_nested_stardep_inner_reference,
+    triple_nested_stardep_middle_fn,
+    triple_nested_stardep_middle_reference,
+    triple_nested_stardep_multilevel_fn,
+    triple_nested_stardep_multilevel_reference,
+    triple_nested_stardep_outer_fn,
+    triple_nested_stardep_outer_reference,
 )
 
 
@@ -231,6 +243,24 @@ class TestForEachTileE2E(_DynamoResetTestCase):
 
         compiled = torch.compile(online_softmax_fn, backend="inductor", fullgraph=True)
         out = compiled(Q_spyre, K_spyre, V_spyre)
+
+        torch.testing.assert_close(
+            out.cpu().float(), ref, atol=self.ATOL, rtol=self.RTOL
+        )
+
+    def test_batched_map_over_online_softmax_carry(self):
+        """An inner Lk advance stays on a full outer-staged K buffer."""
+        torch.manual_seed(0)
+        Q = torch.randn(2, 64, 128, dtype=torch.float16)
+        K = torch.randn(2, 256, 128, dtype=torch.float16)
+        V = torch.randn(2, 256, 128, dtype=torch.float16)
+        ref = torch.softmax(Q.float() @ K.float().transpose(-1, -2), dim=-1)
+        ref = ref @ V.float()
+
+        compiled = torch.compile(
+            batched_online_softmax_fn, backend="inductor", fullgraph=True
+        )
+        out = compiled(Q.to(DEVICE_NAME), K.to(DEVICE_NAME), V.to(DEVICE_NAME))
 
         torch.testing.assert_close(
             out.cpu().float(), ref, atol=self.ATOL, rtol=self.RTOL
@@ -507,6 +537,110 @@ class TestForEachTileNestedMapE2E(_DynamoResetTestCase):
         # Outer tiles 128 rows at a time; inner tiles 128 cols (2 sticks) at
         # a time within each outer row-tile.
         out = compiled(A_spyre, B_spyre, 128, 128)
+
+        torch.testing.assert_close(
+            out.cpu().float(), ref, atol=self.ATOL, rtol=self.RTOL
+        )
+
+
+class TestForEachTileNestedCarryE2E(_DynamoResetTestCase):
+    """Carry-based nested for_each_tile: nested_split_m_then_k_fn (depth=2)
+    and the triple_nested_stardep_* family (depth=3), the fixtures named as
+    a separate, not-yet-covered tier in TestForEachTileNestedMapE2E's own
+    docstring. Unlike that class, every level here carries a matmul
+    accumulation rather than being pure map, and the triple_nested_stardep_*
+    variants each place a surviving STAR_DEP_KEPT tile_dim_marker at a
+    different nesting level (see for_each_tile_fixtures.py's per-fixture
+    docstrings), so a wrong per-level advance shows up as a large numeric
+    mismatch rather than a compile-time error.
+
+    Same fp16-matmul tolerance rationale as TestForEachTileE2E.
+    """
+
+    ATOL = 0.1
+    RTOL = 0.1
+
+    def test_nested_split_m_then_k(self):
+        """Depth=2: outer maps M, inner carries K (matmul accumulation)."""
+        X = torch.randn(256, 256)
+        Y = torch.randn(256, 64)
+        X_spyre, Y_spyre = X.half().to(DEVICE_NAME), Y.half().to(DEVICE_NAME)
+        ref = nested_split_m_then_k_reference(X.half().float(), Y.half().float())
+
+        compiled = torch.compile(
+            nested_split_m_then_k_fn, backend="inductor", fullgraph=True
+        )
+        out = compiled(X_spyre, Y_spyre)
+
+        torch.testing.assert_close(
+            out.cpu().float(), ref, atol=self.ATOL, rtol=self.RTOL
+        )
+
+    def test_triple_nested_stardep_outer(self):
+        """Depth=3: surviving STAR_DEP_KEPT marker at the outer level."""
+        X = torch.randn(2, 256, 256)
+        Y = torch.randn(2, 256, 64)
+        X_spyre, Y_spyre = X.half().to(DEVICE_NAME), Y.half().to(DEVICE_NAME)
+        ref = triple_nested_stardep_outer_reference(X.half().float(), Y.half().float())
+
+        compiled = torch.compile(
+            triple_nested_stardep_outer_fn, backend="inductor", fullgraph=True
+        )
+        out = compiled(X_spyre, Y_spyre)
+
+        torch.testing.assert_close(
+            out.cpu().float(), ref, atol=self.ATOL, rtol=self.RTOL
+        )
+
+    def test_triple_nested_stardep_middle(self):
+        """Depth=3: surviving STAR_DEP_KEPT markers at outer and middle."""
+        X = torch.randn(2, 256, 256)
+        Y = torch.randn(2, 256, 64)
+        X_spyre, Y_spyre = X.half().to(DEVICE_NAME), Y.half().to(DEVICE_NAME)
+        ref = triple_nested_stardep_middle_reference(X.half().float(), Y.half().float())
+
+        compiled = torch.compile(
+            triple_nested_stardep_middle_fn, backend="inductor", fullgraph=True
+        )
+        out = compiled(X_spyre, Y_spyre)
+
+        torch.testing.assert_close(
+            out.cpu().float(), ref, atol=self.ATOL, rtol=self.RTOL
+        )
+
+    def test_triple_nested_stardep_inner(self):
+        """Depth=3: same outer STAR_DEP_KEPT marker as outer_fn; inner
+        marker is INLINE_ERASED despite the fixture's name (see
+        for_each_tile_fixtures.py's docstring)."""
+        X = torch.randn(2, 256, 256)
+        Y = torch.randn(2, 256, 64)
+        X_spyre, Y_spyre = X.half().to(DEVICE_NAME), Y.half().to(DEVICE_NAME)
+        ref = triple_nested_stardep_inner_reference(X.half().float(), Y.half().float())
+
+        compiled = torch.compile(
+            triple_nested_stardep_inner_fn, backend="inductor", fullgraph=True
+        )
+        out = compiled(X_spyre, Y_spyre)
+
+        torch.testing.assert_close(
+            out.cpu().float(), ref, atol=self.ATOL, rtol=self.RTOL
+        )
+
+    def test_triple_nested_stardep_multilevel(self):
+        """Depth=3: same outer STAR_DEP_KEPT markers as outer_fn plus a
+        middle-level `* 1.0`; the inner marker is lost regardless (see
+        for_each_tile_fixtures.py's docstring)."""
+        X = torch.randn(2, 256, 256)
+        Y = torch.randn(2, 256, 64)
+        X_spyre, Y_spyre = X.half().to(DEVICE_NAME), Y.half().to(DEVICE_NAME)
+        ref = triple_nested_stardep_multilevel_reference(
+            X.half().float(), Y.half().float()
+        )
+
+        compiled = torch.compile(
+            triple_nested_stardep_multilevel_fn, backend="inductor", fullgraph=True
+        )
+        out = compiled(X_spyre, Y_spyre)
 
         torch.testing.assert_close(
             out.cpu().float(), ref, atol=self.ATOL, rtol=self.RTOL
