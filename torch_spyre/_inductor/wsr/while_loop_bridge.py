@@ -714,19 +714,63 @@ def _carry_real_input_is_private(
     except NotImplementedError:
         return False  # alias status unknown -> copy
 
+    # Graph outputs that alias this storage (directly or through a view) must
+    # not be mutated in place.
+    for out in getattr(graph, "graph_outputs", None) or []:
+        if _storage_name(out) == name:
+            return False
+
     for op in graph.operations:
         if op is while_op:
-            continue
-        # Structural wrappers reference other ops positionally, not buffers.
-        if isinstance(op, (ir.MultiOutput, ir.WhileLoop)):
-            continue
-        try:
-            reads = op.get_read_writes().reads
-        except Exception:  # noqa: BLE001 -- unknown reader -> not private
-            return False
-        if any(getattr(dep, "name", None) == name for dep in reads):
+            continue  # only THIS loop's carried-input read is the internal use
+        reads = _operation_reads_buffer(op, name)
+        if reads is None or reads:  # unknown -> conservatively not private
             return False
     return True
+
+
+def _storage_name(x: Any) -> "str | None":
+    """Buffer name under any view/box wrapper (None if none can be unwrapped)."""
+    from torch._inductor import ir
+
+    for _ in range(8):
+        if isinstance(x, (ir.MutableBox, ir.TensorBox, ir.StorageBox)):
+            x = x.data
+        elif isinstance(x, ir.ReinterpretView):
+            x = x.data
+        else:
+            break
+    return getattr(x, "get_name", lambda: None)()
+
+
+def _operation_reads_buffer(op: Any, name: str) -> "bool | None":
+    """Whether ``op`` reads buffer ``name``; None when it cannot be proven.
+
+    Declared object inputs (``inputs``/``carried_inputs``) are checked first,
+    so a SECOND WhileLoop sharing the same init is caught rather than skipped.
+    When ``get_read_writes`` fails, a structural wrapper of some loop
+    (``MultiOutput``/``WhileLoop``) is not a direct buffer reader, so it is
+    provably-not-read; anything else unreadable is unknown (caller copies).
+    """
+    from torch._inductor import ir
+
+    for attr in ("inputs", "carried_inputs"):
+        val = getattr(op, attr, None)
+        if not val:
+            continue
+        for x in val:
+            if _storage_name(x) == name:
+                return True
+
+    try:
+        for dep in op.get_read_writes().reads:
+            if getattr(dep, "name", None) == name:
+                return True
+        return False
+    except Exception:  # noqa: BLE001
+        if isinstance(op, (ir.MultiOutput, ir.WhileLoop)):
+            return False
+        return None
 
 
 def _materialize_carry_copy(

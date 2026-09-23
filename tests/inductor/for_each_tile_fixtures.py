@@ -109,6 +109,23 @@ def split_k_caller_init_fn(
     return final
 
 
+def two_loops_shared_init_fn(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+    """Two split-K reductions sharing ONE in-graph `init` buffer.
+
+    Ownership: each loop must get its own initial value, so the two
+    accumulators must not write the same buffer.
+    """
+
+    def body(acc, ops):
+        x_tile, y_tile = ops
+        return acc + x_tile @ y_tile, None
+
+    init = torch.zeros(M, N, device=X.device, dtype=X.dtype)
+    a, _ = for_each_tile(body, (X, Y), dims=(-1, 0), tile_size=64, init=init)
+    b, _ = for_each_tile(body, (X, Y), dims=(-1, 0), tile_size=64, init=init)
+    return a + b
+
+
 def nested_split_m_then_k_fn(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
     """Nested case: outer for_each_tile maps M; inner for_each_tile carries K.
 

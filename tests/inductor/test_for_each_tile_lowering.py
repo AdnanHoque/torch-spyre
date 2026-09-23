@@ -57,6 +57,7 @@ from for_each_tile_fixtures import (
     split_k_fn,
     split_m_elementwise_fn,
     split_m_fn,
+    two_loops_shared_init_fn,
 )
 from torch_spyre._inductor.wsr.for_each_tile_lowering import (
     try_prove_for_each_tile,
@@ -767,17 +768,59 @@ class TestSpliceWhileLoops(unittest.TestCase):
             for op in graph.operations
             if "while_loop_carry_copy_" in (op.get_name() or "")
         ]
-        self.assertTrue(
-            copies, "caller-owned init must get one private pre-loop copy"
+        self.assertEqual(
+            len(copies), 1, "caller-owned init must get exactly one pre-loop copy"
         )
-        for op in graph.operations:
-            layout = getattr(op, "layout", None)
-            if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
-                self.assertNotIn(
-                    layout.get_buffer().get_name(),
-                    input_names,
-                    "no graph input may be used as an in-place mutation target",
-                )
+        mutators = [
+            op
+            for op in graph.operations
+            if isinstance(getattr(op, "layout", None), ir.MutationLayoutSHOULDREMOVE)
+        ]
+        self.assertTrue(mutators, "expected an in-place accumulator")
+        copy_idx = graph.operations.index(copies[0])
+        for op in mutators:
+            self.assertLess(
+                copy_idx,
+                graph.operations.index(op),
+                "the pre-loop copy must precede the in-place accumulator",
+            )
+            self.assertNotIn(
+                op.layout.get_buffer().get_name(),
+                input_names,
+                "no graph input may be used as an in-place mutation target",
+            )
+
+    def test_two_loops_sharing_init_get_independent_buffers(self):
+        """Two loops sharing one in-graph init must not write the same buffer."""
+        from torch._inductor import ir
+        from torch._inductor.virtualized import V
+
+        from torch_spyre._inductor.wsr.for_each_tile_lowering import (
+            splice_while_loops,
+        )
+
+        (X, Y), _ref = matmul_inputs()
+        graph = self._run_graph(two_loops_shared_init_fn, (X, Y))
+        with V.set_graph_handler(graph):
+            splice_while_loops(graph)
+        copies = [
+            op
+            for op in graph.operations
+            if "while_loop_carry_copy_" in (op.get_name() or "")
+        ]
+        self.assertGreaterEqual(
+            len(copies), 1, "a shared init must be copied for the second loop"
+        )
+        targets = {
+            op.layout.get_buffer().get_name()
+            for op in graph.operations
+            if isinstance(getattr(op, "layout", None), ir.MutationLayoutSHOULDREMOVE)
+        }
+        self.assertGreaterEqual(
+            len(targets),
+            2,
+            "the two loops must accumulate into distinct buffers (independent init)",
+        )
 
     def test_carry_mode_group_gets_loop_info(self):
         from torch._inductor import ir
