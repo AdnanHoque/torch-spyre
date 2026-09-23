@@ -616,9 +616,7 @@ class TestCarryRealInputOwnership(unittest.TestCase):
         storage = self._computed("carry_storage")
         view = ir.ReinterpretView(
             data=ir.StorageBox(storage),
-            layout=ir.FixedLayout(
-                torch.device("cpu"), torch.float32, [3, 2], [1, 3]
-            ),
+            layout=ir.FixedLayout(torch.device("cpu"), torch.float32, [3, 2], [1, 3]),
         )
         self.assertFalse(
             bridge._carry_real_input_is_private(
