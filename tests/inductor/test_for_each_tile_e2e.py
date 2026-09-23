@@ -825,12 +825,8 @@ class TestForEachTileTripRangesE2E(_DynamoResetTestCase):
         e = TRIP_E
         for trips in (1, 2, 4):
             with self.subTest(trips=trips):
-                # Each fixed-trip shape compiles in isolation. Without this
-                # per-case reset, Dynamo auto-generalizes table.shape[0] after
-                # the first compile, so the next loop's cond bound goes symbolic
-                # and try_prove_for_each_tile declines the splice -- leaving a
-                # generic WhileLoop that then breaks insert_bmm_padding. Mirrors
-                # _DynamoResetTestCase's per-test reset, applied per case.
+                # Reset per case: without it Dynamo generalizes the fixed trip
+                # counts across subtests and the for_each_tile splice is skipped.
                 torch._dynamo.reset()
                 pages, table, q = trip_range_build(trips, e)
                 ids = [int(table[t, j]) for t in range(trips) for j in range(e)]
