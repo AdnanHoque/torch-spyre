@@ -562,6 +562,44 @@ def _extra_readers_of_placeholder(
     return extra_readers
 
 
+def _make_copying_buffer(graph: "GraphLowering", source: Any, name: str) -> Any:
+    """Build and register a ComputedBuffer that copies ``source``.
+
+    Shared construction for the in-loop WAR snapshot
+    (``_snapshot_carry_placeholder``) and the pre-loop carry-ownership copy
+    (``_materialize_carry_copy``); they differ only in where the returned
+    buffer is inserted, not in how it is built or registered.
+    """
+    from torch._inductor import ir
+    from torch._inductor.ir import ComputedBuffer, FixedLayout, Pointwise
+
+    layout = source.layout
+    buf_layout = FixedLayout(
+        layout.device,
+        layout.dtype,
+        list(layout.size),
+        list(layout.stride),
+    )
+    data = Pointwise(
+        device=layout.device,
+        dtype=layout.dtype,
+        inner_fn=source.make_loader(),
+        ranges=list(layout.size),
+    )
+    buf = ComputedBuffer(name=name, layout=buf_layout, data=data)
+    buf.operation_name = name
+    buf.origins = getattr(source, "origins", None) or ir.OrderedSet()
+
+    # Built outside any SubgraphLowering context, so it never self-registered
+    # (see _transplant_buffer_registrations) -- register it directly on the
+    # outer graph so get_buffer/get_operation lookups succeed.
+    graph.name_to_op[name] = buf
+    graph.name_to_buffer[name] = buf
+    if buf not in graph.buffers:
+        graph.buffers.append(buf)
+    return buf
+
+
 def _snapshot_carry_placeholder(
     graph: "GraphLowering",
     placeholder_name: str,
@@ -594,45 +632,13 @@ def _snapshot_carry_placeholder(
     global name_map rewrite does for every other redirected read.
     """
     from torch._inductor import ir
-    from torch._inductor.ir import ComputedBuffer, FixedLayout, Pointwise
     from torch_spyre._inductor.pass_utils import redirect_computed_buffer_reads
 
     target = real_input
     while isinstance(target, ir.MutableBox):
         target = target.data
-    target_layout = target.layout
-
     snapshot_name = graph.qualify_name(f"while_loop_carry_snapshot_{placeholder_name}")
-    snapshot_layout = FixedLayout(
-        target_layout.device,
-        target_layout.dtype,
-        list(target_layout.size),
-        list(target_layout.stride),
-    )
-    snapshot_data = Pointwise(
-        device=target_layout.device,
-        dtype=target_layout.dtype,
-        inner_fn=target.make_loader(),
-        ranges=list(target_layout.size),
-    )
-    snapshot_buf = ComputedBuffer(
-        name=snapshot_name,
-        layout=snapshot_layout,
-        data=snapshot_data,
-    )
-    snapshot_buf.operation_name = snapshot_name
-    snapshot_buf.origins = getattr(target, "origins", None) or ir.OrderedSet()
-
-    # snapshot_buf is constructed here, not under the inner body subgraph's
-    # SubgraphLowering context, so it never self-registered anywhere (see
-    # _transplant_buffer_registrations's docstring on why ordinary spliced
-    # ops need that transplant at all) -- register it directly into the
-    # outer graph so later get_buffer(snapshot_name)/get_operation(...)
-    # lookups (e.g. coarse_tile.py's read-copy planning) succeed.
-    graph.name_to_op[snapshot_name] = snapshot_buf
-    graph.name_to_buffer[snapshot_name] = snapshot_buf
-    if snapshot_buf not in graph.buffers:
-        graph.buffers.append(snapshot_buf)
+    snapshot_buf = _make_copying_buffer(graph, target, snapshot_name)
 
     # The producer isn't always a ComputedBuffer -- e.g. online-softmax's
     # `p @ v_tile` term makes it a FallbackKernel/MultiOutput pair, with the
@@ -676,33 +682,48 @@ def _carry_real_input_is_private(
 ) -> bool:
     """Whether an accumulator may write its carry's initial buffer in place.
 
-    The in-place write is safe only when the buffer is private to this
-    subgraph: not a caller input, not a graph output, not in
-    ``graph.never_reuse_buffers``, and read by no other parent-graph op (the
-    while_loop's own carried-input read is excluded). Unknown ownership
-    returns False (the caller then materialises one private copy).
+    Guard is **positively** owned: the target must be a compiler-created
+    ``ComputedBuffer`` (a caller ``init`` is an ``InputBuffer``; a view/alias of
+    one is a ``ReinterpretView``/``StorageBox``, not a ``ComputedBuffer``), must
+    not be a graph input or output, must not be in ``graph.never_reuse_buffers``,
+    must not alias another buffer (``get_inputs_that_alias_output`` /
+    ``get_mutation_names``), and must have no other parent-graph reader -- the
+    while_loop's own carried-input read is excluded, and any reader whose
+    ``get_read_writes`` cannot be read is treated as **unknown -> not private**.
+    Anything not positively proven private returns False (caller copies).
     """
     from torch._inductor import ir
 
     target = real_input
     while isinstance(target, ir.MutableBox):
         target = target.data
+    if not isinstance(target, ir.ComputedBuffer):
+        return False
     name = target.get_name()
 
-    if name in getattr(graph, "graph_inputs", {}):
+    if name in graph.graph_inputs:
         return False
     if name in set(graph.get_output_names()):
         return False
-    if name in getattr(graph, "never_reuse_buffers", ()):
+    if name in graph.never_reuse_buffers:
         return False
+
+    try:
+        if target.get_inputs_that_alias_output() or target.get_mutation_names():
+            return False
+    except NotImplementedError:
+        return False  # alias status unknown -> copy
 
     for op in graph.operations:
         if op is while_op:
             continue
+        # Structural wrappers reference other ops positionally, not buffers.
+        if isinstance(op, (ir.MultiOutput, ir.WhileLoop)):
+            continue
         try:
             reads = op.get_read_writes().reads
-        except Exception:  # noqa: BLE001 -- non-IR ops (e.g. MultiOutput children)
-            continue
+        except Exception:  # noqa: BLE001 -- unknown reader -> not private
+            return False
         if any(getattr(dep, "name", None) == name for dep in reads):
             return False
     return True
@@ -723,35 +744,15 @@ def _materialize_carry_copy(
     ``real_input``'s final pre-loop value; returns the copy buffer.
     """
     from torch._inductor import ir
-    from torch._inductor.ir import ComputedBuffer, FixedLayout, Pointwise
 
     target = real_input
     while isinstance(target, ir.MutableBox):
         target = target.data
-    layout = target.layout
-
     copy_name = graph.qualify_name(f"while_loop_carry_copy_{binding.scratch_name}")
-    copy_layout = FixedLayout(
-        layout.device,
-        layout.dtype,
-        list(layout.size),
-        list(layout.stride),
-    )
-    copy_data = Pointwise(
-        device=layout.device,
-        dtype=layout.dtype,
-        inner_fn=target.make_loader(),
-        ranges=list(layout.size),
-    )
-    copy_buf = ComputedBuffer(name=copy_name, layout=copy_layout, data=copy_data)
-    copy_buf.operation_name = copy_name
-    copy_buf.origins = getattr(target, "origins", None) or ir.OrderedSet()
-
-    graph.name_to_op[copy_name] = copy_buf
-    graph.name_to_buffer[copy_name] = copy_buf
-    if copy_buf not in graph.buffers:
-        graph.buffers.append(copy_buf)
-
+    copy_buf = _make_copying_buffer(graph, target, copy_name)
+    # Insertion point: the copy runs once, after the init's pre-loop producer
+    # and before the loop -- unlike the in-body WAR snapshot that lands
+    # immediately before the carry's producer op.
     idx = graph.operations.index(while_op)
     graph.operations.insert(idx, copy_buf)
     return copy_buf
