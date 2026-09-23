@@ -730,13 +730,23 @@ def _carry_real_input_is_private(
 
 
 def _storage_name(x: Any) -> "str | None":
-    """Buffer name under any view/box wrapper (None if none can be unwrapped)."""
+    """Buffer name under any view/box wrapper (None if it unwraps to no name).
+
+    Mirrors Inductor's own ``MutationLayoutSHOULDREMOVE.get_buffer`` unwrap:
+    ``BaseView`` goes through ``unwrap_view()``, the boxes through ``.data``.
+    Each step unwraps to a strictly lower wrapper, so the loop terminates at a
+    ``Buffer`` with no fixed depth limit.
+    """
     from torch._inductor import ir
 
-    for _ in range(8):
-        if isinstance(x, (ir.MutableBox, ir.TensorBox, ir.StorageBox)):
+    while True:
+        if isinstance(x, ir.MutableBox):
             x = x.data
-        elif isinstance(x, ir.ReinterpretView):
+        elif isinstance(x, ir.BaseView):
+            x = x.unwrap_view()
+        elif isinstance(x, ir.TensorBox):
+            x = x.data
+        elif isinstance(x, ir.StorageBox):
             x = x.data
         else:
             break
