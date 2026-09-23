@@ -2594,6 +2594,177 @@ class TestConsumeTileDimMarkers(unittest.TestCase):
         actual = compiled(Q.to(DEVICE_NAME), K.to(DEVICE_NAME), V.to(DEVICE_NAME))
         torch.testing.assert_close(actual.cpu().float(), expected, atol=1e-2, rtol=1e-2)
 
+    def test_consumed_marker_axis_does_not_resolve_tiled_position(self):
+        """PR1 (consumed-axis provenance): a tile axis CONSUMED (sliced) at the
+        consumer must not be stamped as a surviving tiled dim.
+
+        paged_gather_kv_fn slices the tiled block table's sole dim to a page
+        index (its tile axis is CONSUMED), so every consumer's marker-axis
+        coordinate is a pure constant. Real Spyre lowering (marker consume +
+        lookup), no device. The BEHAVIOURAL assertion comes first, so on
+        pristine main this fails because lookup falls back to the coefficient
+        coincidence -- not because a helper is missing.
+        """
+        import torch_spyre._inductor.wsr.for_each_tile_lowering as fel
+        from torch._inductor import ir
+
+        from torch_spyre._inductor.wsr.for_each_tile_lowering import (
+            _body_loop_var,
+            _consume_tile_dim_markers,
+            _stacking_carry_indices,
+            lookup_marker_dim,
+            try_prove_for_each_tile,
+        )
+        from torch_spyre._inductor.wsr.while_loop_bridge import (
+            carry_bindings_for,
+            splice_while_loop,
+        )
+
+        from for_each_tile_fixtures import (
+            consumed_row_fn,
+            consumed_row_inputs,
+        )
+
+        graph = self._run_graph(consumed_row_fn, consumed_row_inputs())
+        while_op = next(op for op in graph.operations if isinstance(op, ir.WhileLoop))
+        res = try_prove_for_each_tile(while_op)
+        self.assertTrue(res.accepted)
+        loop_var = _body_loop_var(while_op)
+        self.assertIsNotNone(loop_var)
+
+        with V.set_graph_handler(graph):
+            carries = carry_bindings_for(
+                while_op, _stacking_carry_indices(while_op, loop_var)
+            )
+            group_ops = splice_while_loop(
+                graph, while_op, carries, trip_count=res.trip_count
+            )
+            marker_map = _consume_tile_dim_markers(group_ops, graph.operations)
+        self.assertTrue(marker_map, "expected a non-empty marker map")
+
+        # BEHAVIOURAL: the sliced tile axis must not resolve to a tiled position.
+        with V.set_graph_handler(graph):
+            for cname, _dep in marker_map:
+                op = next(o for o in graph.operations if o.get_name() == cname)
+                self.assertIsNone(
+                    lookup_marker_dim(op, loop_var),
+                    f"a consumed (sliced) tile axis on {cname!r} must not "
+                    "resolve to a tiled position",
+                )
+
+        # Internal provenance (present only with the fix).
+        reg = getattr(fel, "_MARKER_AXIS_COORDS", {}).get(id(graph.operations), {})
+        self.assertTrue(reg, "no captured marker-axis provenance")
+        helper = getattr(fel, "_marker_axis_is_consumed", None)
+        self.assertIsNotNone(helper, "missing _marker_axis_is_consumed")
+        for coords in reg.values():
+            self.assertTrue(
+                helper(coords),
+                f"a consumed tile axis must be a pure constant; got {coords}",
+            )
+
+    def test_consumed_read_does_not_hide_a_retained_read(self):
+        """PR1: a consumed mapped read must not hide a SECOND retained mapped
+        read on the same op.
+
+        Minimal IR (this class's established mock-IR convention): one op reads
+        two markers -- X consumed-first (its read still satisfies the
+        coefficient coincidence, but its marker axis was sliced to a constant)
+        and Y retained (advances on its own axis). lookup_marker_dim must skip
+        the consumed X and resolve Y, not return X's coincidental position.
+        On pristine main the consumed-check does not exist, so X is returned
+        (a behavioural failure, not a missing-helper error).
+        """
+        import sympy
+
+        import torch_spyre._inductor.wsr.coarse_tile as coarse_tile_mod
+        import torch_spyre._inductor.wsr.for_each_tile_lowering as fel
+        from torch._inductor.dependencies import MemoryDep
+        from torch_spyre._inductor.wsr.for_each_tile_lowering import (
+            _MARKER_MAPS,
+            clear_marker_maps,
+            lookup_marker_dim,
+        )
+
+        u0 = sympy.Symbol("u0")
+        v0 = sympy.Symbol("v0")
+        w0 = sympy.Symbol("w0")
+
+        # X: consumed-first read; coefficient coincidence 3*u0 on v0's axis.
+        x_dep = MemoryDep(
+            name="x_buf",
+            index=v0 + 3 * u0,
+            var_names=(v0,),
+            size=(sympy.Integer(3),),
+        )
+        # Y: retained read; advances on w0's own axis.
+        y_dep = MemoryDep(
+            name="y_buf",
+            index=w0 + u0,
+            var_names=(w0,),
+            size=(sympy.Integer(1),),
+        )
+        out_dep = MemoryDep(
+            name="out_buf",
+            index=sympy.Symbol("d0"),
+            var_names=(sympy.Symbol("d0"),),
+            size=(sympy.Integer(1),),
+        )
+
+        op = mock.Mock(spec=["get_read_writes", "get_name", "data"])
+        op.get_name.return_value = "mixed_op"
+        op.data = mock.Mock(spec=[])  # not a Reduction
+        rw = mock.Mock()
+        rw.reads = [x_dep, y_dep]
+        rw.writes = {out_dep}
+        op.get_read_writes.return_value = rw
+
+        operations = ["sentinel_operations_list"]
+        clear_marker_maps()
+        self.addCleanup(clear_marker_maps)
+        _MARKER_MAPS[id(operations)] = {("mixed_op", x_dep): 0, ("mixed_op", y_dep): 0}
+        reg = getattr(fel, "_MARKER_AXIS_COORDS", None)
+        if reg is not None:
+            reg[id(operations)] = {("mixed_op", x_dep): [sympy.Integer(0)]}
+
+        graph = mock.Mock(spec=["operations"])
+        graph.operations = operations
+
+        with mock.patch.object(coarse_tile_mod, "op_out_coords", return_value=[v0, w0]):
+            with V.set_graph_handler(graph):
+                result = lookup_marker_dim(op, u0)
+
+        self.assertEqual(
+            result,
+            (1, False),
+            "expected lookup_marker_dim to skip the consumed X read and "
+            "resolve the retained Y read (position 1); got the consumed X "
+            "position or None instead",
+        )
+
+    def test_clear_marker_maps_clears_axis_coords(self):
+        """clear_marker_maps must reset the consumed-axis provenance registry
+        alongside _MARKER_MAPS (same per-compile lifetime contract)."""
+        import torch_spyre._inductor.wsr.for_each_tile_lowering as fel
+        from torch_spyre._inductor.wsr.for_each_tile_lowering import (
+            _MARKER_MAPS,
+            clear_marker_maps,
+        )
+
+        clear_marker_maps()
+        self.addCleanup(clear_marker_maps)
+        _MARKER_MAPS[id(object())] = {("op", object()): 0}
+        axisreg = getattr(fel, "_MARKER_AXIS_COORDS", None)
+        if axisreg is None:
+            self.skipTest("consumed-axis provenance registry not present")
+        axisreg[id(object())] = {("op", object()): [0]}
+
+        clear_marker_maps()
+        self.assertEqual(_MARKER_MAPS, {})
+        self.assertEqual(
+            axisreg, {}, "clear_marker_maps must clear _MARKER_AXIS_COORDS too"
+        )
+
 
 class TestStampDirectLoopInfo(unittest.TestCase):
     """_stamp_direct_loop_info builds loop_group_id/loop_count directly."""
