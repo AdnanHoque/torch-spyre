@@ -71,7 +71,7 @@ from .pass_utils import (
     input_layout_for_operation,
     is_restickify_coords,
     alignment_coordinates,
-    loop_var_ranges_from_dim_hints,
+    per_trip_index,
 )
 from .views import align_tensors, tiling_expr_to_device_expr
 from .logging_utils import get_inductor_logger
@@ -828,11 +828,7 @@ class SpyreKernel(Kernel[CSEVariable]):
         # leaks into the OpSpec iteration space nor applies the same
         # advance a second time.
         device_tile_advance_expr = self._general_tile_advance(tensor, is_input, name)
-        loop_var_ranges = loop_var_ranges_from_dim_hints(operation)
-        base_index = sympy_subs(
-            tensor.index,
-            {loop_var: sympy.Integer(0) for loop_var in loop_var_ranges},
-        )
+        base_index = per_trip_index(operation, tensor.index)
         device_coords = alignment_coordinates(
             tensor.layout.device_layout,
             base_index,
