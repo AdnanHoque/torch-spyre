@@ -671,6 +671,92 @@ def _snapshot_carry_placeholder(
     return body_ops
 
 
+def _carry_real_input_is_private(
+    graph: "GraphLowering", while_op: "ir.WhileLoop", real_input: Any
+) -> bool:
+    """Whether an accumulator may write its carry's initial buffer in place.
+
+    The in-place write is safe only when the buffer is private to this
+    subgraph: not a caller input, not a graph output, not in
+    ``graph.never_reuse_buffers``, and read by no other parent-graph op (the
+    while_loop's own carried-input read is excluded). Unknown ownership
+    returns False (the caller then materialises one private copy).
+    """
+    from torch._inductor import ir
+
+    target = real_input
+    while isinstance(target, ir.MutableBox):
+        target = target.data
+    name = target.get_name()
+
+    if name in getattr(graph, "graph_inputs", {}):
+        return False
+    if name in set(graph.get_output_names()):
+        return False
+    if name in getattr(graph, "never_reuse_buffers", ()):
+        return False
+
+    for op in graph.operations:
+        if op is while_op:
+            continue
+        try:
+            reads = op.get_read_writes().reads
+        except Exception:  # noqa: BLE001 -- non-IR ops (e.g. MultiOutput children)
+            continue
+        if any(getattr(dep, "name", None) == name for dep in reads):
+            return False
+    return True
+
+
+def _materialize_carry_copy(
+    graph: "GraphLowering",
+    while_op: "ir.WhileLoop",
+    real_input: Any,
+    binding: CarryBinding,
+) -> Any:
+    """Insert one pre-loop copy of a caller-owned carry's initial buffer.
+
+    Built exactly like ``_snapshot_carry_placeholder``'s copying
+    ``ComputedBuffer``, but placed in ``graph.operations`` immediately before
+    the loop (once), so the accumulator's in-place write lands in a
+    compiler-owned buffer and the caller's tensor is left untouched. Reads
+    ``real_input``'s final pre-loop value; returns the copy buffer.
+    """
+    from torch._inductor import ir
+    from torch._inductor.ir import ComputedBuffer, FixedLayout, Pointwise
+
+    target = real_input
+    while isinstance(target, ir.MutableBox):
+        target = target.data
+    layout = target.layout
+
+    copy_name = graph.qualify_name(f"while_loop_carry_copy_{binding.scratch_name}")
+    copy_layout = FixedLayout(
+        layout.device,
+        layout.dtype,
+        list(layout.size),
+        list(layout.stride),
+    )
+    copy_data = Pointwise(
+        device=layout.device,
+        dtype=layout.dtype,
+        inner_fn=target.make_loader(),
+        ranges=list(layout.size),
+    )
+    copy_buf = ComputedBuffer(name=copy_name, layout=copy_layout, data=copy_data)
+    copy_buf.operation_name = copy_name
+    copy_buf.origins = getattr(target, "origins", None) or ir.OrderedSet()
+
+    graph.name_to_op[copy_name] = copy_buf
+    graph.name_to_buffer[copy_name] = copy_buf
+    if copy_buf not in graph.buffers:
+        graph.buffers.append(copy_buf)
+
+    idx = graph.operations.index(while_op)
+    graph.operations.insert(idx, copy_buf)
+    return copy_buf
+
+
 def _rewire_accumulator_output(
     graph: "GraphLowering",
     while_op: "ir.WhileLoop",
@@ -919,6 +1005,9 @@ def splice_while_loop(
         placeholder_name = body_graph_input_names[binding.carry_index]
         real_input = while_op.carried_inputs[binding.carry_index]
         real_name = real_input.get_name()
+        # Read side target; overridden below to a private copy when the
+        # accumulator may not reuse the initial buffer in place.
+        read_target = real_input
 
         if binding.stacking:
             # Stacking carry: fold its destination to the flat result shape
@@ -986,6 +1075,16 @@ def splice_while_loop(
             # (e.g. split_k_fn's `acc + x @ y`, which reads the carry
             # exactly once, in the producer itself) keeps today's single-
             # buffer in-place path with no extra copy.
+            # In-place reuse of the initial buffer is legal only when that
+            # buffer is private to this subgraph. Otherwise materialise ONE
+            # pre-loop copy and write into it, leaving the caller's tensor
+            # (a graph input) or any other surviving reader untouched. The
+            # copy is built like _snapshot_carry_placeholder's copying
+            # ComputedBuffer, but inserted before the loop, not per trip.
+            if not _carry_real_input_is_private(graph, while_op, real_input):
+                read_target = _materialize_carry_copy(
+                    graph, while_op, real_input, binding
+                )
             extra_readers = _extra_readers_of_placeholder(
                 placeholder_name, body_output_name, body_ops
             )
@@ -994,7 +1093,7 @@ def splice_while_loop(
                     graph,
                     placeholder_name,
                     body_output_name,
-                    real_input,
+                    read_target,
                     extra_readers,
                     body_ops,
                 )
@@ -1003,14 +1102,15 @@ def splice_while_loop(
                 while_op,
                 binding,
                 body_ops,
-                real_input,
+                read_target,
             )
 
-        # Read side always resolves to the real, already-registered initial
-        # value -- see docstring above for why this holds for both
-        # pass-through and mutated carries at this stage of the pipeline.
-        name_map[placeholder_name] = real_name
-        ref_map[placeholder_name] = real_input
+        # Read side resolves to the real initial value, or to the private
+        # pre-loop copy materialised above when in-place reuse of the initial
+        # buffer is not provably safe (caller input / graph output /
+        # never-reuse / aliased survivor). See _carry_real_input_is_private.
+        name_map[placeholder_name] = read_target.get_name()
+        ref_map[placeholder_name] = read_target
 
     for i in range(len(carries), len(body_graph_input_names)):
         placeholder_name = body_graph_input_names[i]
