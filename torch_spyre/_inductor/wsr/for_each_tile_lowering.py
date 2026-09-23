@@ -306,12 +306,6 @@ the analogous reset_provenance_warnings() call, for the same "each compile
 starts from a clean slate" reason.
 """
 
-_MARKER_AXIS_COORDS: dict[int, dict[tuple[str, "Dep"], "list[sympy.Expr]"]] = {}
-"""Per-compile consumed-axis provenance, keyed by id(operations) -> {(consumer
-op name, dep): the marker-axis load-site coordinate(s) captured in
-_InlineMarkerHandler.load}. Cleared with _MARKER_MAPS, for the same
-per-compile lifetime."""
-
 
 def clear_marker_maps() -> None:
     """Discard every entry in the module-level _MARKER_MAPS registry.
@@ -325,7 +319,6 @@ def clear_marker_maps() -> None:
     returning None.
     """
     _MARKER_MAPS.clear()
-    _MARKER_AXIS_COORDS.clear()
 
 
 def _stacking_carry_indices(
@@ -466,13 +459,15 @@ def _marker_resolution(op: "ir.Operation") -> "MarkerResolution | None":
 
 
 def _marker_axis_is_consumed(axis_coords: "list[sympy.Expr] | None") -> bool:
-    """True iff the marker's tiled-axis load-site coordinate is a PURE CONSTANT (no
-    iteration-variable free symbols) -> the axis was consumed/removed at the consumer.
+    """True iff the marker's tiled-axis load-site coordinate is consumed at the consumer.
 
-    Rename-robust by construction: a surviving tiled coordinate carries a free symbol
-    under whatever name the current inner_fn evaluation uses (d0/i0/q0/index0/_i0/...),
-    so it is never classified consumed. Anything with free symbols that cannot be mapped
-    is left to the pre-existing (unchanged) resolution path, not called consumed.
+    True iff the captured coordinate(s) are non-empty and carry no free symbols at
+    all (all pure constants) -- stricter than "no iteration variable", so a
+    dynamic-size symbol conservatively keeps the existing resolution path. A
+    surviving tiled coordinate always carries a free symbol (d0/i0/q0/...), so it is
+    never misclassified. A kept size-1 tiled axis is classified consumed: harmless,
+    it cannot be split and the per-trip advance still comes from
+    _structural_resolve / squeezed_advance_per_read.
     """
     if not axis_coords:
         return False
@@ -625,8 +620,8 @@ class _InlineMarkerHandler(WrapperHandler):
     ):
         super().__init__(inner)
         self._marker_name = marker_name
-        # Authoritative tiled axis of the marker operand + a compile-local collector
-        # for the load-site coordinate along that axis (provenance for lookup_marker_dim).
+        # Marker operand's tiled axis + a one-shot collector for the load-site
+        # coordinate along it (feeds the consumed-axis classification).
         self._marker_dim = _marker_dim(marker_op)
         self._capture = capture
         layout = marker_op.layout
@@ -695,7 +690,7 @@ def _inline_marker_into_consumer(
     consumer_op: "ir.Operation",
     marker_op: "ir.Operation",
     operations: list["ir.Operation"],
-) -> "tuple[ir.Operation, dict]":
+) -> "tuple[ir.Operation, bool]":
     """Erase marker_op by inlining its body into consumer_op's load of it.
 
     See _InlineMarkerHandler for why a plain name-swap
@@ -708,9 +703,11 @@ def _inline_marker_into_consumer(
     target/nested-WhileLoop repointing) for a caller supplying a full new
     body object rather than a bare name map.
 
-    Returns ``(new_consumer, capture)``: the captured marker-axis load-site
-    coordinate(s) keyed by consumer load-site index, so the caller can record
-    per-read provenance for lookup_marker_dim's consumed-axis check.
+    Returns ``(new_consumer, consumed)``: the replacement buffer and whether the
+    marker's tiled axis was consumed at the consumer. The new read/write info is
+    materialized once here to fill the one-shot collector, which is then closed
+    (the closed-over ``capture`` is rebound to None) so later re-evaluations of
+    this long-lived inner_fn stop recording.
     """
     from torch._inductor.virtualized import V
 
@@ -722,7 +719,7 @@ def _inline_marker_into_consumer(
     marker_name = marker_op.get_name()
 
     orig_inner = consumer_op.data.inner_fn
-    capture: dict = {}
+    capture: "dict | None" = {}
 
     def new_inner_fn(*args, _orig_inner=orig_inner):
         with V.set_ops_handler(
@@ -740,7 +737,15 @@ def _inline_marker_into_consumer(
         pass_name="_consume_tile_dim_markers",
         reason=f"inline erased tile_dim_marker {marker_name!r} body",
     )
-    return result, capture
+    # Fill the one-shot collector once (this evaluates the replacement body),
+    # classify, then close it by rebinding the closed-over `capture` to None:
+    # later re-evaluations of this long-lived inner_fn pass None to the handler.
+    result.get_read_writes()
+    consumed = _marker_axis_is_consumed(
+        list(capture.values()) if capture is not None else []
+    )
+    capture = None
+    return result, consumed
 
 
 def _consume_tile_dim_markers(
@@ -958,6 +963,9 @@ def _consume_tile_dim_markers(
         # resolved.
         any_star_dep_consumer = False
         for consumer_op, consumer_dep in consumers:
+            # Set by the ComputedBuffer branch; stays False (unchanged behavior)
+            # for a StarDep consumer, which has no captured load-site coordinate.
+            _marker_axis_consumed = False
             if hasattr(consumer_op, "data"):
                 # A consumer can independently read marker_input_name BEFORE
                 # inlining too -- e.g. a body op shaped like
@@ -972,7 +980,7 @@ def _consume_tile_dim_markers(
                     for d in consumer_op.get_read_writes().reads
                     if isinstance(d, MemoryDep) and d.name == marker_input_name
                 ]
-                new_consumer, _axis_capture = _inline_marker_into_consumer(
+                new_consumer, _marker_axis_consumed = _inline_marker_into_consumer(
                     consumer_op, marker_op, operations
                 )
                 # _inline_marker_into_consumer swaps `operations[op_idx]` in
@@ -1004,9 +1012,6 @@ def _consume_tile_dim_markers(
                         f"used to go through erased marker {marker_name!r})."
                     )
                 new_dep = brand_new_reads[0]
-                # Registry only (cleared per compile) -- no dep attribute.
-                _reg = _MARKER_AXIS_COORDS.setdefault(id(operations), {})
-                _reg[(new_consumer.get_name(), new_dep)] = list(_axis_capture.values())
             else:
                 # StarDep-shaped consumer (ExternKernelOut/FallbackKernel/
                 # ConcatKernel/... -- including a nested ir.WhileLoop, whose own
@@ -1061,7 +1066,12 @@ def _consume_tile_dim_markers(
                 new_dep = consumer_dep
                 any_star_dep_consumer = True
 
-            marker_map[(new_consumer.get_name(), new_dep)] = dim
+            # Skip a consumed read: its `dim` names a marker axis that no longer
+            # exists in the read, and recording it is what would let
+            # lookup_marker_dim's coefficient coincidence mis-resolve it. A
+            # retained read of a mixed op is still entered and still resolves.
+            if not _marker_axis_consumed:
+                marker_map[(new_consumer.get_name(), new_dep)] = dim
             if id(consumer_op) in group_op_ids:
                 group_op_ids.discard(id(consumer_op))
                 group_op_ids.add(id(new_consumer))
@@ -1240,15 +1250,6 @@ def lookup_marker_dim(
                     candidates.append((pos, False, var))
                 elif var in red_vars:
                     candidates.append((red_vars.index(var), True, var))
-            _axreg = _MARKER_AXIS_COORDS.get(id(V.graph.operations))
-            _axis_coords = _axreg.get((op_name, dep)) if _axreg is not None else None
-            if _marker_axis_is_consumed(_axis_coords):
-                # The marker axis was consumed (a pure constant), not a surviving
-                # tiled dim: do not fall back to the coefficient coincidence for
-                # THIS read. Keep looking at the op's other reads -- a second read
-                # may be a retained marker whose axis survives. If none resolves,
-                # the function still returns None at the loop end.
-                continue
             if len(candidates) > 1:
                 names = ", ".join(str(c[2]) for c in candidates)
                 raise AssertionError(
