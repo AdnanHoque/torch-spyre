@@ -93,6 +93,22 @@ def split_k_fn(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
     return final
 
 
+def split_k_caller_init_fn(
+    X: torch.Tensor, Y: torch.Tensor, acc0: torch.Tensor
+) -> torch.Tensor:
+    """split_K whose init is a CALLER tensor (a graph input, not an in-graph fill).
+
+    Carry ownership: the accumulator must not overwrite acc0 in place.
+    """
+
+    def body(acc, ops):
+        x_tile, y_tile = ops
+        return acc + x_tile @ y_tile, None
+
+    final, _ = for_each_tile(body, (X, Y), dims=(-1, 0), tile_size=64, init=acc0)
+    return final
+
+
 def nested_split_m_then_k_fn(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
     """Nested case: outer for_each_tile maps M; inner for_each_tile carries K.
 

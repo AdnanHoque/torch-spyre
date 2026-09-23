@@ -53,6 +53,7 @@ from for_each_tile_fixtures import (
     nested_split_m_then_k_reference,
     paged_gather_inputs,
     paged_gather_reference,
+    split_k_caller_init_fn,
     split_k_fn,
     split_m_elementwise_fn,
     split_m_fn,
@@ -559,6 +560,109 @@ def _find_while_loop_ir_op(fn, args):
     return while_ops[0]
 
 
+class TestCarryRealInputOwnership(unittest.TestCase):
+    """The in-place-guard predicate on real IR buffers (no device)."""
+
+    def _computed(self, name, size=(2, 3), stride=(3, 1)):
+        from torch._inductor import ir
+
+        data = mock.MagicMock(spec=ir.Pointwise)
+        data.ranges = list(size)
+        op = ir.ComputedBuffer(
+            name=name,
+            layout=ir.FixedLayout(
+                torch.device("cpu"), torch.float32, list(size), list(stride)
+            ),
+            data=data,
+        )
+        op.operation_name = name
+        return op
+
+    def _graph(self, ops, inputs=(), outputs=(), never_reuse=()):
+        class _G:
+            def __init__(self):
+                self.operations = list(ops)
+                self.graph_inputs = {n: None for n in inputs}
+                self.never_reuse_buffers = set(never_reuse)
+
+            def get_output_names(self):
+                return list(outputs)
+
+        return _G()
+
+    def test_private_in_graph_buffer_is_owned(self):
+        import torch_spyre._inductor.wsr.while_loop_bridge as bridge
+
+        buf = self._computed("carry_buf")
+        self.assertTrue(
+            bridge._carry_real_input_is_private(self._graph([buf]), object(), buf)
+        )
+
+    def test_graph_input_is_not_owned(self):
+        import torch_spyre._inductor.wsr.while_loop_bridge as bridge
+
+        buf = self._computed("carry_buf")
+        self.assertFalse(
+            bridge._carry_real_input_is_private(
+                self._graph([buf], inputs=["carry_buf"]), object(), buf
+            )
+        )
+
+    def test_aliased_view_is_not_owned(self):
+        import torch_spyre._inductor.wsr.while_loop_bridge as bridge
+        from torch._inductor import ir
+
+        storage = self._computed("carry_storage")
+        view = ir.ReinterpretView(
+            data=ir.StorageBox(storage),
+            layout=ir.FixedLayout(
+                torch.device("cpu"), torch.float32, [3, 2], [1, 3]
+            ),
+        )
+        self.assertFalse(
+            bridge._carry_real_input_is_private(
+                self._graph([storage]), object(), ir.TensorBox(view)
+            )
+        )
+
+    def test_unknown_reader_is_not_owned(self):
+        import torch_spyre._inductor.wsr.while_loop_bridge as bridge
+
+        buf = self._computed("carry_buf")
+
+        class _BadReader:
+            def get_read_writes(self):
+                raise RuntimeError("cannot statically read this op")
+
+        self.assertFalse(
+            bridge._carry_real_input_is_private(
+                self._graph([buf, _BadReader()]), object(), buf
+            )
+        )
+
+    def test_other_reader_is_not_owned(self):
+        import sympy
+
+        import torch_spyre._inductor.wsr.while_loop_bridge as bridge
+        from torch._inductor.dependencies import MemoryDep
+
+        buf = self._computed("carry_buf")
+
+        class _Reader:
+            def __init__(self, dep):
+                self._dep = dep
+
+            def get_read_writes(self):
+                return mock.Mock(reads=[self._dep], writes=set())
+
+        dep = MemoryDep("carry_buf", sympy.Symbol("d0"), (2,), ())
+        self.assertFalse(
+            bridge._carry_real_input_is_private(
+                self._graph([buf, _Reader(dep)]), object(), buf
+            )
+        )
+
+
 class TestSpliceWhileLoops(unittest.TestCase):
     def _run_graph(self, fn, args):
         """Lower fn(*args) through a fresh GraphLowering and return it.
@@ -620,6 +724,60 @@ class TestSpliceWhileLoops(unittest.TestCase):
                 info = op.loop_info
                 self.assertEqual(info.loop_group_id, (0,))
                 self.assertIsNone(info.propagation)
+
+    def test_private_in_graph_fill_keeps_single_buffer(self):
+        """A compiler-owned in-graph `torch.zeros` fill is not copied."""
+        from torch._inductor.virtualized import V
+
+        from torch_spyre._inductor.wsr.for_each_tile_lowering import (
+            splice_while_loops,
+        )
+
+        (X, Y), _ref = matmul_inputs()
+        graph = self._run_graph(split_k_fn, (X, Y))
+        with V.set_graph_handler(graph):
+            splice_while_loops(graph)
+        copies = [
+            op
+            for op in graph.operations
+            if "while_loop_carry_copy_" in (op.get_name() or "")
+        ]
+        self.assertFalse(
+            copies, "a private in-graph fill must keep the single-buffer path"
+        )
+
+    def test_caller_init_gets_private_pre_loop_copy(self):
+        """A caller tensor used as init gets one private pre-loop copy, and no
+        graph input is left as an in-place mutation target."""
+        from torch._inductor import ir
+        from torch._inductor.virtualized import V
+
+        from torch_spyre._inductor.wsr.for_each_tile_lowering import (
+            splice_while_loops,
+        )
+
+        (X, Y), ref = matmul_inputs()
+        acc0 = torch.zeros_like(ref)
+        graph = self._run_graph(split_k_caller_init_fn, (X, Y, acc0))
+        input_names = set(graph.graph_inputs.keys())
+        with V.set_graph_handler(graph):
+            splice_while_loops(graph)
+        copies = [
+            op
+            for op in graph.operations
+            if "while_loop_carry_copy_" in (op.get_name() or "")
+        ]
+        self.assertTrue(
+            copies, "caller-owned init must get one private pre-loop copy"
+        )
+        for op in graph.operations:
+            layout = getattr(op, "layout", None)
+            if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+                self.assertNotIn(
+                    layout.get_buffer().get_name(),
+                    input_names,
+                    "no graph input may be used as an in-place mutation target",
+                )
 
     def test_carry_mode_group_gets_loop_info(self):
         from torch._inductor import ir
