@@ -573,41 +573,39 @@ def _is_full_span_relayout(view_layout: Any, storage_layout: Any) -> bool:
     backing (``storage [2, 2]/[3, 1]``, ``view [2, 2]/[2, 1]``) would read
     addresses the logical element copy never wrote. Under this proof a storage
     copy costs exactly the view's own size (no amplification) and re-applying
-    the view preserves addressing.
+    the view preserves addressing. Symbolic or non-integer layout values are
+    unprovable; malformed layouts raise rather than hiding a compiler defect.
     """
     import sympy
     from torch._prims_common import _is_non_overlapping_and_dense_or_false
 
     def _concrete(vals):
-        """Python ints, or None if any is symbolic (concrete-only policy)."""
+        """Python ints, or None for symbolic, non-integer or non-finite values."""
         out = []
         for v in vals:
             e = sympy.sympify(v)
-            if e.free_symbols:
+            if e.free_symbols or e.is_integer is not True:
                 return None
             out.append(int(e))
         return out
 
-    try:
-        if len(view_layout.size) != len(storage_layout.size):
-            return False
-        # Real Inductor layouts carry sympy.Integer; torch's density predicate
-        # runs its comparisons through guard_or_false, which asserts a Python
-        # bool and rejects sympy Boolean*. Concretize first.
-        for layout in (view_layout, storage_layout):
-            if _concrete([layout.offset]) != [0]:
-                return False
-            size = _concrete(layout.size)
-            stride = _concrete(layout.stride)
-            if size is None or stride is None:
-                return False
-            if not _is_non_overlapping_and_dense_or_false(size, stride):
-                return False
-        view_numel = _concrete([sympy.prod(view_layout.size)])
-        storage_numel = _concrete([sympy.prod(storage_layout.size)])
-        return view_numel is not None and view_numel == storage_numel
-    except Exception:  # noqa: BLE001 -- unprovable -> not a full-span relayout
+    if len(view_layout.size) != len(storage_layout.size):
         return False
+    # Real Inductor layouts carry sympy.Integer; torch's density predicate
+    # runs its comparisons through guard_or_false, which asserts a Python
+    # bool and rejects sympy Boolean*. Concretize first.
+    for layout in (view_layout, storage_layout):
+        if _concrete([layout.offset]) != [0]:
+            return False
+        size = _concrete(layout.size)
+        stride = _concrete(layout.stride)
+        if size is None or stride is None:
+            return False
+        if not _is_non_overlapping_and_dense_or_false(size, stride):
+            return False
+    view_numel = _concrete([sympy.prod(view_layout.size)])
+    storage_numel = _concrete([sympy.prod(storage_layout.size)])
+    return view_numel is not None and view_numel == storage_numel
 
 
 def _copy_source_and_view(source: Any) -> "tuple[Any, Any]":

@@ -51,6 +51,7 @@ from for_each_tile_fixtures import (
     matmul_inputs,
     nested_split_m_then_k_fn,
     nested_split_m_then_k_reference,
+    nested_two_inner_loops_shared_init_fn,
     paged_gather_inputs,
     paged_gather_reference,
     split_k_caller_init_fn,
@@ -697,6 +698,68 @@ class TestCarryRealInputOwnership(unittest.TestCase):
             sympy.Integer(0),
         )
         self.assertTrue(bridge._is_full_span_relayout(view, storage))
+
+    def test_symbolic_layout_values_are_not_full_span(self):
+        import sympy
+
+        import torch_spyre._inductor.wsr.while_loop_bridge as bridge
+
+        storage = self._computed("carry_storage", size=(2, 3), stride=(3, 1))
+        symbol = sympy.Symbol("s0", integer=True, positive=True)
+        for field, value in (
+            ("size", [symbol, 2]),
+            ("stride", [1, symbol]),
+            ("offset", 64 * symbol),
+        ):
+            with self.subTest(field=field):
+                view = self._view(storage, [3, 2], [1, 3])
+                setattr(view.layout, field, value)
+                self.assertFalse(
+                    bridge._is_full_span_relayout(view.layout, storage.layout)
+                )
+
+    def test_non_integer_layout_values_are_not_full_span(self):
+        import sympy
+
+        import torch_spyre._inductor.wsr.while_loop_bridge as bridge
+
+        storage = self._computed("carry_storage", size=(2, 3), stride=(3, 1))
+        for value in (sympy.Rational(13, 4), sympy.oo, sympy.nan):
+            with self.subTest(value=value):
+                view = self._view(storage, [3, 2], [1, 3])
+                view.layout.size[0] = value
+                self.assertFalse(
+                    bridge._is_full_span_relayout(view.layout, storage.layout)
+                )
+
+    def test_malformed_layout_raises(self):
+        import sympy
+
+        import torch_spyre._inductor.wsr.while_loop_bridge as bridge
+
+        storage = self._computed("carry_storage", size=(2, 3), stride=(3, 1))
+        with self.assertRaises(AttributeError):
+            bridge._is_full_span_relayout(object(), storage.layout)
+        view = self._view(storage, [3, 2], [1, 3])
+        view.layout.offset = object()
+        with self.assertRaises(sympy.SympifyError):
+            bridge._is_full_span_relayout(view.layout, storage.layout)
+
+    def test_full_span_relayout_surfaces_density_check_errors(self):
+        import torch_spyre._inductor.wsr.while_loop_bridge as bridge
+
+        storage = self._computed("carry_storage", size=(2, 3), stride=(3, 1))
+        view = self._view(storage, [3, 2], [1, 3])
+        for error in (AssertionError, RuntimeError, TypeError, ValueError):
+            with (
+                self.subTest(error=error),
+                mock.patch(
+                    "torch._prims_common._is_non_overlapping_and_dense_or_false",
+                    side_effect=error("density proof defect"),
+                ),
+            ):
+                with self.assertRaisesRegex(error, "density proof defect"):
+                    bridge._is_full_span_relayout(view.layout, storage.layout)
 
     def test_offset_view_is_not_full_span(self):
         import torch_spyre._inductor.wsr.while_loop_bridge as bridge
@@ -1352,6 +1415,39 @@ class TestSpliceWhileLoops(unittest.TestCase):
                     for op, _identity in identities
                 ),
                 "the full-cache exact-stride copy remained inside the loop",
+            )
+
+    def test_inner_pre_loop_copy_belongs_to_enclosing_loop_only(self):
+        """Reset the inner carry once per enclosing trip, outside the inner loop."""
+        from torch_spyre._inductor.wsr.for_each_tile_lowering import (
+            splice_while_loops,
+        )
+
+        (X, Y), _ref = matmul_inputs()
+        graph = self._run_graph(nested_two_inner_loops_shared_init_fn, (X, Y))
+        with V.set_graph_handler(graph):
+            splice_while_loops(graph)
+
+        copies = [
+            op for op in graph.operations if "while_loop_carry_copy_" in op.get_name()
+        ]
+        # The first inner loop spliced copies the shared fill. The second may
+        # then own the fill outright: a copy of a pure fill inlines the fill
+        # rather than reading it, so the copy is not a second reader.
+        self.assertTrue(
+            [op for op in copies if len(op.get_size()) == 2],
+            "the shared fill must be copied before an inner loop",
+        )
+        for op in copies:
+            info = getattr(op, "loop_info", None)
+            self.assertIsNotNone(
+                info, f"{op.get_name()} is not a member of the enclosing loop"
+            )
+            self.assertEqual(
+                info.loop_group_id,
+                (0,),
+                f"{op.get_name()} must run once per outer trip, "
+                "not inside the inner loop",
             )
 
 
