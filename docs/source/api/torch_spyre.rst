@@ -701,6 +701,10 @@ Environment Variables
    * - ``BUNDLE_SYMBOLIC_ARGS``
      - Emit LPDDR5 tensor addresses as runtime symbols rather than baked
        integers (default ``1``)
+   * - ``TORCHINDUCTOR_COMPILE_THREADS``
+     - Number of Inductor compile workers. Independent backend kernels compile in
+       parallel when this is greater than ``1``; a value of ``1`` executes
+       compilation inline
    * - ``LAYOUT_SOLVER``
      - LX scratchpad layout solver strategy: ``cpsat`` (default),
        ``greedy``, ``bestfit``, ``firstfit``, ``simulated_annealing``.
@@ -784,10 +788,6 @@ Environment Variables
    * - ``SPYRE_LX_SOLVER_RELAYOUT_PRESOLVE_MAX_COPIES``
      - For unpriced CP-SAT solves, skip presolve above this many relayout
        copies (default ``0``, which disables the threshold)
-   * - ``SPYRE_ASYNC_DXP_COMPILE``
-     - Submit independent DXP kernel compilations to Inductor's subprocess
-       pool and resolve them at the wrapper's ``async_compile.wait()``
-       barrier (default ``0``)
    * - ``SPYRE_READ_COPY_ELISION``
      - Remove a proven-redundant read copy after LX planning; a failed proof
        leaves the graph unchanged (default ``1``; set ``0`` to disable)
