@@ -523,14 +523,17 @@ def _looped_op(trips, tiled_out, hints, write_index, read_indices, data=None):
     )
 
 
-def _factors(monkeypatch, op, it_space):
+def _features(monkeypatch, op, it_space):
     from torch._inductor.virtualized import V
 
     monkeypatch.setattr(dcm, "iteration_space_from_op", lambda _op: it_space)
     monkeypatch.setattr(dcm, "_indirect_write_elems", lambda *_: None)
     with V.set_graph_handler(_StubGraph()):
-        feature = dcm.extract_op_features(op)
-    return {a.name: a.loop_factor for a in feature.args}
+        return dcm.extract_op_features(op)
+
+
+def _factors(monkeypatch, op, it_space):
+    return {a.name: a.loop_factor for a in _features(monkeypatch, op, it_space).args}
 
 
 def test_the_extractor_walks_an_expert_bank_read_once(monkeypatch):
@@ -596,3 +599,38 @@ def test_the_extractor_pairs_nested_equal_trip_loops_by_level(monkeypatch):
     assert factors["arg0"] == 4  # advances with the outer loop only
     assert factors["arg1"] == 4  # advances with the inner loop only
     assert factors["arg2"] == 1  # advances with both
+
+
+def test_the_extractor_marks_the_reads_that_advance_with_the_loop_variable(monkeypatch):
+    """``advances_with_loop_var`` is what confines the partitioned-read price to the
+    for_each_tile loop's tiled operand: set for a read whose index carries the loop
+    variable, clear for the re-entered read and for the output."""
+    op = _looped_op(
+        [128],
+        [[]],
+        [_hint(u0, sympy.Integer(128))],
+        write_index=64 * d0 + d2,
+        read_indices=[704 * d2 + 1982464 * u0, 64 * d0 + d2],
+    )
+    feature = _features(monkeypatch, op, {d0: 64, d2: 704})
+    advances = {a.name: a.advances_with_loop_var for a in feature.args}
+    assert advances["arg0"] is True
+    assert advances["arg1"] is False
+    assert advances["op_buf1"] is False
+
+
+def test_an_op_without_a_for_each_tile_variable_marks_no_read_as_advancing(monkeypatch):
+    """Coarse tiling stamps a loop but no loop variable on the op's hints, so no read
+    is marked, whatever its ``loop_factor``."""
+    op = _looped_op(
+        [4],
+        [[0]],
+        [],
+        write_index=64 * d0 + d1,
+        read_indices=[64 * d0 + d2, 64 * d1 + d2],
+        data=SimpleNamespace(
+            ranges=[64, 64], reduction_ranges=[64], reduction_type=None
+        ),
+    )
+    feature = _features(monkeypatch, op, {d0: 64, d1: 64, d2: 64})
+    assert not any(a.advances_with_loop_var for a in feature.args)

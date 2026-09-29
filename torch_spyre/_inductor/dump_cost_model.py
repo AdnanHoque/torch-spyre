@@ -333,6 +333,16 @@ def _levels_with_loop_vars(op, levels):
     return paired
 
 
+def _advances_with(index, loop_vars) -> bool:
+    """Whether ``index`` carries one of the ``for_each_tile`` loop variables."""
+    if index is None or not loop_vars:
+        return False
+    try:
+        return bool(loop_vars & set(getattr(index, "free_symbols", None) or ()))
+    except Exception:  # noqa: BLE001 - best-effort feature extraction
+        return False
+
+
 def _loop_factor_for_index(index, levels) -> int:
     """How many times traffic at ``index`` is transferred over the whole loop nest.
 
@@ -1042,6 +1052,7 @@ def extract_op_features(
     _levels = _tiled_symbols_per_level(op)
     if _levels:
         _levels = _levels_with_loop_vars(op, _levels)
+    _splice_vars = set(loop_var_ranges_from_dim_hints(op))
     try:
         _rw = op.get_read_writes()
         _write_index = next(iter(_rw.writes)).index
@@ -1140,6 +1151,7 @@ def extract_op_features(
                     else in_factor
                 ),
                 is_boundary=(None if graph_inputs is None else name in graph_inputs),
+                advances_with_loop_var=_advances_with(index, _splice_vars),
                 # Matmul consumers only: rung-G verified a pointwise broadcast
                 # operand loads once per kernel, the relayout sweep measured a bmm
                 # operand loading once per replicated core (cost_model.ArgTraffic).

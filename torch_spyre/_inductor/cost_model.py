@@ -219,6 +219,13 @@ class ArgTraffic:
     # iteration). LX-resident args are ~free (excluded from read/write) unless they
     # cross the graph boundary -- see ``is_boundary``.
     loop_factor: int = 1
+    # This read's address advances with a ``for_each_tile`` loop variable: its index
+    # carries a per-iteration symbol the lowering recorded on the op's dim hints, so
+    # the loop walks this operand one tile per trip (``loop_factor`` is then 1). A
+    # coarse-tiling loop can also leave ``loop_factor`` at 1 for an operand it walks,
+    # so this flag, not the factor, says which kind of loop the operand advances with.
+    # Read by ``_partitioned_operand_read_excess`` only.
+    advances_with_loop_var: bool = False
     # This arg's traffic crosses the GRAPH boundary, so LX residency cannot remove it:
     # a read of a graph input, or the externally-visible write of a graph output. The
     # scratchpad planner pins such a buffer by CLONING it (allocator._push_allocation),
@@ -1445,53 +1452,90 @@ def _partitioned_operand_read_excess(ops: list, p: "CostParams"):
     B / peak -- the same form ``_store_core_excess_ns`` uses for writes. Physical
     bytes are unchanged, and the excess is zero once the cores reach the peak.
 
-    Scope follows the measurements (decode projections, 22-25 active cores):
+    Two operand classes are priced, and nothing else:
 
-    * Every op in the bundle is single-pass by its extracted features
-      (``_is_single_pass``). Looped work (coarse-tiled attention, nested tiles)
-      has its own read pricing and shares the bundle's memory and overlap terms,
-      so a bundle with any looped op keeps its previous price whole.
-    * The operand is partitioned (``replication == 1``). A replicated operand has
-      its own per-core model (``_replicated_operand_reads``). A replication that
-      is a solver symbol gets this term exactly where it resolves to 1 -- the
-      complement of ``ArgTraffic.replicated_hbm_elems`` -- so the co-optimizer's
-      expression equals the committed-path price at every candidate.
-    * The operand is not reused: every element feeds one multiply-accumulate
-      (``matmul_macs <= elems``), i.e. a decode projection streaming its weight.
-      With row reuse the operand's delivery rate has not been measured.
+    * A single-pass operand (decode projections, 22-25 active cores). Every op in
+      the bundle is single-pass by its extracted features (``_is_single_pass``): a
+      bundle with any looped op keeps its previous price for these operands, because
+      looped work shares the bundle's memory and overlap terms. The operand is
+      partitioned (``replication == 1``; a replicated operand has its own per-core
+      model, ``_replicated_operand_reads``; a replication that is a solver symbol
+      gets this term exactly where it resolves to 1, the complement of
+      ``ArgTraffic.replicated_hbm_elems``, so the co-optimizer's expression equals
+      the committed-path price at every candidate) and not reused: every element
+      feeds one multiply-accumulate (``matmul_macs <= elems``). With row reuse the
+      operand's delivery rate has not been measured, and an unknown or symbolic MAC
+      count does not prove the operand unreused.
+
+    * The tiled operand of a ``for_each_tile`` loop: an input of a looped matmul whose
+      address advances with the loop's per-iteration variable
+      (``ArgTraffic.advances_with_loop_var``) and which the loop walks once
+      (``loop_factor == 1``); the operand a per-expert loop reads one expert bank of
+      per trip. It is priced as partitioned across the op's cores, with the same
+      arithmetic and the same rate as the single-pass class; no constant is added.
+      The rate is selected by the shape sweep over an expert loop at 32, 128 and 512
+      tokens. Only the number of cores that stream the operand enters, so this term
+      separates an under-parallel plan from one that uses the cores. It does not
+      rank plans that already use all cores: those are ordered by the cohort and
+      broadcast derate on a shared weight. A form that also scaled by the
+      operand's replication did not improve on this one; its rate overstates
+      multicast delivery, so a replication-aware price needs a multicast rate.
+
+    Coarse-tiling loops are deliberately NOT in the second class. A coarse-tiled
+    matmul (a row-tiled or reduction-tiled dense matmul) also leaves one operand at
+    ``loop_factor == 1``, but that operand's delivery under a coarse loop was not
+    measured, the loop has its own re-read pricing (``_loop_reread_bytes``), and the
+    recorded factor cannot tell the two loops apart. Such a bundle keeps the price it
+    had before this term.
+
+    A bundle mixing looped and single-pass matmuls prices the looped tiled operand
+    only, and leaves each single-pass matmul at its previous price, since the bundle
+    is not all single-pass.
 
     Resident operands vanish through ``hbm_elems``; a graph input read by several
     ops of the bundle is charged once, by the same ``max`` rule as
     ``_fused_hbm_bytes``.
     """
     rate = p.mm_partitioned_read_gbps_per_core
-    if rate <= 0 or not all(_is_single_pass(op) for op in ops):
+    if rate <= 0:
         return 0.0
+    single_pass = all(_is_single_pass(op) for op in ops)
     total = 0.0
     external: dict[str, float | sympy.Expr] = {}
     for op in ops:
         if not op.is_matmul:
             continue
+        looped = op.loop_trip > 1
         for arg in op.args:
-            # A MAC count that is unknown (0) or symbolic does not prove the
-            # operand unreused, so it keeps the old price.
-            if (
-                arg.role != "input"
-                or _is_sym(op.matmul_macs, arg.elems)
-                or not 0 < op.matmul_macs <= arg.elems
-            ):
+            if arg.role != "input":
                 continue
-            if (
-                isinstance(arg.replication, sympy.Basic)
-                and arg.replication.free_symbols
-            ):
-                partitioned = sympy.Piecewise(
-                    (1, sympy.Eq(arg.replication, 1)), (0, True)
-                )
-            elif arg.replication == 1:
+            if looped:
+                # The loop's tiled operand: walked once (factor 1) and advancing with
+                # the for_each_tile variable. Its splits partition it across cores.
+                if not (arg.advances_with_loop_var and arg.loop_factor == 1):
+                    continue
                 partitioned = 1
             else:
-                continue
+                # Single-pass class: whole bundle single-pass, operand unreused.
+                # A MAC count that is unknown (0) or symbolic does not prove the
+                # operand unreused, so it keeps the old price.
+                if (
+                    not single_pass
+                    or _is_sym(op.matmul_macs, arg.elems)
+                    or not 0 < op.matmul_macs <= arg.elems
+                ):
+                    continue
+                if (
+                    isinstance(arg.replication, sympy.Basic)
+                    and arg.replication.free_symbols
+                ):
+                    partitioned = sympy.Piecewise(
+                        (1, sympy.Eq(arg.replication, 1)), (0, True)
+                    )
+                elif arg.replication == 1:
+                    partitioned = 1
+                else:
+                    continue
             # The operand's own bytes on the branch where it is partitioned. The
             # 0/1 gate goes inside the Max: CP-SAT multiplies it into the small
             # reciprocal-split variables there, rather than into the Max's wide
