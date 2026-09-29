@@ -46,6 +46,7 @@ from .pass_utils import (
     _build_indirect_store_subs,
     apply_splits_from_index_coeff,
     iteration_space_from_op,
+    loop_var_ranges_from_dim_hints,
 )
 
 logger = get_logger("cost_model")
@@ -300,6 +301,36 @@ def _tiled_symbols_per_level(op):
         # be guessed. See _loop_factor_for_index.
         levels.append((trip, syms, declared))
     return levels
+
+
+def _levels_with_loop_vars(op, levels):
+    """``levels`` with each level's own splice loop variable folded into its symbols.
+
+    ``_tiled_symbols_per_level`` derives a level's symbols from the op's OWN tiled
+    dims.  An op that tiles none of them -- its iteration space has no such dim, as
+    for a per-expert matmul whose weight read advances with the expert loop -- gets
+    an empty set, and ``_loop_factor_for_index`` then treats every one of its args as
+    re-entered at the same address.  A read whose index carries that level's loop
+    variable is walked, not re-entered: its address advances by one tile per trip.
+
+    The ``for_each_tile`` lowering stamps one ``CoarseTileInfo`` level per nesting
+    level, outermost first, and appends one ``DimHint(loop_var, loop_var_range=trip)``
+    per level in the same order, so the i-th hint carrying a ``loop_var_range`` (read
+    through ``loop_var_ranges_from_dim_hints``) is the loop variable of level i.  Each
+    variable is paired to its level by position and its range is checked against the
+    level's trip count; pairing by trip count alone would give two nested loops of
+    equal trip count each other's variable.  When the hint count and the level count
+    differ (the loop info also comes from another source) nothing is paired and the
+    levels are returned unchanged, which keeps the previous price.
+    """
+    loop_vars = list(loop_var_ranges_from_dim_hints(op).items())
+    if len(loop_vars) != len(levels):
+        return levels
+    paired = []
+    for (trip, syms, declared), (var, var_range) in zip(levels, loop_vars):
+        same_trip = _int(var_range, -1) == trip
+        paired.append((trip, syms | {var} if same_trip else syms, declared))
+    return paired
 
 
 def _loop_factor_for_index(index, levels) -> int:
@@ -985,6 +1016,8 @@ def extract_op_features(
     #                                      level 0 (index has i0) and repeats at level 1
     #                                      (no r0_0) => 1*4; B does the opposite => 2*1.
     _levels = _tiled_symbols_per_level(op)
+    if _levels:
+        _levels = _levels_with_loop_vars(op, _levels)
     try:
         _rw = op.get_read_writes()
         _write_index = next(iter(_rw.writes)).index
