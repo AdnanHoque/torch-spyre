@@ -384,6 +384,14 @@ class OpFeatures:
     # None means unavailable/unsupported geometry; legacy records keep the old BW.
     transport_read_run_bytes: int | None = None
     transport_tile_elems: int | None = None
+    # True when the priced read feeds arithmetic rather than a plain copy: any
+    # one-input, one-output arithmetic op, in any graph, not only a loop body. The
+    # request law is the same; only its rate lookup differs, because an arithmetic
+    # op may run on a core count the copy calibration never visited (see
+    # ``_transport_rate_cores``). The price is nonzero only where the per-core read
+    # run is short (under about 1 KB at the peak bandwidth); longer runs cost nothing
+    # extra, so an op with large contiguous per-core runs is unchanged.
+    transport_compute_read: bool = False
     # LX RELAYOUT (PR #3439): an identity copy the scratchpad planner inserts when a
     # producer and its consumers own an LX buffer under different per-core divisions.
     # Its traffic is entirely LX, which this model charges at zero -- calibrated for
@@ -2041,6 +2049,27 @@ def _store_core_excess_ns(ops: list, p: "CostParams"):
     return total
 
 
+def _transport_rate_cores(rates: dict, cores: int, compute_read: bool):
+    """Calibrated core count whose ns/request applies to ``cores``, else None.
+
+    A copy is priced only at a calibrated count. A read that feeds arithmetic
+    may run on any count; its requests sustain the rate of the largest
+    calibrated count not above it (22 cores stream like 16, 11 like 8), so
+    splitting the stick axis is never free just because the count is odd.
+
+    The extension to uncalibrated counts is an assumption, not a measurement: the
+    calibration visited only the counts in ``rates``, and the rate of a count between
+    two of them is taken to be the lower one's. It may over- or under-state a real
+    stream at such a count; a measurement at those counts would replace it.
+    """
+    if cores in rates:
+        return cores
+    if not compute_read:
+        return None
+    below = [c for c in rates if c <= cores]
+    return max(below) if below else None
+
+
 def transport_dma_cost_available(op: OpFeatures, p: "CostParams") -> bool:
     """Whether transport geometry and calibration support this cost term.
 
@@ -2063,8 +2092,10 @@ def transport_dma_cost_available(op: OpFeatures, p: "CostParams") -> bool:
     ):
         return False
     cores = sympy.sympify(op.cores)
-    if not cores.free_symbols and rates.get(cores, 0) <= 0:
-        return False
+    if not cores.free_symbols:
+        key = _transport_rate_cores(rates, cores, op.transport_compute_read)
+        if key is None or rates[key] <= 0:
+            return False
     return (
         sum(a.role == "input" for a in op.args) == 1
         and sum(a.role == "output" for a in op.args) == 1
@@ -2115,7 +2146,9 @@ def _transport_dma_excess_ns(ops: list, p: "CostParams"):
 
         def for_run(requests, with_transpose):
             branches = []
-            for cores, ns in rates.items():
+            # A compute read takes the rate of the largest calibrated count at or
+            # below its own; test the counts from the top so the first hit wins.
+            for cores, ns in sorted(rates.items(), reverse=op.transport_compute_read):
                 if ns <= 0:
                     continue
                 floor = max(
@@ -2135,7 +2168,12 @@ def _transport_dma_excess_ns(ops: list, p: "CostParams"):
                         (requests * ns - byte_time, at_most(requests, max_requests)),
                         (cap, True),
                     )
-                branches.append((value, sympy.Eq(op.cores, cores)))
+                at_count = (
+                    sympy.Ge(op.cores, cores)
+                    if op.transport_compute_read
+                    else sympy.Eq(op.cores, cores)
+                )
+                branches.append((value, at_count))
             return sympy.Piecewise(*branches, (0, True))
 
         # Price each physical run branch separately. This avoids a reciprocal

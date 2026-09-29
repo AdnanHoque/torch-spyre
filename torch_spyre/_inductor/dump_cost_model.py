@@ -1164,16 +1164,19 @@ def extract_op_features(
     hbm_pattern = "" if is_matmul else _hbm_pattern(op, is_reduction, out_dims)
     # A staging copy still issues the source DMA even if it is later elided into
     # its consumer. Price its physical read during planning too, not only the
-    # final restickify's rewritten access. Arithmetic/unary compute ops are not
-    # part of this transport calibration.
+    # final restickify's rewritten access. Any arithmetic op issues the same source
+    # requests for its one input (the geometry proof below still demands exactly
+    # one read and one write), so its read run is priced by the same law, in every
+    # graph and not only inside a loop body.
     try:
-        is_transport = (
+        is_transport = data is not None and not is_reduction
+        compute_read = (
             data is not None
-            and not is_reduction
-            and set(data.inner_fn_opcount().used_ops) == {"load"}
+            and is_transport
+            and set(data.inner_fn_opcount().used_ops) != {"load"}
         )
     except (AttributeError, TypeError):
-        is_transport = False
+        is_transport = compute_read = False
     transport_read_run_bytes, transport_tile_elems = (
         _transport_read_geometry(op, work_slices) if is_transport else (None, None)
     )
@@ -1201,6 +1204,7 @@ def extract_op_features(
         hbm_pattern=hbm_pattern,
         transport_read_run_bytes=transport_read_run_bytes,
         transport_tile_elems=transport_tile_elems,
+        transport_compute_read=bool(compute_read and transport_tile_elems),
         is_lx_relayout=_rl[0],
         relayout_run_elems=_rl[1],
         relayout_split=_rl[2],

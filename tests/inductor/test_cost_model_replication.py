@@ -439,7 +439,9 @@ def test_a_for_each_tile_loop_prices_the_operand_it_walks_and_nothing_else():
     op = _expert_loop_projection(25)
     assert _partitioned_operand_read_excess([op], p) == pytest.approx(_excess_ns(25))
     # The walked operand alone: drop the re-entered activation, same price.
-    weight_only = dataclasses.replace(op, args=[a for a in op.args if a.elems == W_ELEMS or a.role == "output"])
+    weight_only = dataclasses.replace(
+        op, args=[a for a in op.args if a.elems == W_ELEMS or a.role == "output"]
+    )
     assert _partitioned_operand_read_excess([weight_only], p) == pytest.approx(
         _excess_ns(25)
     )
@@ -464,7 +466,11 @@ def test_a_for_each_tile_loop_price_depends_on_how_many_cores_stream_the_operand
     # The number of cores is all it reads: two 32-core shapes are not ranked by it.
     shaped = [
         _partitioned_operand_read_excess(
-            [dataclasses.replace(_expert_loop_projection(1), cores=32, matmul_m_split=m)],
+            [
+                dataclasses.replace(
+                    _expert_loop_projection(1), cores=32, matmul_m_split=m
+                )
+            ],
             p,
         )
         for m in (1, 2, 32)
@@ -480,7 +486,11 @@ def test_the_for_each_tile_price_is_symbolic_in_the_core_count_and_matches_numer
     at = sympy.lambdify([cores], expr, modules="math")
     for c in (4, 8, 16, 32):
         concrete = _partitioned_operand_read_excess(
-            [_expert_loop_projection(1) if c == 1 else dataclasses.replace(_expert_loop_projection(1), cores=c)],
+            [
+                _expert_loop_projection(1)
+                if c == 1
+                else dataclasses.replace(_expert_loop_projection(1), cores=c)
+            ],
             _COST_PARAMS,
         )
         assert at(c) == pytest.approx(concrete, rel=1e-9, abs=1e-6)
