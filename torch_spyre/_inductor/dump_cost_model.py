@@ -496,6 +496,7 @@ def _matmul_features(
     loop_trip: int = 1,
     tiles_red_dim: bool = False,
     work_slices=None,
+    tiles_out_dim: bool = False,
 ):
     """(macs, rows_per_core, cols_per_core, a_bytes, b_bytes, k_split, m_split, n_split).
 
@@ -509,7 +510,18 @@ def _matmul_features(
     ``loop_trip``, so the reduction-tiled ops were under-counting compute by up to 16x.
     ``tiles_reduction_dim`` is exactly the discriminator -- it predicts the convention on
     all six coarse ops measured (row_tiling total; k_tiling / nested / bmm_k / bmm_nested
-    / bmm_3d2d per-tile) -- so the factor is applied here, once, at the source. ``rows_per_core`` = M/m (drives pt_eff + A re-read),
+    / bmm_3d2d per-tile) -- so the factor is applied here, once, at the source.
+
+    A matmul in a counted loop that tiles NEITHER of its own dims (``tiles_red_dim`` and
+    ``tiles_out_dim`` both false) is a per-trip body op of a ``for_each_tile`` loop -- one
+    expert's MLP in an expert loop, one attention step over a KV page in a page loop.  It
+    executes its whole iteration space once per trip, so its total is ``loop_trip`` times
+    the per-trip product.  The discriminator is all-or-nothing across nesting levels:
+    ``tiles_out_dim`` / ``tiles_red_dim`` say whether ANY level tiles such a dim, so a
+    nest with one tiling level and one non-tiling level takes the tiling convention and is
+    not scaled for the non-tiling level (no measured shape has this form).
+
+    ``rows_per_core`` = M/m (drives pt_eff + A re-read),
     ``cols_per_core`` = N/n (drives B re-read). ``a_bytes`` = |A| = M*K, ``b_bytes`` =
     |B| = K*N (device dtype). ``k_split``/``m_split``/``n_split`` = the K/M/N core splits.
     M/N/K + splits are recovered from the iteration space: reduction (K) vars have coeff 0
@@ -523,7 +535,13 @@ def _matmul_features(
     data = getattr(op, "data", None)
     k_size = _prod_ints(getattr(data, "reduction_ranges", None) or [])
     # Scale a reduction-tiled slice back up to the whole-loop total (see docstring).
-    macs = out_elems * k_size * (loop_trip if tiles_red_dim else 1)
+    # Per-trip body op of a counted loop (see the docstring): its whole iteration space
+    # runs once per trip, and the traffic side already charges it ``loop_trip`` times
+    # (``out_factor`` in ``extract_op_features``), so its work is scaled the same way.
+    reexecuted_per_trip = loop_trip > 1 and not tiles_red_dim and not tiles_out_dim
+    macs = out_elems * k_size
+    if tiles_red_dim or reexecuted_per_trip:
+        macs *= loop_trip
     rows_per_core = cols_per_core = 0.0
     a_bytes = b_bytes = 0
     k_split = m_split = n_split = 1
@@ -964,7 +982,13 @@ def extract_op_features(
             matmul_m_split,
             matmul_n_split,
         ) = _matmul_features(
-            op, out_elems, dtype_bytes, loop_trip, is_tiled_red, work_slices
+            op,
+            out_elems,
+            dtype_bytes,
+            loop_trip,
+            is_tiled_red,
+            work_slices,
+            tiles_out_dim,
         )
         reduction_cores = k_split
 

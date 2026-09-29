@@ -101,8 +101,12 @@ def test_nested_loops_of_equal_trip_count_pair_each_variable_with_its_own_level(
     levels = [(4, set(), 0), (4, set(), 0)]
     merged = _levels_with_loop_vars(_op(_hint(u0, 4), _hint(u1, 4)), levels)
     assert [syms for _t, syms, _d in merged] == [{u0}, {u1}]
-    assert _loop_factor_for_index(8 * u0 + d0, merged) == 4  # walked outer, re-read inner
-    assert _loop_factor_for_index(8 * u1 + d0, merged) == 4  # re-read outer, walked inner
+    assert (
+        _loop_factor_for_index(8 * u0 + d0, merged) == 4
+    )  # walked outer, re-read inner
+    assert (
+        _loop_factor_for_index(8 * u1 + d0, merged) == 4
+    )  # re-read outer, walked inner
     assert _loop_factor_for_index(8 * u0 + 2 * u1, merged) == 1  # walked at both
     assert _loop_factor_for_index(d0, merged) == 16  # re-entered at both
 

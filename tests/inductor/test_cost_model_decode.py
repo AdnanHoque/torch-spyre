@@ -306,3 +306,96 @@ class SymbolicPriceTest(unittest.TestCase):
         self.assertFalse(isinstance(symbolic, int))  # genuinely symbolic, not cast
         self.assertEqual(int(symbolic.subs(sym_is_lx, 0)), store(False).hbm_elems())
         self.assertEqual(store(False).hbm_elems(), 65536)
+
+
+def test_macs_are_the_whole_loop_total_for_every_loop_shape(monkeypatch):
+    """``matmul_macs`` is the work of the WHOLE counted loop, whatever the loop tiles.
+
+    A matmul in a counted loop that tiles neither of its own dims (one expert's MLP in
+    an expert loop) runs its full iteration space once per trip, and the traffic side
+    already charges it ``loop_trip`` times; its work must be the per-trip product times
+    the trip count. A loop that tiles an output dim leaves the output buffer full-extent
+    (raw product is already the total), a loop that tiles the reduction dim leaves a
+    per-tile slice (scaled up), and a single pass is unchanged.
+    """
+    m, n, kk = sympy.symbols("m n kk", positive=True, integer=True)
+    it_space = {m: 64, n: 1024, kk: 2048}
+    _patch(monkeypatch, it_space, {m: 1, n: 1, kk: 1})
+    op = _FakeOp(1024 * m + n, m + kk, {"d0": 1, "d1": 1, "d2": 1})
+    out_elems = 64 * 1024
+    per_trip = out_elems * 2048
+
+    def macs(loop_trip, tiles_red, tiles_out):
+        return dcm._matmul_features(
+            op, out_elems, 2, loop_trip, tiles_red, None, tiles_out
+        )[0]
+
+    assert macs(1, False, False) == per_trip  # single pass
+    assert macs(128, False, False) == 128 * per_trip  # per-trip body op
+    assert macs(128, False, True) == per_trip  # output-tiled: already the total
+    assert macs(128, True, False) == 128 * per_trip  # reduction-tiled slice
+
+
+def test_macs_of_a_paged_attention_step_and_a_row_loop(monkeypatch):
+    """Non-expert ``for_each_tile`` shapes.
+
+    * A page loop: one attention score matmul per KV page (64 query rows x 128 page
+      tokens x head dim 64), 16 trips, tiling none of its own dims -- a per-trip body
+      op, so 16 pages of work.
+    * A row loop over the same op's query rows: the loop tiles an output dim, the
+      output buffer is full-extent and the raw product already is the total.
+    """
+    m, n, kk = sympy.symbols("m n kk", positive=True, integer=True)
+    _patch(monkeypatch, {m: 64, n: 128, kk: 64}, {m: 1, n: 1, kk: 1})
+    op = _FakeOp(128 * m + n, m + kk, {"d0": 1, "d1": 1, "d2": 1})
+    op.data = SimpleNamespace(reduction_ranges=[64])
+    page_scores = 64 * 128 * 64
+
+    page_loop = dcm._matmul_features(op, 64 * 128, 2, 16, False, None, False)[0]
+    row_loop = dcm._matmul_features(op, 64 * 128, 2, 8, False, None, True)[0]
+    assert page_loop == 16 * page_scores
+    assert row_loop == page_scores
+
+
+def test_the_extractor_scales_a_per_trip_body_matmul_by_its_trip(monkeypatch):
+    """Wiring: ``extract_op_features`` passes the loop's tiling to ``_matmul_features``.
+
+    Without it a per-trip body matmul reports one trip of work while its traffic is
+    charged ``loop_trip`` times.
+    """
+    from torch_spyre._inductor.constants import BATCH_MATMUL_OP
+
+    m, n, kk = sympy.symbols("m n kk", positive=True, integer=True)
+    _patch(monkeypatch, {m: 64, n: 128, kk: 64}, {m: 1, n: 1, kk: 1})
+    monkeypatch.setattr(dcm, "_indirect_write_elems", lambda *_: None)
+    op = _FakeOp(128 * m + n, m + kk, {"d0": 1, "d1": 1, "d2": 1})
+    op.data = SimpleNamespace(
+        reduction_ranges=[64], reduction_type=BATCH_MATMUL_OP, ranges=[64, 128]
+    )
+    layout = SimpleNamespace(allocation=None, device_layout=None)
+    op.name = "buf1"
+    op.dim_hints = []
+    op.get_operation_name = lambda: "op_buf1"
+    op.get_layout = lambda: layout
+    op.get_dtype = lambda: SimpleNamespace(itemsize=2)
+    op.get_size = lambda: [64, 128]
+    graph = SimpleNamespace(
+        graph_input_names=[],
+        get_output_names=lambda: [],
+        get_buffer=lambda name: None,
+    )
+
+    def macs(loop_info):
+        op.loop_info = loop_info
+        with V.set_graph_handler(graph):
+            return dcm.extract_op_features(op).matmul_macs
+
+    def loop(tiled_out):
+        return SimpleNamespace(
+            loop_count=[16],
+            loop_tiled_dims=[tiled_out],
+            loop_tiled_reduction_dims=[[]],
+        )
+
+    assert macs(loop([])) == 16 * 64 * 128 * 64  # per-trip body op
+    assert macs(loop([0])) == 64 * 128 * 64  # output-tiled: already the total
