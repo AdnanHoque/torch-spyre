@@ -226,6 +226,10 @@ class ArgTraffic:
     # so this flag, not the factor, says which kind of loop the operand advances with.
     # Read by ``_partitioned_operand_read_excess`` only.
     advances_with_loop_var: bool = False
+    # Positive evidence from the existing legal candidate menu: at least one
+    # candidate splits a symbol this read indexes. This is menu-wide, not a
+    # property of the selected candidate. Missing menu evidence leaves it False.
+    has_partitioning_candidate: bool = False
     # This arg's traffic crosses the GRAPH boundary, so LX residency cannot remove it:
     # a read of a graph input, or the externally-visible write of a graph output. The
     # scratchpad planner pins such a buffer by CLONING it (allocator._push_allocation),
@@ -1478,11 +1482,20 @@ def _partitioned_operand_read_excess(ops: list, p: "CostParams"):
     * The tiled operand of a ``for_each_tile`` loop: an input of a looped matmul whose
       address advances with the loop's per-iteration variable
       (``ArgTraffic.advances_with_loop_var``) and which the loop walks once
-      (``loop_factor == 1``); the operand a per-expert loop reads one expert bank of
-      per trip. It is priced as partitioned across the op's cores, with the same
+      (``loop_factor == 1``), with a legal candidate that partitions this read
+      (``has_partitioning_candidate``). An operand that cannot be partitioned by
+      any available choice must not gain delivery credit from extra replicas.
+      This is a menu-wide applicability rule, not a per-candidate replication gate:
+      every candidate of an eligible operand uses the same proxy. Missing menu
+      evidence declines this loop-only estimate; no divisions are reconstructed.
+      This is an empirical proxy for delivery and compute parallelism, not measured
+      traffic. Declining it restores only this term's pre-estimate price, not the
+      whole model's price or its chosen plan.
+      The operand a per-expert loop reads one expert bank of per trip is then
+      priced as partitioned across the op's cores, with the same
       arithmetic and the same rate as the single-pass class; no constant is added.
       The rate is selected by the shape sweep over an expert loop at 32, 128 and 512
-      tokens. Only the number of cores that stream the operand enters, so this term
+      tokens. The op's total core count enters, not a measured reader count, so it
       separates an under-parallel plan from one that uses the cores. It does not
       rank plans that already use all cores: those are ordered by the cohort and
       broadcast derate on a shared weight. A form that also scaled by the
@@ -1518,9 +1531,13 @@ def _partitioned_operand_read_excess(ops: list, p: "CostParams"):
             if arg.role != "input":
                 continue
             if looped:
-                # The loop's tiled operand: walked once (factor 1) and advancing with
-                # the for_each_tile variable. Its splits partition it across cores.
-                if not (arg.advances_with_loop_var and arg.loop_factor == 1):
+                # The loop walks this operand once, and its legal menu offers a
+                # partitioning choice. All candidates then use the same proxy.
+                if not (
+                    arg.advances_with_loop_var
+                    and arg.loop_factor == 1
+                    and arg.has_partitioning_candidate
+                ):
                     continue
                 partitioned = 1
             else:

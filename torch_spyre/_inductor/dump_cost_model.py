@@ -19,6 +19,10 @@ Walks ``graph.operations`` and builds :class:`cost_model.OpFeatures` per op
 then a dump hook (``SPYRE_DUMP_COST=1``) prints the features and the predicted
 device latency so it can be compared against the measured value on hardware.
 
+The standalone dump has no candidate menu and omits the menu-dependent loop-delivery
+estimate. Its looped-matmul totals can therefore differ from the allocator's objective;
+it does not reconstruct candidate divisions from the committed plan.
+
 Extraction is best-effort and defensive: anything it can't resolve falls back to
 a safe default and never raises into compilation. The numbers must be validated
 against device measurements (``examples/bench_*``); the model is only as good as
@@ -27,7 +31,7 @@ this extraction.
 
 import math
 import os
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Sequence
 
 import sympy
 from torch._inductor.ir import ComputedBuffer, MutationLayoutSHOULDREMOVE
@@ -916,11 +920,27 @@ def _relayout_logger():
     return get_inductor_logger("dump_cost_model")
 
 
+def _has_partitioning_candidate(index, candidate_work_slices) -> bool:
+    """Whether the caller's legal menu contains a split of this read's index.
+
+    The menu is already filtered by the existing division machinery. Inspect it,
+    do not manufacture candidates from shape or infer them from the current split.
+    Unknown indices, absent menus and symbolic factors provide no positive proof.
+    """
+    indexed: set[sympy.Symbol] = getattr(index, "free_symbols", set())
+    return any(
+        symbol in indexed and isinstance(factor, (int, sympy.Integer)) and factor > 1
+        for candidate in candidate_work_slices or ()
+        for symbol, factor in candidate.items()
+    )
+
+
 def extract_op_features(
     op,
     work_slices=None,
     *,
     is_lx: Optional[Mapping[str, bool]] = None,
+    candidate_work_slices: Optional[Sequence[Mapping[sympy.Symbol, int]]] = None,
 ) -> OpFeatures:
     """Build OpFeatures for one ComputedBuffer op (best-effort).
 
@@ -931,6 +951,12 @@ def extract_op_features(
     ``is_lx`` supplies each arg's residency (symbolic or concrete) by buffer
     name, such as a relayout candidate's forced placement. A name missing from
     it falls back to the buffer's committed layout.
+
+    ``candidate_work_slices`` is the caller's existing legal menu on this op's
+    symbol basis, held constant across symbolic and concrete candidate evaluation.
+    It supplies positive evidence for the loop-delivery estimate's applicability.
+    Without it that estimate is omitted, including in standalone diagnostic calls;
+    the extractor never re-enumerates divisions or treats one chosen split as a menu.
 
     Each arg is also stamped with ``is_boundary``: whether ITS traffic crosses the
     graph boundary, resolved against the arg's own role, so a buffer that is both a
@@ -1152,6 +1178,9 @@ def extract_op_features(
                 ),
                 is_boundary=(None if graph_inputs is None else name in graph_inputs),
                 advances_with_loop_var=_advances_with(index, _splice_vars),
+                has_partitioning_candidate=_has_partitioning_candidate(
+                    index, candidate_work_slices
+                ),
                 # Matmul consumers only: rung-G verified a pointwise broadcast
                 # operand loads once per kernel, the relayout sweep measured a bmm
                 # operand loading once per replicated core (cost_model.ArgTraffic).

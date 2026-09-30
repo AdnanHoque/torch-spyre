@@ -523,13 +523,13 @@ def _looped_op(trips, tiled_out, hints, write_index, read_indices, data=None):
     )
 
 
-def _features(monkeypatch, op, it_space):
+def _features(monkeypatch, op, it_space, **kwargs):
     from torch._inductor.virtualized import V
 
     monkeypatch.setattr(dcm, "iteration_space_from_op", lambda _op: it_space)
     monkeypatch.setattr(dcm, "_indirect_write_elems", lambda *_: None)
     with V.set_graph_handler(_StubGraph()):
-        return dcm.extract_op_features(op)
+        return dcm.extract_op_features(op, **kwargs)
 
 
 def _factors(monkeypatch, op, it_space):
@@ -617,6 +617,53 @@ def test_the_extractor_marks_the_reads_that_advance_with_the_loop_variable(monke
     assert advances["arg0"] is True
     assert advances["arg1"] is False
     assert advances["op_buf1"] is False
+
+
+def test_partitionability_requires_a_legal_menu_split_of_the_read_index():
+    index = 64 * d1 + d2
+    assert not dcm._has_partitioning_candidate(index, None)
+    assert not dcm._has_partitioning_candidate(index, [])
+    assert not dcm._has_partitioning_candidate(index, [{d0: 32, d1: 1}])
+    assert not dcm._has_partitioning_candidate(index, [{d1: sympy.Symbol("split")}])
+    assert not dcm._has_partitioning_candidate(None, [{d1: 2}])
+    assert dcm._has_partitioning_candidate(index, [{d0: 32}, {d1: 2}])
+    assert dcm._has_partitioning_candidate(index, [{d2: sympy.Integer(4)}])
+
+
+def test_the_extractor_uses_the_same_menu_for_every_priced_candidate(monkeypatch):
+    op = _looped_op(
+        [128],
+        [[]],
+        [_hint(u0, sympy.Integer(128))],
+        write_index=64 * d0 + d2,
+        read_indices=[704 * d2 + 1982464 * u0],
+    )
+    # One candidate only replicates this read; the other partitions it. Both
+    # retain the estimate because the legal menu offers a partitioning choice.
+    menu = [{d0: 16, d2: 1}, {d0: 8, d2: 2}]
+    for chosen in menu:
+        features = _features(
+            monkeypatch,
+            op,
+            {d0: 32, d2: 128},
+            work_slices=chosen,
+            candidate_work_slices=menu,
+        )
+        assert next(
+            a for a in features.args if a.name == "arg0"
+        ).has_partitioning_candidate
+
+    # The shape and bytes are unchanged. Remove the partitioning option and
+    # applicability declines; this is not a byte-size cutoff or a chosen-split test.
+    for menu_without_partition in (None, [{d0: 8, d2: 1}, {d0: 16, d2: 1}]):
+        features = _features(
+            monkeypatch,
+            op,
+            {d0: 32, d2: 128},
+            work_slices={d0: 16, d2: 1},
+            candidate_work_slices=menu_without_partition,
+        )
+        assert not any(a.has_partitioning_candidate for a in features.args)
 
 
 def test_an_op_without_a_for_each_tile_variable_marks_no_read_as_advancing(monkeypatch):

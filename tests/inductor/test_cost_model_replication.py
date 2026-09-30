@@ -389,7 +389,9 @@ def _expert_loop_projection(cores, *, trips=4, **fields):
     op.args = [
         dataclasses.replace(a, loop_factor=trips)
         if a.role == "input" and a.elems != W_ELEMS
-        else dataclasses.replace(a, advances_with_loop_var=True)
+        else dataclasses.replace(
+            a, advances_with_loop_var=True, has_partitioning_candidate=True
+        )
         if a.role == "input"
         else a
         for a in op.args
@@ -446,7 +448,11 @@ def test_a_for_each_tile_loop_prices_the_operand_it_walks_and_nothing_else():
         _excess_ns(25)
     )
     # Re-entered, or advancing without being walked once: not the priced class.
-    for change in ({"advances_with_loop_var": False}, {"loop_factor": 4}):
+    for change in (
+        {"advances_with_loop_var": False},
+        {"loop_factor": 4},
+        {"has_partitioning_candidate": False},
+    ):
         unpriced = _expert_loop_projection(25)
         unpriced.args[2] = dataclasses.replace(unpriced.args[2], **change)
         assert _partitioned_operand_read_excess([unpriced], p) == 0
@@ -494,6 +500,21 @@ def test_the_for_each_tile_price_is_symbolic_in_the_core_count_and_matches_numer
             _COST_PARAMS,
         )
         assert at(c) == pytest.approx(concrete, rel=1e-9, abs=1e-6)
+
+
+def test_an_unpartitionable_loop_read_keeps_the_price_without_delivery_estimation():
+    off = dataclasses.replace(_COST_PARAMS, mm_partitioned_read_gbps_per_core=0.0)
+    cores = sympy.Symbol("cores", integer=True, positive=True)
+    for c in (8, 16, 32, cores):
+        op = dataclasses.replace(_expert_loop_projection(1), cores=c)
+        op.args = [
+            dataclasses.replace(a, has_partitioning_candidate=False) for a in op.args
+        ]
+        assert _partitioned_operand_read_excess([op], _COST_PARAMS) == 0
+        difference = sympy.simplify(
+            predict_ops([op], _COST_PARAMS) - predict_ops([op], off)
+        )
+        assert difference.is_zero is True
 
 
 def test_a_coarse_tiled_dense_matmul_keeps_its_price():
