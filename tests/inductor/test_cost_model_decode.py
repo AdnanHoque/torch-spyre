@@ -1255,12 +1255,15 @@ def test_the_allocator_prices_loop_delivery_only_for_reads_the_loop_variable_wal
 def test_a_read_whose_advance_moved_to_its_restickify_copy_gets_no_loop_delivery(
     monkeypatch,
 ):
-    """The lost case, through the allocator. ``insert_restickify`` moves a read's
-    advance onto the copy it inserts and stamps the consumer's read pinned at the
-    shared levels; the consumer reads the fixed copy every trip, and ``u0`` stays in
-    its index. The row tile ``d0`` still walks it (factor 1), so the free-symbol rule
-    priced it as a loop-walked operand. By the stamp it is not one: only the bank
-    keeps the estimate."""
+    """Synthetic stamp-consistency check, not an observed lowered-kernel case.
+
+    Through the allocator: the activation read below keeps ``u0`` in its index but
+    carries an empty ("pinned") stamp, and the row tile ``d0`` still walks it
+    (factor 1). The free-symbol rule priced it as a loop-walked operand; by the
+    stamp it is not one, so only the bank keeps the estimate. The read is
+    constructed for the check: no reachable read with ``u0`` in its index and a
+    pinned stamp is known, and whether ``insert_restickify`` (which the test name
+    recalls) or any other pass produces one is not established."""
     moved = _allocator_features(
         monkeypatch, _row_tiled_expert_matmul([_PINNED, _ADVANCES])
     )

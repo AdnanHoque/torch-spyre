@@ -336,9 +336,9 @@ looped matmul only when all three hold:
 
 The excess is `bytes / (cores * rate) - bytes / peak`, and never below zero. Three reads
 look similar but are not eligible: a read whose index contains the variable but does not
-advance with it (`4096 * FloorDiv(u0, 2)`, or a read whose advance `insert_restickify`
-moved onto the copy it inserted); a read walked only by a coarse-tiled dimension of the
-op; a read re-entered every trip.
+advance with it (the tests use the synthetic index `4096 * FloorDiv(u0, 2)`; no lowered
+kernel is known to produce such a read); a read walked only by a coarse-tiled dimension
+of the op; a read re-entered every trip.
 
 The report leaves this estimate out. It extracts features without the legal menu, so
 condition 3 never holds there, and its totals need not rank eligible looped-matmul plans

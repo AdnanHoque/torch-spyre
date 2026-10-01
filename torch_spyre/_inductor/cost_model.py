@@ -226,9 +226,10 @@ class ArgTraffic:
     # This read's address advances with a ``for_each_tile`` loop variable at some
     # level, by the lowering's own per-read verdict (its stamp, else a nonzero
     # coefficient on the level's variable) -- the verdict ``loop_factor`` also uses.
-    # The variable merely appearing in the index is not enough: a pinned read can
-    # keep it (``4096*FloorDiv(u0, 2)``, or a read whose advance insert_restickify
-    # moved onto the copy). A coarse-tiling loop can also leave ``loop_factor`` at 1
+    # The variable merely appearing in the index is not enough: by that rule a read
+    # can keep it and still be pinned (the tested example is the synthetic index
+    # ``4096*FloorDiv(u0, 2)``; no lowered kernel is known to produce such a read).
+    # A coarse-tiling loop can also leave ``loop_factor`` at 1
     # for an operand it walks, so this flag, not the factor, says which kind of loop
     # the operand advances with. Read by ``_partitioned_operand_read_excess`` only.
     advances_with_loop_var: bool = False
