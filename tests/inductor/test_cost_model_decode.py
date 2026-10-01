@@ -29,6 +29,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
+import pytest
 import sympy
 import torch
 from sympy import Symbol
@@ -637,6 +638,7 @@ def _looped_matmul_features(
     write_index,
     read_indices,
     it_space,
+    work_slices=None,
 ):
     """``extract_op_features`` on a batch-matmul body op inside a loop nest."""
     from torch_spyre._inductor.constants import BATCH_MATMUL_OP
@@ -651,7 +653,7 @@ def _looped_matmul_features(
     monkeypatch.setattr(dcm, "iteration_space_from_op", lambda _op: it_space)
     monkeypatch.setattr(dcm, "_indirect_write_elems", lambda *_: None)
     with V.set_graph_handler(_StubGraph()):
-        return dcm.extract_op_features(op)
+        return dcm.extract_op_features(op, work_slices)
 
 
 def _output_factor(feature):
@@ -759,6 +761,212 @@ def test_a_mixed_nest_scales_only_the_level_that_re_writes(monkeypatch):
     factors = {a.name: a.loop_factor for a in feature.args}
     assert factors["arg0"] == 4  # walked by the row loop, re-read by the inner loop
     assert factors["arg1"] == 2  # re-read by the row loop, walked by the inner loop
+
+
+# ------------------- the same work on both matmul models (allocator and report)
+#
+# The scratchpad allocator prices with ``use_bundled_cost_model=False``: the UPSTREAM
+# model rebuilds per-trip M/N/K axes from the features and calls
+# ``work_division._matmul_execution_cost``. The report (``cost_model_pass``) uses the
+# default BUNDLED model, which reads ``matmul_macs``. Both must charge the work of
+# the whole loop, and neither may multiply a buffer that already spans the trips.
+
+
+def _allocator_compute_ns(feature):
+    from torch_spyre._inductor import cost_model
+    from torch_spyre._inductor.scratchpad.allocator import _COST_PARAMS
+
+    assert _COST_PARAMS.use_bundled_cost_model is False
+    return cost_model._matmul_ns_upstream([feature], _COST_PARAMS)
+
+
+def _report_compute_ns(feature):
+    from torch_spyre._inductor import cost_model
+
+    params = cost_model.CostParams()
+    assert params.use_bundled_cost_model is True
+    return cost_model._matmul_ns_bundled([feature], params)
+
+
+def _passes(feature):
+    from torch_spyre._inductor import cost_model
+
+    k_axis = cost_model._matmul_axes_for_split_cost(feature)[3]
+    return cost_model._matmul_passes(feature, k_axis[0])
+
+
+def _expert_matmuls(monkeypatch, trips):
+    """One expert projection (T=64, N=128, K=64) per trip of a ``trips``-trip loop:
+    re-writing one ``[T, N]`` buffer each trip (stationary output), and writing its
+    own slice of a stacked ``[trips, T, N]`` buffer."""
+    T, N, K = 64, 128, 64
+    m, n, r0 = sympy.symbols("m n r0", integer=True)
+    common = dict(
+        k=K,
+        trips=[trips],
+        tiled_out=[[]],
+        hints=[_hint(u0, sympy.Integer(trips))],
+        read_indices=[K * m + r0, N * K * u0 + N * r0 + n],
+        it_space={m: T, n: N, r0: K},
+        work_slices={m: 4, n: 8, r0: 1},
+    )
+    stationary = _looped_matmul_features(
+        monkeypatch, size=[T, N], write_index=N * m + n, **common
+    )
+    stacked = _looped_matmul_features(
+        monkeypatch, size=[trips, T, N], write_index=T * N * u0 + N * m + n, **common
+    )
+    return stationary, stacked
+
+
+def test_both_matmul_models_charge_every_trip_of_a_stationary_output_loop(
+    monkeypatch,
+):
+    """Review of #4996 (cyang49): the allocator's model ignored the corrected work.
+
+    A 128-expert loop whose body matmul re-writes one ``[T, N]`` buffer each trip
+    does 128 experts of work. Before, the allocator's model priced one expert: it
+    rebuilds ``B = out_elems / (M * N) = 1`` and never read ``matmul_macs``."""
+    one, _ = _expert_matmuls(monkeypatch, 1)
+    stationary, _ = _expert_matmuls(monkeypatch, 128)
+    assert _passes(stationary) == 128
+    assert _allocator_compute_ns(stationary) == pytest.approx(
+        128 * _allocator_compute_ns(one), rel=1e-12
+    )
+    assert _report_compute_ns(stationary) == pytest.approx(
+        128 * _report_compute_ns(one), rel=1e-12
+    )
+
+
+def test_both_matmul_models_charge_a_stacked_output_loop_once(monkeypatch):
+    """The stacked write ``out[u0, m, n]`` into ``[E, T, N]``: ``B`` already spans the
+    128 trips, so neither model multiplies again. It is the same 128 experts of work
+    as the stationary-output loop, on both models."""
+    one, _ = _expert_matmuls(monkeypatch, 1)
+    stationary, stacked = _expert_matmuls(monkeypatch, 128)
+    assert _passes(stacked) == 1
+    assert _allocator_compute_ns(stacked) == pytest.approx(
+        _allocator_compute_ns(stationary), rel=1e-12
+    )
+    assert _allocator_compute_ns(stacked) == pytest.approx(
+        128 * _allocator_compute_ns(one), rel=1e-12
+    )
+    assert _report_compute_ns(stacked) == pytest.approx(
+        _report_compute_ns(stationary), rel=1e-12
+    )
+
+
+def test_both_matmul_models_charge_a_page_loop_and_a_reduction_tiled_loop_per_trip(
+    monkeypatch,
+):
+    """Non-expert shapes. An attention-score step over one KV page per trip (16 pages)
+    re-writes its score buffer; a coarse loop over K revisits one output with each K
+    slice (4 trips of K/4). Each pass is one trip's matmul, so both are charged 16 and
+    4 passes; a row loop walks its output once and keeps one pass."""
+    m, n, r0 = sympy.symbols("m n r0", integer=True)
+    scores = dict(
+        size=[64, 128],
+        k=64,
+        write_index=128 * m + n,
+        read_indices=[64 * m + r0, 64 * n + r0],
+        it_space={m: 64, n: 128, r0: 64},
+        work_slices={m: 4, n: 8, r0: 1},
+    )
+    page_one = _looped_matmul_features(
+        monkeypatch, trips=[1], tiled_out=[[]], hints=[_hint(u0, 1)], **scores
+    )
+    page_loop = _looped_matmul_features(
+        monkeypatch, trips=[16], tiled_out=[[]], hints=[_hint(u0, 16)], **scores
+    )
+    row_loop = _looped_matmul_features(
+        monkeypatch, trips=[8], tiled_out=[[0]], hints=[_hint(u0, 8)], **scores
+    )
+    assert _passes(page_loop) == 16
+    assert _allocator_compute_ns(page_loop) == pytest.approx(
+        16 * _allocator_compute_ns(page_one), rel=1e-12
+    )
+    assert _passes(row_loop) == 1
+    assert _allocator_compute_ns(row_loop) == pytest.approx(
+        _allocator_compute_ns(page_one), rel=1e-12
+    )
+
+    k_slices = dict(
+        size=[64, 128],
+        k=16,
+        write_index=128 * m + n,
+        read_indices=[64 * m + r0, 128 * r0 + n],
+        it_space={m: 64, n: 128, r0: 16},
+        work_slices={m: 4, n: 8, r0: 1},
+    )
+    k_one = _looped_matmul_features(
+        monkeypatch, trips=[1], tiled_out=[[]], tiled_red=[[0]], **k_slices
+    )
+    k_loop = _looped_matmul_features(
+        monkeypatch, trips=[4], tiled_out=[[]], tiled_red=[[0]], **k_slices
+    )
+    assert _passes(k_loop) == 4
+    assert _allocator_compute_ns(k_loop) == pytest.approx(
+        4 * _allocator_compute_ns(k_one), rel=1e-12
+    )
+
+
+def test_both_matmul_models_charge_a_mixed_nest_level_by_level(monkeypatch):
+    """Outer row loop (walks the output, 2 trips) around an inner ``for_each_tile``
+    loop that re-writes it (4 trips): 1 x 4 passes on both models."""
+    m, n, r0 = sympy.symbols("m n r0", integer=True)
+    common = dict(
+        size=[64, 128],
+        k=64,
+        write_index=128 * m + n,
+        read_indices=[64 * m + r0, 8192 * u1 + 128 * r0 + n],
+        it_space={m: 64, n: 128, r0: 64},
+        work_slices={m: 4, n: 8, r0: 1},
+    )
+    single = _looped_matmul_features(
+        monkeypatch,
+        trips=[2, 1],
+        tiled_out=[[0], []],
+        hints=[_hint(u0, 2), _hint(u1, 1)],
+        **common,
+    )
+    nest = _looped_matmul_features(
+        monkeypatch,
+        trips=[2, 4],
+        tiled_out=[[0], []],
+        hints=[_hint(u0, 2), _hint(u1, 4)],
+        **common,
+    )
+    assert (_passes(single), _passes(nest)) == (1, 4)
+    assert _allocator_compute_ns(nest) == pytest.approx(
+        4 * _allocator_compute_ns(single), rel=1e-12
+    )
+    assert _report_compute_ns(nest) == pytest.approx(
+        4 * _report_compute_ns(single), rel=1e-12
+    )
+
+
+def test_a_record_without_a_loop_keeps_its_allocator_price(monkeypatch):
+    """A single-pass record, and a record whose MAC count is missing, are priced
+    exactly as before: one call of the execution model with the rebuilt axes."""
+    import dataclasses
+
+    from torch_spyre._inductor import cost_model
+
+    one, _ = _expert_matmuls(monkeypatch, 1)
+    axes = cost_model._matmul_axes_for_split_cost(one)
+    b_axis, m_axis, n_axis, k_axis, shared = axes
+    direct = 1000.0 * wd._matmul_execution_cost(
+        b_axis,
+        m_axis,
+        n_axis,
+        k_axis,
+        cost_model.config.sencores,
+        shared_weight=shared,
+        include_hbm=False,
+    )
+    assert _allocator_compute_ns(one) == pytest.approx(direct, rel=1e-12)
+    no_macs = dataclasses.replace(one, matmul_macs=0)
+    assert _allocator_compute_ns(no_macs) == pytest.approx(direct, rel=1e-12)
 
 
 def test_the_extractor_follows_a_pinned_stamp_on_a_read_carrying_the_loop_variable(

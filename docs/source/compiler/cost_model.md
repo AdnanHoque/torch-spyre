@@ -297,6 +297,30 @@ for rereading inputs when large output tiles are split across many cores. That f
 has not been recalibrated together with shared-input delivery; their combined accuracy is
 not established for all shapes. Pointwise broadcast inputs retain their existing one-load rule.
 
+### Two matmul models: the planner's and the report's
+
+The scratchpad allocator and the report price a matmul with different models, so a
+fix to one is not a fix to the other.
+
+| caller | setting | matmul compute |
+|---|---|---|
+| scratchpad allocator (the CP-SAT objective that chooses plans) | `use_bundled_cost_model=False` | rebuilds batch, M, N and K from the features and calls `work_division._matmul_execution_cost` without its HBM term |
+| report (`cost_model_pass`, `SPYRE_DUMP_COST`) | default, `use_bundled_cost_model=True` | `matmul_macs / cores / (mac_peak * pt_eff)` |
+
+Both must count the same work over a loop. The rebuilt axes describe **one pass over the
+output buffer**: batch × M × N is `out_elems`, and K is the slice of the reduction one
+trip sees. `matmul_macs` is the work of the whole loop: the extractor multiplies one
+pass by the write's own loop factor. The allocator's estimate is therefore charged once
+per pass, `passes = matmul_macs / (out_elems * K)`, and never multiplied by the trip
+count directly. Two loops of 128 experts, each expert a `[64, 128]` output with K = 64:
+
+- a body that re-writes one `[64, 128]` buffer every trip makes 128 passes;
+- a body that writes its own slice of a stacked `[128, 64, 128]` buffer makes one pass,
+  because the batch already counts the 128 experts.
+
+Both cost 128 experts of work on both models. A reduction-tiled loop makes one pass per
+K slice; a loop that tiles an output dimension walks its output once and makes one pass.
+
 `spyre_fuse_nodes` fuses everything it can — contiguous Spyre nodes accumulate in order, and
 only a node that is not on the device starts a new bundle. No size limit, no cost heuristic,
 no reordering. The pass applies that same rule, with two differences:

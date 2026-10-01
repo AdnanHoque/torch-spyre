@@ -111,7 +111,11 @@ implementations, switched on ``CostParams.use_bundled_cost_model``:
   It is called with ``include_hbm=False``. Its own
   HBM-traffic term is dropped because the bundle memory term below already charges the
   operand/output bytes, and does so LX-aware; charging both double-counts memory.
-  ``predict_ops`` also charges shared-input delivery. CP-SAT uses this model.
+  ``predict_ops`` also charges shared-input delivery. CP-SAT uses this model: the
+  scratchpad allocator sets this flag, so it is the price that chooses plans. The axes
+  it is called with describe ONE pass over the output buffer; a loop that produces
+  that buffer several times is charged once per pass (``_matmul_passes``), the same
+  work count ``matmul_macs`` gives the bundled model.
 
 - BUNDLED (``use_bundled_cost_model=True``): the original device-calibrated model,
   kept alongside the above rather than deleted. Adds a compute term that OVERLAPS the
@@ -1934,6 +1938,34 @@ def _matmul_axes_for_split_cost(o) -> tuple | None:
     )
 
 
+def _matmul_passes(o, K):
+    """How many times ``o`` runs the matmul its reconstructed axes describe.
+
+    ``_matmul_axes_for_split_cost`` describes one pass over the output buffer:
+    ``B * M * N`` is ``out_elems`` and ``K`` is the reduction extent of one trip.
+    ``matmul_macs`` is the work of the whole loop nest: the extractor scales one
+    pass, ``out_elems * K``, by the write's own loop factor. Their ratio is the
+    number of passes:
+
+    * a single-pass matmul, or a loop that walks its output buffer once (an
+      output-tiled loop, or a stacked ``[E, T, N]`` buffer whose slice ``u0`` each
+      trip writes): 1. The trips are already inside ``B * M * N``, so they are
+      not counted again;
+    * a body matmul re-writing one buffer every trip (one expert's projection,
+      one KV page of attention): the trip count;
+    * a reduction-tiled loop, which revisits the same output with each K slice:
+      the trip count;
+    * a nest: the product of what each level does.
+
+    A record without a MAC count, or with a one-pass count (written before the
+    extractor scaled it), gives 1: its previous price.
+    """
+    one_pass = o.out_elems * K
+    if o.matmul_macs == 0 or one_pass == 0:
+        return 1
+    return o.matmul_macs / one_pass
+
+
 def _matmul_ns_upstream(ops: list, p: CostParams) -> float:
     """Compute-side (ns) of a bundle containing a matmul, using the UPSTREAM
     (``CostParams.use_bundled_cost_model=False``) matmul model.
@@ -1944,6 +1976,10 @@ def _matmul_ns_upstream(ops: list, p: CostParams) -> float:
     version is blind to LX residency, which is what the co-optimizing planner steers).
     Standalone chooser preferences are also excluded: a preference for using more
     cores must not become an additive latency on every matmul in the graph.
+
+    The estimate is for one pass over the output buffer and is charged once per
+    pass of the loop (``_matmul_passes``), never multiplied by the trip count
+    directly: a stacked output already spans the trips.
     """
     total_us = 0.0
     for o in ops:
@@ -1973,7 +2009,7 @@ def _matmul_ns_upstream(ops: list, p: CostParams) -> float:
                 f"(b_axis={b_axis}, m_axis={m_axis}, n_axis={n_axis}, "
                 f"k_axis={k_axis}, cores_used={cores_used})"
             )
-        total_us += us
+        total_us += us * _matmul_passes(o, k_axis[0])
     return total_us * 1000.0  # us -> ns
 
 
@@ -2774,12 +2810,14 @@ def explain(ops: list, params: CostParams | None = None) -> str:
                     f"(B={B}/{b}, M={M}/{m}, N={N}/{n}, K={K}/{k}, "
                     f"cores_used={cores_used})"
                 )
+            passes = _matmul_passes(o, K)
+            per_pass = "" if passes == 1 else f" per pass x {float(passes):g} passes"
             lines.append(
                 f"     {o.name}: B={B}(/{b}) M={M:.0f}(/{m}) N={N:.0f}(/{n}) "
                 f"K={K:.0f}(/{k}) shared_weight={shared_weight} "
-                f"cores={cores_used} -> compute {us:.2f} us"
+                f"cores={cores_used} -> compute {us:.2f} us{per_pass}"
             )
-            compute_ns += us * 1000.0
+            compute_ns += us * passes * 1000.0
         R, W = _fused_hbm_bytes(ops)  # external input counted once (fused kernel)
         lines.append(
             f"     compute = {compute_ns / 1000:.2f} us   R={R}B (read) W={W}B (write)"
