@@ -344,6 +344,50 @@ The report leaves this estimate out. It extracts features without the legal menu
 condition 3 never holds there, and its totals need not rank eligible looped-matmul plans
 the way the allocator does.
 
+### DMA requests of a loop matmul's operand reads
+
+A core reads its slice of an operand as contiguous runs, and each run is one DMA request.
+A request has a fixed cost, so a slice cut into many tiny runs is slow even when its bytes
+are few. The transport term already prices this with a calibrated request law. The same
+law prices each HBM input of a matmul inside a loop (`loop_trip > 1`):
+
+- requests per trip = the read's own footprint per trip / one core's contiguous run (a
+  run ends at the innermost split of the axes the read indexes), floored at one maximum
+  burst and capped at one 128-byte word;
+- each request costs the calibrated ns of the largest calibrated core count at or below
+  the op's (22 cores take the 16-core rate, 11 take the 8-core rate);
+- the excess over `bytes / peak`, times the trips, times `(1 - is_lx)`.
+
+Toy example: one expert of the MoE gate bank is `[2816, 704]` in a layout that keeps each
+row's 11 sticks together. Split the columns 11 ways (on 22 cores) and every core gets one
+128-byte stick of every row: 2816 × 11 = 30,976 requests per trip. At 7.5 ns that is
+232 µs, against 26.4 µs to move the bytes, so 206 µs per trip, 26.35 ms over 128 experts.
+Split K 4 ways instead and each core reads whole rows, one long run: no excess.
+
+The loop-delivery estimate above prices the same bytes for a different reason (too few
+cores streaming them). Delivery takes as long as the slower of the two, so a read is
+charged `max(delivery, requests)`, never their sum, and this term adds only the part the
+estimate does not already charge. Both sides aggregate reads the same way: a graph input
+read by several ops of one kernel is one load, charged once at the slowest of its reads;
+any other read is charged on its own. With two reads of one graph input at (delivery,
+requests) = (10, 10) and (1, 20), the load is delivered in 20: the estimate charges 10
+and this term adds 10, not 19.
+
+Where it does not apply:
+
+- a single-pass matmul (no loop) keeps its previous price, which keeps this term disjoint
+  from any single-pass delivery estimate;
+- a read whose geometry is not proven (another device dtype, a gather or indirect index,
+  or a stick split that some candidate of the menu cannot keep whole) keeps its previous
+  price for every candidate;
+- copies and other one-input ops keep the transport term exactly as before; a matmul
+  never enters it, so the allocator's direct-read decisions are unchanged.
+
+The report has no menu, so the delivery estimate is absent there and the report charges
+the whole request excess. Two things are assumptions, not measurements: the rate at core
+counts the calibration never visited, and that the two bottlenecks combine by `max`
+rather than adding.
+
 `spyre_fuse_nodes` fuses everything it can — contiguous Spyre nodes accumulate in order, and
 only a node that is not on the device starts a new bundle. No size limit, no cost heuristic,
 no reordering. The pass applies that same rule, with two differences:
