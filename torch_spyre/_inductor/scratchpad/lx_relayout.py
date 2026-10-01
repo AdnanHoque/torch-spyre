@@ -60,7 +60,7 @@ from ..pass_utils import (
     op_read_writes,
     try_device_coordinates,
 )
-from .utils import _op_num_cores
+from .utils import _op_num_cores, invalidate_frontend_lx_high_water
 
 logger = get_inductor_logger("lx_relayout")
 _DESTINATION_PREFIX = "__spyre_lx_relayout__"
@@ -499,6 +499,9 @@ def demote_lx_relayout_group(
         layout = buffer.get_layout()
         if isinstance(layout, FixedTiledLayout):
             _clear_lx_state(layout)
+    # Demotion changes which buffers the frontend still owns; any cached
+    # per-op high-water must be recomputed against the new state.
+    invalidate_frontend_lx_high_water(graph)
     logger.info("demoted %s out of LX: %s", ", ".join(sorted(names)), reason)
 
 

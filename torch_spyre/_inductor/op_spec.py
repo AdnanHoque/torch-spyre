@@ -31,6 +31,11 @@ from .constants import IDENTITY_OP
 
 LX_RELAYOUT_INFO_KEY = "lx_relayout_certified"
 
+# Optional per-program frontend LX reservation, in bytes per core, reserving
+# [0, value) in the owning program's phase. Absent means the backend keeps its
+# configured default reservation.
+FRONTEND_LX_BYTES_INFO_KEY = "frontend_lx_bytes"
+
 
 class IndirectAccess(Function):
     """Sympy function: IndirectAccess(tensor_name) — runtime index read from that tensor at the current iteration point.

@@ -102,6 +102,7 @@ from torch_spyre._inductor.scratchpad.utils import (
     _would_produce_lx_back_gap,
     OP_OUTPUT_NOT_GOOD_FOR_LX_REUSE,
     counted_loop_lifetime_overrides,
+    publish_frontend_lx_footprints,
 )
 from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
 from torch_spyre._inductor.ir import FixedTiledLayout, SpyreEmptyFallback
@@ -1466,6 +1467,13 @@ class ScratchpadAllocator:
         buffer_users = get_buffer_users(graph)
         graph_editor = GraphEditor(graph)
 
+        # The packed per-core footprint of every buffer that keeps its LX
+        # placement, keyed by the name the final graph will use. Published for
+        # frontend_lx_high_water, which must not re-derive these from tensor
+        # sizes: relayout sources carry their source footprint and private
+        # destinations their rounded destination footprint.
+        footprints: dict[str, int] = {}
+
         for b in buffers:
             if b.address is None or b.name.startswith("__spyre_lx_relayout__:"):
                 continue
@@ -1479,6 +1487,7 @@ class ScratchpadAllocator:
                     lx_view=b.lx_view,
                 )
                 self._set_one_allocation(new_buffer, b.address, b.lx_view)
+                footprints[new_buffer.get_name()] = b.size
 
             elif b.name in outputs:
                 new_buffer = graph_editor.push_allocation_with_clone(
@@ -1486,13 +1495,30 @@ class ScratchpadAllocator:
                 )
                 self._set_one_allocation(buf, b.address, b.lx_view)
                 graph_editor.change_graph_output(buf, new_buffer)
+                footprints[b.name] = b.size
 
             else:
                 self._set_one_allocation(buf, b.address, b.lx_view)
+                footprints[b.name] = b.size
 
         # Keep graph mutation last and in pre-scheduling: solver retries require
         # the original graph, and post-grad no-op elimination has already run.
         materialize_lx_relayouts(graph, accepted_lx_relayouts)
+
+        # A private relayout destination is materialized under a fresh buffer
+        # name; resolve it through the registry to keep the footprint record on
+        # the name the final graph uses.
+        by_name = {b.name: b for b in buffers}
+        registry = materialized_lx_relayouts(graph)
+        for plan in accepted_lx_relayouts:
+            entry = registry.get(plan.edge)
+            destination = by_name.get(plan.destination_name)
+            if entry is None or destination is None:
+                continue
+            copy_name, _ = entry
+            footprints[copy_name] = destination.size
+
+        publish_frontend_lx_footprints(graph, footprints)
 
     def _set_one_allocation(
         self,
