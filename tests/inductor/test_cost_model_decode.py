@@ -1072,3 +1072,241 @@ def test_an_op_without_a_for_each_tile_variable_marks_no_read_as_advancing(monke
     )
     feature = _features(monkeypatch, op, {d0: 64, d1: 64, d2: 64})
     assert not any(a.advances_with_loop_var for a in feature.args)
+
+
+# ------------------------- loop-delivery eligibility: one per-read verdict
+#
+# ``advances_with_loop_var`` gates the loop-delivery term (with ``loop_factor == 1``
+# and a partitioning candidate). It follows the same per-read verdict as
+# ``loop_factor``: the lowering's stamp, else a nonzero coefficient on the level's
+# variable. Each test asserts the flag and the factor together, since only their
+# combination prices.
+
+
+def _read(feature, name):
+    return next(a for a in feature.args if a.name == name)
+
+
+def test_a_stamped_pinned_read_carrying_the_loop_variable_is_not_eligible(
+    monkeypatch,
+):
+    op = _looped_op(
+        [8],
+        [[]],
+        [_hint(u0, sympy.Integer(8))],
+        write_index=64 * d0 + d2,
+        read_indices=[4096 * u0 + d2],
+    )
+    op.loop_info.tiled_dims_per_read = [[[]]]
+    op.loop_info.squeezed_advance_per_read = []
+    pinned = _read(_features(monkeypatch, op, {d0: 64, d2: 64}), "arg0")
+    assert (pinned.advances_with_loop_var, pinned.loop_factor) == (False, 8)
+
+
+def test_a_squeezed_advance_stamp_is_eligible_without_the_variable_in_the_index(
+    monkeypatch,
+):
+    """The rebased direct read ``read_copy_elision`` builds: the loop variable left
+    the index, and the stamp carries the advance (one expert bank slice per trip).
+    It is the same walked read as before the rebase, so it is eligible."""
+    op = _looped_op(
+        [8],
+        [[]],
+        [_hint(u0, sympy.Integer(8))],
+        write_index=64 * d0 + d2,
+        read_indices=[d2],
+    )
+    op.loop_info.tiled_dims_per_read = [[[]]]
+    op.loop_info.squeezed_advance_per_read = [[[(sympy.Integer(4096), 1)]]]
+    walked = _read(
+        _features(monkeypatch, op, {d0: 64, d2: 64}, candidate_work_slices=[{d2: 4}]),
+        "arg0",
+    )
+    assert (walked.advances_with_loop_var, walked.loop_factor) == (True, 1)
+    assert walked.has_partitioning_candidate
+
+
+def test_a_zero_coefficient_loop_variable_is_not_eligible_without_stamps(monkeypatch):
+    from torch.utils._sympy.functions import FloorDiv
+
+    op = _looped_op(
+        [8],
+        [[]],
+        [_hint(u0, sympy.Integer(8))],
+        write_index=64 * d0 + d2,
+        read_indices=[4096 * FloorDiv(u0, 2) + d2],
+    )
+    pinned = _read(_features(monkeypatch, op, {d0: 64, d2: 64}), "arg0")
+    assert (pinned.advances_with_loop_var, pinned.loop_factor) == (False, 8)
+
+
+def test_a_read_walked_only_by_the_levels_tiled_dim_is_a_coarse_loop_read(
+    monkeypatch,
+):
+    """The level tiles the op's row dim ``d0`` and the read carries ``d0``, so the
+    loop walks it once (factor 1), but its ``u0`` term has coefficient 0: the
+    for_each_tile variable does not advance it. That is the coarse-loop operand the
+    loop-delivery term leaves out, so it is not eligible."""
+    from torch.utils._sympy.functions import FloorDiv
+
+    op = _looped_op(
+        [8],
+        [[0]],
+        [_hint(u0, sympy.Integer(8))],
+        write_index=64 * d0 + d1,
+        read_indices=[64 * d0 + 4096 * FloorDiv(u0, 2) + d2],
+        data=SimpleNamespace(
+            ranges=[64, 64], reduction_ranges=[64], reduction_type=None
+        ),
+    )
+    read = _read(_features(monkeypatch, op, {d0: 64, d1: 64, d2: 64}), "arg0")
+    assert (read.advances_with_loop_var, read.loop_factor) == (False, 1)
+
+
+# Through the callers. The allocator builds its objective from
+# ``CoOptimizingAllocator._extract_op_features`` (the legal menu goes in) and prices
+# with its own ``_COST_PARAMS``; the report calls ``extract_op_features(op)`` with no
+# menu and the default params.
+
+
+def _row_tiled_expert_matmul(read_stamps):
+    """One expert per trip of an 8-trip loop that also tiles the output rows ``d0``.
+
+    ``arg0`` is the activation tile; its index carries ``d0`` and ``u0``.
+    ``arg1`` is the expert bank, walked by ``u0``. ``read_stamps`` is the
+    lowering's per-read stamp list.
+    """
+    from torch_spyre._inductor.constants import BATCH_MATMUL_OP
+
+    op = _looped_op(
+        [8],
+        [[0]],
+        [_hint(u0, sympy.Integer(8))],
+        write_index=64 * d0 + d1,
+        read_indices=[64 * d0 + 4096 * u0 + d2, 64 * d2 + d1 + 4096 * u0],
+        data=SimpleNamespace(
+            ranges=[64, 64], reduction_ranges=[64], reduction_type=BATCH_MATMUL_OP
+        ),
+    )
+    op.get_size = lambda: [64, 64]
+    op.loop_info.tiled_dims_per_read = read_stamps
+    op.loop_info.squeezed_advance_per_read = []
+    return op
+
+
+_ADVANCES = [[(0, sympy.Integer(64))]]  # one level, advancing
+_PINNED = [[]]  # one level, the explicit "pinned" verdict
+_IT_SPACE = {d0: 64, d1: 64, d2: 64}
+_MENU = [{d0: 2, d1: 4}, {d1: 8}]  # 8 cores: the delivery estimate is nonzero
+
+
+def _allocator_features(monkeypatch, op, chosen=0):
+    from torch_spyre._inductor.scratchpad import sa_cooptimizer
+    from torch_spyre._inductor.scratchpad.allocator import CoOptimizingAllocator
+    from torch_spyre._inductor.scratchpad.plan_solver import CoreDivision
+
+    monkeypatch.setattr(sa_cooptimizer, "iteration_space_from_op", lambda _: _IT_SPACE)
+    monkeypatch.setattr(dcm, "iteration_space_from_op", lambda _: _IT_SPACE)
+    monkeypatch.setattr(dcm, "_indirect_write_elems", lambda *_: None)
+    buffers = {
+        "buf1": SimpleNamespace(
+            sym_core_divs=_MENU[chosen],
+            core_divisions=[CoreDivision(splits=dict(s)) for s in _MENU],
+        )
+    }
+    with V.set_graph_handler(_StubGraph()):
+        return CoOptimizingAllocator._extract_op_features(
+            None, None, "buf1", buffers, {}, op=op
+        )
+
+
+def _delivery_ns(feature, params=None):
+    from torch_spyre._inductor.cost_model import _partitioned_operand_read_excess
+    from torch_spyre._inductor.scratchpad.allocator import _COST_PARAMS
+
+    return _partitioned_operand_read_excess([feature], params or _COST_PARAMS)
+
+
+def _without(feature, name):
+    import dataclasses
+
+    return dataclasses.replace(
+        feature, args=[a for a in feature.args if a.name != name]
+    )
+
+
+def test_the_allocator_prices_loop_delivery_only_for_reads_the_loop_variable_walks(
+    monkeypatch,
+):
+    """Both reads advance by the lowering's stamps: both are walked once and both
+    get the allocator's loop-delivery estimate."""
+    walked = _allocator_features(
+        monkeypatch, _row_tiled_expert_matmul([_ADVANCES, _ADVANCES])
+    )
+    flags = {
+        a.name: (a.advances_with_loop_var, a.loop_factor, a.has_partitioning_candidate)
+        for a in walked.args
+        if a.role == "input"
+    }
+    assert flags == {"arg0": (True, 1, True), "arg1": (True, 1, True)}
+    assert _delivery_ns(walked) > _delivery_ns(_without(walked, "arg0")) > 0
+
+
+def test_a_read_whose_advance_moved_to_its_restickify_copy_gets_no_loop_delivery(
+    monkeypatch,
+):
+    """The lost case, through the allocator. ``insert_restickify`` moves a read's
+    advance onto the copy it inserts and stamps the consumer's read pinned at the
+    shared levels; the consumer reads the fixed copy every trip, and ``u0`` stays in
+    its index. The row tile ``d0`` still walks it (factor 1), so the free-symbol rule
+    priced it as a loop-walked operand. By the stamp it is not one: only the bank
+    keeps the estimate."""
+    moved = _allocator_features(
+        monkeypatch, _row_tiled_expert_matmul([_PINNED, _ADVANCES])
+    )
+    activation, bank = _read(moved, "arg0"), _read(moved, "arg1")
+    assert (activation.advances_with_loop_var, activation.loop_factor) == (False, 1)
+    assert activation.has_partitioning_candidate
+    assert (bank.advances_with_loop_var, bank.loop_factor) == (True, 1)
+    assert _delivery_ns(moved) == pytest.approx(_delivery_ns(_without(moved, "arg0")))
+    assert _delivery_ns(moved) > 0
+
+
+def test_the_report_omits_the_loop_delivery_estimate(monkeypatch):
+    """The report extracts without the legal menu, so no read has partitioning
+    evidence and the estimate is omitted for every shape, eligible or not. Its
+    totals therefore need not rank eligible looped-matmul plans as the allocator
+    does."""
+    from torch_spyre._inductor.cost_model import CostParams
+
+    op = _row_tiled_expert_matmul([_ADVANCES, _ADVANCES])
+    report = _features(monkeypatch, op, _IT_SPACE)
+    assert [a.advances_with_loop_var for a in report.args if a.role == "input"] == [
+        True,
+        True,
+    ]
+    assert not any(a.has_partitioning_candidate for a in report.args)
+    assert _delivery_ns(report, CostParams()) == 0
+
+
+def test_a_rebased_bank_read_keeps_the_estimate_of_its_pre_rebase_form(monkeypatch):
+    """The gained case, through the allocator's extraction. The pre-rebase bank read
+    carries ``u0``; the rebased one (``read_copy_elision``) drops it and keeps the
+    advance in the squeezed stamp. One physical read, one price. Under the
+    free-symbol rule the rebased form lost the estimate. (Today the allocator never
+    sees a rebased matmul read: its pricing projection rebases pointwise copies only,
+    and the elision itself runs after planning.)"""
+    before = _row_tiled_expert_matmul([_PINNED, _ADVANCES])
+    rebased = _row_tiled_expert_matmul([_PINNED, [[]]])
+    rebased.get_read_writes().reads[1].index = 64 * d2 + d1
+    rebased.loop_info.squeezed_advance_per_read = [[[]], [[(sympy.Integer(4096), 1)]]]
+    bank_before = _read(_allocator_features(monkeypatch, before), "arg1")
+    priced = _allocator_features(monkeypatch, rebased)
+    bank_after = _read(priced, "arg1")
+    assert (bank_after.advances_with_loop_var, bank_after.loop_factor) == (True, 1)
+    assert (
+        bank_after.has_partitioning_candidate == bank_before.has_partitioning_candidate
+    )
+    assert _delivery_ns(priced) == pytest.approx(
+        _delivery_ns(_allocator_features(monkeypatch, before))
+    )

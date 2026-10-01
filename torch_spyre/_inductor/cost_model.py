@@ -223,12 +223,14 @@ class ArgTraffic:
     # iteration). LX-resident args are ~free (excluded from read/write) unless they
     # cross the graph boundary -- see ``is_boundary``.
     loop_factor: int = 1
-    # This read's address advances with a ``for_each_tile`` loop variable: its index
-    # carries a per-iteration symbol the lowering recorded on the op's dim hints, so
-    # the loop walks this operand one tile per trip (``loop_factor`` is then 1). A
-    # coarse-tiling loop can also leave ``loop_factor`` at 1 for an operand it walks,
-    # so this flag, not the factor, says which kind of loop the operand advances with.
-    # Read by ``_partitioned_operand_read_excess`` only.
+    # This read's address advances with a ``for_each_tile`` loop variable at some
+    # level, by the lowering's own per-read verdict (its stamp, else a nonzero
+    # coefficient on the level's variable) -- the verdict ``loop_factor`` also uses.
+    # The variable merely appearing in the index is not enough: a pinned read can
+    # keep it (``4096*FloorDiv(u0, 2)``, or a read whose advance insert_restickify
+    # moved onto the copy). A coarse-tiling loop can also leave ``loop_factor`` at 1
+    # for an operand it walks, so this flag, not the factor, says which kind of loop
+    # the operand advances with. Read by ``_partitioned_operand_read_excess`` only.
     advances_with_loop_var: bool = False
     # Positive evidence from the existing legal candidate menu: at least one
     # candidate splits a symbol this read indexes. This is menu-wide, not a

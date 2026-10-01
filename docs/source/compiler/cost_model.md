@@ -321,6 +321,29 @@ count directly. Two loops of 128 experts, each expert a `[64, 128]` output with 
 Both cost 128 experts of work on both models. A reduction-tiled loop makes one pass per
 K slice; a loop that tiles an output dimension walks its output once and makes one pass.
 
+### Delivering the operand a loop walks
+
+A `for_each_tile` loop that reads one expert bank (or one KV page) per trip streams that
+operand from main memory one slice per trip. When too few cores stream it, delivery is
+slower than the shared peak. The allocator adds that excess time for an input of a
+looped matmul only when all three hold:
+
+1. a `for_each_tile` variable advances the read's address, by the lowering's own
+   per-read verdict: its stamp, else a nonzero coefficient on the variable. This is the
+   same verdict that sets the read's loop factor;
+2. the loop walks the read once (loop factor 1);
+3. some division in the allocator's legal menu splits a dimension the read indexes.
+
+The excess is `bytes / (cores * rate) - bytes / peak`, and never below zero. Three reads
+look similar but are not eligible: a read whose index contains the variable but does not
+advance with it (`4096 * FloorDiv(u0, 2)`, or a read whose advance `insert_restickify`
+moved onto the copy it inserted); a read walked only by a coarse-tiled dimension of the
+op; a read re-entered every trip.
+
+The report leaves this estimate out. It extracts features without the legal menu, so
+condition 3 never holds there, and its totals need not rank eligible looped-matmul plans
+the way the allocator does.
+
 `spyre_fuse_nodes` fuses everything it can — contiguous Spyre nodes accumulate in order, and
 only a node that is not on the device starts a new bundle. No size limit, no cost heuristic,
 no reordering. The pass applies that same rule, with two differences:

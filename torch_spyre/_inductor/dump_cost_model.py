@@ -395,16 +395,6 @@ def _loop_var_advances(index, loop_vars, stamped=None) -> list[bool]:
     return advances
 
 
-def _advances_with(index, loop_vars) -> bool:
-    """Whether ``index`` carries one of the ``for_each_tile`` loop variables."""
-    if index is None or not loop_vars:
-        return False
-    try:
-        return bool(loop_vars & set(getattr(index, "free_symbols", None) or ()))
-    except Exception:  # noqa: BLE001 - best-effort feature extraction
-        return False
-
-
 def _loop_factor_for_index(index, levels, advances=None) -> int:
     """How many times traffic at ``index`` is transferred over the whole loop nest.
 
@@ -1067,7 +1057,6 @@ def extract_op_features(
     # matmul's work) and every read's (see the PER-ARG comment below).
     _levels = _tiled_symbols_per_level(op)
     _loop_vars = _level_loop_vars(op, _levels) if _levels else []
-    _splice_vars = set(loop_var_ranges_from_dim_hints(op))
     _li = getattr(op, "loop_info", None)
     try:
         _rw = op.get_read_writes()
@@ -1226,6 +1215,26 @@ def extract_op_features(
             broadcast = n_index_vars < n_out_vars
         except Exception:  # noqa: BLE001
             broadcast = False
+        # One verdict per read and level: does this read's address advance with
+        # that level's for_each_tile variable? The lowering stamps it, else its
+        # own coefficient rule decides (``_loop_var_advances``). It sets both the
+        # read's loop factor and its loop-delivery eligibility, so the two prices
+        # cannot disagree about one read.
+        read_advances = (
+            _loop_var_advances(
+                index,
+                _loop_vars,
+                _stamped_advances(
+                    _stamped_reads[indexed_pos],
+                    _squeezed_reads[indexed_pos] if _squeezed_reads else None,
+                    len(_levels),
+                )
+                if stamps_cover_reads
+                else None,
+            )
+            if (_levels and index is not None)
+            else []
+        )
         mem, dims, in_elems, in_logical = _input_traffic(name)
         if in_elems is None:  # unresolved buffer -> fallback
             # A broadcast operand with no resolvable buffer (e.g. a scalar constant)
@@ -1253,28 +1262,16 @@ def extract_op_features(
                 logical=list(in_logical) if in_logical else [],
                 # Per-arg: this read's OWN index decides which levels it repeats at.
                 loop_factor=(
-                    _loop_factor_for_index(
-                        index,
-                        _levels,
-                        _loop_var_advances(
-                            index,
-                            _loop_vars,
-                            _stamped_advances(
-                                _stamped_reads[indexed_pos],
-                                _squeezed_reads[indexed_pos]
-                                if _squeezed_reads
-                                else None,
-                                len(_levels),
-                            )
-                            if stamps_cover_reads
-                            else None,
-                        ),
-                    )
+                    _loop_factor_for_index(index, _levels, read_advances)
                     if (_levels and index is not None)
                     else in_factor
                 ),
                 is_boundary=(None if graph_inputs is None else name in graph_inputs),
-                advances_with_loop_var=_advances_with(index, _splice_vars),
+                # Walked by a for_each_tile variable at some level (the loop-delivery
+                # term also needs loop_factor 1 and a partitioning candidate). A
+                # read walked only by a tiled dim of the op is a coarse-loop read,
+                # which that term leaves out.
+                advances_with_loop_var=any(read_advances),
                 has_partitioning_candidate=_has_partitioning_candidate(
                     index, candidate_work_slices
                 ),
