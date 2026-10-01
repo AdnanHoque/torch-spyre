@@ -372,8 +372,10 @@ def _loop_var_advances(index, loop_vars, stamped=None) -> list[bool]:
     lowering's stamped verdict is authoritative when present (``_stamped_advances``).
     Without it, the lowering's own rule decides: the address advances iff the index
     has a nonzero coefficient on the loop variable.  A loop variable that is merely a
-    free symbol of the index (for example ``4096*FloorDiv(u0, 2)``, or a restickified
-    tile-pool read) does not advance the address.
+    free symbol of the index does not advance the address; the tested example is the
+    synthetic index ``4096*FloorDiv(u0, 2)`` (coefficient 0).  No lowered kernel is
+    known to produce such a read; following the lowering's rule keeps the price
+    consistent with what the lowering stamps.
     """
     advances = []
     for lv, var in enumerate(loop_vars):
@@ -581,7 +583,9 @@ def _matmul_features(
     * per-trip body op of a ``for_each_tile`` loop (one expert's MLP, one attention
       step over a KV page), re-writing the same buffer each trip -> ``trips``;
     * per-trip body op writing its own slice of a stacked buffer (``out[u0, m, n]``
-      into ``[E, T, N]``): the buffer already holds every trip -> 1;
+      into ``[E, T, N]``): the buffer already holds every trip -> 1.  This is the
+      write-index form the factor handles; whether a lowered body ``batchmatmul``
+      reaches that write is not established (its test is synthetic);
     * nested loops: the product over levels (``mm_nested_m_k`` -> 4).
 
     The factor is per level, so a nest that tiles at one level and not another is

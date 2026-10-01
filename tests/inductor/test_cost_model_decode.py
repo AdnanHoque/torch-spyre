@@ -463,10 +463,14 @@ def test_nested_loops_of_different_trip_count_keep_their_own_variables():
 
 
 def test_a_loop_variable_without_a_coefficient_does_not_advance_the_read():
-    """The lowering advances a dependency only when its index has a nonzero
+    """Synthetic stamp-consistency check, not an observed lowered-kernel case.
+
+    The lowering advances a dependency only when its index has a nonzero
     coefficient on the loop variable (``_stamp_direct_loop_info``). ``u0`` being a
-    free symbol is not enough: ``4096*FloorDiv(u0, 2)`` has coefficient 0, so the
-    lowering stamps it pinned and the read is priced as re-entered every trip."""
+    free symbol is not enough: the synthetic index ``4096*FloorDiv(u0, 2)`` has
+    coefficient 0, so under that rule it would be stamped pinned, and the price
+    follows the same rule (re-entered every trip). No lowered kernel is known to
+    produce this read."""
     from torch.utils._sympy.functions import FloorDiv
 
     levels = [(8, set(), 0)]
@@ -478,10 +482,13 @@ def test_a_loop_variable_without_a_coefficient_does_not_advance_the_read():
 
 
 def test_the_lowerings_stamp_decides_over_the_index():
-    """A restickified tile-pool read keeps ``u0`` in its index but is pinned:
-    ``insert_restickify`` moves the advance onto the copy and stamps the consumer's
-    read with an empty level. The stamp is what code generation follows, so it is
-    what the price follows."""
+    """Synthetic stamp-consistency check, not an observed lowered-kernel case.
+
+    When the lowering's stamp and the index disagree, the stamp wins: code
+    generation follows the stamp, so the price follows it too. The read below keeps
+    ``u0`` in its index but carries an empty ("pinned") stamp. It is constructed for
+    the check; no reachable read with ``u0`` in its index and a pinned stamp is
+    known."""
     levels = [(8, set(), 0)]
     op = _op(_hint(u0, 8))
     pool_read = 64 * u0 + d2
@@ -656,6 +663,10 @@ def test_a_stacked_slice_write_is_not_multiplied_by_the_trip_count(monkeypatch):
     ``[E, T, N]`` buffer produces that buffer once: ``out_elems`` already covers every
     trip. Both are 128 experts of ``T*N*K`` work; scaling the stacked write by the trip
     count as well gave 8,589,934,592.
+
+    The stacked write is synthetic: the test checks that the factor follows the
+    write's index, not that a lowered body ``batchmatmul`` reaches this
+    squeezed-advance write (not established).
     """
     E, T, N, K = 128, 64, 128, 64
     m, n, r0 = sympy.symbols("m n r0", integer=True)
@@ -750,9 +761,12 @@ def test_a_mixed_nest_scales_only_the_level_that_re_writes(monkeypatch):
 def test_the_extractor_follows_a_pinned_stamp_on_a_read_carrying_the_loop_variable(
     monkeypatch,
 ):
-    """The lowering's per-read stamp, when it covers every read, is what the price
-    follows: here the second read keeps ``u0`` in its index (as a restickified tile
-    pool read does) but is stamped pinned, so it is re-read every trip."""
+    """Synthetic stamp-consistency check, not an observed lowered-kernel case.
+
+    The lowering's per-read stamp, when it covers every read, is what the price
+    follows: here the second read keeps ``u0`` in its index but is stamped pinned,
+    so it is priced as re-read every trip. The read is constructed for the check;
+    no reachable read of this shape is known."""
     op = _looped_op(
         [8],
         [[]],
