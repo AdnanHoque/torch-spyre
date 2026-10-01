@@ -22,6 +22,8 @@ Each test class covers one category from the Hash Coverage Table:
   TestIterationSpaceHashed     — different iter-space sizes → different hash
   TestOpFuncHashed             — different op names → different hash
   TestDebugHandleStripped      — debug_handle_ is stripped before hashing
+  TestFrontendLxBytesHashed    — per-op frontend LX reservation changes the hash,
+                                 with the same semantics bundle emission uses
 """
 
 import json
@@ -64,6 +66,7 @@ def _make_op_spec(
     is_reduction: bool = False,
     tiled_symbols=None,
     tiled_symbol_trip_counts=None,
+    op_info=None,
 ):
     """Return a minimal OpSpec for a single-input elementwise op."""
     from torch_spyre._inductor.op_spec import OpSpec, TensorArg
@@ -96,7 +99,7 @@ def _make_op_spec(
         is_reduction=is_reduction,
         iteration_space=iteration_space,
         args=[in_arg, out_arg],
-        op_info={},
+        op_info={} if op_info is None else op_info,
         tiled_symbols=tiled_symbols or [],
         tiled_symbol_trip_counts=tiled_symbol_trip_counts or {},
     )
@@ -464,6 +467,110 @@ class TestFrontendPoolAllocationHashed(unittest.TestCase):
             self._hash_with_flag(True),
             "Same flag value must produce the same hash.",
         )
+
+
+# The effective per-op frontend LX reservation is hashed
+class TestFrontendLxBytesHashed(unittest.TestCase):
+    """op_info["frontend_lx_bytes"] is emitted by generate_bundle as
+    ``frontend_lx_bytes = N : i64`` on that program's sdsc_execute (bytes per
+    core, reserving [0, N) in the owning phase; absent = backend default).  On
+    the SPYRE_KERNEL_CACHE=1 path a hit replays the compiled bundle.mlir
+    wholesale, so two OpSpec trees that differ only in this value must produce
+    different keys -- otherwise the second call is served the first call's
+    reservation and can under-reserve its phase.  The key must follow bundle
+    emission exactly: absence, zero and every valid value pairwise distinct,
+    equal values reuse, and values emission drops (non-int, negative) hash
+    like absence.
+    """
+
+    @staticmethod
+    def _op_with_lx(lx_bytes, size: int = 64):
+        from torch_spyre._inductor.op_spec import FRONTEND_LX_BYTES_INFO_KEY
+
+        return _make_op_spec(size=size, op_info={FRONTEND_LX_BYTES_INFO_KEY: lx_bytes})
+
+    def test_values_differing_only_in_lx_bytes_do_not_collide(self):
+        """The reviewed collision: absent / 131072 / 262144 produced one key."""
+        h_absent = _hash([_make_op_spec()])
+        h_small = _hash([self._op_with_lx(131072)])
+        h_large = _hash([self._op_with_lx(262144)])
+
+        self.assertNotEqual(
+            h_absent,
+            h_small,
+            "absent and frontend_lx_bytes=131072 must produce different hashes — "
+            "a cache hit would replay the other call's attribute.",
+        )
+        self.assertNotEqual(
+            h_small,
+            h_large,
+            "frontend_lx_bytes=131072 and 262144 must produce different hashes — "
+            "a hit would under-reserve the larger call's phase.",
+        )
+        self.assertNotEqual(h_absent, h_large)
+
+    def test_absence_zero_and_values_are_pairwise_distinct(self):
+        """Absence (backend default), zero (nothing live) and a value are three
+        different emitted bundles and must be three different keys."""
+        hashes = {
+            name: _hash([spec])
+            for name, spec in {
+                "absent": _make_op_spec(),
+                "zero": self._op_with_lx(0),
+                "131072": self._op_with_lx(131072),
+                "262144": self._op_with_lx(262144),
+            }.items()
+        }
+
+        self.assertEqual(
+            len(set(hashes.values())),
+            4,
+            f"absence, zero and each value must be distinct keys; got {hashes}.",
+        )
+
+    def test_equal_values_produce_same_hash(self):
+        """The same value in two trees of the same shape must reuse the entry
+        (no spurious misses introduced by the coverage change)."""
+        self.assertEqual(
+            _hash([self._op_with_lx(131072)]),
+            _hash([self._op_with_lx(131072)]),
+            "Equal frontend_lx_bytes values must produce the same hash.",
+        )
+
+    def test_nested_loop_body_value_is_hashed(self):
+        """The value of an op nested in LoopSpec bodies is hashed too, at every
+        depth — the consumer belongs to that op's program, not the top level."""
+        from torch_spyre._inductor.op_spec import LoopSpec
+
+        inner_small = LoopSpec(count=2, body=[self._op_with_lx(131072)])
+        inner_large = LoopSpec(count=2, body=[self._op_with_lx(262144)])
+        loop_small = LoopSpec(count=4, body=[inner_small])
+        loop_large = LoopSpec(count=4, body=[inner_large])
+
+        self.assertNotEqual(
+            _hash([loop_small]),
+            _hash([loop_large]),
+            "Changing the value inside a nested loop body must change the hash.",
+        )
+        self.assertNotEqual(
+            _hash([inner_small]),
+            _hash([inner_large]),
+            "Changing the value inside a loop body must change the hash.",
+        )
+
+    def test_values_emission_drops_hash_like_absence(self):
+        """Bundle emission skips non-int and negative values (no attribute),
+        so those trees are byte-identical bundles and must hash like absence —
+        the key follows emission semantics, not op_info's raw content."""
+        h_absent = _hash([_make_op_spec()])
+        for dropped in ("not-an-int", -128, 131072.5):
+            with self.subTest(dropped=dropped):
+                self.assertEqual(
+                    _hash([self._op_with_lx(dropped)]),
+                    h_absent,
+                    f"frontend_lx_bytes={dropped!r} emits no attribute; "
+                    "the hash must match the absent case.",
+                )
 
 
 # Version strings affect hash (environment independence guard)

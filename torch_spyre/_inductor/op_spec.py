@@ -37,6 +37,22 @@ LX_RELAYOUT_INFO_KEY = "lx_relayout_certified"
 FRONTEND_LX_BYTES_INFO_KEY = "frontend_lx_bytes"
 
 
+def frontend_lx_bytes_attr_value(op_info: dict | None) -> int | None:
+    """The value bundle emission writes as ``frontend_lx_bytes = N : i64``.
+
+    Returns the effective per-call reservation, or ``None`` when no attribute
+    is emitted (absent key, or a value that is not a nonnegative int). Bundle
+    emission and the kernel cache key both go through here: the cache key must
+    change exactly when the emitted attribute changes, no more and no less.
+    """
+    if not op_info:
+        return None
+    value = op_info.get(FRONTEND_LX_BYTES_INFO_KEY)
+    if isinstance(value, int) and value >= 0:
+        return int(value)
+    return None
+
+
 class IndirectAccess(Function):
     """Sympy function: IndirectAccess(tensor_name) — runtime index read from that tensor at the current iteration point.
 

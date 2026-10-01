@@ -26,10 +26,10 @@ from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.constants import MAX_POOL_SIZE_BYTES
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.op_spec import (
-    FRONTEND_LX_BYTES_INFO_KEY,
     LoopSpec,
     OpSpec,
     format_op_spec_list,
+    frontend_lx_bytes_attr_value,
 )
 from torch_spyre._inductor.op_spec_validation import validate_op_specs
 
@@ -810,12 +810,10 @@ def _emit_specs(
             symbol_ids_str = ", ".join(str(i) for i in cached_symbol_ids)
             # Per-call reservation, read from THIS op's op_info: the cached JSON
             # above only supplies the filename and symbol IDs, never ownership.
-            lx_bytes = (
-                entry.op_info.get(FRONTEND_LX_BYTES_INFO_KEY) if entry.op_info else None
-            )
+            lx_bytes = frontend_lx_bytes_attr_value(entry.op_info)
             lx_bytes_attr = (
-                f", frontend_lx_bytes = {int(lx_bytes)} : i64"
-                if isinstance(lx_bytes, int) and lx_bytes >= 0
+                f", frontend_lx_bytes = {lx_bytes} : i64"
+                if lx_bytes is not None
                 else ""
             )
             f.write(
