@@ -47,6 +47,7 @@ from torch_spyre._inductor.pass_utils import (
     indirect_info_from_op,
     iteration_space_from_op,
     op_read_writes,
+    origin_in_graph,
     _prepare_per_core_view,
     _per_core_view_from_prep,
     _per_core_view_on_buf,
@@ -328,11 +329,24 @@ def _graph_output_buffer_name(entry: Any) -> Optional[str]:
 
 
 def _is_reinterpret_output_entry(entry: Any) -> bool:
-    """The same ReinterpretView shape ``_residency_reasons`` refuses."""
+    """Whether a ReinterpretView sits anywhere between the entry and its buffer.
 
-    return isinstance(entry, ReinterpretView) or isinstance(
-        getattr(entry, "data", None), ReinterpretView
-    )
+    ``GraphEditor.change_graph_output`` keeps such a view and repoints its
+    ``.data`` in place.  The splice may have handed that same view object to the
+    carry update as its mutation target (an init that is a view, e.g.
+    ``zeros_like`` of a transposed tensor, reaches the output as
+    ``TensorBox(StorageBox(view))``), so repointing it would make the in-loop
+    update write the drain clone instead of the carry.
+    """
+
+    node = entry
+    while not isinstance(node, Buffer):
+        if isinstance(node, ReinterpretView):
+            return True
+        node = getattr(node, "data", None)
+        if node is None:
+            return False
+    return False
 
 
 def validated_drain_plans(
@@ -348,9 +362,10 @@ def validated_drain_plans(
     created):
 
     P1  boundary cloning is enabled;
-    P2  exactly one ``graph.graph_outputs`` entry names the storage, and it is
-        not a ReinterpretView (``change_graph_output`` replaces the first
-        match, so an aliased entry declines);
+    P2  exactly one ``graph.graph_outputs`` entry names the storage, and no
+        ReinterpretView sits anywhere on its wrapper chain
+        (``change_graph_output`` replaces the first match, so an aliased entry
+        declines, and it repoints a view in place);
     P3  the storage op carries a ``LoopCarryRecord`` whose ``storage_name`` is
         its own name and whose ``update_name`` resolves to exactly one op;
     P4  that update is the only op mutating the storage;
@@ -359,7 +374,11 @@ def validated_drain_plans(
         has no loop membership;
     P6  the retained FX ``while_loop`` origin lives in this graph;
     P7  the loop's group subtree is non-empty, so its last member -- the
-        lowered insertion anchor -- exists.
+        lowered insertion anchor -- exists;
+    P8  the storage has an FX origin in this graph: the drain's FX clone reads
+        that node.  The pre-loop ownership copy of a caller's init is built
+        without origins by design (``while_loop_bridge._make_copying_buffer``),
+        so such a carry declines.
 
     Intentional false negatives (safe declines, not bugs): a carry whose
     initializer is a view (the mutation target names the view, not the backing
@@ -391,6 +410,8 @@ def validated_drain_plans(
             continue
         loop_origin = record.loop_origin
         if loop_origin is None or getattr(loop_origin, "graph", None) is not fx_graph:
+            continue
+        if origin_in_graph(getattr(storage_op, "origins", ()), fx_graph) is None:
             continue
         update_op = op_by_name.get(record.update_name)
         if update_op is None:
@@ -535,7 +556,7 @@ def _assert_drain_plan_committed(
     graph: GraphLowering,
     storage_buffer: LifetimeBoundBuffer,
     buffers_by_name: Mapping[str, LifetimeBoundBuffer],
-    op_by_name: Mapping[str, Operation],
+    op_by_name: dict[str, Operation],
     plan: DrainPlan,
 ) -> None:
     """Fail-fast checks for a planned drain the solver committed to LX.

@@ -62,6 +62,7 @@ from for_each_tile_fixtures import (
     split_k_fn,
     split_k_private_transposed_init_fn,
     split_k_transposed_caller_init_fn,
+    split_k_transposed_caller_init_two_carries_fn,
     split_m_elementwise_fn,
     split_m_fn,
     two_loops_shared_init_fn,
@@ -2313,6 +2314,61 @@ class TestDrainMaterialization(unittest.TestCase):
                 allocator_module, "op_read_writes", side_effect=_forged
             ):
                 self.assertEqual(self._validate(graph), {})
+        with self.subTest("storage has no FX origin in this graph"):
+            with mock.patch.object(storage, "origins", OrderedSet()):
+                self.assertEqual(self._validate(graph), {})
+
+    def test_plan_declines_a_caller_init_carry(self):
+        """A caller-owned init is copied before the loop into an origin-less buffer.
+
+        That copy is the carry's storage, so the drain's FX clone would have no
+        node to read: the plan must decline and the carry keep today's HBM
+        behavior, instead of failing in the push.
+        """
+        from torch_spyre._inductor.wsr.for_each_tile_lowering import (
+            splice_while_loops,
+        )
+
+        (X, Y), ref = matmul_inputs()
+        graph = self._run_graph(split_k_caller_init_fn, (X, Y, torch.zeros_like(ref)))
+        with V.set_graph_handler(graph):
+            splice_while_loops(graph)
+        storage, _update, record = self._carry_parts(graph)
+        self.assertIn("while_loop_carry_copy_", storage.get_name())
+        self.assertIsNotNone(record.loop_origin)
+        self.assertEqual(len(storage.origins), 0)
+        self.assertEqual(self._validate(graph), {})
+
+    def test_plan_declines_a_carry_whose_output_is_a_view(self):
+        """An init that is a view reaches the output wrapped around that view.
+
+        ``b``'s init is ``zeros_like`` of a transposed tensor, so its graph
+        output is ``TensorBox(StorageBox(view))`` and the same view is its
+        update's mutation target. Repointing that view to a drain clone would
+        redirect the in-loop update, so the plan must decline.
+        """
+        from torch._inductor import ir
+
+        from torch_spyre._inductor.wsr.for_each_tile_lowering import (
+            splice_while_loops,
+        )
+
+        (X, Y), ref = matmul_inputs()
+        acc0 = torch.zeros_like(ref).t().contiguous()
+        graph = self._run_graph(
+            split_k_transposed_caller_init_two_carries_fn, (X, Y, acc0)
+        )
+        with V.set_graph_handler(graph):
+            splice_while_loops(graph)
+
+        def nested_view(entry):
+            node = entry.data if isinstance(entry, ir.TensorBox) else None
+            return isinstance(node, ir.StorageBox) and isinstance(
+                node.data, ir.ReinterpretView
+            )
+
+        self.assertTrue(any(nested_view(e) for e in graph.graph_outputs))
+        self.assertEqual(self._validate(graph), {})
 
     # ------------------------------------------------------------------
     # Real captured scheduler nodes and loop ordering

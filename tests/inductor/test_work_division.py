@@ -2475,6 +2475,9 @@ class TestResidencyEdgeMatching(unittest.TestCase):
         graph.graph_outputs = [storage_op]
         graph.get_output_names.return_value = ["plain"]
         graph.get_buffer.side_effect = op_by_name.get
+        # The drain's FX clone reads the storage's own FX node.
+        graph.graph = torch.fx.Graph()
+        storage_op.origins = OrderedSet([graph.graph.placeholder("plain")])
 
         # One counted loop holds the update and the reader; the fill and the
         # tail run outside it. The update writes through the storage.
