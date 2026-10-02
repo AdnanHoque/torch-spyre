@@ -41,6 +41,7 @@ import torch
 from torch._inductor.dependencies import MemoryDep
 
 from torch_spyre._inductor.ir import FixedTiledLayout
+from torch_spyre._inductor.loop_info import LoopCarryRecord
 from torch_spyre._inductor.op_spec import (
     FRONTEND_LX_BYTES_INFO_KEY,
     LX_RELAYOUT_INFO_KEY,
@@ -509,11 +510,12 @@ class PushAllocationPublicationTest(TestCase):
     under the name the final graph uses. The graph edits around it are stubbed:
     only what is published is checked here."""
 
-    def _publish(self, buffers, plans, registry):
+    def _publish(self, buffers, plans, registry, operations=()):
         graph = SimpleNamespace(
             get_output_names=lambda: [],
             graph_input_names=[],
             get_buffer=lambda name: SimpleNamespace(name=name),
+            operations=list(operations),
         )
         allocator = SimpleNamespace(_set_one_allocation=lambda *args: None)
         published = {}
@@ -572,6 +574,34 @@ class PushAllocationPublicationTest(TestCase):
         source = _joint("buf3", 2 << 20, {_S0: 16}, chosen=0, address=131072)
         published = self._publish([source, copy], [plan], {plan.edge: ("buf9", plan)})
         self.assertNotIn("buf9", published)
+
+    def test_loop_carry_update_carries_its_storage_record(self):
+        """A counted loop's carry update (a running max, say) writes in place
+        into the carry's storage and shares its layout. The final graph names
+        that write after the update, so the update gets the storage's record;
+        without it frontend_lx_high_water refused every bound in a decode
+        layer graph. An update whose storage has no record gets none."""
+
+        def op(name, record=None):
+            o = SimpleNamespace(get_name=lambda: name)
+            if record is not None:
+                o._loop_carry_record = record
+            return o
+
+        carry = LoopCarryRecord(storage_name="buf10", update_name="body_buf15")
+        orphan = LoopCarryRecord(storage_name="buf99", update_name="body_buf23")
+        storage = _joint("buf10", 8192, {_S0: 32}, chosen=0, address=141568)
+        published = self._publish(
+            [storage],
+            [],
+            {},
+            operations=[
+                op("buf10", carry),
+                op("body_buf15", carry),
+                op("body_buf23", orphan),
+            ],
+        )
+        self.assertEqual(published, {"buf10": 256, "body_buf15": 256})
 
     def test_unchosen_joint_buffer_publishes_an_unsized_record(self):
         buffers = [_joint("buf1", 4 << 20, {_S0: 32}, chosen=None, address=0)]

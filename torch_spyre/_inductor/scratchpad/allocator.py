@@ -1558,6 +1558,21 @@ class ScratchpadAllocator:
                     footprints[plan.source_name], plan.source_footprint_bytes or 0
                 )
 
+        # A counted-loop carry update writes in place into its carry's storage
+        # and shares that storage's layout (LoopCarryRecord, for_each_tile): it
+        # owns no LX of its own, but the final graph reads and writes it under
+        # its own name, so it carries the storage's record.
+        for op in graph.operations:
+            record = getattr(op, "_loop_carry_record", None)
+            if (
+                isinstance(record, LoopCarryRecord)
+                and record.update_name == op.get_name()
+                and record.storage_name in footprints
+            ):
+                footprints.setdefault(
+                    record.update_name, footprints[record.storage_name]
+                )
+
         publish_frontend_lx_footprints(graph, footprints)
 
     def _set_one_allocation(
