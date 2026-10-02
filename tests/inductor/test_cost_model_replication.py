@@ -41,6 +41,7 @@ from torch_spyre._inductor.cost_model import (
     CostParams,
     OpFeatures,
     _fused_hbm_bytes,
+    _loop_operand_request_excess,
     _partitioned_operand_read_excess,
     _replicated_operand_reads,
     explain,
@@ -685,6 +686,65 @@ def test_cp_sat_follows_symbolic_weight_replication_and_residency():
             exact = _excess_ns(cores) if partitioned and cores < 32 else 0.0
             got = _solve_pinned(expr, menu, i, residency=resident)
             assert got == pytest.approx(exact, rel=1e-3, abs=1.0), (menu[i], resident)
+
+
+def _with_run(op, run, **fields):
+    """``op`` with a proven per-core DMA run of ``run`` bytes on its weight read,
+    one trip's share of the weight per invocation."""
+    op.args[2] = dataclasses.replace(
+        op.args[2],
+        read_run_bytes=run,
+        read_tile_elems=W_ELEMS // op.loop_trip,
+        **fields,
+    )
+    return op
+
+
+def _requests_excess_ns(run, ns=7.5):
+    """The weight's DMA request time beyond bytes/peak over the whole loop."""
+    return W_BYTES * (ns / run - 1 / 150)
+
+
+def test_loop_operand_requests_skip_resident_and_single_pass_reads():
+    """The request term is ``(1 - is_lx)`` times the excess, symbolically, and prices
+    looped matmuls only, so it stays disjoint from the single-pass estimate."""
+    p = _COST_PARAMS
+    added = _requests_excess_ns(128) - _excess_ns(16)
+    assert added > 0
+    is_lx = sympy.Symbol("is_lx_w", integer=True, nonnegative=True)
+    resident = _with_run(_expert_loop_projection(16), 128, is_lx=is_lx)
+    term = sympy.sympify(_loop_operand_request_excess([resident], p))
+    assert term.subs(is_lx, 1) == 0
+    assert float(term.subs(is_lx, 0)) == pytest.approx(added, rel=1e-9)
+    single = _with_run(_projection(16, 1), 128)
+    assert _loop_operand_request_excess([single], p) == 0
+
+
+@pytest.mark.parametrize("boundary", [True, False])
+@pytest.mark.parametrize("order", [(0, 1), (1, 0)])
+def test_a_weight_read_by_two_looped_matmuls_is_counted_by_its_owner(boundary, order):
+    """Use A, 4 cores and 256 B runs: delivery-bound. Use B, 16 cores and 128 B
+    runs: request-bound, slower than A's delivery. A graph input is one load: its
+    composed price is the slowest use (B's requests), not A's delivery plus B's
+    requests beyond B's delivery. An internal buffer is two loads, each read at
+    its own slower bottleneck."""
+    p = _COST_PARAMS
+    a = (_excess_ns(4), _requests_excess_ns(256))
+    b = (_excess_ns(16), _requests_excess_ns(128))
+    assert a[0] > a[1] > 0 and b[1] > a[0] > b[0] > 0
+    uses = [
+        _with_run(_expert_loop_projection(cores), run, is_boundary=boundary)
+        for cores, run in ((4, 256), (16, 128))
+    ]
+    uses = [uses[i] for i in order]
+    delivery = _partitioned_operand_read_excess(uses, p)
+    composed = delivery + _loop_operand_request_excess(uses, p)
+    if boundary:
+        assert delivery == pytest.approx(a[0], rel=1e-9)
+        assert composed == pytest.approx(b[1], rel=1e-9)
+    else:
+        assert delivery == pytest.approx(a[0] + b[0], rel=1e-9)
+        assert composed == pytest.approx(a[0] + b[1], rel=1e-9)
 
 
 def test_explain_reports_the_limit():

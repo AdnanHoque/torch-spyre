@@ -25,6 +25,7 @@ No Spyre device or backend compiler is required; the iteration space and split m
 are injected so the pure decode logic is exercised in isolation.
 """
 
+import dataclasses
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -39,7 +40,7 @@ from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
 import torch_spyre._inductor.dump_cost_model as dcm
-from torch_spyre._C import SpyreTensorLayout
+from torch_spyre._C import DataFormats, SpyreTensorLayout
 from torch_spyre._inductor import work_division as wd
 from torch_spyre._inductor.cost_model import ArgTraffic
 from torch_spyre._inductor.dump_cost_model import (
@@ -545,12 +546,12 @@ def _looped_op(trips, tiled_out, hints, write_index, read_indices, data=None):
     )
 
 
-def _features(monkeypatch, op, it_space, **kwargs):
+def _features(monkeypatch, op, it_space, graph=None, **kwargs):
     from torch._inductor.virtualized import V
 
     monkeypatch.setattr(dcm, "iteration_space_from_op", lambda _op: it_space)
     monkeypatch.setattr(dcm, "_indirect_write_elems", lambda *_: None)
-    with V.set_graph_handler(_StubGraph()):
+    with V.set_graph_handler(graph or _StubGraph()):
         return dcm.extract_op_features(op, **kwargs)
 
 
@@ -1200,23 +1201,27 @@ _IT_SPACE = {d0: 64, d1: 64, d2: 64}
 _MENU = [{d0: 2, d1: 4}, {d1: 8}]  # 8 cores: the delivery estimate is nonzero
 
 
-def _allocator_features(monkeypatch, op, chosen=0):
+def _allocator_features(
+    monkeypatch, op, chosen=0, *, menu=_MENU, it_space=_IT_SPACE, graph=None, is_lx=None
+):
+    """The allocator's extraction with its legal ``menu``. ``chosen`` is a menu
+    index, or a ``{dim: split symbol}`` map that keeps the splits symbolic."""
     from torch_spyre._inductor.scratchpad import sa_cooptimizer
     from torch_spyre._inductor.scratchpad.allocator import CoOptimizingAllocator
     from torch_spyre._inductor.scratchpad.plan_solver import CoreDivision
 
-    monkeypatch.setattr(sa_cooptimizer, "iteration_space_from_op", lambda _: _IT_SPACE)
-    monkeypatch.setattr(dcm, "iteration_space_from_op", lambda _: _IT_SPACE)
+    monkeypatch.setattr(sa_cooptimizer, "iteration_space_from_op", lambda _: it_space)
+    monkeypatch.setattr(dcm, "iteration_space_from_op", lambda _: it_space)
     monkeypatch.setattr(dcm, "_indirect_write_elems", lambda *_: None)
     buffers = {
         "buf1": SimpleNamespace(
-            sym_core_divs=_MENU[chosen],
-            core_divisions=[CoreDivision(splits=dict(s)) for s in _MENU],
+            sym_core_divs=menu[chosen] if isinstance(chosen, int) else chosen,
+            core_divisions=[CoreDivision(splits=dict(s)) for s in menu],
         )
     }
-    with V.set_graph_handler(_StubGraph()):
+    with V.set_graph_handler(graph or _StubGraph()):
         return CoOptimizingAllocator._extract_op_features(
-            None, None, "buf1", buffers, {}, op=op
+            None, None, "buf1", buffers, is_lx or {}, op=op
         )
 
 
@@ -1313,3 +1318,231 @@ def test_a_rebased_bank_read_keeps_the_estimate_of_its_pre_rebase_form(monkeypat
     assert _delivery_ns(priced) == pytest.approx(
         _delivery_ns(_allocator_features(monkeypatch, before))
     )
+
+
+# DMA requests of looped matmul operand reads, at the MoE expert-loop shape: 128
+# experts, 128 tokens, hidden 2816, inter 704. Each run of a core's read is one DMA
+# request. A column split that leaves each core one stick (128 B) of every bank row
+# makes thousands of them per trip. Expected values are hand arithmetic from the
+# calibrated constants: 7.5 ns per request at 4-16 cores (11 and 22 cores take it),
+# 3.75 at 32, a 150 B/ns peak, and 150/32 B/ns per core for the delivery estimate.
+_E, _T, _K, _N = 128, 128, 2816, 704
+_ONE_STICK = {d0: 2, d1: 11}  # 22 cores
+_K_SPLIT = {d0: 8, d2: 4}  # 32 cores
+_GATE_MENU = [_ONE_STICK, _K_SPLIT, {d0: 32}]
+
+
+class _LayoutGraph(_StubGraph):
+    """Graph inputs with real device layouts, by name: ``{name: (size, layout)}``."""
+
+    def __init__(self, buffers):
+        self.graph_input_names = list(buffers)
+        self._buffers = buffers
+
+    def get_buffer(self, name):
+        if name not in self._buffers:
+            return None
+        size, layout = self._buffers[name]
+        return SimpleNamespace(
+            get_layout=lambda: SimpleNamespace(device_layout=layout, allocation=None),
+            get_size=lambda: list(size),
+        )
+
+
+def _moe_gate(hidden=_K, cols=_N, bank_dtype=DataFormats.SEN169_FP16):
+    """``out[m, n] = sum_k act[m, k] * bank[u0, k, n]``, one expert per trip, with
+    its graph and iteration space. The activation lies in stick planes
+    ``[K/64, T, 64]``; the bank keeps each row's sticks together, ``[E, K, N/64, 64]``."""
+    from torch_spyre._inductor.constants import BATCH_MATMUL_OP
+
+    sizes = (_T, cols, hidden)
+    op = _looped_op(
+        [_E],
+        [[]],
+        [_hint(u0, sympy.Integer(_E))],
+        write_index=cols * d0 + d1,
+        read_indices=[],
+        data=SimpleNamespace(
+            ranges=[_T, cols], reduction_ranges=[hidden], reduction_type=BATCH_MATMUL_OP
+        ),
+    )
+    reads = [
+        MemoryDep("arg0", hidden * d0 + d2, (d0, d1, d2), sizes),
+        MemoryDep("arg1", hidden * cols * u0 + cols * d2 + d1, (d0, d1, d2), sizes),
+    ]
+    write = MemoryDep("buf1", cols * d0 + d1, (d0, d1, d2), sizes)
+    op.get_read_writes = lambda: SimpleNamespace(reads=reads, writes=[write])
+    op.get_size = lambda: [_T, cols]
+    graph = _LayoutGraph(
+        {
+            "arg0": (
+                [_T, hidden],
+                SpyreTensorLayout(
+                    device_size=[hidden // 64, _T, 64],
+                    stride_map=[64, hidden, 1],
+                    device_dtype=DataFormats.SEN169_FP16,
+                ),
+            ),
+            "arg1": (
+                [_E, hidden, cols],
+                SpyreTensorLayout(
+                    device_size=[_E, hidden, cols // 64, 64],
+                    stride_map=[hidden * cols, cols, 64, 1],
+                    device_dtype=bank_dtype,
+                ),
+            ),
+        }
+    )
+    return op, graph, {d0: _T, d1: cols, d2: hidden}
+
+
+def _requests_ns(ops, params=None):
+    from torch_spyre._inductor.cost_model import _loop_operand_request_excess
+    from torch_spyre._inductor.scratchpad.allocator import _COST_PARAMS
+
+    return _loop_operand_request_excess(ops, params or _COST_PARAMS)
+
+
+@pytest.mark.parametrize(
+    "split,act_run,bank_run",
+    [
+        (_ONE_STICK, _T // 2 * 128, 128),  # one stick of every bank row
+        (_K_SPLIT, _T // 8 * 128, _K // 4 * _N * 2),  # whole bank rows
+        ({d0: 32}, _T // 32 * 128, _K * _N * 2),  # tokens do not index the bank
+    ],
+)
+def test_the_extractor_measures_each_matmul_operands_dma_run(
+    monkeypatch, split, act_run, bank_run
+):
+    """A core's contiguous run of each input, from its device layout, and the read's
+    own footprint per trip (one expert, not the op's M*N*K space or the whole bank).
+    A matmul keeps no single-read transport geometry, so the transport term never
+    prices it."""
+    op, graph, space = _moe_gate()
+    feature = _features(
+        monkeypatch,
+        op,
+        space,
+        graph=graph,
+        work_slices={s: split.get(s, 1) for s in space},
+        candidate_work_slices=_GATE_MENU,
+    )
+    act, bank = _read(feature, "arg0"), _read(feature, "arg1")
+    assert (act.read_run_bytes, act.read_tile_elems) == (act_run, _T * _K)
+    assert (bank.read_run_bytes, bank.read_tile_elems) == (bank_run, _K * _N)
+    assert (feature.transport_read_run_bytes, feature.transport_tile_elems) == (
+        None,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "shape,split,ns,cores",
+    [
+        ((_K, _N), _ONE_STICK, 7.5, 22),  # requests 26.354 ms > delivery 1.538 ms
+        ((_K, _N), _K_SPLIT, 3.75, 32),  # long runs: no excess
+        ((704, 2816), {d1: 11}, 7.5, 11),  # 512 B: requests 4.051 < delivery 6.459
+    ],
+)
+def test_a_looped_operand_read_is_charged_the_slower_of_requests_and_delivery(
+    monkeypatch, shape, split, ns, cores
+):
+    """Through the allocator's extraction and params: the bank's DMA requests and
+    its loop-delivery estimate are excess time over the same bytes/peak, so the read
+    is charged the larger, never the sum. Short runs add requests; long runs, or a
+    delivery-bound read, keep the previous price. The report extracts without the
+    legal menu, so it has no delivery estimate and charges the requests alone."""
+    from torch_spyre._inductor.cost_model import CostParams, predict_ops
+    from torch_spyre._inductor.scratchpad.allocator import _COST_PARAMS
+
+    op, graph, space = _moe_gate(*shape)
+    feature = _allocator_features(
+        monkeypatch,
+        op,
+        menu=[split, {d0: 8}],
+        it_space=space,
+        graph=graph,
+    )
+    assert feature.cores == cores
+    bank = _read(feature, "arg1")
+    payload = bank.read_tile_elems * 2
+    requests = _E * (payload / bank.read_run_bytes * ns - payload / 150)
+    delivery = max(0.0, _E * payload * (32 / (cores * 150) - 1 / 150))
+    assert _delivery_ns(feature) == pytest.approx(delivery, rel=1e-9)
+    added = max(0.0, requests - delivery)
+    assert _requests_ns([feature]) == pytest.approx(added, rel=1e-9)
+    stripped = dataclasses.replace(
+        feature,
+        args=[
+            dataclasses.replace(a, read_run_bytes=None, read_tile_elems=None)
+            for a in feature.args
+        ],
+    )
+    assert predict_ops([feature], _COST_PARAMS) - predict_ops(
+        [stripped], _COST_PARAMS
+    ) == pytest.approx(added, rel=1e-9)
+    report = _features(
+        monkeypatch,
+        op,
+        space,
+        graph=graph,
+        work_slices={s: split.get(s, 1) for s in space},
+    )
+    assert _requests_ns([report], CostParams()) == pytest.approx(
+        max(0.0, requests), rel=1e-9
+    )
+
+
+@pytest.mark.parametrize(
+    "menu,bank_dtype,declined",
+    [
+        (_GATE_MENU, DataFormats.SEN169_FP16, set()),
+        # 44 stick planes per row: a K split of 3 cannot keep whole sticks.
+        ([*_GATE_MENU, {d2: 3}], DataFormats.SEN169_FP16, {"arg0"}),
+        (_GATE_MENU, DataFormats.IEEE_FP32, {"arg1"}),
+    ],
+    ids=["fp16", "uneven-k-split", "fp32-bank"],
+)
+def test_the_symbolic_operand_price_equals_the_concrete_price_at_every_candidate(
+    monkeypatch, menu, bank_dtype, declined
+):
+    """The allocator's symbolic run and objective, at each legal candidate, equal
+    that candidate's concrete extraction and price. A read whose geometry is not
+    proven at every candidate, or not fp16, declines everywhere, never a price for
+    some candidates only. CP-SAT keeps the term at every pinned candidate."""
+    from test_cost_model_replication import _solve_pinned
+
+    from torch_spyre._inductor.cost_model import predict_ops
+    from torch_spyre._inductor.scratchpad.allocator import _COST_PARAMS
+
+    op, graph, space = _moe_gate(bank_dtype=bank_dtype)
+    names = {d1: "split_n", d2: "split_k", d0: "split_m"}  # _solve_pinned's order
+    symbols = {
+        d: sympy.Symbol(n, integer=True, positive=True) for d, n in names.items()
+    }
+    kwargs = dict(menu=menu, it_space=space, graph=graph)
+    symbolic = _allocator_features(monkeypatch, op, symbols, **kwargs)
+    term = sympy.sympify(_requests_ns([symbolic]))
+    objective = sympy.sympify(predict_ops([symbolic], _COST_PARAMS))
+    pinned = [tuple(c.get(d, 1) for d in names) for c in menu]
+    priced = []
+    for i, candidate in enumerate(menu):
+        concrete = _allocator_features(monkeypatch, op, i, **kwargs)
+        at = {symbols[d]: candidate.get(d, 1) for d in names}
+        for name in ("arg0", "arg1"):
+            run = _read(symbolic, name).read_run_bytes
+            assert (run is None) == (name in declined)
+            assert run is None or sympy.sympify(run).free_symbols
+            assert (None if run is None else sympy.sympify(run).subs(at)) == _read(
+                concrete, name
+            ).read_run_bytes
+        expected = float(_requests_ns([concrete]))
+        priced.append(expected)
+        assert float(term.subs(at)) == pytest.approx(expected, abs=1e-3)
+        assert float(objective.subs(at)) == pytest.approx(
+            float(predict_ops([concrete], _COST_PARAMS)), rel=1e-9
+        )
+        assert _solve_pinned(term, pinned, i) == pytest.approx(expected, abs=2.0)
+    # At the one-stick candidate only the bank's runs are short: declined, it adds
+    # nothing. (At 32 token cores the activation's 512 B runs are priced too.)
+    assert (priced[0] > 0) == ("arg1" not in declined)
