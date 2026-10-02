@@ -46,7 +46,19 @@ from torch_spyre._inductor.op_spec import (
     LX_RELAYOUT_INFO_KEY,
     OpSpec,
 )
-from torch_spyre._inductor.scratchpad.allocator import _lx_planning_size
+from torch_spyre._inductor.scratchpad import allocator as allocator_mod
+from torch_spyre._inductor.scratchpad.allocator import (
+    ScratchpadAllocator,
+    _lx_planning_size,
+    _placed_lx_footprint,
+)
+from torch_spyre._inductor.scratchpad.plan_solver import (
+    CoreDivision,
+    CoreDivisionBuffer,
+    LifetimeBoundBuffer,
+    RelayoutCopyBuffer,
+    relayout_copy_name,
+)
 from torch_spyre._inductor.scratchpad.utils import (
     frontend_lx_high_water,
     invalidate_frontend_lx_high_water,
@@ -387,6 +399,194 @@ class BundleFrontendLxBytesTest(TestCase):
             ]
         )
         self.assertIn("frontend_lx_bytes = 256 : i64", mlir)
+
+
+# ---------------------------------------------------------------------------
+# Allocator publication: the per-core footprint each placed buffer owns
+# ---------------------------------------------------------------------------
+
+_S0 = sympy.Symbol("s0", integer=True, positive=True)
+_S1 = sympy.Symbol("s1", integer=True, positive=True)
+
+
+def _joint(name, size, *splits, chosen, address=None, uses=(0, 1)):
+    """A joint-planner buffer: total device bytes plus its candidate divisions."""
+    return CoreDivisionBuffer(
+        name,
+        size,
+        list(uses),
+        address=address,
+        core_divisions=[CoreDivision(splits=dict(s)) for s in splits],
+        chosen_division=chosen,
+    )
+
+
+def _copy(parent, group, address, consumers, span=163840, cores=32):
+    """A joint-planner relayout copy: the destination span on every core."""
+    copy = RelayoutCopyBuffer(
+        name=relayout_copy_name(parent, group),
+        size=span * cores,
+        uses=[5, 7],
+        address=address,
+        core_divisions=[CoreDivision(splits={"relayout_copy": cores})],
+        relayout_parent=parent,
+        group=group,
+        candidates=tuple(SimpleNamespace(consumer=c) for c in consumers),
+    )
+    copy.chosen_division = 0
+    return copy
+
+
+def _plan(
+    source,
+    consumers,
+    destination_address,
+    destination_span,
+    source_span,
+    solver_copy_name=None,
+):
+    """The fields of an LXRelayoutPlan that publication reads. A joint-planner
+    plan names the copy buffer its fired group placed (``solver_copy_name``);
+    a fixed-division plan names none."""
+    destination_name = f"__spyre_lx_relayout__:{source}:{consumers[0]}"
+    return SimpleNamespace(
+        source_name=source,
+        consumer_names=tuple(consumers),
+        destination_name=destination_name,
+        edge=(source, destination_name),
+        destination_address=destination_address,
+        destination_footprint_bytes=destination_span,
+        source_footprint_bytes=source_span,
+        solver_copy_name=solver_copy_name,
+    )
+
+
+class PlacedFootprintTest(TestCase):
+    def test_fixed_division_buffer_is_already_per_core(self):
+        """The fixed-division allocators size a buffer per core already."""
+        buffer = LifetimeBoundBuffer("a", 131072, [0, 1], address=0)
+        self.assertEqual(_placed_lx_footprint(buffer), 131072)
+
+    def test_joint_buffer_owns_its_chosen_division_share(self):
+        """The joint planner sizes a buffer in total bytes and reserves one
+        core's share of the division it chose: a 512 x 4096 fp16 tensor (4 MiB)
+        split 32 ways owns 128 KiB per core -- not 4 MiB, which would put every
+        bound above the planning size and silently emit nothing."""
+        buffer = _joint("a", 4 << 20, {}, {_S0: 32}, chosen=1)
+        self.assertEqual(_placed_lx_footprint(buffer), 128 << 10)
+        buffer.chosen_division = 0
+        self.assertEqual(_placed_lx_footprint(buffer), 4 << 20)
+
+    def test_reduction_split_does_not_shrink_the_share(self):
+        """Only output splits partition the buffer; a reduction split repeats it."""
+        buffer = CoreDivisionBuffer(
+            "a",
+            1 << 20,
+            [0, 1],
+            core_divisions=[
+                CoreDivision(splits={_S0: 4, _S1: 8}, reduction_syms=frozenset({_S1}))
+            ],
+            chosen_division=0,
+        )
+        self.assertEqual(_placed_lx_footprint(buffer), 256 << 10)
+
+    def test_uneven_share_rounds_up(self):
+        buffer = _joint("a", 1000, {_S0: 3}, chosen=0)
+        self.assertEqual(_placed_lx_footprint(buffer), 334)
+
+    def test_joint_buffer_without_a_choice_has_no_span(self):
+        """No recorded division: no provable span, never zero occupancy."""
+        buffer = _joint("a", 4 << 20, {_S0: 32}, chosen=None)
+        self.assertEqual(_placed_lx_footprint(buffer), -1)
+
+    def test_relayout_copy_owns_its_destination_span(self):
+        copy = _copy("buf3", 0, 598016, ["buf5"], span=163840, cores=32)
+        self.assertEqual(_placed_lx_footprint(copy), 163840)
+
+
+class PushAllocationPublicationTest(TestCase):
+    """``_push_allocation`` publishes one per-core footprint per placed buffer,
+    under the name the final graph uses. The graph edits around it are stubbed:
+    only what is published is checked here."""
+
+    def _publish(self, buffers, plans, registry):
+        graph = SimpleNamespace(
+            get_output_names=lambda: [],
+            graph_input_names=[],
+            get_buffer=lambda name: SimpleNamespace(name=name),
+        )
+        allocator = SimpleNamespace(_set_one_allocation=lambda *args: None)
+        published = {}
+
+        def capture(g, footprints):
+            published.update(footprints)
+
+        with (
+            mock.patch.object(allocator_mod, "get_buffer_users", return_value={}),
+            mock.patch.object(allocator_mod, "GraphEditor"),
+            mock.patch.object(allocator_mod, "materialize_lx_relayouts"),
+            mock.patch.object(
+                allocator_mod, "materialized_lx_relayouts", return_value=registry
+            ),
+            mock.patch.object(
+                allocator_mod, "publish_frontend_lx_footprints", side_effect=capture
+            ),
+        ):
+            ScratchpadAllocator._push_allocation(allocator, graph, buffers, plans)
+        return published
+
+    def test_joint_planner_publishes_per_core_shares_and_its_copy(self):
+        """A 4 MiB tensor on 32 cores, a relayout source on 16 cores, and the
+        solver's copy materialized as buf9: 128 KiB, 128 KiB and the copy's
+        160 KiB destination span. The copy buffer itself is never published
+        under its synthetic name."""
+        source = _joint("buf3", 2 << 20, {_S0: 16}, chosen=0, address=131072)
+        copy = _copy("buf3", 0, 598016, ["buf5"], span=163840, cores=32)
+        plan = _plan("buf3", ["buf5"], 598016, 163840, 131072, copy.name)
+        buffers = [
+            _joint("buf1", 4 << 20, {}, {_S0: 32}, chosen=1, address=0),
+            source,
+            copy,
+        ]
+        published = self._publish(buffers, [plan], {plan.edge: ("buf9", plan)})
+        self.assertEqual(published, {"buf1": 131072, "buf3": 131072, "buf9": 163840})
+
+    def test_relayout_source_keeps_its_measured_span(self):
+        """A source whose measured per-core span exceeds the equal share keeps
+        the larger span, as the fixed-division path's raised size does."""
+        source = _joint("buf3", 2 << 20, {_S0: 16}, chosen=0, address=131072)
+        copy = _copy("buf3", 0, 598016, ["buf5"])
+        plan = _plan("buf3", ["buf5"], 598016, 163840, 196608, copy.name)
+        published = self._publish([source, copy], [plan], {plan.edge: ("buf9", plan)})
+        self.assertEqual(published["buf3"], 196608)
+
+    def test_copy_is_resolved_by_the_name_the_plan_carries(self):
+        """The fired group that made the plan named its copy buffer, so nothing
+        is searched for: a copy of the same source at the plan's address but of
+        another group is not taken, and the materialized copy stays unrecorded,
+        so frontend_lx_high_water refuses every bound."""
+        copy = _copy("buf3", 0, 598016, ["buf5"])
+        plan = _plan(
+            "buf3", ["buf5"], 598016, 163840, 131072, relayout_copy_name("buf3", 1)
+        )
+        source = _joint("buf3", 2 << 20, {_S0: 16}, chosen=0, address=131072)
+        published = self._publish([source, copy], [plan], {plan.edge: ("buf9", plan)})
+        self.assertNotIn("buf9", published)
+
+    def test_unchosen_joint_buffer_publishes_an_unsized_record(self):
+        buffers = [_joint("buf1", 4 << 20, {_S0: 32}, chosen=None, address=0)]
+        self.assertEqual(self._publish(buffers, [], {}), {"buf1": -1})
+
+    def test_fixed_division_path_is_unchanged(self):
+        """Per-core sizes as given; a private destination allocated under
+        plan.destination_name keeps its own (rounded) size."""
+        plan = _plan("a", ["c"], 4096, 8000, 4096)
+        destination = LifetimeBoundBuffer(
+            plan.destination_name, 8192, [1, 2], address=4096
+        )
+        buffers = [LifetimeBoundBuffer("a", 131072, [0, 1], address=0), destination]
+        published = self._publish(buffers, [plan], {plan.edge: ("buf9", plan)})
+        self.assertEqual(published, {"a": 131072, "buf9": 8192})
 
 
 if __name__ == "__main__":

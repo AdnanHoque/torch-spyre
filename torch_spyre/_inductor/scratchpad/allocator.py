@@ -173,6 +173,26 @@ _LX_TRACKER_CAPACITY_BYTES = (
 _LX_ALLOCATION_GRANULARITY_BYTES = 128
 
 
+def _placed_lx_footprint(buffer: LifetimeBoundBuffer) -> int:
+    """Per-core LX bytes the allocator reserved for ``buffer`` at its address.
+
+    The fixed-division allocators size a :class:`LifetimeBoundBuffer` per core
+    already (``mem_usage_by_buf``'s ``size_per_core``, raised for a relayout
+    source). The joint planner's :class:`CoreDivisionBuffer` carries the *total*
+    device footprint instead, and every joint engine reserves
+    :meth:`CoreDivisionBuffer.per_core_size` of the division it chose on every
+    core. A joint buffer without a recorded choice has no provable span, so it
+    reports -1, which ``frontend_lx_high_water`` refuses rather than reading as
+    zero.
+    """
+    if isinstance(buffer, CoreDivisionBuffer) and buffer.core_divisions:
+        index = buffer.chosen_division
+        if index is None or not 0 <= index < len(buffer.core_divisions):
+            return -1
+        return buffer.per_core_size(index)
+    return buffer.size
+
+
 def _handoff_child_start(
     name: str,
     lifetimes: dict[str, list[int]],
@@ -1471,7 +1491,9 @@ class ScratchpadAllocator:
         # placement, keyed by the name the final graph will use. Published for
         # frontend_lx_high_water, which must not re-derive these from tensor
         # sizes: relayout sources carry their source footprint and private
-        # destinations their rounded destination footprint.
+        # destinations their rounded destination footprint. A joint-planner
+        # buffer is sized in total bytes, so its per-core span is the share of
+        # the division the solver chose (_placed_lx_footprint).
         footprints: dict[str, int] = {}
 
         for b in buffers:
@@ -1479,6 +1501,7 @@ class ScratchpadAllocator:
                 continue
 
             buf = graph.get_buffer(b.name)
+            footprint = _placed_lx_footprint(b)
             if b.name in inputs:
                 new_buffer = graph_editor.push_allocation_with_clone(
                     buf,
@@ -1487,7 +1510,7 @@ class ScratchpadAllocator:
                     lx_view=b.lx_view,
                 )
                 self._set_one_allocation(new_buffer, b.address, b.lx_view)
-                footprints[new_buffer.get_name()] = b.size
+                footprints[new_buffer.get_name()] = footprint
 
             elif b.name in outputs:
                 new_buffer = graph_editor.push_allocation_with_clone(
@@ -1495,28 +1518,45 @@ class ScratchpadAllocator:
                 )
                 self._set_one_allocation(buf, b.address, b.lx_view)
                 graph_editor.change_graph_output(buf, new_buffer)
-                footprints[b.name] = b.size
+                footprints[b.name] = footprint
 
             else:
                 self._set_one_allocation(buf, b.address, b.lx_view)
-                footprints[b.name] = b.size
+                footprints[b.name] = footprint
 
         # Keep graph mutation last and in pre-scheduling: solver retries require
         # the original graph, and post-grad no-op elimination has already run.
         materialize_lx_relayouts(graph, accepted_lx_relayouts)
 
-        # A private relayout destination is materialized under a fresh buffer
-        # name; resolve it through the registry to keep the footprint record on
-        # the name the final graph uses.
+        # A relayout destination is materialized under a fresh buffer name;
+        # resolve it through the registry to keep the footprint record on the
+        # name the final graph uses. The fixed-division path allocated it as
+        # plan.destination_name, the joint planner as the RelayoutCopyBuffer the
+        # plan names (plan.solver_copy_name). Either way the copy owns at least
+        # the plan's measured destination span, and the source keeps at least its
+        # measured source span.
         by_name = {b.name: b for b in buffers}
         registry = materialized_lx_relayouts(graph)
         for plan in accepted_lx_relayouts:
             entry = registry.get(plan.edge)
-            destination = by_name.get(plan.destination_name)
-            if entry is None or destination is None:
+            if entry is None:
+                continue
+            placed_name = plan.solver_copy_name or plan.destination_name
+            destination = by_name.get(placed_name)
+            if destination is None:
+                # No record: frontend_lx_high_water then refuses every bound.
                 continue
             copy_name, _ = entry
-            footprints[copy_name] = destination.size
+            placed = _placed_lx_footprint(destination)
+            measured = round_up_to_alignment(
+                plan.destination_footprint_bytes or 0,
+                _LX_ALLOCATION_GRANULARITY_BYTES,
+            )
+            footprints[copy_name] = placed if placed < 0 else max(placed, measured)
+            if footprints.get(plan.source_name, 0) > 0:
+                footprints[plan.source_name] = max(
+                    footprints[plan.source_name], plan.source_footprint_bytes or 0
+                )
 
         publish_frontend_lx_footprints(graph, footprints)
 

@@ -60,6 +60,7 @@ from ..pass_utils import (
     op_read_writes,
     try_device_coordinates,
 )
+from .plan_solver import relayout_copy_name
 from .utils import _op_num_cores, invalidate_frontend_lx_high_water
 
 logger = get_inductor_logger("lx_relayout")
@@ -85,6 +86,11 @@ class LXRelayoutPlan:
     completed_producer_cores: tuple[int, ...] = ()
     source_address: int | None = None
     destination_address: int | None = None
+    # The joint planner's buffer for this destination: the group's
+    # RelayoutCopyBuffer (``relayout_copy_name(source, group)``), named by the
+    # fired group that makes the plan. None on the fixed-division path, which
+    # allocates the destination as ``destination_name`` itself.
+    solver_copy_name: str | None = None
 
     @property
     def destination_name(self) -> str:
@@ -255,6 +261,7 @@ class FiredRelayoutGroup:
             destination_footprint_bytes=c.destination_footprint_bytes,
             source_address=source_address,
             destination_address=self.destination_address,
+            solver_copy_name=relayout_copy_name(self.parent, self.group),
         )
 
     @classmethod
