@@ -2372,7 +2372,7 @@ class TestDrainMaterialization(unittest.TestCase):
                 after_fx=plan.loop_origin,
                 lower_anchor=plan.anchor_op,
             )
-        allocator_module._clear_drain_loop_metadata(drain)
+        allocator_module._clear_loop_membership_metadata(drain)
 
         # Lowered order: immediately after the loop's last member.
         anchor_index = graph.operations.index(plan.anchor_op)
@@ -4791,6 +4791,172 @@ class TestStampDirectLoopInfo(unittest.TestCase):
             "no op in split_m_elementwise_fn's body has a loop_var-advancing "
             "read -- test would pass vacuously",
         )
+
+
+class TestHoistedInputCloneOnRealGraph(unittest.TestCase):
+    """An LX input clone read inside a counted loop is placed before the loop.
+
+    Real captured ``split_m_fn`` graph (``Y`` invariant, ``X`` sliced), lowered
+    through ``GraphLowering`` and spliced by the production
+    ``splice_while_loops``; the real ``GraphEditor`` inserts the clone and real
+    scheduler nodes are grouped by the real counted-loop regrouping.  No Spyre
+    tensor is allocated and no kernel runs.
+    """
+
+    _run_graph = TestSpliceWhileLoops._run_graph
+
+    def _spliced_graph(self):
+        from torch_spyre._inductor.wsr.for_each_tile_lowering import (
+            splice_while_loops,
+        )
+
+        (X, Y), _ref = matmul_inputs()
+        graph = self._run_graph(split_m_fn, (X, Y))
+        with V.set_graph_handler(graph):
+            splice_while_loops(graph)
+        return graph
+
+    @staticmethod
+    def _tile_input(graph, name):
+        """Give a CPU-captured input the Spyre layout the real push requires."""
+        from torch._inductor.ir import FlexibleLayout
+        from torch_spyre._C import SpyreTensorLayout
+        from torch_spyre._inductor.ir import FixedTiledLayout
+
+        box = graph.get_buffer(name)  # TensorBox(StorageBox(InputBuffer))
+        inner = box.data.data
+        size = [int(s) for s in inner.get_layout().size]
+        dtype = torch.float16
+        stride = [int(s) for s in FlexibleLayout.contiguous_strides(size)]
+        stick_dim = len(size) - 1
+        dim_order = [i for i in range(len(size)) if i != stick_dim] + [stick_dim]
+        object.__setattr__(
+            inner,
+            "layout",
+            FixedTiledLayout(
+                torch.device("spyre:0"),
+                dtype,
+                size,
+                stride,
+                SpyreTensorLayout(size, stride, dtype, dim_order),
+            ),
+        )
+        return box
+
+    def test_invariant_input_clone_runs_once_before_the_loop(self):
+        from types import SimpleNamespace
+
+        from torch._inductor.scheduler import Scheduler
+        from torch_spyre._inductor.pass_utils import PerCoreView, op_read_writes
+        from torch_spyre._inductor.scheduler import (
+            CountedLoopSchedulerNode,
+            _build_loop_group,
+            _loop_group_id,
+            _regroup_by_outer_loop_key,
+        )
+        from torch_spyre._inductor.scratchpad import allocator as allocator_module
+        from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
+        from torch_spyre._inductor.scratchpad.utils import (
+            counted_loop_entry,
+            counted_loop_group_path,
+            get_buffer_users,
+        )
+
+        graph = self._spliced_graph()
+        with V.set_graph_handler(graph):
+            users = get_buffer_users(graph)
+            in_loop_inputs = [
+                name
+                for name in graph.graph_input_names
+                if users.get(name) and counted_loop_group_path(users[name][0])
+            ]
+            self.assertTrue(in_loop_inputs, "fixture must read an input in its loop")
+            name = in_loop_inputs[0]
+            entry = counted_loop_entry(graph.operations, users[name][0])
+            # The gate declines exactly when the input's last reader is its
+            # outermost loop's last member (that reader could take the clone's
+            # slot in place); otherwise it returns the loop entry.  The
+            # placement below is checked at the loop entry either way.
+            last = users[name][-1]
+            last_outer = counted_loop_group_path(last)[:1]
+            ends_loop = bool(last_outer) and not any(
+                counted_loop_group_path(op)[:1] == last_outer
+                for op in graph.operations[graph.operations.index(last) + 1 :]
+            )
+            self.assertIs(
+                allocator_module._hoisted_input_clone_entry(graph, name, users[name]),
+                None if ends_loop else entry,
+            )
+            box = self._tile_input(graph, name)
+            user_names = {u.get_name() for u in users[name]}
+            reads_before = sorted(
+                str(d.index)
+                for op in users[name]
+                for d in op_read_writes(op).reads
+                if d.name == name
+            )
+            clone = GraphEditor(graph).push_allocation_with_clone(
+                box,
+                users[name],
+                input=True,
+                lx_view=PerCoreView((), (), num_cores=1),
+                lower_before=entry,
+            )
+            allocator_module._clear_loop_membership_metadata(clone)
+
+            # Lowered order: immediately before the loop entry, outside it.
+            self.assertIs(graph.operations[graph.operations.index(entry) - 1], clone)
+            self.assertEqual(counted_loop_group_path(clone), ())
+            # The clone reads only the input.
+            self.assertEqual({d.name for d in op_read_writes(clone).reads}, {name})
+            # Consumers read the clone with exactly the indices they used for
+            # the input (a tile-advancing read keeps advancing; only the name
+            # changed), and nothing reads the input directly any more.
+            clone_name = clone.get_name()
+            consumers = [op for op in graph.operations if op.get_name() in user_names]
+            reads_after = sorted(
+                str(d.index)
+                for op in consumers
+                for d in op_read_writes(op).reads
+                if d.name == clone_name
+            )
+            self.assertEqual(reads_after, reads_before)
+            self.assertFalse(
+                any(
+                    d.name == name for op in consumers for d in op_read_writes(op).reads
+                )
+            )
+
+            stub = SimpleNamespace(
+                available_buffer_names=set(),
+                name_to_fused_node={},
+                removed_ops=set(),
+                get_backend=lambda device: SimpleNamespace(
+                    group_fn=lambda sizes: tuple(sizes)
+                ),
+            )
+            snodes = [
+                Scheduler.create_scheduler_node(stub, op) for op in graph.operations
+            ]
+            for order, snode in enumerate(snodes):
+                snode.min_order = order
+                snode.max_order = order
+            ordered = _regroup_by_outer_loop_key(snodes)
+            wrapped = _build_loop_group(ordered, 0)
+
+        clone_node = next(n for n in snodes if getattr(n, "node", None) is clone)
+        self.assertIsNone(_loop_group_id(clone_node))
+        counted_loops = [n for n in wrapped if isinstance(n, CountedLoopSchedulerNode)]
+        self.assertEqual(len(counted_loops), 1)
+        self.assertNotIn(clone_node, counted_loops[0].get_nodes())
+        self.assertLess(wrapped.index(clone_node), wrapped.index(counted_loops[0]))
+        # Some loop member depends on the clone, so the scheduler cannot sink it.
+        readers = [
+            n
+            for n in counted_loops[0].get_nodes()
+            if any(dep.name == clone_name for dep in n.unmet_dependencies)
+        ]
+        self.assertTrue(readers)
 
 
 if __name__ == "__main__":
