@@ -325,7 +325,7 @@ class _CoreDivisionBufferWithCpVars(_LifetimeBufferWithCpVars[CoreDivisionBuffer
         b = self.buffer
         m = self.model
 
-        per_core = [ceil_div(b.size, cd.output_partition) for cd in b.core_divisions]
+        per_core = [b.per_core_size(i) for i in range(len(b.core_divisions))]
         # Total cores the op runs on under each division -- includes any
         # reduction-axis split, so a reduction-parallel division counts its full
         # parallelism (``output_partition`` alone would score it as 1 core).
@@ -473,9 +473,7 @@ class _CoreDivisionBufferWithCpVars(_LifetimeBufferWithCpVars[CoreDivisionBuffer
         )
 
     def footprint(self, solver: "cp_model.CpSolver") -> int:
-        t = self.buffer
-        cd = t.core_divisions[solver.Value(self.division)]
-        return ceil_div(t.size, cd.output_partition)
+        return self.buffer.per_core_size(solver.Value(self.division))
 
     def record_division(self, solver: "cp_model.CpSolver") -> None:
         self.buffer.chosen_division = solver.Value(self.division)
