@@ -42,8 +42,10 @@ from torch_spyre._C import SpyreTensorLayout
 from torch_spyre._inductor import work_division as wd
 from torch_spyre._inductor.cost_model import ArgTraffic
 from torch_spyre._inductor.dump_cost_model import (
-    _levels_with_loop_vars,
+    _level_loop_vars,
     _loop_factor_for_index,
+    _loop_var_advances,
+    _stamped_advances,
 )
 from torch_spyre._inductor.ir import FixedTiledLayout
 
@@ -312,53 +314,22 @@ class SymbolicPriceTest(unittest.TestCase):
         self.assertEqual(store(False).hbm_elems(), 65536)
 
 
-def test_macs_are_the_whole_loop_total_for_every_loop_shape(monkeypatch):
-    """``matmul_macs`` is the work of the WHOLE counted loop, whatever the loop tiles.
+def test_macs_are_one_output_pass_times_the_writes_loop_factor(monkeypatch):
+    """``matmul_macs`` is the work of the WHOLE counted loop.
 
-    A matmul in a counted loop that tiles neither of its own dims (one expert's MLP in
-    an expert loop) runs its full iteration space once per trip, and the traffic side
-    already charges it ``loop_trip`` times; its work must be the per-trip product times
-    the trip count. A loop that tiles an output dim leaves the output buffer full-extent
-    (raw product is already the total), a loop that tiles the reduction dim leaves a
-    per-tile slice (scaled up), and a single pass is unchanged.
+    ``out_elems * K`` is one pass over the output buffer; the extractor passes the
+    write's own loop factor (how many times that buffer is produced over the nest),
+    and the work is the product. Which factor each loop shape gets is tested through
+    the extractor below.
     """
     m, n, kk = sympy.symbols("m n kk", positive=True, integer=True)
     it_space = {m: 64, n: 1024, kk: 2048}
     _patch(monkeypatch, it_space, {m: 1, n: 1, kk: 1})
     op = _FakeOp(1024 * m + n, m + kk, {"d0": 1, "d1": 1, "d2": 1})
     out_elems = 64 * 1024
-    per_trip = out_elems * 2048
-
-    def macs(loop_trip, tiles_red, tiles_out):
-        return dcm._matmul_features(
-            op, out_elems, 2, loop_trip, tiles_red, None, tiles_out
-        )[0]
-
-    assert macs(1, False, False) == per_trip  # single pass
-    assert macs(128, False, False) == 128 * per_trip  # per-trip body op
-    assert macs(128, False, True) == per_trip  # output-tiled: already the total
-    assert macs(128, True, False) == 128 * per_trip  # reduction-tiled slice
-
-
-def test_macs_of_a_paged_attention_step_and_a_row_loop(monkeypatch):
-    """Non-expert ``for_each_tile`` shapes.
-
-    * A page loop: one attention score matmul per KV page (64 query rows x 128 page
-      tokens x head dim 64), 16 trips, tiling none of its own dims -- a per-trip body
-      op, so 16 pages of work.
-    * A row loop over the same op's query rows: the loop tiles an output dim, the
-      output buffer is full-extent and the raw product already is the total.
-    """
-    m, n, kk = sympy.symbols("m n kk", positive=True, integer=True)
-    _patch(monkeypatch, {m: 64, n: 128, kk: 64}, {m: 1, n: 1, kk: 1})
-    op = _FakeOp(128 * m + n, m + kk, {"d0": 1, "d1": 1, "d2": 1})
-    op.data = SimpleNamespace(reduction_ranges=[64])
-    page_scores = 64 * 128 * 64
-
-    page_loop = dcm._matmul_features(op, 64 * 128, 2, 16, False, None, False)[0]
-    row_loop = dcm._matmul_features(op, 64 * 128, 2, 8, False, None, True)[0]
-    assert page_loop == 16 * page_scores
-    assert row_loop == page_scores
+    per_pass = out_elems * 2048
+    assert dcm._matmul_features(op, out_elems, 2)[0] == per_pass  # single pass
+    assert dcm._matmul_features(op, out_elems, 2, 128)[0] == 128 * per_pass
 
 
 def test_the_extractor_scales_a_per_trip_body_matmul_by_its_trip(monkeypatch):
@@ -422,37 +393,47 @@ def _op(*hints):
 # ------------------------------------------------------------- level pairing
 
 
+def _factor(index, levels, op, stamped=None):
+    """The read/write factor the extractor computes for ``index``."""
+    loop_vars = _level_loop_vars(op, levels)
+    return _loop_factor_for_index(
+        index, levels, _loop_var_advances(index, loop_vars, stamped)
+    )
+
+
 def test_an_advancing_read_is_not_multiplied_by_the_trip_count():
     # One level of 128 trips; the op tiles none of its own dims (the measured case).
     levels = [(128, set(), 0)]
     advancing = 704 * d2 + 1982464 * u0
     invariant = 2816 * d0 + d2
-    merged = _levels_with_loop_vars(_op(_hint(u0, sympy.Integer(128))), levels)
-    assert _loop_factor_for_index(advancing, merged) == 1
-    assert _loop_factor_for_index(invariant, merged) == 128
-    # Without the fold the advancing read is charged the trip count.
+    op = _op(_hint(u0, sympy.Integer(128)))
+    assert _factor(advancing, levels, op) == 1
+    assert _factor(invariant, levels, op) == 128
+    # Without the loop variable the advancing read is charged the trip count.
     assert _loop_factor_for_index(advancing, levels) == 128
 
 
-def test_a_variable_whose_range_is_not_the_levels_trip_is_not_folded_in():
+def test_a_variable_whose_range_is_not_the_levels_trip_is_not_paired():
     levels = [(128, set(), 0)]
-    merged = _levels_with_loop_vars(_op(_hint(u0, sympy.Integer(4))), levels)
-    assert merged == levels
+    assert _level_loop_vars(_op(_hint(u0, sympy.Integer(4))), levels) == [None]
 
 
 def test_hints_without_a_range_are_ignored():
     # An ordinary spyre_hint scope variable is a real iteration-range variable (already
     # in dep.ranges); only for_each_tile variables carry loop_var_range.
     levels = [(128, set(), 0)]
-    assert _levels_with_loop_vars(_op(_hint(u0, None)), levels) == levels
-    assert _levels_with_loop_vars(SimpleNamespace(), levels) == levels
+    assert _level_loop_vars(_op(_hint(u0, None)), levels) == [None]
+    assert _level_loop_vars(SimpleNamespace(), levels) == [None]
 
 
 def test_a_hint_count_that_differs_from_the_level_count_pairs_nothing():
     # Two levels but one loop variable: the pairing is not known, so keep the price
-    # every other op gets.
+    # every other op gets, and say so in the debug log.
     levels = [(4, set(), 0), (4, set(), 0)]
-    assert _levels_with_loop_vars(_op(_hint(u0, 4)), levels) == levels
+    with mock.patch.object(dcm.logger, "debug") as debug:
+        assert _level_loop_vars(_op(_hint(u0, 4)), levels) == [None, None]
+    debug.assert_called_once()
+    assert _factor(8 * u0 + d0, levels, _op(_hint(u0, 4))) == 16
 
 
 def test_nested_loops_of_equal_trip_count_pair_each_variable_with_its_own_level():
@@ -463,23 +444,63 @@ def test_nested_loops_of_equal_trip_count_pair_each_variable_with_its_own_level(
     was charged 1 instead of 4.
     """
     levels = [(4, set(), 0), (4, set(), 0)]
-    merged = _levels_with_loop_vars(_op(_hint(u0, 4), _hint(u1, 4)), levels)
-    assert [syms for _t, syms, _d in merged] == [{u0}, {u1}]
-    assert (
-        _loop_factor_for_index(8 * u0 + d0, merged) == 4
-    )  # walked outer, re-read inner
-    assert (
-        _loop_factor_for_index(8 * u1 + d0, merged) == 4
-    )  # re-read outer, walked inner
-    assert _loop_factor_for_index(8 * u0 + 2 * u1, merged) == 1  # walked at both
-    assert _loop_factor_for_index(d0, merged) == 16  # re-entered at both
+    op = _op(_hint(u0, 4), _hint(u1, 4))
+    assert _level_loop_vars(op, levels) == [u0, u1]
+    assert _factor(8 * u0 + d0, levels, op) == 4  # walked outer, re-read inner
+    assert _factor(8 * u1 + d0, levels, op) == 4  # re-read outer, walked inner
+    assert _factor(8 * u0 + 2 * u1, levels, op) == 1  # walked at both
+    assert _factor(d0, levels, op) == 16  # re-entered at both
 
 
 def test_nested_loops_of_different_trip_count_keep_their_own_variables():
     levels = [(2, set(), 0), (4, set(), 0)]
-    merged = _levels_with_loop_vars(_op(_hint(u0, 2), _hint(u1, 4)), levels)
-    assert _loop_factor_for_index(8 * u0, merged) == 4
-    assert _loop_factor_for_index(8 * u1, merged) == 2
+    op = _op(_hint(u0, 2), _hint(u1, 4))
+    assert _factor(8 * u0, levels, op) == 4
+    assert _factor(8 * u1, levels, op) == 2
+
+
+# ----------------------------------------------- pinned reads (lowering's rule)
+
+
+def test_a_loop_variable_without_a_coefficient_does_not_advance_the_read():
+    """Synthetic stamp-consistency check, not an observed lowered-kernel case.
+
+    The lowering advances a dependency only when its index has a nonzero
+    coefficient on the loop variable (``_stamp_direct_loop_info``). ``u0`` being a
+    free symbol is not enough: the synthetic index ``4096*FloorDiv(u0, 2)`` has
+    coefficient 0, so under that rule it would be stamped pinned, and the price
+    follows the same rule (re-entered every trip). No lowered kernel is known to
+    produce this read."""
+    from torch.utils._sympy.functions import FloorDiv
+
+    levels = [(8, set(), 0)]
+    op = _op(_hint(u0, 8))
+    pinned = 4096 * FloorDiv(u0, 2) + d2
+    assert _loop_var_advances(pinned, [u0]) == [False]
+    assert _factor(pinned, levels, op) == 8
+    assert _factor(4096 * u0 + d2, levels, op) == 1  # coefficient 4096: advances
+
+
+def test_the_lowerings_stamp_decides_over_the_index():
+    """Synthetic stamp-consistency check, not an observed lowered-kernel case.
+
+    When the lowering's stamp and the index disagree, the stamp wins: code
+    generation follows the stamp, so the price follows it too. The read below keeps
+    ``u0`` in its index but carries an empty ("pinned") stamp. It is constructed for
+    the check; no reachable read with ``u0`` in its index and a pinned stamp is
+    known."""
+    levels = [(8, set(), 0)]
+    op = _op(_hint(u0, 8))
+    pool_read = 64 * u0 + d2
+    pinned_stamp = _stamped_advances([[]], None, 1)
+    advancing_stamp = _stamped_advances([[(0, sympy.Integer(1))]], None, 1)
+    squeezed_stamp = _stamped_advances([[]], [[(sympy.Integer(64), 1)]], 1)
+    assert (pinned_stamp, advancing_stamp, squeezed_stamp) == ([False], [True], [True])
+    assert _factor(pool_read, levels, op, pinned_stamp) == 8
+    assert _factor(d2, levels, op, advancing_stamp) == 1
+    # A stamp that does not cover every level is not used.
+    assert _stamped_advances([[], []], None, 1) is None
+    assert _stamped_advances([[]], [[], []], 1) is None
 
 
 # ------------------------------------------------ wiring in extract_op_features
@@ -599,6 +620,168 @@ def test_the_extractor_pairs_nested_equal_trip_loops_by_level(monkeypatch):
     assert factors["arg0"] == 4  # advances with the outer loop only
     assert factors["arg1"] == 4  # advances with the inner loop only
     assert factors["arg2"] == 1  # advances with both
+
+
+# ---------------------------------------- matmul work = one pass x the write's factor
+
+
+def _looped_matmul_features(
+    monkeypatch,
+    *,
+    size,
+    k,
+    trips,
+    tiled_out,
+    tiled_red=None,
+    hints=(),
+    write_index,
+    read_indices,
+    it_space,
+):
+    """``extract_op_features`` on a batch-matmul body op inside a loop nest."""
+    from torch_spyre._inductor.constants import BATCH_MATMUL_OP
+
+    data = SimpleNamespace(
+        ranges=list(size[-2:]), reduction_ranges=[k], reduction_type=BATCH_MATMUL_OP
+    )
+    op = _looped_op(trips, tiled_out, hints, write_index, read_indices, data=data)
+    op.get_size = lambda: list(size)
+    if tiled_red is not None:
+        op.loop_info.loop_tiled_reduction_dims = [list(lv) for lv in tiled_red]
+    monkeypatch.setattr(dcm, "iteration_space_from_op", lambda _op: it_space)
+    monkeypatch.setattr(dcm, "_indirect_write_elems", lambda *_: None)
+    with V.set_graph_handler(_StubGraph()):
+        return dcm.extract_op_features(op)
+
+
+def _output_factor(feature):
+    return next(a.loop_factor for a in feature.args if a.role == "output")
+
+
+def test_a_stacked_slice_write_is_not_multiplied_by_the_trip_count(monkeypatch):
+    """Review repro (E=128, T=64, N=128, K=64; the loop tiles none of the op's dims).
+
+    A per-expert body matmul that re-writes one ``[T, N]`` buffer each trip produces
+    it 128 times. One that writes its own slice ``out[u0, m, n]`` of a stacked
+    ``[E, T, N]`` buffer produces that buffer once: ``out_elems`` already covers every
+    trip. Both are 128 experts of ``T*N*K`` work; scaling the stacked write by the trip
+    count as well gave 8,589,934,592.
+
+    The stacked write is synthetic: the test checks that the factor follows the
+    write's index, not that a lowered body ``batchmatmul`` reaches this
+    squeezed-advance write (not established).
+    """
+    E, T, N, K = 128, 64, 128, 64
+    m, n, r0 = sympy.symbols("m n r0", integer=True)
+    common = dict(
+        k=K,
+        trips=[E],
+        tiled_out=[[]],
+        hints=[_hint(u0, sympy.Integer(E))],
+        read_indices=[K * m + r0, N * K * u0 + N * r0 + n],
+        it_space={m: T, n: N, r0: K},
+    )
+    per_trip = _looped_matmul_features(
+        monkeypatch, size=[T, N], write_index=N * m + n, **common
+    )
+    stacked = _looped_matmul_features(
+        monkeypatch, size=[E, T, N], write_index=T * N * u0 + N * m + n, **common
+    )
+    assert (_output_factor(per_trip), per_trip.matmul_macs) == (E, 67_108_864)
+    assert (_output_factor(stacked), stacked.matmul_macs) == (1, 67_108_864)
+
+
+def test_macs_of_a_paged_attention_step_and_a_row_loop(monkeypatch):
+    """Non-expert ``for_each_tile`` shapes.
+
+    * A page loop: one attention score matmul per KV page (64 query rows x 128 page
+      tokens x head dim 64), 16 trips, re-writing one score buffer -- 16 pages of work.
+    * A row loop over the same op's query rows: the loop tiles an output dim, the
+      output buffer is full-extent and the raw product already is the total.
+    """
+    m, n, r0 = sympy.symbols("m n r0", integer=True)
+    common = dict(
+        size=[64, 128],
+        k=64,
+        write_index=128 * m + n,
+        read_indices=[64 * m + r0, 64 * n + r0],
+        it_space={m: 64, n: 128, r0: 64},
+    )
+    page_loop = _looped_matmul_features(
+        monkeypatch, trips=[16], tiled_out=[[]], hints=[_hint(u0, 16)], **common
+    )
+    row_loop = _looped_matmul_features(
+        monkeypatch, trips=[8], tiled_out=[[0]], hints=[_hint(u0, 8)], **common
+    )
+    assert page_loop.matmul_macs == 16 * 64 * 128 * 64
+    assert row_loop.matmul_macs == 64 * 128 * 64
+
+
+def test_a_reduction_tiled_matmul_keeps_its_trip_scaling(monkeypatch):
+    """A coarse loop over K: the write has no reduction variable, so the same output
+    tile is produced every trip with ``K / trips`` of the reduction; the work of the
+    nest is ``trips`` times the per-tile product (unchanged convention)."""
+    m, n, r0 = sympy.symbols("m n r0", integer=True)
+    feature = _looped_matmul_features(
+        monkeypatch,
+        size=[64, 128],
+        k=16,  # the per-tile K slice of a K=64 reduction in 4 trips
+        trips=[4],
+        tiled_out=[[]],
+        tiled_red=[[0]],
+        write_index=128 * m + n,
+        read_indices=[64 * m + r0, 128 * r0 + n],
+        it_space={m: 64, n: 128, r0: 16},
+    )
+    assert _output_factor(feature) == 4
+    assert feature.matmul_macs == 64 * 128 * 64
+
+
+def test_a_mixed_nest_scales_only_the_level_that_re_writes(monkeypatch):
+    """An outer row loop (tiles the output row dim, 2 trips) around an inner
+    ``for_each_tile`` loop that tiles none of the op's dims (4 trips). The output is
+    walked by the outer level and re-written by the inner one: 1 * 4 passes. The old
+    all-or-nothing rule saw "tiles an output dim" and did not scale at all."""
+    m, n, r0 = sympy.symbols("m n r0", integer=True)
+    feature = _looped_matmul_features(
+        monkeypatch,
+        size=[64, 128],
+        k=64,
+        trips=[2, 4],
+        tiled_out=[[0], []],
+        hints=[_hint(u0, 2), _hint(u1, 4)],
+        write_index=128 * m + n,
+        read_indices=[64 * m + r0, 8192 * u1 + 128 * r0 + n],
+        it_space={m: 64, n: 128, r0: 64},
+    )
+    assert _output_factor(feature) == 4
+    assert feature.matmul_macs == 4 * 64 * 128 * 64
+    factors = {a.name: a.loop_factor for a in feature.args}
+    assert factors["arg0"] == 4  # walked by the row loop, re-read by the inner loop
+    assert factors["arg1"] == 2  # re-read by the row loop, walked by the inner loop
+
+
+def test_the_extractor_follows_a_pinned_stamp_on_a_read_carrying_the_loop_variable(
+    monkeypatch,
+):
+    """Synthetic stamp-consistency check, not an observed lowered-kernel case.
+
+    The lowering's per-read stamp, when it covers every read, is what the price
+    follows: here the second read keeps ``u0`` in its index but is stamped pinned,
+    so it is priced as re-read every trip. The read is constructed for the check;
+    no reachable read of this shape is known."""
+    op = _looped_op(
+        [8],
+        [[]],
+        [_hint(u0, sympy.Integer(8))],
+        write_index=64 * d0 + d2,
+        read_indices=[4096 * u0 + d2, 64 * u0 + d2],
+    )
+    op.loop_info.tiled_dims_per_read = [[[(0, sympy.Integer(1))]], [[]]]
+    op.loop_info.squeezed_advance_per_read = []
+    factors = _factors(monkeypatch, op, {d0: 64, d2: 64})
+    assert factors["arg0"] == 1  # stamped advancing
+    assert factors["arg1"] == 8  # stamped pinned despite u0 in its index
 
 
 def test_the_extractor_marks_the_reads_that_advance_with_the_loop_variable(monkeypatch):
