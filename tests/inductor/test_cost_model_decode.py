@@ -634,17 +634,27 @@ def _looped_matmul_features(
     write_index,
     read_indices,
     it_space,
+    ranges=None,
+    output_tiled_dims=None,
 ):
-    """``extract_op_features`` on a batch-matmul body op inside a loop nest."""
+    """``extract_op_features`` on a batch-matmul body op inside a loop nest.
+
+    ``ranges`` overrides the host ranges (default: the last two of ``size``) and
+    ``output_tiled_dims`` sets the lowering's stamped output verdict.
+    """
     from torch_spyre._inductor.constants import BATCH_MATMUL_OP
 
     data = SimpleNamespace(
-        ranges=list(size[-2:]), reduction_ranges=[k], reduction_type=BATCH_MATMUL_OP
+        ranges=list(size[-2:] if ranges is None else ranges),
+        reduction_ranges=[k],
+        reduction_type=BATCH_MATMUL_OP,
     )
     op = _looped_op(trips, tiled_out, hints, write_index, read_indices, data=data)
     op.get_size = lambda: list(size)
     if tiled_red is not None:
         op.loop_info.loop_tiled_reduction_dims = [list(lv) for lv in tiled_red]
+    if output_tiled_dims is not None:
+        op.loop_info.output_tiled_dims = output_tiled_dims
     monkeypatch.setattr(dcm, "iteration_space_from_op", lambda _op: it_space)
     monkeypatch.setattr(dcm, "_indirect_write_elems", lambda *_: None)
     with V.set_graph_handler(_StubGraph()):
@@ -779,3 +789,36 @@ def test_the_extractor_follows_a_pinned_stamp_on_a_read_carrying_the_loop_variab
     factors = _factors(monkeypatch, op, {d0: 64, d2: 64})
     assert factors["arg0"] == 1  # stamped advancing
     assert factors["arg1"] == 8  # stamped pinned despite u0 in its index
+
+
+def test_a_stamped_level_without_a_loop_variable_follows_its_stamp(monkeypatch):
+    """Review repro (H=16 heads, T=64, N=128, K=64; ``[H, T, N]`` output).
+
+    The loop tiles output dim 0 with tile size 1, so the iteration space has no
+    symbol for it (``_tiled_symbols_per_level`` skips unit-size ranges) and the level
+    declares a dim but names no symbol. The level has no paired ``for_each_tile``
+    variable (no loop-variable hint). The lowering's stamp says the output advances
+    at that level, and the stamp is consulted whether or not a variable is paired:
+    the write is walked once and the matmul work is the loop's true total
+    ``16 * T * N * K``, not 16 times it.
+
+    Synthetic, mirroring the reviewer's repro. Which lowerings reach it (a
+    ``spyre_hint`` or solver coarse loop, or a hint/level count mismatch) is the
+    reviewer's statement, not independently established here.
+    """
+    H, T, N, K = 16, 64, 128, 64
+    m, n, r0 = sympy.symbols("m n r0", integer=True)
+    feature = _looped_matmul_features(
+        monkeypatch,
+        size=[H, T, N],
+        ranges=[1, T, N],  # the unit-size head range has no iteration symbol
+        k=K,
+        trips=[H],
+        tiled_out=[[0]],
+        output_tiled_dims=[[(0, 1)]],
+        write_index=N * m + n,
+        read_indices=[K * m + r0, N * r0 + n],
+        it_space={m: T, n: N, r0: K},
+    )
+    assert _output_factor(feature) == 1
+    assert feature.matmul_macs == H * T * N * K

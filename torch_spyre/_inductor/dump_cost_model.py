@@ -367,22 +367,22 @@ def _stamped_advances(tiled, squeezed, n_levels: int) -> list[bool] | None:
 def _loop_var_advances(index, loop_vars, stamped=None) -> list[bool]:
     """Per level: does a dependency at ``index`` advance with that level's loop?
 
-    Only levels with a paired ``for_each_tile`` loop variable can say yes; the tiled
-    dims of every level are handled by ``_loop_factor_for_index`` itself.  The
-    lowering's stamped verdict is authoritative when present (``_stamped_advances``).
-    Without it, the lowering's own rule decides: the address advances iff the index
-    has a nonzero coefficient on the loop variable.  A loop variable that is merely a
-    free symbol of the index does not advance the address; the tested example is the
-    synthetic index ``4096*FloorDiv(u0, 2)`` (coefficient 0).  No lowered kernel is
-    known to produce such a read; following the lowering's rule keeps the price
-    consistent with what the lowering stamps.
+    A complete stamped verdict decides for every level, with or without a paired
+    ``for_each_tile`` loop variable (``_stamped_advances``); the tiled dims of every
+    level are handled by ``_loop_factor_for_index`` itself.  Without a stamp, only a
+    level with a paired loop variable can say yes, by the lowering's own rule: the
+    address advances iff the index has a nonzero coefficient on the loop variable.  A
+    loop variable that is merely a free symbol of the index does not advance the
+    address; the tested example is the synthetic index ``4096*FloorDiv(u0, 2)``
+    (coefficient 0).  No lowered kernel is known to produce such a read; following the
+    lowering's rule keeps the price consistent with what the lowering stamps.
     """
     advances = []
     for lv, var in enumerate(loop_vars):
-        if var is None:
-            advances.append(False)
-        elif stamped is not None:
+        if stamped is not None:
             advances.append(stamped[lv])
+        elif var is None:
+            advances.append(False)
         else:
             try:
                 advances.append(sympy.sympify(index).coeff(var) != 0)
