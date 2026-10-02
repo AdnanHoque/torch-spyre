@@ -130,6 +130,7 @@ class GraphEditor:
         lx_view: PerCoreView | None = None,
         after_fx: Node | None = None,
         lower_anchor: Operation | None = None,
+        lower_before: Operation | None = None,
     ) -> ComputedBuffer:
         """Insert a clone; private clones rewire only ``buffer_users``.
 
@@ -140,7 +141,17 @@ class GraphEditor:
         final after the whole counted loop: the drain must be inserted after the
         loop's last member, not after the pre-loop initializer.  Both default
         to ``None``, which keeps every existing caller byte-identical.
+
+        ``lower_before`` is the mirror image for an input clone: it places the
+        lowered clone immediately before ``lower_before`` (the entry of the
+        counted loop its consumers run in) instead of before its first
+        consumer, so a loop-invariant copy runs once rather than every trip.
+        The FX node already sits right after the input placeholder, so only the
+        lowered order moves.
         """
+        assert lower_anchor is None or lower_before is None, (
+            "a clone has one position: lower_anchor and lower_before exclude each other"
+        )
         if input and lx_view is None:
             raise ValueError("an LX input clone requires its accepted physical view")
         if isinstance(buffer, TensorBox):
@@ -298,8 +309,11 @@ class GraphEditor:
                 self.lowering.operations.index(lower_anchor) + 1, new_com_buf
             )
         else:
+            # A hoisted input clone goes before its consumers' loop entry; any
+            # other clone goes before its first consumer, as before.
+            before = lower_before if lower_before is not None else buffer_users[0]
             self.lowering.operations.insert(
-                self.lowering.operations.index(buffer_users[0]), new_com_buf
+                self.lowering.operations.index(before), new_com_buf
             )
 
         return new_com_buf

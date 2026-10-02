@@ -102,6 +102,8 @@ from torch_spyre._inductor.scratchpad.utils import (
     _get_buffer_user_deps,
     _would_produce_lx_back_gap,
     OP_OUTPUT_NOT_GOOD_FOR_LX_REUSE,
+    counted_loop_entry,
+    counted_loop_group_path,
     counted_loop_lifetime_overrides,
 )
 from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
@@ -460,20 +462,73 @@ def _drain_lifetime_end_overrides(
         )
 
 
-def _clear_drain_loop_metadata(op: Operation) -> None:
-    """Drop loop/carry metadata from a post-loop drain clone.
+def _clear_loop_membership_metadata(op: Operation) -> None:
+    """Drop loop/carry metadata from a clone placed outside its counted loop.
 
-    ``copy_op_metadata`` copies the storage's attributes onto the clone, but
-    the drain is neither a loop member nor a carry: a surviving ``loop_info``
-    would re-group it into the counted loop at scheduling time
-    (``_loop_group_id``), and the records would misclassify it in
-    ``_build_cd_bound_buffers``.  Only the drain branch of ``_push_allocation``
-    calls this; every ordinary clone keeps today's metadata-copy behavior.
+    ``copy_op_metadata`` copies the storage's (drain) or the first consumer's
+    (input clone) attributes onto the clone, but a post-loop drain and a
+    hoisted pre-loop input clone are neither loop members nor carries: a
+    surviving ``loop_info`` would re-group the clone into the counted loop at
+    scheduling time (``_loop_group_id``) and give it another op's per-read tile
+    advance in codegen (``_general_tile_advance``), and the records would
+    misclassify it in ``_build_cd_bound_buffers``.  Only the drain branch and
+    the hoisted-input branch of ``_push_allocation`` call this; every other
+    clone keeps today's metadata-copy behavior.
     """
 
     for attr in ("loop_info", "_loop_carry_record", "_carried_reduction_record"):
         if hasattr(op, attr):
             delattr(op, attr)
+
+
+def _hoisted_input_clone_entry(
+    graph: GraphLowering, name: str, users: Sequence[Operation]
+) -> Optional[Operation]:
+    """Where an LX clone of graph input ``name`` may run once, before its loop.
+
+    An input clone copies the whole input (``clone_lowering`` over the input's
+    full ranges), never a per-trip window: each consumer keeps its own index,
+    tile advance included, and only the buffer it names changes.  So when the
+    first consumer runs inside a counted loop, re-running the clone on every
+    trip rewrites the same LX bytes with the same values; it can run once
+    before the loop.  ``counted_loop_lifetime_overrides`` already reserves the
+    input's LX address from that loop's entry to its end, so the move changes
+    no address, no lifetime and no capacity -- only how often the HBM read
+    happens.
+
+    Returns the loop's entry operation, or ``None`` (clone stays where it is
+    today) when the first consumer is not a counted-loop member, when any
+    operation mutates the input (a per-trip clone would then observe the
+    writes), or when an opaque extern kernel runs between the loop entry and
+    the first consumer (the clone's LX bytes would be live across it, which
+    the residency gate only checked from the first use on), or when the
+    input's last reader is its outermost loop's last member: no lifetime end
+    override widens the clone then, so the reverse-parent in-place edge
+    (``_handoff_parent_end``) may hand its slot to that reader, and the next
+    trip would read the overwritten bytes that a per-trip clone re-copies.
+    """
+    if not users:
+        return None
+    entry = counted_loop_entry(graph.operations, users[0])
+    if entry is None:
+        return None
+    for op in graph.operations:
+        try:
+            if name in op.get_mutation_names():
+                return None
+        except NotImplementedError:
+            return None
+    start = graph.operations.index(entry)
+    first_use = graph.operations.index(users[0])
+    if _extern_kernel_in_live_range(graph, list(range(start, first_use + 1))):
+        return None
+    last_outer = counted_loop_group_path(users[-1])[:1]
+    if last_outer and not any(
+        counted_loop_group_path(op)[:1] == last_outer
+        for op in graph.operations[graph.operations.index(users[-1]) + 1 :]
+    ):
+        return None
+    return entry
 
 
 def _assert_drain_plan_committed(
@@ -1768,12 +1823,20 @@ class ScratchpadAllocator:
 
             buf = graph.get_buffer(b.name)
             if b.name in inputs:
+                # A loop-invariant input clone runs once, before the counted
+                # loop its consumers run in, instead of on every trip.
+                hoist_before = _hoisted_input_clone_entry(
+                    graph, b.name, buffer_users[b.name]
+                )
                 new_buffer = graph_editor.push_allocation_with_clone(
                     buf,
                     buffer_users[b.name],
                     input=True,
                     lx_view=b.lx_view,
+                    lower_before=hoist_before,
                 )
+                if hoist_before is not None:
+                    _clear_loop_membership_metadata(new_buffer)
                 self._set_one_allocation(new_buffer, b.address, b.lx_view)
 
             elif b.name in outputs:
@@ -1801,7 +1864,7 @@ class ScratchpadAllocator:
                     # a carry.  The scheduler-level
                     # ``_loop_group_id(drain_node) is None`` is asserted by the
                     # captured-order test; here the op-level absence is exact.
-                    _clear_drain_loop_metadata(new_buffer)
+                    _clear_loop_membership_metadata(new_buffer)
                 else:
                     new_buffer = graph_editor.push_allocation_with_clone(
                         buf, buffer_users[b.name], input=False
