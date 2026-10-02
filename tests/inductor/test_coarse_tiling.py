@@ -10090,5 +10090,226 @@ class TestCoarseTilingPassRegionRefusal(unittest.TestCase):
         self.assertEqual(self._state(ops[:1]), loop_before)
 
 
+class _SentinelOp:
+    """Identity-only stand-in for an ``ir.Operation`` in push-branch tests."""
+
+    def __init__(self, name):
+        self.name = name
+        self.operation_name = name
+
+    def get_name(self):
+        return self.name
+
+    def __repr__(self):
+        return f"_SentinelOp({self.name!r})"
+
+
+class TestDrainPlanPushAndLifetime(unittest.TestCase):
+    """Post-loop drain plan: lifetime extension and the push branch.
+
+    The drain-map validator itself is exercised on a real captured
+    ``for_each_tile`` graph in ``test_for_each_tile_lowering.py``; here the
+    plan is an input, and the tests pin the lifetime extension arithmetic, the
+    no-late-decline assertion, and the exact push call shape (drain vs
+    ordinary output clone vs HBM fallback) with mocked graph-editor
+    machinery, following this module's existing mock conventions.
+    """
+
+    def test_drain_lifetime_extension_reaches_graph_exit(self):
+        from torch_spyre._inductor.scratchpad.allocator import (
+            _drain_lifetime_end_overrides,
+        )
+
+        plan = SimpleNamespace(storage_name="buf2")
+        overrides = {"buf2": 3, "other": 9}
+        _drain_lifetime_end_overrides(overrides, {"buf2": plan}, 7)
+        self.assertEqual(overrides, {"buf2": 7, "other": 9})
+        # max(): a later shorter measurement never shrinks a longer end.
+        _drain_lifetime_end_overrides(overrides, {"buf2": plan}, 5)
+        self.assertEqual(overrides["buf2"], 7)
+
+    def test_missing_drain_anchor_raises_instead_of_falling_back(self):
+        """After LX is committed there is no late decline."""
+        from torch_spyre._inductor.scratchpad.allocator import (
+            DrainPlan,
+            _assert_drain_plan_committed,
+        )
+
+        plan = DrainPlan(
+            storage_name="buf2",
+            update_name="buf2_update",
+            loop_group=(0,),
+            anchor_op=_SentinelOp("no_longer_present"),
+            loop_origin=_SentinelOp("while_loop_hop"),
+        )
+        graph = SimpleNamespace(operations=[], graph=object())
+        with self.assertRaisesRegex(AssertionError, "no longer in graph.operations"):
+            _assert_drain_plan_committed(graph, None, {}, {}, plan)
+
+    def _isolation_plan(self):
+        from torch_spyre._inductor.scratchpad.allocator import DrainPlan
+
+        return DrainPlan(
+            storage_name="buf2",
+            update_name="buf2_update",
+            loop_group=(0,),
+            anchor_op=_SentinelOp("loop_last_member"),
+            loop_origin=_SentinelOp("while_loop_hop"),
+        )
+
+    def _run_push(self, *, with_plan, address=0x4000):
+        from torch_spyre._inductor.scratchpad import allocator as allocator_module
+        from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
+        from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
+
+        allocator = ScratchpadAllocator(GreedyLayoutSolver, 2**20)
+        storage_op = _SentinelOp("buf2")
+        update_op = _SentinelOp("buf2_update")
+        plan = self._isolation_plan()
+        graph = MagicMock()
+        graph.operations = [storage_op, update_op, plan.anchor_op]
+        graph.get_output_names.return_value = ["buf2"]
+        graph.graph_input_names = []
+        graph.get_buffer.return_value = storage_op
+        buffer = SimpleNamespace(name="buf2", address=address, lx_view=object())
+        clone = SimpleNamespace(
+            loop_info=object(),
+            _loop_carry_record=object(),
+            _carried_reduction_record=object(),
+        )
+        if with_plan:
+            allocator._validated_drain_plans = {"buf2": plan}
+        with (
+            patch.object(
+                allocator_module, "get_buffer_users", return_value={"buf2": [update_op]}
+            ),
+            patch.object(allocator_module, "GraphEditor") as graph_editor_cls,
+            patch.object(allocator_module, "materialize_lx_relayouts"),
+            patch.object(
+                allocator_module, "_assert_drain_plan_committed"
+            ) as check_committed,
+            patch.object(allocator, "_set_one_allocation"),
+        ):
+            editor = graph_editor_cls.return_value
+            editor.push_allocation_with_clone.return_value = clone
+            allocator._push_allocation(graph, [buffer], [])
+        return SimpleNamespace(
+            editor=editor,
+            clone=clone,
+            check_committed=check_committed,
+            storage_op=storage_op,
+            update_op=update_op,
+            plan=plan,
+            with_plan=with_plan,
+        )
+
+    def test_push_emits_post_loop_drain_only_with_plan(self):
+        """Drain branch: output-only clone after the loop's last member."""
+        result = self._run_push(with_plan=True)
+        result.check_committed.assert_called_once()
+        result.editor.push_allocation_with_clone.assert_called_once_with(
+            result.storage_op,
+            [],
+            input=False,
+            private=True,
+            after_fx=result.plan.loop_origin,
+            lower_anchor=result.plan.anchor_op,
+        )
+        # The real clearing helper ran; the clone loses exactly the
+        # loop/carry metadata.
+        self.assertFalse(hasattr(result.clone, "loop_info"))
+        self.assertFalse(hasattr(result.clone, "_loop_carry_record"))
+        self.assertFalse(hasattr(result.clone, "_carried_reduction_record"))
+        result.editor.change_graph_output.assert_called_once_with(
+            result.storage_op, result.clone
+        )
+
+    def test_push_ordinary_output_clone_is_unchanged_without_plan(self):
+        """Default-call differential: no plan -> today's exact call."""
+        result = self._run_push(with_plan=False)
+        result.check_committed.assert_not_called()
+        result.editor.push_allocation_with_clone.assert_called_once_with(
+            result.storage_op, [result.update_op], input=False
+        )
+        # The ordinary clone path is not touched by the drain-only clearing.
+        self.assertTrue(hasattr(result.clone, "loop_info"))
+        self.assertTrue(hasattr(result.clone, "_loop_carry_record"))
+        self.assertTrue(hasattr(result.clone, "_carried_reduction_record"))
+
+    def test_push_emits_no_copy_when_solver_chose_hbm(self):
+        result = self._run_push(with_plan=True, address=None)
+        result.editor.push_allocation_with_clone.assert_not_called()
+        result.editor.change_graph_output.assert_not_called()
+        # Nothing touched the clone: the HBM fallback emits no copy and no
+        # metadata rewrite.
+        self.assertTrue(hasattr(result.clone, "loop_info"))
+        self.assertTrue(hasattr(result.clone, "_loop_carry_record"))
+
+    def test_second_output_clone_in_same_push_keeps_the_drain_anchor(self):
+        """Anchors are Operation objects, not indices.
+
+        An earlier ordinary output clone in the same ``_push_allocation``
+        call only inserts ops around existing ones, so the drain's anchor
+        identity must still resolve.  The editor is mocked here; the real
+        insertion (``operations.index(lower_anchor) + 1``) is exercised on a
+        real captured graph in ``test_for_each_tile_lowering.py``.
+        """
+        from torch_spyre._inductor.scratchpad import allocator as allocator_module
+        from torch_spyre._inductor.scratchpad.allocator import (
+            ScratchpadAllocator,
+        )
+        from torch_spyre._inductor.scratchpad.greedy_solver import (
+            GreedyLayoutSolver,
+        )
+
+        allocator = ScratchpadAllocator(GreedyLayoutSolver, 2**20)
+        plan = self._isolation_plan()
+        allocator._validated_drain_plans = {"buf2": plan}
+        storage_op = _SentinelOp("buf2")
+        update_op = _SentinelOp("buf2_update")
+        other_op = _SentinelOp("outA")
+        other_consumer = _SentinelOp("outA_consumer")
+        graph = MagicMock()
+        graph.operations = [other_op, storage_op, update_op, plan.anchor_op]
+        graph.get_output_names.return_value = ["buf2", "outA"]
+        graph.graph_input_names = []
+        graph.get_buffer.side_effect = {
+            "buf2": storage_op,
+            "outA": other_op,
+        }.get
+        buffer = SimpleNamespace(name="buf2", address=0x4000, lx_view=object())
+        # Ordinary output clone first, then the drain: the drain's anchor is
+        # the same object, whatever the ordinary push did to the list.
+        buffers = [
+            SimpleNamespace(name="outA", address=0x2000, lx_view=object()),
+            buffer,
+        ]
+        clone = SimpleNamespace(
+            loop_info=object(),
+            _loop_carry_record=object(),
+            _carried_reduction_record=object(),
+        )
+        with (
+            patch.object(
+                allocator_module,
+                "get_buffer_users",
+                return_value={"buf2": [update_op], "outA": [other_consumer]},
+            ),
+            patch.object(allocator_module, "GraphEditor") as graph_editor_cls,
+            patch.object(allocator_module, "materialize_lx_relayouts"),
+            patch.object(allocator_module, "_assert_drain_plan_committed"),
+            patch.object(allocator, "_set_one_allocation"),
+        ):
+            editor = graph_editor_cls.return_value
+            editor.push_allocation_with_clone.return_value = clone
+            allocator._push_allocation(graph, buffers, [])
+        calls = editor.push_allocation_with_clone.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].args, (other_op, [other_consumer]))
+        self.assertEqual(calls[1].args, (storage_op, []))
+        self.assertEqual(calls[1].kwargs["lower_anchor"], plan.anchor_op)
+        self.assertIs(plan.anchor_op, graph.operations[-1])
+
+
 if __name__ == "__main__":
     unittest.main()
