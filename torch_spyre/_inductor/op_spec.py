@@ -38,12 +38,16 @@ FRONTEND_LX_BYTES_INFO_KEY = "frontend_lx_bytes"
 
 
 def frontend_lx_bytes_attr_value(op_info: dict | None) -> int | None:
-    """The value bundle emission writes as ``frontend_lx_bytes = N : i64``.
+    """One op's own reservation, as bundle emission and the cache key read it.
 
-    Returns the effective per-call reservation, or ``None`` when no attribute
-    is emitted (absent key, or a value that is not a nonnegative int). Bundle
-    emission and the kernel cache key both go through here: the cache key must
-    change exactly when the emitted attribute changes, no more and no less.
+    Returns the op's reservation in bytes per core, or ``None`` when the op has
+    none (absent key, or a value that is not a nonnegative int). Bundle emission
+    writes ``frontend_lx_bytes = N : i64`` on a call from these values: the
+    largest over the calls that share the call's sdsc file, or none when any of
+    them has none (``codegen.bundle._record_frontend_lx_bytes``). The kernel
+    cache key hashes every op's own value, so it changes whenever an emitted
+    attribute can change; it may also change when none does (a smaller bound
+    on a shared file), which only costs a recompile.
     """
     if not op_info:
         return None

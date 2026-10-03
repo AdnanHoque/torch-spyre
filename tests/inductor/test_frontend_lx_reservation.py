@@ -40,11 +40,13 @@ import sympy
 import torch
 from torch._inductor.dependencies import MemoryDep
 
+from torch_spyre._inductor import config as _spyre_config
 from torch_spyre._inductor.ir import FixedTiledLayout
 from torch_spyre._inductor.loop_info import LoopCarryRecord
 from torch_spyre._inductor.op_spec import (
     FRONTEND_LX_BYTES_INFO_KEY,
     LX_RELAYOUT_INFO_KEY,
+    LoopSpec,
     OpSpec,
 )
 from torch_spyre._inductor.scratchpad import allocator as allocator_mod
@@ -377,19 +379,90 @@ class BundleFrontendLxBytesTest(TestCase):
                 )
                 self.assertNotIn("frontend_lx_bytes", mlir)
 
-    def test_cached_code_is_reused_but_each_call_keeps_its_own_bound(self):
-        """Two equal programs with different bounds: same sdsc file, two bounds.
+    def test_calls_of_a_shared_program_carry_the_largest_bound(self):
+        """Two equal programs with different bounds: same sdsc file, ONE bound.
 
-        The SDSC cache dedups code, not ownership: the first op's bound must not
-        leak into the second call's attribute, and vice versa.
+        The SDSC cache dedups code into one sdsc file, and the backend makes one
+        plan per file whose LX staging serves every call. A plan made against
+        the first call's 128 KiB bound may stage just above 128 KiB, inside LX
+        the front end still holds at the second call (256 KiB). So both calls
+        state the larger bound. (Seen on a card: two RMSNorms of one layer
+        shared their "+ eps" add; its constant, staged at the first call's
+        640 KiB bound, landed inside a live fp32 buffer that ran to 784 KiB at
+        the second call.)
         """
         first = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 131072})
         second = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 262144})
         mlir = self._bundle([first, second])
 
         self.assertEqual(mlir.count('sdsc_filename="sdsc_0.json"'), 2)
-        self.assertIn("frontend_lx_bytes = 131072 : i64", mlir)
-        self.assertIn("frontend_lx_bytes = 262144 : i64", mlir)
+        self.assertEqual(mlir.count("frontend_lx_bytes = 262144 : i64"), 2)
+        self.assertNotIn("frontend_lx_bytes = 131072 : i64", mlir)
+
+    def test_order_of_the_calls_does_not_matter(self):
+        first = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 262144})
+        second = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 131072})
+        mlir = self._bundle([first, second])
+
+        self.assertEqual(mlir.count("frontend_lx_bytes = 262144 : i64"), 2)
+        self.assertNotIn("frontend_lx_bytes = 131072 : i64", mlir)
+
+    def test_a_shared_program_with_an_unbounded_call_carries_no_bound(self):
+        """A call without a bound keeps the backend's full default reservation,
+        larger than any bound, so no call of that file may state a smaller one."""
+        first = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 131072})
+        second = _make_op_spec("a")
+        mlir = self._bundle([first, second])
+
+        self.assertEqual(mlir.count('sdsc_filename="sdsc_0.json"'), 2)
+        self.assertNotIn("frontend_lx_bytes", mlir)
+
+    def test_an_unbounded_first_call_also_carries_no_bound(self):
+        first = _make_op_spec("a")
+        second = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 131072})
+        mlir = self._bundle([first, second])
+
+        self.assertEqual(mlir.count('sdsc_filename="sdsc_0.json"'), 2)
+        self.assertNotIn("frontend_lx_bytes", mlir)
+
+    def test_without_the_sdsc_cache_each_call_keeps_its_own_bound(self):
+        """No shared file, no shared plan: each call states its own bound."""
+        first = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 131072})
+        second = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 262144})
+        with mock.patch.object(_spyre_config, "sdsc_cache", False):
+            mlir = self._bundle([first, second])
+
+        self.assertIn(
+            'sdsc_filename="sdsc_0.json", "symbol_ids"=[], '
+            "frontend_lx_bytes = 131072 : i64",
+            mlir,
+        )
+        self.assertIn(
+            'sdsc_filename="sdsc_1.json", "symbol_ids"=[], '
+            "frontend_lx_bytes = 262144 : i64",
+            mlir,
+        )
+
+    def test_distinct_programs_keep_their_own_bounds(self):
+        first = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 131072})
+        second = _make_op_spec("b", {FRONTEND_LX_BYTES_INFO_KEY: 262144})
+        mlir = self._bundle([first, second])
+
+        self.assertEqual(mlir.count("frontend_lx_bytes = 131072 : i64"), 1)
+        self.assertEqual(mlir.count("frontend_lx_bytes = 262144 : i64"), 1)
+
+    def test_a_call_inside_a_loop_shares_with_a_call_outside(self):
+        inside = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 393216})
+        outside = _make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: 131072})
+        other = _make_op_spec("b", {FRONTEND_LX_BYTES_INFO_KEY: 65536})
+        mlir = self._bundle(
+            [outside, LoopSpec(count=sympy.Integer(4), body=[inside, other])]
+        )
+
+        self.assertEqual(mlir.count('sdsc_filename="sdsc_0.json"'), 2)
+        self.assertEqual(mlir.count("frontend_lx_bytes = 393216 : i64"), 2)
+        self.assertEqual(mlir.count("frontend_lx_bytes = 65536 : i64"), 1)
+        self.assertNotIn("frontend_lx_bytes = 131072 : i64", mlir)
 
     def test_relayout_marker_and_reservation_coexist(self):
         mlir = self._bundle(

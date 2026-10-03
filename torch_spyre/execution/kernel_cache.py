@@ -241,9 +241,9 @@ def compute_specs_hash(
     The key is a SHA-256 hash covering: the JSON of every sdsc_N.json dict
     (op structure, iteration space, tiling, shapes, dtypes), the trip count of
     every LoopSpec, all baked symbol offsets (pool, kernel_slice, derived),
-    the total pool allocation size, each op's effective frontend LX
-    reservation (``op_info["frontend_lx_bytes"]``, the same value
-    ``generate_bundle`` emits as a per-call attribute), the versions of
+    the total pool allocation size, each op's own frontend LX reservation
+    (``op_info["frontend_lx_bytes"]``, from which ``generate_bundle`` derives
+    each call's attribute), the versions of
     torch, torch_spyre and the deeptools/flex toolchain, the backend compiler
     in use, and the active compile config.
 
@@ -325,15 +325,16 @@ def compute_specs_hash(
                             sort_keys=True,
                         ).encode()
                     )
-                # Include the op's effective frontend LX reservation: bundle
-                # emission writes it as a per-call attribute on this program's
-                # sdsc_execute, so two compilations whose OpSpec trees differ
-                # only in op_info["frontend_lx_bytes"] must not share a cache
-                # entry -- a hit would replay the other call's attribute and
-                # could under-reserve the phase. The shared helper is the same
-                # one emission uses, so the key changes exactly when the
-                # emitted bundle.mlir changes (absent / zero / value distinct;
-                # malformed values emission drops hash like absent).
+                # Include the op's own frontend LX reservation: bundle emission
+                # derives each call's frontend_lx_bytes from these values (the
+                # largest over the calls of one sdsc file), so two compilations
+                # whose OpSpec trees differ only in op_info["frontend_lx_bytes"]
+                # must not share a cache entry -- a hit would replay the other
+                # compilation's attribute and could under-reserve a phase. The
+                # helper is the one emission reads, so the key changes whenever
+                # the emitted bundle.mlir can change (absent / zero / value
+                # distinct; malformed values emission drops hash like absent);
+                # a smaller bound on a shared file changes the key alone.
                 lx_bytes = frontend_lx_bytes_attr_value(entry.op_info)
                 content_parts.append(
                     f"frontend_lx:{'absent' if lx_bytes is None else lx_bytes}".encode()
