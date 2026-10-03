@@ -31,6 +31,7 @@ never from tensor sizes, which cannot express packed relayout footprints.
 """
 
 import os
+import random
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -54,6 +55,10 @@ from torch_spyre._inductor.scratchpad.allocator import (
     ScratchpadAllocator,
     _lx_planning_size,
     _placed_lx_footprint,
+)
+from torch_spyre._inductor.scratchpad.ilp_solver_ortools import (
+    CpSatLayoutSolver,
+    _PlacementUnit,
 )
 from torch_spyre._inductor.scratchpad.plan_solver import (
     CoreDivision,
@@ -690,6 +695,136 @@ class PushAllocationPublicationTest(TestCase):
         buffers = [LifetimeBoundBuffer("a", 131072, [0, 1], address=0), destination]
         published = self._publish(buffers, [plan], {plan.edge: ("buf9", plan)})
         self.assertEqual(published, {"a": 131072, "buf9": 8192})
+
+
+# ---------------------------------------------------------------------------
+# Placement: the bound is a prefix, so long-lived buffers belong low in LX.
+# ---------------------------------------------------------------------------
+
+
+def _unit(name, start, end, footprint, offset, members=None):
+    return _PlacementUnit(
+        members=members or [name],
+        footprint=footprint,
+        start_time=start,
+        end_time=end,
+        original_offset=offset,
+    )
+
+
+def _prefix_bound(units, offsets, tick):
+    """The LX bound a program at ``tick`` states: the highest end address over
+    the units live there (``frontend_lx_high_water``'s definition)."""
+    return max(
+        (
+            offsets[u.members[0]] + u.footprint
+            for u in units
+            if u.start_time <= tick < u.end_time
+        ),
+        default=0,
+    )
+
+
+class JustifyKeepsLongLivedBuffersLowTest(TestCase):
+    def test_a_long_lived_buffer_does_not_take_a_later_programs_room(self):
+        """The residual stream lives from the attention's add (tick 0) to the
+        MLP's add (tick 17). The solver stacked it above the MLP norm's
+        temporaries (ticks 1-8), so at the down projection (tick 14), when only
+        the residual and down's input are live, the program had to state the
+        residual's top: 9 units for 4 units of live data, and the backend lost
+        the room below. Packed longest-lived first, the residual sits at 0 and
+        the down projection states exactly what is live."""
+        units = [
+            _unit("residual", 0, 18, 1, 11),
+            _unit("norm_a", 1, 9, 4, 0),
+            _unit("norm_b", 1, 9, 4, 4),
+            _unit("gate_up", 9, 13, 3, 0),
+            _unit("silu_mul", 11, 14, 3, 3),
+            _unit("down_input", 13, 15, 3, 0),
+        ]
+        offsets = CpSatLayoutSolver._justify(units, 16)
+
+        self.assertIsNotNone(offsets)
+        self.assertEqual(offsets["residual"], 0)
+        self.assertEqual(_prefix_bound(units, offsets, 14), 1 + 3)
+        # Every program's bound is at most its live footprint plus the
+        # residual's: no other hole is left below a live buffer.
+        for tick in range(18):
+            live = [u for u in units if u.start_time <= tick < u.end_time]
+            self.assertLessEqual(
+                _prefix_bound(units, offsets, tick), sum(u.footprint for u in live)
+            )
+
+    def test_the_solver_stacking_is_kept_when_longest_first_does_not_fit(self):
+        """Longest-first can fragment: here it leaves no 7-unit gap for the
+        last unit, while the solver's own stacking packs everything."""
+        units = [
+            _unit("a", 1, 6, 1, 7),
+            _unit("b", 5, 7, 7, 0),
+            _unit("c", 0, 5, 5, 0),
+        ]
+        self.assertEqual(CpSatLayoutSolver._justify(units, 8), {"c": 0, "b": 0, "a": 7})
+
+    def test_nothing_is_returned_when_no_packing_fits(self):
+        # Coarsened merged units can conflict where their members did not; the
+        # caller then keeps the solver's offsets.
+        units = [_unit("a", 0, 4, 6, 0), _unit("b", 2, 6, 6, 4)]
+        self.assertIsNone(CpSatLayoutSolver._justify(units, 10))
+
+    def test_a_merged_unit_moves_as_one_block(self):
+        units = [
+            _unit("short", 0, 2, 4, 0),
+            _unit("chain", 0, 9, 2, 4, members=["parent", "child"]),
+        ]
+        offsets = CpSatLayoutSolver._justify(units, 8)
+        self.assertEqual(offsets["parent"], offsets["child"])
+        self.assertEqual(offsets["parent"], 0)
+        self.assertEqual(offsets["short"], 2)
+
+    def test_every_packing_is_legal(self):
+        """Seeded random layouts that the solver could have returned: the
+        repacked layout never overlaps two live units, never passes capacity,
+        and exists whenever the solver's own stacking can be squeezed."""
+        rng = random.Random(7)
+        for trial in range(300):
+            capacity = rng.randint(8, 32)
+            units: list[_PlacementUnit] = []
+            for i in range(rng.randint(2, 8)):
+                start = rng.randint(0, 12)
+                end = start + rng.randint(1, 8)
+                footprint = rng.randint(1, capacity // 2)
+                free = [
+                    o
+                    for o in range(capacity - footprint + 1)
+                    if all(
+                        not (start < u.end_time and u.start_time < end)
+                        or o + footprint <= u.original_offset
+                        or u.original_offset + u.footprint <= o
+                        for u in units
+                    )
+                ]
+                if free:
+                    units.append(
+                        _unit(f"u{i}", start, end, footprint, rng.choice(free))
+                    )
+            with self.subTest(trial=trial):
+                offsets = CpSatLayoutSolver._justify(units, capacity)
+                # Single-member units squeezed in the solver's stacking never
+                # move up, so some packing always fits.
+                self.assertIsNotNone(offsets)
+                for u in units:
+                    base = offsets[u.members[0]]
+                    self.assertLessEqual(base + u.footprint, capacity)
+                    for v in units:
+                        if v is u or not (
+                            u.start_time < v.end_time and v.start_time < u.end_time
+                        ):
+                            continue
+                        other = offsets[v.members[0]]
+                        self.assertTrue(
+                            base + u.footprint <= other or other + v.footprint <= base,
+                            f"{u.members} and {v.members} overlap",
+                        )
 
 
 if __name__ == "__main__":

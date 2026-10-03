@@ -62,10 +62,13 @@ constraint model over :class:`CoreDivisionBuffer`s:
   proxy for balance rather than a full cost model.
 
 After the solve, ``_justify`` slides each in-place-merged placement unit down to
-the lowest free address, squeezing out float gaps the search leaves. It coarsens
-a merged unit to one rectangle over the union of its members' lifetimes, which is
-conservative enough that the squeeze can occasionally need more room than the
-solver's own answer; when it would not fit, the solver's offsets are kept.
+the lowest free address, the longest-lived units first, so that a long-lived
+buffer sits low in LX and does not raise the front-end LX bound
+(``frontend_lx_bytes``) of every program it spans. It coarsens a merged unit to
+one rectangle over the union of its members' lifetimes, which is conservative
+enough that the squeeze can occasionally need more room than the solver's own
+answer; it then packs in the solver's stacking order, and when that would not fit
+either, the solver's offsets are kept.
 
 **LX relayouts** ride on the same machinery. The allocator hands the solver one
 ``RelayoutCopyBuffer`` per relayout group (a source and one destination per-core
@@ -1780,9 +1783,9 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
         ``address`` (in alignment units, as the solver works them; the caller
         scales to bytes). A spilled buffer gets ``address = None``. When
         bottom_justify is set, each in-place-merged placement unit is slid down
-        to the lowest free address (preserving merges); if that squeeze cannot
-        keep every unit inside capacity the solver's own offsets are kept, since
-        those are always legal."""
+        to the lowest free address, longest-lived first (preserving merges;
+        ``_justify``); if that squeeze cannot keep every unit inside capacity the
+        solver's own offsets are kept, since those are always legal."""
         by_name = {name: sb.buffer for name, sb in bufs.items()}
         spilled = {
             name for name, sb in bufs.items() if not solver.BooleanValue(sb.in_buffer)
@@ -1874,42 +1877,73 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
     def _justify(
         units: list[_PlacementUnit], capacity: int
     ) -> Optional[dict[str, int]]:
-        """Slide each placement unit down to the lowest free address. Processing
-        in current-base order and giving each the lowest non-conflicting slot
-        preserves the relative stacking, so it mostly squeezes out the float gaps
-        the search leaves. Returns a name -> address map, or ``None`` if the
-        result would not fit in ``capacity``.
+        """Slide each placement unit down to the lowest free address, the
+        longest-lived units first. Returns a name -> address map, or ``None`` if
+        no packing fits in ``capacity``.
+
+        The order decides how much LX the backend may use around each program.
+        The front end reports one number per program (``frontend_lx_bytes``:
+        the highest end address over the buffers live at it), so a unit high in
+        LX takes the room below it from every program in its lifetime, even
+        while that room is free. A long-lived unit at the bottom costs those
+        programs only its own footprint, and a shorter-lived unit above it
+        leaves a hole only for a short time. So the units are packed longest
+        lifetime first; ties keep the solver's stacking.
 
         A merged unit is coarsened to one rectangle spanning the union of its
         members' lifetimes at their largest footprint, which is conservative: it
         can make two units conflict here that did not conflict in the model, and
         the bump that resolves that conflict can push a unit's top past capacity.
-        The caller then keeps the solver's own offsets, which the model
-        constrained to fit. Returning ``None`` rather than clamping keeps this a
-        pure optimisation -- it never decides residency, and never hands back an
-        address outside the scratchpad."""
-        placed: list[_PlacementUnit] = []
-        offsets = {}
-        for u in sorted(units, key=lambda u: (u.original_offset, u.start_time)):
-            # lowest base whose [base, base+footprint) clears every already-placed
-            # unit that overlaps this one in time. We don't need to worry about
-            # tied offsets because blocks cannot have the same offset and also
-            # overlap in time.
-            obstacles = sorted(
-                (p.justified_offset, p.justified_offset + p.footprint)
-                for p in placed
-                if u.start_time < p.end_time and p.start_time < u.end_time
-            )
-            base = 0
-            for lo, hi in obstacles:
-                if base + u.footprint <= lo:
-                    break  # fits in the gap below this obstacle
-                if base < hi:
-                    base = hi  # otherwise bump above it
-            if base + u.footprint > capacity:
-                return None
-            u.justified_offset = base
-            placed.append(u)
-            for n in u.members:
-                offsets[n] = base
-        return offsets
+        When the longest-first packing does not fit, the units are packed again
+        in the solver's stacking order (current base first): that keeps the
+        relative stacking, so it only squeezes out the float gaps the search
+        leaves. When that does not fit either, the caller keeps the solver's own
+        offsets, which the model constrained to fit. Returning ``None`` rather
+        than clamping keeps this a pure optimisation -- it never decides
+        residency, and never hands back an address outside the scratchpad."""
+
+        def longest_first(u: _PlacementUnit) -> tuple[int, int, int]:
+            return (u.start_time - u.end_time, u.original_offset, u.start_time)
+
+        def solver_stacking(u: _PlacementUnit) -> tuple[int, int]:
+            return (u.original_offset, u.start_time)
+
+        for key in (longest_first, solver_stacking):
+            offsets = _pack_lowest(sorted(units, key=key), capacity)
+            if offsets is not None:
+                return offsets
+        return None
+
+
+def _pack_lowest(
+    units: list[_PlacementUnit], capacity: int
+) -> Optional[dict[str, int]]:
+    """Give each unit, in the order given, the lowest base whose
+    ``[base, base + footprint)`` clears every unit already placed that overlaps
+    it in time. Records each unit's ``justified_offset`` and returns a name ->
+    address map, or returns ``None`` (recording nothing) as soon as a unit's top
+    would pass ``capacity``."""
+    placed: list[tuple[_PlacementUnit, int]] = []
+    offsets: dict[str, int] = {}
+    for u in units:
+        # We don't need to worry about tied offsets because blocks cannot have
+        # the same offset and also overlap in time.
+        obstacles = sorted(
+            (base, base + p.footprint)
+            for p, base in placed
+            if u.start_time < p.end_time and p.start_time < u.end_time
+        )
+        base = 0
+        for lo, hi in obstacles:
+            if base + u.footprint <= lo:
+                break  # fits in the gap below this obstacle
+            if base < hi:
+                base = hi  # otherwise bump above it
+        if base + u.footprint > capacity:
+            return None
+        placed.append((u, base))
+        for n in u.members:
+            offsets[n] = base
+    for u, base in placed:
+        u.justified_offset = base
+    return offsets
