@@ -384,6 +384,24 @@ class BundleFrontendLxBytesTest(TestCase):
                 )
                 self.assertNotIn("frontend_lx_bytes", mlir)
 
+    def test_boolean_values_do_not_shrink_the_reservation(self):
+        # bool is an int subclass. False must not become a certified zero-byte
+        # bound; malformed metadata keeps the backend's default reservation.
+        for bad in (False, True):
+            with self.subTest(value=bad):
+                mlir = self._bundle(
+                    [_make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: bad})]
+                )
+                self.assertNotIn("frontend_lx_bytes", mlir)
+
+    def test_values_outside_signed_i64_are_not_emitted(self):
+        for bad in (1 << 63, 1 << 64):
+            with self.subTest(value=bad):
+                mlir = self._bundle(
+                    [_make_op_spec("a", {FRONTEND_LX_BYTES_INFO_KEY: bad})]
+                )
+                self.assertNotIn("frontend_lx_bytes", mlir)
+
     def test_calls_of_a_shared_program_carry_the_largest_bound(self):
         """Two equal programs with different bounds: same sdsc file, ONE bound.
 

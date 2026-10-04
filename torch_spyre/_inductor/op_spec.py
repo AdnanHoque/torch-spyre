@@ -41,8 +41,8 @@ def frontend_lx_bytes_attr_value(op_info: dict | None) -> int | None:
     """One op's own reservation, as bundle emission and the cache key read it.
 
     Returns the op's reservation in bytes per core, or ``None`` when the op has
-    none (absent key, or a value that is not a nonnegative int). Bundle emission
-    writes ``frontend_lx_bytes = N : i64`` on a call from these values: the
+    none (absent key, a boolean, or an integer outside nonnegative signed i64).
+    Bundle emission writes ``frontend_lx_bytes = N : i64`` on a call: the
     largest over the calls that share the call's sdsc file, or none when any of
     them has none (``codegen.bundle._record_frontend_lx_bytes``). The kernel
     cache key hashes every op's own value, so it changes whenever an emitted
@@ -52,7 +52,11 @@ def frontend_lx_bytes_attr_value(op_info: dict | None) -> int | None:
     if not op_info:
         return None
     value = op_info.get(FRONTEND_LX_BYTES_INFO_KEY)
-    if isinstance(value, int) and value >= 0:
+    if (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and 0 <= value < (1 << 63)
+    ):
         return int(value)
     return None
 
