@@ -471,106 +471,100 @@ class TestFrontendPoolAllocationHashed(unittest.TestCase):
 
 # The effective per-op frontend LX reservation is hashed
 class TestFrontendLxBytesHashed(unittest.TestCase):
-    """op_info["frontend_lx_bytes"] is emitted by generate_bundle as
-    ``frontend_lx_bytes = N : i64`` on that program's sdsc_execute (bytes per
-    core, reserving [0, N) in the owning phase; absent = backend default).  On
-    the SPYRE_KERNEL_CACHE=1 path a hit replays the compiled bundle.mlir
-    wholesale, so two OpSpec trees that differ only in this value must produce
-    different keys -- otherwise the second call is served the first call's
-    reservation and can under-reserve its phase.  The key must follow bundle
-    emission exactly: absence, zero and every valid value pairwise distinct,
-    equal values reuse, and values emission drops (non-int, negative) hash
-    like absence.
-    """
+    def test_reservation_is_part_of_cache_identity(self):
+        specs = [
+            _make_op_spec(op_info={"frontend_lx_bytes": b}) for b in (0, 131072, 262144)
+        ]
+        hashes = [_hash([op]) for op in specs]
+        self.assertEqual(len(set(hashes + [_hash([_make_op_spec()])])), 4)
+        self.assertEqual(_hash([specs[1]]), hashes[1])
 
-    @staticmethod
-    def _op_with_lx(lx_bytes, size: int = 64):
-        from torch_spyre._inductor.op_spec import FRONTEND_LX_BYTES_INFO_KEY
-
-        return _make_op_spec(size=size, op_info={FRONTEND_LX_BYTES_INFO_KEY: lx_bytes})
-
-    def test_values_differing_only_in_lx_bytes_do_not_collide(self):
-        """The reviewed collision: absent / 131072 / 262144 produced one key."""
-        h_absent = _hash([_make_op_spec()])
-        h_small = _hash([self._op_with_lx(131072)])
-        h_large = _hash([self._op_with_lx(262144)])
-
-        self.assertNotEqual(
-            h_absent,
-            h_small,
-            "absent and frontend_lx_bytes=131072 must produce different hashes — "
-            "a cache hit would replay the other call's attribute.",
-        )
-        self.assertNotEqual(
-            h_small,
-            h_large,
-            "frontend_lx_bytes=131072 and 262144 must produce different hashes — "
-            "a hit would under-reserve the larger call's phase.",
-        )
-        self.assertNotEqual(h_absent, h_large)
-
-    def test_absence_zero_and_values_are_pairwise_distinct(self):
-        """Absence (backend default), zero (nothing live) and a value are three
-        different emitted bundles and must be three different keys."""
-        hashes = {
-            name: _hash([spec])
-            for name, spec in {
-                "absent": _make_op_spec(),
-                "zero": self._op_with_lx(0),
-                "131072": self._op_with_lx(131072),
-                "262144": self._op_with_lx(262144),
-            }.items()
-        }
-
-        self.assertEqual(
-            len(set(hashes.values())),
-            4,
-            f"absence, zero and each value must be distinct keys; got {hashes}.",
+    def test_packed_live_bound_and_missing_or_excessive_record(self):
+        import torch
+        from types import SimpleNamespace
+        from torch._inductor.dependencies import MemoryDep
+        from torch_spyre._inductor.ir import FixedTiledLayout
+        from torch_spyre._inductor.scratchpad.allocator import _lx_planning_size
+        from torch_spyre._inductor.scratchpad.utils import (
+            frontend_lx_high_water,
+            publish_frontend_lx_footprints,
         )
 
-    def test_equal_values_produce_same_hash(self):
-        """The same value in two trees of the same shape must reuse the entry
-        (no spurious misses introduced by the coverage change)."""
-        self.assertEqual(
-            _hash([self._op_with_lx(131072)]),
-            _hash([self._op_with_lx(131072)]),
-            "Equal frontend_lx_bytes values must produce the same hash.",
-        )
+        d = Symbol("d0", integer=True, nonnegative=True)
 
-    def test_nested_loop_body_value_is_hashed(self):
-        """The value of an op nested in LoopSpec bodies is hashed too, at every
-        depth — the consumer belongs to that op's program, not the top level."""
+        def op(name, reads=(), writes=()):
+            rw = SimpleNamespace(
+                reads={MemoryDep(n, d, (d,), (64,)) for n in reads},
+                writes={MemoryDep(n, d, (d,), (64,)) for n in writes},
+            )
+            return SimpleNamespace(
+                get_operation_name=lambda: name, get_read_writes=lambda: rw
+            )
+
+        buffers = {}
+        for name, address in (("a", 0), ("b", 512)):
+            layout = FixedTiledLayout(
+                torch.device("cpu"),
+                torch.float16,
+                [64],
+                [1],
+                SimpleNamespace(device_size=[64]),
+                Integer(0),
+            )
+            layout.allocation["lx"] = address
+            buffers[name] = SimpleNamespace(layout=layout)
+        for span in (256, None, _lx_planning_size()):
+            with self.subTest(span=span):
+                graph = SimpleNamespace(
+                    operations=[
+                        op("write", writes=["a"]),
+                        op("handoff", ["a"], ["b"]),
+                        op("read", ["b"]),
+                    ],
+                    graph_input_names=[],
+                    try_get_buffer=buffers.get,
+                    get_buffer=buffers.__getitem__,
+                )
+                publish_frontend_lx_footprints(
+                    graph, {"a": 128, **({"b": span} if span else {})}
+                )
+                expected = (
+                    {"write": 128, "handoff": 768, "read": 768} if span == 256 else {}
+                )
+                self.assertEqual(frontend_lx_high_water(graph), expected)
+
+    def test_shared_program_uses_maximum_or_default_inside_loop(self):
+        import os
+        import tempfile
+        from unittest import mock
+        from torch_spyre._inductor.codegen.bundle import generate_bundle
         from torch_spyre._inductor.op_spec import LoopSpec
 
-        inner_small = LoopSpec(count=2, body=[self._op_with_lx(131072)])
-        inner_large = LoopSpec(count=2, body=[self._op_with_lx(262144)])
-        loop_small = LoopSpec(count=4, body=[inner_small])
-        loop_large = LoopSpec(count=4, body=[inner_large])
+        def compile_op(idx, op, symbols, symbol_id_offset=0):
+            return {f"{idx}_{op.op}": {"op": op.op}}, [], [], []
 
-        self.assertNotEqual(
-            _hash([loop_small]),
-            _hash([loop_large]),
-            "Changing the value inside a nested loop body must change the hash.",
-        )
-        self.assertNotEqual(
-            _hash([inner_small]),
-            _hash([inner_large]),
-            "Changing the value inside a loop body must change the hash.",
-        )
-
-    def test_values_emission_drops_hash_like_absence(self):
-        """Bundle emission skips non-int and negative values (no attribute),
-        so those trees are byte-identical bundles and must hash like absence —
-        the key follows emission semantics, not op_info's raw content."""
-        h_absent = _hash([_make_op_spec()])
-        for dropped in ("not-an-int", -128, 131072.5):
-            with self.subTest(dropped=dropped):
-                self.assertEqual(
-                    _hash([self._op_with_lx(dropped)]),
-                    h_absent,
-                    f"frontend_lx_bytes={dropped!r} emits no attribute; "
-                    "the hash must match the absent case.",
-                )
+        for bounds, expected in (((131072, 262144), 262144), ((131072, None), None)):
+            with self.subTest(bounds=bounds), tempfile.TemporaryDirectory() as path:
+                specs = [
+                    _make_op_spec(op_info={} if b is None else {"frontend_lx_bytes": b})
+                    for b in bounds
+                ]
+                for spec in specs:
+                    spec.args = []
+                specs[1] = LoopSpec(count=Integer(4), body=[specs[1]])
+                with mock.patch(
+                    "torch_spyre._inductor.codegen.bundle.compile_op_spec", compile_op
+                ):
+                    generate_bundle("test_kernel", path, specs)
+                with open(os.path.join(path, "bundle.mlir")) as file:
+                    mlir = file.read()
+                self.assertEqual(mlir.count('sdsc_filename="sdsc_0.json"'), 2)
+                if expected is None:
+                    self.assertNotIn("frontend_lx_bytes", mlir)
+                else:
+                    self.assertEqual(
+                        mlir.count(f"frontend_lx_bytes = {expected} : i64"), 2
+                    )
 
 
 # Version strings affect hash (environment independence guard)

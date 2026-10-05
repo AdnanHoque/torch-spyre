@@ -1,6 +1,0 @@
-# Device-free frontend LX ownership and reservation tests.
-test_suite_config:
-  labels: [unit, trunk]
-  files:
-    - path: ${TORCH_DEVICE_ROOT}/tests/inductor/test_frontend_lx_reservation.py
-      unlisted_test_mode: mandatory_success

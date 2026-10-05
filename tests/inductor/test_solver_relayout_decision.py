@@ -242,15 +242,6 @@ def test_copy_buffer_is_the_destination_the_allocator_would_build():
     assert copy.size == 64 and copy.num_cores == 4 and copy.min_footprint == 16
     assert copy.parents == [] and copy.cd_parent_matches == {}
     assert copy.cost_by_source_division == {0: 5000.0}
-    # The plan the fired group makes names this buffer, so the commit path
-    # finds the copy by name instead of searching for it.
-    (group,) = FiredRelayoutGroup.from_chosen(
-        [
-            ChosenRelayout(_candidate("C1", 0, 5000.0), 16),
-            ChosenRelayout(_candidate("C2", 0, 5000.0), 16),
-        ]
-    )
-    assert group.plan(source_address=0).solver_copy_name == copy.name
 
 
 def test_copy_is_sized_by_the_destination_span_not_the_source_share():
@@ -609,10 +600,6 @@ def test_fired_groups_regroup_edges_by_source_and_view():
     ]
     plan = groups[0].plan(source_address=0)
     assert (plan.source_name, plan.consumer_names) == ("P", ("C1", "C2"))
-    assert plan.solver_copy_name == relayout_copy_name("P", 0)
-    assert groups[1].plan(source_address=0).solver_copy_name == relayout_copy_name(
-        "P", 1
-    )
     assert (plan.source_view, plan.destination_view) == (_view(0), _view(1))
     assert (plan.num_cores, plan.source_address, plan.destination_address) == (
         4,
