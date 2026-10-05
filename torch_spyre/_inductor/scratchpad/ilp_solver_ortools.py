@@ -1366,7 +1366,14 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
             self.limit,
             self.alignment,
         )
-        planned = seed.plan_layout_and_core_divisions(folded)
+        try:
+            planned = seed.plan_layout_and_core_divisions(folded)
+        except (NameError, TypeError, ValueError, ZeroDivisionError, RuntimeError):
+            # Optional hints must not bypass CP-SAT's normal objective fallback.
+            return {
+                "skipped": "cost scorer unavailable",
+                "seconds": time.perf_counter() - started,
+            }
         seconds = time.perf_counter() - started
         if seed._score_fn is None:
             return {"skipped": "cost scorer unavailable", "seconds": seconds}
