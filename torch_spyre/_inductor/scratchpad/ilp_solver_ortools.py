@@ -104,6 +104,7 @@ import logging
 import math
 import operator
 import os
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
@@ -1323,6 +1324,61 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
     # ------------------------------------------------------------------
     # Model build + solve
     # ------------------------------------------------------------------
+    def _add_sa_seed_hints(self, model, tensors, forced_reasons, cost_expr) -> dict:
+        """Seed priced joint search with the existing cost-aware co-optimizer.
+
+        SA does not choose relayouts. Score a no-copy plan, then hint only base
+        division/residency choices; CP-SAT keeps placements and copies free.
+        """
+        from torch_spyre._inductor.scratchpad.sa_cooptimizer import (
+            SaCoOptimizingSolver,
+        )
+
+        buffers = [b for b in self.buffers if not isinstance(b, RelayoutCopyBuffer)]
+        if not buffers or not all(
+            isinstance(b, CoreDivisionBuffer) and b.core_divisions for b in buffers
+        ):
+            return {"skipped": "placement-only buffers"}
+        if any(b.paired_with for b in buffers):
+            return {"skipped": "paired buffers"}
+        folded = cost_expr.xreplace(
+            {
+                b.sym_is_lx: sympy.S.Zero
+                for b in self.buffers
+                if isinstance(b, RelayoutCopyBuffer)
+            }
+        )
+        known = {
+            symbol
+            for b in buffers
+            for symbol in (b.sym_is_lx, b.sym_division, *b.sym_core_divs.values())
+        }
+        if not folded.free_symbols <= known:
+            return {"skipped": "unknown cost symbols"}
+        started = time.perf_counter()
+        seed = SaCoOptimizingSolver(
+            [
+                replace(
+                    b, residency_reason=forced_reasons.get(b.name, b.residency_reason)
+                )
+                for b in buffers
+            ],
+            self.limit,
+            self.alignment,
+        )
+        planned = seed.plan_layout_and_core_divisions(folded)
+        seconds = time.perf_counter() - started
+        if seed._score_fn is None:
+            return {"skipped": "cost scorer unavailable", "seconds": seconds}
+        for b in planned:
+            t = tensors[b.name]
+            # All single-choice divisions share one constant-zero CP variable.
+            if len(b.core_divisions) > 1:
+                model.add_hint(t.division, b.chosen_division)
+            if b.name not in forced_reasons:
+                model.add_hint(t.in_buffer, int(b.address is not None))
+        return {"seconds": seconds, "cost_aware": True, "hinted_buffers": len(planned)}
+
     def _minimize_cost_expr(
         self,
         model: "cp_model.CpModel",
@@ -1679,7 +1735,11 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
             # expression when tiling is a solver axis, because the cost model is
             # flat in tile size and cut count. Unchanged behaviour otherwise --
             # a successful cost solve returns here and the ladder is skipped.
+            seed_stats = self._add_sa_seed_hints(
+                model, tensors, forced_reasons, cost_expr
+            )
             status = self._minimize_cost_expr(model, solver, tensors, cost_expr)
+            self.last_solve_stats["sa_seed"] = seed_stats
 
         if status is None:
             # TODO: Update objective to a maxmin optimization to optimize overall
