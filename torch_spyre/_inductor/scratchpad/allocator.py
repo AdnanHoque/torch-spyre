@@ -527,6 +527,9 @@ def _hoisted_input_clone_entry(
     override widens the clone then, so the reverse-parent in-place edge
     (``_handoff_parent_end``) may hand its slot to that reader, and the next
     trip would read the overwritten bytes that a per-trip clone re-copies.
+    A multi-output fallback anywhere in the outer loop's span also prevents
+    hoisting: it can run before the loop and overwrite the clone's LX bytes,
+    and context switching does not bracket it.
     """
     if not users:
         return None
@@ -542,6 +545,14 @@ def _hoisted_input_clone_entry(
     start = graph.operations.index(entry)
     first_use = graph.operations.index(users[0])
     if _extern_kernel_in_live_range(graph, list(range(start, first_use + 1))):
+        return None
+    outer = counted_loop_group_path(entry)[:1]
+    end = max(
+        i
+        for i, op in enumerate(graph.operations)
+        if counted_loop_group_path(op)[:1] == outer
+    )
+    if _multi_output_extern_kernel_in_live_range(graph, [start, end]):
         return None
     last_outer = counted_loop_group_path(users[-1])[:1]
     if last_outer and not any(

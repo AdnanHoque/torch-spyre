@@ -10463,6 +10463,45 @@ class TestHoistedInputClone(unittest.TestCase):
         graph = self._graph([head, extern, consumer, _LoopOp("add", (0,))])
         self.assertIsNone(_hoisted_input_clone_entry(graph, "x", [consumer]))
 
+    def test_no_hoist_across_multi_output_fallback_after_the_last_use(self):
+        from torch._inductor.ir import FallbackKernel
+        from torch_spyre._inductor.scratchpad.allocator import (
+            _hoisted_input_clone_entry,
+        )
+
+        class _Fallback(FallbackKernel):
+            def __init__(self):
+                self.name = "fallback"
+                self.outputs = [_SentinelOp("out0"), _SentinelOp("out1")]
+
+            def get_mutation_names(self):
+                return []
+
+        head = _LoopOp("head", (0,))
+        reader = _LoopOp("reader", (0,))
+        fallback = _Fallback()
+        # The fallback is after x's last read, but the whole loop must wait
+        # for its output. A hoisted clone could run before this unbracketed
+        # fallback; the per-trip clone remains inside that waiting loop.
+        tail = _make_inside_consumer_op("tail", "out0", (0,))
+        tail.get_mutation_names.return_value = []
+        ops = [head, reader, fallback, tail]
+        with config.patch({"enable_lx_context_switching": True}):
+            self.assertIsNone(
+                _hoisted_input_clone_entry(self._graph(ops), "x", [reader])
+            )
+            result = self._run_input_push(ops, [reader])
+        result.editor.push_allocation_with_clone.assert_called_once_with(
+            result.source,
+            [reader],
+            input=True,
+            lx_view=result.lx_view,
+            lower_before=None,
+        )
+        for attr in ("loop_info", "_loop_carry_record", "_carried_reduction_record"):
+            self.assertTrue(hasattr(result.clone, attr), attr)
+        result.set_alloc.assert_called_once_with(result.clone, 0x4000, result.lx_view)
+
     def _run_input_push(self, ops, users):
         from torch_spyre._inductor.scratchpad import allocator as allocator_module
         from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
