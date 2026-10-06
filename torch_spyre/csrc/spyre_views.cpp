@@ -37,7 +37,7 @@ namespace spyre {
 // The low-level compiler view helpers bypass Autograd's ordinary view setup.
 // Their mutations must still invalidate allocation-scoped padding proofs.
 static void share_padding_version(const at::Tensor& source,
-                                   const at::Tensor& alias) {
+                                  const at::Tensor& alias) {
   const auto& version = source.unsafeGetTensorImpl()->version_counter();
   if (!alias.is_inference()) {
     alias.unsafeGetTensorImpl()->set_version_counter(version);

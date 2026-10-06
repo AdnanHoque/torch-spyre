@@ -376,8 +376,8 @@ void set_spyre_tensor_layout(const at::Tensor& tensor,
 
 void invalidate_zero_padding(const at::Tensor& tensor) {
   if (!tensor.is_privateuseone()) return;
-  auto* storage = dynamic_cast<SpyreStorageImpl*>(
-      tensor.storage().unsafeGetStorageImpl());
+  auto* storage =
+      dynamic_cast<SpyreStorageImpl*>(tensor.storage().unsafeGetStorageImpl());
   if (storage) {
     std::lock_guard<std::mutex> lock(storage->zero_padding_mutex);
     storage->zero_padding.reset();
@@ -388,8 +388,8 @@ bool certify_zero_padding(const at::Tensor& tensor,
                           const std::vector<int64_t>& valid_size) {
   TORCH_CHECK(tensor.is_privateuseone());
   auto* impl = dynamic_cast<SpyreTensorImpl*>(tensor.unsafeGetTensorImpl());
-  auto* storage = dynamic_cast<SpyreStorageImpl*>(
-      tensor.storage().unsafeGetStorageImpl());
+  auto* storage =
+      dynamic_cast<SpyreStorageImpl*>(tensor.storage().unsafeGetStorageImpl());
   TORCH_CHECK(impl && storage, "Zero-padding certificate needs Spyre storage");
   const auto& stl = impl->spyre_layout;
   stl.with_zero_padding(valid_size);  // Validate the rectangle.
