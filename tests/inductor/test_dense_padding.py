@@ -15,15 +15,16 @@
 """Focused CPU proof tests; native DMA/mutation tests run separately on Spyre."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import sympy
 import torch
-from torch._inductor.dependencies import MemoryDep, ReadWrites
+from torch._inductor.dependencies import MemoryDep, ReadWrites, StarDep
 from torch._inductor.ir import (
     ComputedBuffer,
     InputBuffer,
+    MutationLayoutSHOULDREMOVE,
     Pointwise,
     Reduction,
     ReductionHint,
@@ -231,6 +232,115 @@ def test_physical_domains_preserve_logical_address_decomposition_and_clones():
         assert cloned.dense_padding == (3200, 3328)
         with pytest.raises(Unsupported, match="axis lost"):
             dp.physical_iteration_space(gate, gate.get_read_writes(), {n: 512 * 3200})
+
+
+@pytest.mark.parametrize("op", [SimpleNamespace(), MagicMock(spec=ComputedBuffer)])
+def test_unannotated_operations_keep_logical_ranges_without_layout_queries(op):
+    op.get_layout = MagicMock(side_effect=NotImplementedError("MultiOutputLayout"))
+    logical = {sympy.Symbol("d0"): sympy.Integer(64)}
+    assert not dp.has_dense_padding(op)
+    assert dp.physical_iteration_space(op, None, logical) == logical
+    op.get_layout.assert_not_called()
+
+
+def test_synthesized_zero_mask_attribute_does_not_enable_padding():
+    assert dp.zero_mask_for_op(MagicMock(), None, {}) == {}
+
+
+def test_unrelated_extern_operation_does_not_block_dense_chain_selection():
+    graph, _ = _graph()
+    extern = SimpleNamespace(
+        layout=object(),
+        get_layout=MagicMock(side_effect=NotImplementedError("MultiOutputLayout")),
+        get_read_writes=lambda: ReadWrites(OrderedSet(), OrderedSet(), OrderedSet()),
+    )
+    graph.operations.append(extern)
+    with (
+        V.set_graph_handler(graph),
+        dp.config.patch({"compiler_dense_padding": True, "ktir_emitter": False}),
+    ):
+        dp.select_dense_padding(graph)
+        assert graph.buffers["down"].dense_reduction_padding == (3200, 3328)
+    extern.get_layout.assert_not_called()
+
+
+@pytest.mark.parametrize("mutation", [False, True])
+def test_extern_read_or_mutation_declines_dense_chain(mutation):
+    graph, _ = _graph()
+    graph.operations.append(
+        SimpleNamespace(
+            layout=object(),
+            get_name=lambda: "extern",
+            get_mutation_names=lambda: ["silu"] if mutation else [],
+            get_read_writes=lambda: ReadWrites(
+                OrderedSet() if mutation else OrderedSet([StarDep("silu")]),
+                OrderedSet(),
+                OrderedSet(),
+            ),
+        )
+    )
+    with (
+        V.set_graph_handler(graph),
+        dp.config.patch({"compiler_dense_padding": True, "ktir_emitter": False}),
+    ):
+        dp.select_dense_padding(graph)
+        assert graph.buffers["gate"].layout.dense_padding is None
+        assert getattr(graph.buffers["down"], "dense_reduction_padding", None) is None
+
+
+def test_mutation_alias_preserves_selected_physical_domain():
+    graph, (_, n, _) = _graph()
+    source = graph.buffers["gate"]
+    dp._grow_output(source, 3200, 3328)
+    graph.mark_buffer_mutated = MagicMock()
+    with V.set_graph_handler(graph):
+        alias = SimpleNamespace(layout=MutationLayoutSHOULDREMOVE(source))
+        logical = logical_iteration_space_from_op(source)
+    graph.mark_buffer_mutated.assert_called_once_with("gate")
+    assert dp.has_dense_padding(alias)
+    assert (
+        dp.physical_iteration_space(alias, source.get_read_writes(), logical)[n] == 3328
+    )
+
+
+def test_padded_ownership_rejects_a_changed_symbol_context():
+    from torch_spyre._inductor.work_division import TensorDep
+    from torch_spyre._inductor.work_division_constraints import (
+        aligned_ownership_split_domains,
+    )
+
+    graph, _ = _graph()
+    gate = graph.buffers["gate"]
+    dp._grow_output(gate, 3200, 3328)
+    rw = gate.get_read_writes()
+    ctx = SimpleNamespace(
+        op=gate,
+        input_tds=[],
+        output_td=TensorDep(next(iter(rw.writes)), gate.layout),
+        it_space={sympy.Symbol("renamed"): 3328},
+    )
+    with (
+        V.set_graph_handler(graph),
+        pytest.raises(Unsupported, match="cannot prove dense padding ownership"),
+    ):
+        aligned_ownership_split_domains(ctx)
+
+
+def test_selected_physical_domains_still_reject_coarse_tiling():
+    from torch_spyre._inductor.wsr.coarse_tile import (
+        _divide_ranges,
+        _divide_reduction_ranges,
+    )
+
+    graph, _ = _graph()
+    gate, down = graph.buffers["gate"], graph.buffers["down"]
+    dp._grow_output(gate, 3200, 3328)
+    down.dense_reduction_padding = (3200, 3328)
+    assert dp.has_dense_padding(gate) and dp.has_dense_padding(down)
+    with pytest.raises(Unsupported, match="coarse tiling a selected"):
+        _divide_ranges(gate, sympy.Integer(2), [1])
+    with pytest.raises(Unsupported, match="coarse tiling a selected"):
+        _divide_reduction_ranges(down, sympy.Integer(2), [0])
 
 
 def test_planner_selects_one_closed_chain_and_declines_unsafe_consumers():

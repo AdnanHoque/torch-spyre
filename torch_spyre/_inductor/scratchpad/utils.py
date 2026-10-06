@@ -860,12 +860,10 @@ def _would_produce_lx_back_gap(
         op = graph.operations[use_idx]
         rw = op_read_writes(op)
         from ..pass_utils import iteration_space_from_op
+        from ..dense_padding import has_dense_padding
 
         physical_ranges = None
-        if (
-            getattr(op.get_layout(), "dense_padding", None) is not None
-            or getattr(op, "dense_reduction_padding", None) is not None
-        ):
+        if has_dense_padding(op):
             physical_ranges = iteration_space_from_op(op)
         for dep in rw.reads | rw.writes:
             if dep.name != buf_name:

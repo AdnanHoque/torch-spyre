@@ -31,7 +31,12 @@ import math
 import sympy
 import torch
 from torch._inductor.dependencies import MemoryDep
-from torch._inductor.ir import ComputedBuffer, Pointwise, Reduction
+from torch._inductor.ir import (
+    ComputedBuffer,
+    MutationLayoutSHOULDREMOVE,
+    Pointwise,
+    Reduction,
+)
 from torch._inductor.virtualized import V
 
 from torch_spyre._C import ElementArrangement, SpyreTensorLayout
@@ -89,6 +94,25 @@ def _layout(op):
     return layout
 
 
+def _padding_extents(op):
+    """Read explicit compiler annotations without probing a tensor layout.
+
+    Extern operations can have MultiOutputLayout, whose get_layout() raises.
+    Unannotated operations retain the ordinary logical iteration path.
+    """
+    layout = getattr(op, "layout", None)
+    if isinstance(layout, MutationLayoutSHOULDREMOVE):
+        layout = layout.real_layout()
+    return (
+        getattr(layout, "__dict__", {}).get("dense_padding"),
+        op.__dict__.get("dense_reduction_padding"),
+    )
+
+
+def has_dense_padding(op):
+    return any(padding is not None for padding in _padding_extents(op))
+
+
 def physical_iteration_space(op, rw, logical_space):
     """Apply explicit physical extents after logical address decomposition.
 
@@ -97,9 +121,7 @@ def physical_iteration_space(op, rw, logical_space):
     that no longer proves the selected axis fails closed.
     """
     result = dict(logical_space)
-    layout = _layout(op)
-    output_padding = getattr(layout, "dense_padding", None)
-    reduction_padding = getattr(op, "dense_reduction_padding", None)
+    output_padding, reduction_padding = _padding_extents(op)
     if output_padding is None and reduction_padding is None:
         return result
     writes = [dep for dep in rw.writes if isinstance(dep, MemoryDep)]
@@ -128,7 +150,7 @@ def physical_iteration_space(op, rw, logical_space):
 
 def zero_mask_for_op(op, rw, logical_space):
     """Codegen-only tail bounds for the certified output-stick axis."""
-    if not getattr(op, "dense_padding_zero_mask", False):
+    if op.__dict__.get("dense_padding_zero_mask") is not True:
         return {}
     physical = physical_iteration_space(op, rw, logical_space)
     changes = [
@@ -353,16 +375,18 @@ def select_dense_padding(graph):
         return
     from .pass_utils import op_read_writes
     from .work_division import has_work_div_hint
-    from torch._inductor.ir import MutationLayoutSHOULDREMOVE
 
     consumers = {}
     mutated = set(getattr(graph, "mutated_inputs", ()))
     for op in graph.operations:
-        if isinstance(op.get_layout(), MutationLayoutSHOULDREMOVE):
-            mutated.add(op.get_layout().target.get_name())
+        layout = getattr(op, "layout", None)
+        if isinstance(layout, MutationLayoutSHOULDREMOVE):
+            mutated.add(layout.target.get_name())
+        mutated.update(getattr(op, "get_mutation_names", lambda: ())())
         for dep in op.get_read_writes().reads:
-            if isinstance(dep, MemoryDep):
-                consumers.setdefault(dep.name, set()).add(op.get_name())
+            # Extern/fallback reads can be StarDep rather than MemoryDep.
+            # Any outside reader breaks the closed-chain proof.
+            consumers.setdefault(dep.name, set()).add(op.get_name())
     outputs = set(graph.get_output_names())
     used = set()
     candidates_seen = 0

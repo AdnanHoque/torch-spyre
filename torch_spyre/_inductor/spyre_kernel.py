@@ -832,10 +832,14 @@ class SpyreKernel(Kernel[CSEVariable]):
         # advance a second time.
         device_tile_advance_expr = self._general_tile_advance(tensor, is_input, name)
         base_index = per_trip_index(operation, tensor.index)
+        from .dense_padding import has_dense_padding
+
         device_coords = alignment_coordinates(
             tensor.layout.device_layout,
             base_index,
-            logical_iteration_space(current_node),
+            logical_iteration_space(current_node)
+            if has_dense_padding(operation)
+            else it_space,
             self.indirect_sizes,
             repeat_info_out=self._alignment_repeat_info,
         )
