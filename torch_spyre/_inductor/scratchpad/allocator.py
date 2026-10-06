@@ -2512,6 +2512,10 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                 key=lambda b: b.name,
             ):
                 cost_expr = cost_expr + copy.cost_term()
+        # For the packing after the solve, which keeps the matmul programs'
+        # front-end LX bounds low (CpSatLayoutSolver._justify). Indexed like the
+        # buffers' uses: the graph is not edited between the two.
+        solver.matmul_ticks = _matmul_ticks(graph)
         result = solver.plan_layout_and_core_divisions(cost_expr)
         if any(buffer.lx_relayout_plans for buffer in result):
             raise AssertionError("CoOptimizingAllocator does not support LX relayout")
@@ -3824,6 +3828,14 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         count.
         """
         return [_view_for_div(op, dep, buf_name, cd.splits, prep_cache) for cd in divs]
+
+
+def _matmul_ticks(graph: GraphLowering) -> frozenset[int]:
+    """The indices of ``graph``'s matmul programs in ``graph.operations``, the
+    index space of ``calculate_liveness`` and so of every buffer's ``uses``."""
+    return frozenset(
+        index for index, op in enumerate(graph.operations) if _is_matmul_op(op)
+    )
 
 
 def _make_cpsat_solver(

@@ -963,6 +963,13 @@ class CoreDivisionLayoutSolver(MemoryPlanSolver):
     # others never see a copy and their objective carries no relayout term.
     decides_lx_relayouts: bool = False
 
+    # The operation indices (the ``uses`` index space) of the graph's matmul
+    # programs, set by the allocator before the solve. An engine that packs
+    # addresses after its solve may keep these programs' front-end LX bound
+    # (``frontend_lx_bytes``) low: a matmul turns backend LX room into fewer
+    # passes over its LX input. Empty means unknown, and changes nothing.
+    matmul_ticks: frozenset[int] = frozenset()
+
     @abstractmethod
     def plan_layout_and_core_divisions(
         self, cost_expr: sympy.Expr | None = None

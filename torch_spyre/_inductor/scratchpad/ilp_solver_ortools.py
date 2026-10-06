@@ -68,7 +68,12 @@ buffer sits low in LX and does not raise the front-end LX bound
 one rectangle over the union of its members' lifetimes, which is conservative
 enough that the squeeze can occasionally need more room than the solver's own
 answer; it then packs in the solver's stacking order, and when that would not fit
-either, the solver's offsets are kept.
+either, the solver's offsets are kept. One more step looks at relayout copies
+(below): the solve sees a copy's source live at the copy's consumer, but the
+copy op that the commit path inserts before that consumer is the source's last
+reader, so a source packed under its copy leaves a hole under the consumer's
+input. ``_justify`` packs such a copy below its source when that lowers the
+bound of a matmul program and raises none (``matmul_ticks``).
 
 **LX relayouts** ride on the same machinery. The allocator hands the solver one
 ``RelayoutCopyBuffer`` per relayout group (a source and one destination per-core
@@ -174,6 +179,31 @@ class _PlacementUnit:
     end_time: int
     original_offset: int  # offset the solver chose, before bottom-justify
     justified_offset: int = 0  # final justified offset
+    # (member, start_time, end_time, footprint) of each member, for reading the
+    # bound a program will state; empty means each member spans the whole unit.
+    member_spans: tuple[tuple[str, int, int, int], ...] = ()
+
+    def spans(self) -> tuple[tuple[str, int, int, int], ...]:
+        return self.member_spans or tuple(
+            (n, self.start_time, self.end_time, self.footprint) for n in self.members
+        )
+
+
+@dataclass(frozen=True)
+class _Handoff:
+    """A relayout source whose last reader is its copy.
+
+    In the solve the copy and its source are both live at the copy's consumer
+    (tick ``consumer_tick``), because the copy op does not exist yet. The commit
+    path inserts that op just before the consumer and rewires the consumer to
+    read the copy, so the source is dead at the consumer program itself. Only a
+    copy with one consumer tick and a source whose lifetime ends there is a
+    hand-off: then the inserted op sits right before that consumer, wherever
+    the consumers are listed."""
+
+    source: str
+    copy: str
+    consumer_tick: int
 
 
 def _gate_divisions(model, compatible, src_div, dst_div, enforce_lit) -> None:
@@ -1825,10 +1855,24 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
                     start_time=min(by_name[n].start_time for n in names),
                     end_time=max(by_name[n].end_time for n in names),
                     original_offset=solver.Value(bufs[names[0]].offset),
+                    member_spans=tuple(
+                        (
+                            n,
+                            by_name[n].start_time,
+                            by_name[n].end_time,
+                            footprint[n],
+                        )
+                        for n in names
+                    ),
                 )
                 for names in components.values()
             ]
-            offsets = self._justify(units, self._capacity_units)
+            offsets = self._justify(
+                units,
+                self._capacity_units,
+                matmul_ticks=self.matmul_ticks,
+                handoffs=self._relayout_handoffs(by_name, spilled),
+            )
 
         if offsets is None:
             offsets = {
@@ -1874,8 +1918,31 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
         return by_name
 
     @staticmethod
+    def _relayout_handoffs(
+        by_name: dict[str, LifetimeBoundBuffer], spilled: set[str]
+    ) -> list[_Handoff]:
+        """Every resident relayout copy whose source dies at the copy
+        (:class:`_Handoff`): the copy has one consumer tick and the source's
+        lifetime ends on that tick, so the copy op is the source's last
+        reader."""
+        handoffs = []
+        for name, buf in by_name.items():
+            if not isinstance(buf, RelayoutCopyBuffer) or name in spilled:
+                continue
+            source = by_name.get(buf.relayout_parent)
+            if source is None or source.name in spilled:
+                continue
+            tick = buf.start_time
+            if buf.end_time == tick + 1 and source.end_time == tick + 1:
+                handoffs.append(_Handoff(source.name, name, tick))
+        return handoffs
+
+    @staticmethod
     def _justify(
-        units: list[_PlacementUnit], capacity: int
+        units: list[_PlacementUnit],
+        capacity: int,
+        matmul_ticks: frozenset[int] = frozenset(),
+        handoffs: Sequence[_Handoff] = (),
     ) -> Optional[dict[str, int]]:
         """Slide each placement unit down to the lowest free address, the
         longest-lived units first. Returns a name -> address map, or ``None`` if
@@ -1889,6 +1956,12 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
         programs only its own footprint, and a shorter-lived unit above it
         leaves a hole only for a short time. So the units are packed longest
         lifetime first; ties keep the solver's stacking.
+
+        Then each relayout hand-off is looked at (``_decide_handoffs``):
+        a source packed under its copy is a hole under the copy at the copy's
+        consumer, where the source is already dead. The copy goes below its
+        source when that lowers the bound of a matmul program (``matmul_ticks``)
+        and raises none.
 
         A merged unit is coarsened to one rectangle spanning the union of its
         members' lifetimes at their largest footprint, which is conservative: it
@@ -1908,11 +1981,74 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
         def solver_stacking(u: _PlacementUnit) -> tuple[int, int]:
             return (u.original_offset, u.start_time)
 
-        for key in (longest_first, solver_stacking):
-            offsets = _pack_lowest(sorted(units, key=key), capacity)
-            if offsets is not None:
-                return offsets
-        return None
+        order = sorted(units, key=longest_first)
+        offsets = _pack_lowest(order, capacity)
+        if offsets is None:
+            return _pack_lowest(sorted(units, key=solver_stacking), capacity)
+        if matmul_ticks and handoffs:
+            order = _decide_handoffs(order, capacity, matmul_ticks, handoffs)
+            # Record the chosen packing's bases (every trial recorded its own).
+            offsets = _pack_lowest(order, capacity)
+            assert offsets is not None, "the chosen packing fitted when tried"
+        return offsets
+
+
+def _decide_handoffs(
+    order: list[_PlacementUnit],
+    capacity: int,
+    matmul_ticks: frozenset[int],
+    handoffs: Sequence[_Handoff],
+) -> list[_PlacementUnit]:
+    """The packing order after deciding each relayout hand-off, earliest
+    consumer first: the copy's unit is packed before (so below) its source's
+    unit when that lowers the bound of at least one matmul program and raises
+    the bound of none. ``order`` must pack within ``capacity``.
+
+    Why matmul programs. The bound only costs a program the room it takes from
+    the backend, and a matmul is where the backend turns room into speed: it
+    makes its output columns in as many passes as its room allows and reads its
+    LX input once per pass, so a hole under its input can cost a whole pass. A
+    program that reads each input once (elementwise, a copy) loses at most
+    chunk size to a higher bound. Every packing tried fits in ``capacity``, so
+    every program keeps at least the share the solve left the backend.
+
+    Bounds are read as the reservation computes them (``frontend_lx_high_water``):
+    per program, the highest ``base + footprint`` over the members live there,
+    a hand-off's source counting as dead at its consumer."""
+    units = list(order)
+    unit_of = {n: u for u in units for n in u.members}
+    dead = {(h.source, h.consumer_tick) for h in handoffs}
+
+    def matmul_bounds(offsets: dict[str, int]) -> dict[int, int]:
+        bounds = dict.fromkeys(matmul_ticks, 0)
+        for u in units:
+            base = offsets[u.members[0]]
+            for name, start, end, footprint in u.spans():
+                for t in matmul_ticks:
+                    if start <= t < end and (name, t) not in dead:
+                        bounds[t] = max(bounds[t], base + footprint)
+        return bounds
+
+    offsets = _pack_lowest(order, capacity)
+    assert offsets is not None, "the longest-first packing must fit"
+    best = matmul_bounds(offsets)
+    for h in sorted(handoffs, key=lambda h: (h.consumer_tick, h.copy)):
+        source, copy = unit_of.get(h.source), unit_of.get(h.copy)
+        if source is None or copy is None or source is copy:
+            continue
+        if order.index(source) > order.index(copy):
+            continue  # the copy is already packed first
+        trial = [u for u in order if u is not source]
+        trial.insert(trial.index(copy) + 1, source)
+        offsets = _pack_lowest(trial, capacity)
+        if offsets is None:
+            continue
+        bounds = matmul_bounds(offsets)
+        if any(bounds[t] < best[t] for t in bounds) and all(
+            bounds[t] <= best[t] for t in bounds
+        ):
+            order, best = trial, bounds
+    return order
 
 
 def _pack_lowest(
