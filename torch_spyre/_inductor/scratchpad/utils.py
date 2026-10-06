@@ -859,6 +859,14 @@ def _would_produce_lx_back_gap(
     for use_idx in uses:
         op = graph.operations[use_idx]
         rw = op_read_writes(op)
+        from ..pass_utils import iteration_space_from_op
+
+        physical_ranges = None
+        if (
+            getattr(op.get_layout(), "dense_padding", None) is not None
+            or getattr(op, "dense_reduction_padding", None) is not None
+        ):
+            physical_ranges = iteration_space_from_op(op)
         for dep in rw.reads | rw.writes:
             if dep.name != buf_name:
                 continue
@@ -867,12 +875,13 @@ def _would_produce_lx_back_gap(
             except Exception:
                 continue
             for d, coord_expr in enumerate(coords[:-1]):
+                ranges = physical_ranges if physical_ranges is not None else dep.ranges
                 syms = coord_expr.free_symbols
                 if not syms:
                     if device_size[d] > 1:
                         return True
                     continue
-                if any(sym not in dep.ranges for sym in syms):
+                if any(sym not in ranges for sym in syms):
                     continue
                 # A device coordinate may be walked by several iteration symbols
                 # (``2*d0 + floor(d2/64)``), so the covered extent is the
@@ -883,10 +892,7 @@ def _would_produce_lx_back_gap(
                     int(
                         bound_sympy(
                             coord_expr,
-                            {
-                                sym: ValueRanges(0, int(dep.ranges[sym]) - 1)
-                                for sym in syms
-                            },
+                            {sym: ValueRanges(0, int(ranges[sym]) - 1) for sym in syms},
                         ).upper
                     )
                     + 1

@@ -2797,6 +2797,11 @@ def _divide_ranges(
     data = op.data
     if not isinstance(data, (Pointwise, Reduction)):
         return _DivideRangesResult(None, None)
+    if tiled_dims and (
+        getattr(op.get_layout(), "dense_padding", None) is not None
+        or getattr(op, "dense_reduction_padding", None) is not None
+    ):
+        raise Unsupported("coarse tiling a selected physical dense-padding domain")
 
     # Keep this a true no-op when this level does not tile an output dim.
     # In particular, a reduction-only level can be processed after one of
@@ -2943,6 +2948,11 @@ def _divide_reduction_ranges(
     assert isinstance(data, Reduction)
     if not tiled_dims:
         return None
+    if (
+        getattr(op.get_layout(), "dense_padding", None) is not None
+        or getattr(op, "dense_reduction_padding", None) is not None
+    ):
+        raise Unsupported("coarse tiling a selected physical dense-padding domain")
     hinted_reduction_ranges = _loop_var_hinted_reduction_ranges(op)
     before_symbols = None
     fused_before_symbols = None

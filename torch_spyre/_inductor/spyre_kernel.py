@@ -67,6 +67,7 @@ from .pass_utils import (
     compute_symbolic_bounds,
     finite_upper_or_none,
     iteration_space,
+    logical_iteration_space,
     iteration_space_with_splits,
     indirect_access_subs_from_kernel,
     input_layout_for_operation,
@@ -834,7 +835,7 @@ class SpyreKernel(Kernel[CSEVariable]):
         device_coords = alignment_coordinates(
             tensor.layout.device_layout,
             base_index,
-            it_space,
+            logical_iteration_space(current_node),
             self.indirect_sizes,
             repeat_info_out=self._alignment_repeat_info,
         )
@@ -1081,6 +1082,16 @@ class SpyreKernel(Kernel[CSEVariable]):
         lx_bytes = frontend_lx_high_water(V.graph).get(ir_node.get_operation_name())
         if lx_bytes is not None:
             op_info = {**op_info, FRONTEND_LX_BYTES_INFO_KEY: lx_bytes}
+
+        from .dense_padding import ZERO_MASK_INFO_KEY, zero_mask_for_op
+
+        zero_mask = zero_mask_for_op(
+            ir_node,
+            self.current_node.read_writes,
+            logical_iteration_space(self.current_node),
+        )
+        if zero_mask:
+            op_info = {**op_info, ZERO_MASK_INFO_KEY: zero_mask}
 
         op_spec = OpSpec(
             op,
