@@ -3411,7 +3411,17 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             residency_reason = residency_by_buf[output_name]
 
             buf_divisions = divisions[output_name]
-            parents = list(in_place.get(output_name, []))
+            # Drain plans can extend a parent's lifetime after the in-place
+            # candidates were computed. Recheck adjacency with the same final
+            # bounds handed to the solver so stale handoffs cannot reach it.
+            parents = [
+                parent
+                for parent in in_place.get(output_name, [])
+                if _handoff_parent_end(parent, lifetimes, lifetime_end_overrides)
+                == _handoff_child_start(
+                    output_name, lifetimes, lifetime_start_overrides
+                )
+            ]
             size = info["size"]  # total footprint; solver divides per chosen cd
             parent_proj = info["op_inputs"].copy()
             cd_parent_matches = self._cd_parent_matches(

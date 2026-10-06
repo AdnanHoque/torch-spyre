@@ -10128,6 +10128,89 @@ class TestDrainPlanPushAndLifetime(unittest.TestCase):
         _drain_lifetime_end_overrides(overrides, {"buf2": plan}, 5)
         self.assertEqual(overrides["buf2"], 7)
 
+    def test_drain_lifetime_extension_rejects_stale_in_place_handoff(self):
+        """A post-loop reader cannot reuse a carry kept live for its drain."""
+        from collections import namedtuple
+
+        from torch_spyre._inductor.scratchpad import allocator as allocator_module
+        from torch_spyre._inductor.scratchpad import utils as utils_module
+        from torch_spyre._inductor.scratchpad.allocator import CoOptimizingAllocator
+        from torch_spyre._inductor.scratchpad.plan_solver import (
+            CoreDivision,
+            _check_in_place_relationships,
+        )
+
+        ops = [
+            _LoopOp("carry"),
+            _LoopOp("update", (0,)),
+            _LoopOp("reader"),
+            _LoopOp("tail"),
+        ]
+        inputs = {
+            "carry": [],
+            "update": ["carry"],
+            "reader": ["carry"],
+            "tail": ["reader"],
+        }
+        layout = SimpleNamespace(device_layout=object())
+        for op in ops:
+            op.layout = layout
+        by_name = {op.name: op for op in ops}
+        graph = SimpleNamespace(
+            operations=ops,
+            graph_input_names=[],
+            get_buffer=by_name.get,
+            get_output_names=lambda: ["carry", "tail"],
+        )
+        dep = namedtuple("dep", ["name"])
+
+        def read_writes(op):
+            return SimpleNamespace(
+                reads={dep(name) for name in inputs[op.name]},
+                writes={dep(op.name)},
+            )
+
+        allocator = CoOptimizingAllocator(MagicMock(), size=4096)
+        allocator._validated_drain_plans = {
+            "carry": SimpleNamespace(storage_name="carry")
+        }
+        divisions = {op.name: [CoreDivision(splits={})] for op in ops}
+        with (
+            patch.object(utils_module, "op_read_writes", side_effect=read_writes),
+            patch.object(allocator_module, "op_read_writes", side_effect=read_writes),
+            patch.object(
+                allocator_module, "clone_at_graph_boundaries", return_value=False
+            ),
+            patch.object(
+                allocator_module,
+                "mem_usage_by_buf",
+                return_value={
+                    name: {"size": 128, "op_inputs": reads}
+                    for name, reads in inputs.items()
+                },
+            ),
+            patch.object(
+                allocator,
+                "_op_inputs_good_for_lx_inplace",
+                side_effect=lambda op: inputs[op.name],
+            ),
+            patch.object(
+                allocator, "_residency_by_buf", return_value=dict.fromkeys(by_name)
+            ),
+            patch.object(allocator, "_cd_parent_matches", return_value={}),
+            patch.object(allocator, "_cd_parent_relayouts", return_value={}),
+        ):
+            in_place = allocator._determine_in_place_division_invariant(graph)
+            self.assertEqual(in_place["reader"], ["carry"])
+            built = allocator._build_cd_bound_buffers(graph, in_place, divisions)
+
+        # Before the fix this raises: carry.end_time=4 != reader.start_time+1=3.
+        _check_in_place_relationships(built)
+        buffers = {b.name: b for b in built}
+        self.assertEqual(buffers["carry"].end_time, len(ops))
+        self.assertEqual(buffers["reader"].in_place_parents, [])
+        self.assertEqual(buffers["tail"].in_place_parents, ["reader"])
+
     def test_missing_drain_anchor_raises_instead_of_falling_back(self):
         """After LX is committed there is no late decline."""
         from torch_spyre._inductor.scratchpad.allocator import (
