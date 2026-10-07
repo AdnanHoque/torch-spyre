@@ -340,6 +340,16 @@ advance with it (the tests use the synthetic index `4096 * FloorDiv(u0, 2)`; no 
 kernel is known to produce such a read); a read walked only by a coarse-tiled dimension
 of the op; a read re-entered every trip.
 
+Condition 3 applies to the whole legal menu, not to the selected division's replication.
+Once it holds, even a candidate that replicates the read receives this estimate, using
+the op's total core count. Its existing replica or shared-load delivery charge remains
+additive. The expert-region screens support plan selection on the tested shapes; they
+do not separately calibrate this sum for replicated looped reads or establish whether
+the underlying costs overlap. Treat the sum as an empirical ranking proxy, not a
+measurement of separate physical costs. The `max(delivery, requests)` rule below combines
+only the loop-delivery and request estimates; it does not include the replica or
+shared-load delivery charge.
+
 The report leaves this estimate out. It extracts features without the legal menu, so
 condition 3 never holds there, and its totals need not rank eligible looped-matmul plans
 the way the allocator does.
