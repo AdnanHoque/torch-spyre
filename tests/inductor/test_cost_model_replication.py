@@ -43,6 +43,7 @@ from torch_spyre._inductor.cost_model import (
     _fused_hbm_bytes,
     _loop_operand_request_excess,
     _partitioned_operand_read_excess,
+    _read_burst_excess_ns,
     _replicated_operand_reads,
     explain,
     predict_ops,
@@ -716,8 +717,15 @@ def test_loop_operand_requests_skip_resident_and_single_pass_reads():
     term = sympy.sympify(_loop_operand_request_excess([resident], p))
     assert term.subs(is_lx, 1) == 0
     assert float(term.subs(is_lx, 0)) == pytest.approx(added, rel=1e-9)
+    assert _read_burst_excess_ns([resident], p) == 0
     single = _with_run(_projection(16, 1), 128)
     assert _loop_operand_request_excess([single], p) == 0
+    assert _read_burst_excess_ns([single], p) > 0
+    # Without a proven per-trip footprint, the general burst term still applies.
+    fallback = _expert_loop_projection(16)
+    fallback.args[2] = dataclasses.replace(fallback.args[2], read_run_bytes=128)
+    assert _loop_operand_request_excess([fallback], p) == 0
+    assert _read_burst_excess_ns([fallback], p) > 0
 
 
 @pytest.mark.parametrize("boundary", [True, False])
@@ -738,7 +746,11 @@ def test_a_weight_read_by_two_looped_matmuls_is_counted_by_its_owner(boundary, o
     ]
     uses = [uses[i] for i in order]
     delivery = _partitioned_operand_read_excess(uses, p)
-    composed = delivery + _loop_operand_request_excess(uses, p)
+    composed = (
+        delivery
+        + _loop_operand_request_excess(uses, p)
+        + _read_burst_excess_ns(uses, p)
+    )
     if boundary:
         assert delivery == pytest.approx(a[0], rel=1e-9)
         assert composed == pytest.approx(b[1], rel=1e-9)
