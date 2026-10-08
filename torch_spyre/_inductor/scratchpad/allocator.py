@@ -752,6 +752,16 @@ class ScratchpadAllocator:
             return "graph input (no clone)"
         if is_empty_tiled_layout(getattr(graph.try_get_buffer(name), "layout", None)):
             return "empty tensor"
+        layout = getattr(graph.try_get_buffer(name), "layout", None)
+        if (
+            isinstance(layout, FixedTiledLayout)
+            and layout.device_layout.zero_padding_valid_size
+        ):
+            # Graph-input clones iterate logical sizes. A padded consumer may
+            # read beyond them, so the clone cannot inherit the source's zero
+            # proof. Keep the certified allocation in HBM until input clones
+            # can copy its complete physical domain.
+            return "certified padding requires a physical input clone"
         if self._read_count(uses) == 0:
             return "no consumer reads it from LX"
         if self._is_index_or_indirectly_accessed(graph, name, uses, None):

@@ -428,6 +428,7 @@ PYBIND11_MODULE(_C, m) {
   m.def("set_spyre_tensor_layout", &spyre::set_spyre_tensor_layout);
   // Only the load path calls this, after zero fill plus logical DMA.
   m.def("_certify_zero_padding", &spyre::certify_zero_padding);
+  m.def("_invalidate_zero_padding", &spyre::invalidate_zero_padding);
   m.def("get_spyre_tensor_sizes", &spyre::get_spyre_tensor_sizes);
   m.def("get_spyre_tensor_strides", &spyre::get_spyre_tensor_strides);
   m.def("get_downcast_warning", &spyre::get_downcast_warn_enabled,

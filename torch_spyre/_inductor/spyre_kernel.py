@@ -1511,6 +1511,15 @@ class SpyreKernel(Kernel[CSEVariable]):
         )
         call_args.extend(self._live_call_arg_names)
 
+        # Compiled stores bypass the native copy/fill invalidators. Clear the
+        # allocation's proof even when a .data alias has an independent version
+        # counter. Intersect with finalized arguments to exclude pooled/dead
+        # destinations; live_output_buffers also includes in-place reuse.
+        outputs = self.args.live_output_buffers()
+        for arg in self._live_call_arg_names:
+            if arg in outputs:
+                wrapper.writeline(f"_invalidate_zero_padding({arg})")
+
         call_args_str = ", ".join(call_args)
         wrapper.writeline(f"{name}.run({call_args_str})")
         if emit_pool_tensor:

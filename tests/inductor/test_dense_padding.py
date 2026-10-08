@@ -424,6 +424,39 @@ def test_absent_certificate_and_decode_keep_logical_execution():
         assert decode.buffers["gate"].layout.dense_padding is None
 
 
+@pytest.mark.parametrize("fixed", [False, True])
+def test_certified_input_padding_is_not_lost_in_an_lx_clone(monkeypatch, fixed):
+    from torch_spyre._inductor.scratchpad import allocator as alloc
+
+    graph, _ = _graph()
+    graph.try_get_buffer = graph.buffers.get
+    planner = alloc.ScratchpadAllocator(alloc.FirstFitLayoutSolver, 1 << 20)
+    monkeypatch.setattr(alloc, "clone_at_graph_boundaries", lambda: True)
+    # Exercise the shared verdict used by both placement and joint planning.
+    # A normal input passes these unrelated admission checks.
+    monkeypatch.setattr(
+        planner, "_is_index_or_indirectly_accessed", lambda *args: False
+    )
+    monkeypatch.setattr(
+        alloc.GraphEditor, "all_uses_are_rewritable", lambda *args: True
+    )
+    monkeypatch.setattr(alloc, "buffer_not_read_in_full", lambda *args: False)
+    monkeypatch.setattr(planner, "_restickify_barrier", lambda *args: None)
+    monkeypatch.setattr(alloc, "_would_produce_lx_back_gap", lambda *args: False)
+    with dp.config.patch({"enable_lx_context_switching": True}):
+        reason = planner._input_residency_reason(
+            graph, "wd", [0, 1], ncores={"wd": 4}, division_is_fixed=fixed
+        )
+        assert reason == "certified padding requires a physical input clone"
+        graph.buffers["wd"].layout.device_layout.zero_padding_valid_size = []
+        assert (
+            planner._input_residency_reason(
+                graph, "wd", [0, 1], ncores={"wd": 4}, division_is_fixed=fixed
+            )
+            is None
+        )
+
+
 def test_existing_cost_model_selects_padded_prefill_candidate():
     graph, _ = _graph()
     with (
