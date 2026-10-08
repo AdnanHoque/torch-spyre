@@ -1465,7 +1465,7 @@ def extract_op_features(
         mem, dims, in_elems, in_logical = _input_traffic(name)
         operand_geometry = (
             _operand_read_geometry(op, dep, work_slices, candidate_work_slices)
-            if is_matmul and index is not None
+            if is_matmul and loop_trip > 1 and index is not None
             else (None, None)
         )
         if in_elems is None:  # unresolved buffer -> fallback

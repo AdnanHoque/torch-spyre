@@ -390,8 +390,11 @@ Where it does not apply:
 - a read whose geometry is not proven (another device dtype, a gather or indirect index,
   or a stick split that some candidate of the menu cannot keep whole) keeps its previous
   price for every candidate;
-- copies and other one-input ops keep the transport term exactly as before; a matmul
-  never enters it, so the allocator's direct-read decisions are unchanged.
+- plain copies keep their existing transport term. One-input/one-output arithmetic
+  ops with proven geometry use that term too, including outside looped matmuls; the
+  general read-burst term then declines them to avoid a second request charge.
+  This arithmetic extension uses the per-trip footprint and the rate at the largest
+  calibrated core count below the choice. A matmul never enters the transport term.
 
 The report has no menu, so the delivery estimate is absent there and the report charges
 the whole request excess. Two things are assumptions, not measurements: the rate at core

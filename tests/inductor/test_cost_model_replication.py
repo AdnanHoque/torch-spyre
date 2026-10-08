@@ -759,6 +759,34 @@ def test_a_weight_read_by_two_looped_matmuls_is_counted_by_its_owner(boundary, o
         assert composed == pytest.approx(a[0] + b[1], rel=1e-9)
 
 
+@pytest.mark.parametrize("boundary", [True, False])
+def test_cp_sat_composes_two_symbolic_readers_by_ownership(boundary):
+    """Symbolic splits change both bottlenecks and which shared reader wins."""
+    n, k = sympy.symbols("split_n split_k", integer=True, positive=True)
+    uses = [
+        _with_run(_expert_loop_projection(cores), extent / cores, is_boundary=boundary)
+        for cores, extent in ((n, 4096), (k, 8192))
+    ]
+    delivery = _partitioned_operand_read_excess(uses, _COST_PARAMS)
+    extra = _loop_operand_request_excess(uses, _COST_PARAMS)
+    assert delivery.free_symbols == extra.free_symbols == {n, k}
+    menu = [(4, 16), (16, 4), (32, 16), (16, 32)]
+    for i, cores in enumerate(menu):
+        parts = [max(0, _excess_ns(c)) for c in cores]
+        requests = [
+            max(0, _requests_excess_ns(extent / c, ns=3.75 if c == 32 else 7.5))
+            for c, extent in zip(cores, (4096, 8192))
+        ]
+        aggregate = max if boundary else sum
+        expected = aggregate([max(a, b) for a, b in zip(parts, requests)])
+        assert float(
+            (delivery + extra).subs(dict(zip((n, k), cores)))
+        ) == pytest.approx(expected)
+        assert _solve_pinned(delivery + extra, menu, i) == pytest.approx(
+            expected, abs=2.0
+        )
+
+
 def test_explain_reports_the_limit():
     text = explain([_projection(25, 1)], _COST_PARAMS)
     assert "partitioned-read core limit" in text

@@ -559,6 +559,29 @@ def _factors(monkeypatch, op, it_space):
     return {a.name: a.loop_factor for a in _features(monkeypatch, op, it_space).args}
 
 
+@pytest.mark.parametrize("trips", [1, 8])
+def test_operand_geometry_preserves_the_single_pass_read_estimate(monkeypatch, trips):
+    """Only looped matmuls may replace the existing read-run estimate."""
+    from torch_spyre._inductor.constants import BATCH_MATMUL_OP
+
+    op = _looped_op(
+        [trips],
+        [[]],
+        [_hint(u0, sympy.Integer(trips))],
+        write_index=64 * d0 + d1,
+        read_indices=[64 * d0 + d2],
+        data=SimpleNamespace(
+            ranges=[64, 64], reduction_ranges=[64], reduction_type=BATCH_MATMUL_OP
+        ),
+    )
+    # The operand-specific proof can find a different run than the general one.
+    monkeypatch.setattr(dcm, "_operand_read_geometry", lambda *_: (128, 4096))
+    monkeypatch.setattr(dcm, "_read_run_bytes", lambda *_: 256)
+    read = _read(_features(monkeypatch, op, {d0: 64, d1: 64, d2: 64}), "arg0")
+    expected = (256, None) if trips == 1 else (128, 4096)
+    assert (read.read_run_bytes, read.read_tile_elems) == expected
+
+
 def test_the_extractor_walks_an_expert_bank_read_once(monkeypatch):
     """The bug itself: a per-expert body op whose bank read advances with the expert
     loop was priced 128 reads of the bank.  Removing the fold in the extractor fails
@@ -824,6 +847,44 @@ def _expert_matmuls(monkeypatch, trips):
         monkeypatch, size=[trips, T, N], write_index=T * N * u0 + N * m + n, **common
     )
     return stationary, stacked
+
+
+def test_loop_passes_do_not_multiply_the_batch_split_penalty_twice(monkeypatch):
+    """The same physical BMM batch split costs once per invocation in either form."""
+    from torch_spyre._inductor import cost_model as cm
+    from torch_spyre._inductor.scratchpad.allocator import _COST_PARAMS
+
+    E, B, M, N, K = 8, 2, 512, 128, 64
+    b, m, n, r0 = sympy.symbols("b m n r0", integer=True)
+    common = dict(
+        k=K,
+        trips=[E],
+        tiled_out=[[]],
+        hints=[_hint(u0, sympy.Integer(E))],
+        ranges=[B, M, N],
+        read_indices=[M * K * b + K * m + r0, B * K * N * u0 + K * N * b + N * r0 + n],
+        it_space={b: B, m: M, n: N, r0: K},
+        work_slices={b: 2, m: 2, n: 8, r0: 1},
+    )
+    body = _looped_matmul_features(
+        monkeypatch, size=[B, M, N], write_index=M * N * b + N * m + n, **common
+    )
+    stacked = _looped_matmul_features(
+        monkeypatch,
+        size=[E, B, M, N],
+        write_index=B * M * N * u0 + M * N * b + N * m + n,
+        **common,
+    )
+    assert (_passes(body), _passes(stacked)) == (E, 1)
+    expected = E * _COST_PARAMS.mm_batch_split_ns_per_step
+    assert expected > 0
+    without_batch = dataclasses.replace(_COST_PARAMS, mm_batch_split_ns_per_step=0)
+    for feature in (body, stacked):
+        assert cm._matmul_batch_split_ns([feature], _COST_PARAMS) == expected
+        assert _allocator_compute_ns(feature) - cm._matmul_ns_upstream(
+            [feature], without_batch
+        ) == pytest.approx(expected)
+    assert _allocator_compute_ns(body) == pytest.approx(_allocator_compute_ns(stacked))
 
 
 def test_both_matmul_models_charge_every_trip_of_a_stationary_output_loop(
@@ -1440,6 +1501,48 @@ def test_the_extractor_measures_each_matmul_operands_dma_run(
         None,
         None,
     )
+
+
+def test_operand_geometry_declines_an_indirect_bank_index(monkeypatch):
+    op, graph, space = _moe_gate()
+    rw = op.get_read_writes()
+    bank = dataclasses.replace(
+        rw.reads[1],
+        index=rw.reads[1].index.subs(
+            u0, sympy.Symbol("idx", integer=True, nonnegative=True)
+        ),
+    )
+    op.get_read_writes = lambda: SimpleNamespace(
+        reads=[rw.reads[0], bank], writes=rw.writes
+    )
+    feature = _features(
+        monkeypatch,
+        op,
+        space,
+        graph=graph,
+        work_slices=_ONE_STICK,
+        candidate_work_slices=_GATE_MENU,
+    )
+    read = _read(feature, "arg1")
+    with V.set_graph_handler(graph):
+        previous_run = dcm._read_run_bytes(op, bank, _ONE_STICK)
+    assert (read.read_run_bytes, read.read_tile_elems) == (previous_run, None)
+
+
+def test_operand_geometry_needs_a_menu_for_symbolic_stick_splits(monkeypatch):
+    op, graph, space = _moe_gate()
+    splits = {d0: 1, d1: 1, d2: sympy.Symbol("split_k", integer=True, positive=True)}
+    kwargs = dict(graph=graph, work_slices=splits)
+    unknown = _read(_features(monkeypatch, op, space, **kwargs), "arg0")
+    proven = _read(
+        _features(monkeypatch, op, space, candidate_work_slices=_GATE_MENU, **kwargs),
+        "arg0",
+    )
+    with V.set_graph_handler(graph):
+        previous_run = dcm._read_run_bytes(op, op.get_read_writes().reads[0], splits)
+    assert (unknown.read_run_bytes, unknown.read_tile_elems) == (previous_run, None)
+    assert proven.read_run_bytes is not None
+    assert proven.read_tile_elems == _T * _K
 
 
 @pytest.mark.parametrize(

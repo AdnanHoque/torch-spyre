@@ -190,6 +190,8 @@ from typing import Optional
 
 import sympy
 
+
+# These min/max wrappers dispatch symbolic operands to SymPy.
 from .work_division import (
     _matmul_execution_cost,
     _matmul_multicast_penalty,
@@ -1480,67 +1482,17 @@ def _is_single_pass(op) -> bool:
 
 
 def _partitioned_operand_read_excess(ops: list, p: "CostParams"):
-    """Extra delivery time when too few cores stream a partitioned matmul operand.
+    """Delivery time beyond bytes/peak for eligible matmul operands.
 
-    The base memory term charges an operand's bytes B at the shared peak. When a
-    matmul splits a non-replicated operand across its cores, each core streams
-    only its own slice, priced at the effective ``mm_partitioned_read_gbps_per_core``;
-    with too few cores the read takes B / (cores * rate). Add only the excess over
-    B / peak -- the same form ``_store_core_excess_ns`` uses for writes. Physical
-    bytes are unchanged, and the excess is zero once the cores reach the peak.
+    Price an unreused, partitioned operand only in an all-single-pass bundle,
+    or a once-walked ``for_each_tile`` operand with a legal partitioning choice.
+    The latter eligibility is menu-wide: replicated candidates keep this proxy
+    in addition to their existing replica/shared-load charges. Coarse loops and
+    unknown eligibility do not receive the loop-delivery estimate.
 
-    Two operand classes are priced, and nothing else:
-
-    * A single-pass operand (decode projections, 22-25 active cores). Every op in
-      the bundle is single-pass by its extracted features (``_is_single_pass``): a
-      bundle with any looped op keeps its previous price for these operands, because
-      looped work shares the bundle's memory and overlap terms. The operand is
-      partitioned (``replication == 1``; a replicated operand has its own per-core
-      model, ``_replicated_operand_reads``; a replication that is a solver symbol
-      gets this term exactly where it resolves to 1, the complement of
-      ``ArgTraffic.replicated_hbm_elems``, so the co-optimizer's expression equals
-      the committed-path price at every candidate) and not reused: every element
-      feeds one multiply-accumulate (``matmul_macs <= elems``). With row reuse the
-      operand's delivery rate has not been measured, and an unknown or symbolic MAC
-      count does not prove the operand unreused.
-
-    * The tiled operand of a ``for_each_tile`` loop: an input of a looped matmul whose
-      address advances with the loop's per-iteration variable
-      (``ArgTraffic.advances_with_loop_var``) and which the loop walks once
-      (``loop_factor == 1``), with a legal candidate that partitions this read
-      (``has_partitioning_candidate``). An operand that cannot be partitioned by
-      any available choice must not gain delivery credit from extra replicas.
-      This is a menu-wide applicability rule, not a per-candidate replication gate:
-      every candidate of an eligible operand uses the same proxy. Missing menu
-      evidence declines this loop-only estimate; no divisions are reconstructed.
-      This is an empirical proxy for delivery and compute parallelism, not measured
-      traffic. Declining it restores only this term's pre-estimate price, not the
-      whole model's price or its chosen plan.
-      The operand a per-expert loop reads one expert bank of per trip is then
-      priced as partitioned across the op's cores, with the same
-      arithmetic and the same rate as the single-pass class; no constant is added.
-      The rate is selected by the shape sweep over an expert loop at 32, 128 and 512
-      tokens. The op's total core count enters, not a measured reader count, so it
-      separates an under-parallel plan from one that uses the cores. It does not
-      rank plans that already use all cores: those are ordered by the cohort and
-      broadcast derate on a shared weight. A form that also scaled by the
-      operand's replication did not improve on this one; its rate overstates
-      multicast delivery, so a replication-aware price needs a multicast rate.
-
-    Coarse-tiling loops are deliberately NOT in the second class. A coarse-tiled
-    matmul (a row-tiled or reduction-tiled dense matmul) also leaves one operand at
-    ``loop_factor == 1``, but that operand's delivery under a coarse loop was not
-    measured, the loop has its own re-read pricing (``_loop_reread_bytes``), and the
-    recorded factor cannot tell the two loops apart. Such a bundle keeps the price it
-    had before this term.
-
-    A bundle mixing looped and single-pass matmuls prices the looped tiled operand
-    only, and leaves each single-pass matmul at its previous price, since the bundle
-    is not all single-pass.
-
-    Resident operands vanish through ``hbm_elems``; a graph input read by several
-    ops of the bundle is charged once, by the same ``max`` rule as
-    ``_fused_hbm_bytes``.
+    Residency removes a read; shared graph inputs are charged once. See
+    ``docs/source/compiler/cost_model.md`` for the applicability rules,
+    calibration limits, and composition with the DMA request estimate.
     """
     return _owned_total(_partitioned_operand_terms(ops, p))
 
@@ -1601,14 +1553,10 @@ def _partitioned_operand_terms(ops: list, p: "CostParams"):
 
 
 def _owned_total(charges) -> float:
-    """Sum per-read ``(arg, value)`` charges by who owns each read.
+    """Sum internal reads separately and shared graph inputs once at their maximum.
 
-    A graph input read by several ops of one bundle is one physical load, so its
-    reads are charged once, at their ``max`` (the de-duplication of
-    ``_fused_hbm_bytes``). Every other read is charged on its own. The loop-delivery
-    estimate and its composition with the request law both aggregate through this
-    one function, so a graph input cannot be charged as one load by one term and as
-    several by the other."""
+    Both delivery and composed request charges use this ownership rule.
+    """
     total = 0.0
     external: dict[str, float | sympy.Expr] = {}
     for arg, value in charges:
@@ -2464,6 +2412,8 @@ def _loop_operand_request_excess(ops: list, p: "CostParams"):
     report extracts without the legal menu, E_part is omitted and this is E_req.
     Uses only existing calibrated parameters; adds no constant.
     """
+    # _partitioned_operand_terms yields the original ArgTraffic objects, retained
+    # by ops. Both passes therefore use the same live identities within this call.
     part = {id(arg): excess for arg, excess in _partitioned_operand_terms(ops, p)}
     requests = {}
     for op in ops:
@@ -2493,13 +2443,11 @@ def _loop_operand_request_excess(ops: list, p: "CostParams"):
 
 
 def _composed_delivery_excess(reads) -> float:
-    """``owned(max(E_part, E_req)) - owned(E_part)`` over ``(arg, E_part, E_req)``.
+    """Add ``owned(max(delivery, requests)) - owned(delivery)``.
 
-    One bottleneck per read, and one owner per read (``_owned_total`` for both
-    sides). A graph input read twice with ``(E_part, E_req)`` of (10, 10) and
-    (1, 20) is one load whose delivery is 20: the existing estimate already charges
-    10, so this adds 10. Taking ``max(E_part)`` and ``max(E_req - E_part)`` across
-    the reads separately would add 19 and charge 29."""
+    Aggregate each side before subtracting so a shared input has one owner.
+    The cost-model documentation gives a two-reader worked example.
+    """
     composed = _owned_total((arg, max(part, request)) for arg, part, request in reads)
     return composed - _owned_total((arg, part) for arg, part, _ in reads)
 

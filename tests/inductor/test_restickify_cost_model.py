@@ -205,6 +205,28 @@ def test_compute_read_prices_a_stick_split_at_an_uncalibrated_count():
     assert 0 < expr.subs(cores, 32) < expr.subs(cores, 22)
 
 
+@pytest.mark.parametrize("cores", [16, 22])
+def test_arithmetic_transport_replaces_the_general_read_burst_charge(cores):
+    """The request estimate has one owner after enabling arithmetic transport."""
+    p = cm.CostParams()
+    op = _activation(cores, 128)
+    op = replace(op, args=[replace(op.args[0], read_run_bytes=128), op.args[1]])
+    payload = op.transport_tile_elems * op.dtype_bytes
+    expected = op.loop_trip * (
+        payload / 128 * p.transport_dma_ns_per_request[16] - payload / p.bw_peak_gbps
+    )
+    assert cm._transport_dma_excess_ns([op], p) == pytest.approx(expected)
+    assert cm._read_burst_excess_ns([op], p) == 0
+
+    # Without transport geometry, the general burst path retains its calibrated
+    # counts only. The arithmetic extension at 22 cores is an explicit assumption.
+    general = replace(op, transport_read_run_bytes=None, transport_tile_elems=None)
+    assert cm._transport_dma_excess_ns([general], p) == 0
+    assert cm._read_burst_excess_ns([general], p) == pytest.approx(
+        expected if cores == 16 else 0
+    )
+
+
 def test_a_mixed_bundle_prices_only_the_arithmetic_read_at_an_uncalibrated_count():
     """One bundle holding a plain copy, an arithmetic op and a matmul. At 22 cores the
     copy is unpriced (no copy was calibrated there) and the matmul has no source-run
