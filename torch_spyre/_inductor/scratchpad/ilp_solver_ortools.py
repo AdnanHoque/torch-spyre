@@ -1368,7 +1368,14 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
         )
         try:
             planned = seed.plan_layout_and_core_divisions(folded)
-        except (NameError, TypeError, ValueError, ZeroDivisionError, RuntimeError):
+        except (
+            AssertionError,
+            NameError,
+            TypeError,
+            ValueError,
+            ZeroDivisionError,
+            RuntimeError,
+        ):
             # Optional hints must not bypass CP-SAT's normal objective fallback.
             return {
                 "skipped": "cost scorer unavailable",
@@ -1725,6 +1732,7 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
         tile_terms = self._tile_count_terms(model, tensors)
 
         status = None
+        seed_stats = None
         core_terms = None
         occupancy: Optional[int] = None
 
@@ -1746,9 +1754,10 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
                 model, tensors, forced_reasons, cost_expr
             )
             status = self._minimize_cost_expr(model, solver, tensors, cost_expr)
-            self.last_solve_stats["sa_seed"] = seed_stats
 
         if status is None:
+            # Optional priced-search hints must not alter the fallback ladder.
+            model.clear_hints()
             # TODO: Update objective to a maxmin optimization to optimize overall
             # throughput.
             #
@@ -1839,6 +1848,10 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
                     model.minimize(sum(tile_terms))
                     status = _solve_stage("tile count")
 
+        if seed_stats is not None:
+            # Each ladder stage replaces the solve record; retain seed timing
+            # alongside the solve that actually produced the final plan.
+            self.last_solve_stats["sa_seed"] = seed_stats
         final_tensors = self._extract(solver, tensors)
 
         if logger.isEnabledFor(logging.DEBUG):
