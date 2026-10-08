@@ -559,15 +559,15 @@ def _factors(monkeypatch, op, it_space):
     return {a.name: a.loop_factor for a in _features(monkeypatch, op, it_space).args}
 
 
-@pytest.mark.parametrize("trips", [1, 8])
+@pytest.mark.parametrize("trips", [None, 1, 8])
 def test_operand_geometry_preserves_the_single_pass_read_estimate(monkeypatch, trips):
     """Only looped matmuls may replace the existing read-run estimate."""
     from torch_spyre._inductor.constants import BATCH_MATMUL_OP
 
     op = _looped_op(
-        [trips],
-        [[]],
-        [_hint(u0, sympy.Integer(trips))],
+        [] if trips is None else [trips],
+        [] if trips is None else [[]],
+        [] if trips is None else [_hint(u0, sympy.Integer(trips))],
         write_index=64 * d0 + d1,
         read_indices=[64 * d0 + d2],
         data=SimpleNamespace(
@@ -578,7 +578,7 @@ def test_operand_geometry_preserves_the_single_pass_read_estimate(monkeypatch, t
     monkeypatch.setattr(dcm, "_operand_read_geometry", lambda *_: (128, 4096))
     monkeypatch.setattr(dcm, "_read_run_bytes", lambda *_: 256)
     read = _read(_features(monkeypatch, op, {d0: 64, d1: 64, d2: 64}), "arg0")
-    expected = (256, None) if trips == 1 else (128, 4096)
+    expected = (128, 4096) if trips == 8 else (256, None)
     assert (read.read_run_bytes, read.read_tile_elems) == expected
 
 
@@ -1505,7 +1505,12 @@ def test_the_extractor_measures_each_matmul_operands_dma_run(
 
 def test_operand_geometry_declines_an_indirect_bank_index(monkeypatch):
     op, graph, space = _moe_gate()
+    kwargs = dict(graph=graph, work_slices=_ONE_STICK, candidate_work_slices=_GATE_MENU)
+    before = _read(_features(monkeypatch, op, space, **kwargs), "arg1")
+    assert (before.read_run_bytes, before.read_tile_elems) == (128, _K * _N)
     rw = op.get_read_writes()
+    # An unknown loaded index is outside the iteration space; unlike u0 it is
+    # not a for_each_tile offset that the geometry proof can pin per invocation.
     bank = dataclasses.replace(
         rw.reads[1],
         index=rw.reads[1].index.subs(
@@ -1515,14 +1520,7 @@ def test_operand_geometry_declines_an_indirect_bank_index(monkeypatch):
     op.get_read_writes = lambda: SimpleNamespace(
         reads=[rw.reads[0], bank], writes=rw.writes
     )
-    feature = _features(
-        monkeypatch,
-        op,
-        space,
-        graph=graph,
-        work_slices=_ONE_STICK,
-        candidate_work_slices=_GATE_MENU,
-    )
+    feature = _features(monkeypatch, op, space, **kwargs)
     read = _read(feature, "arg1")
     with V.set_graph_handler(graph):
         previous_run = dcm._read_run_bytes(op, bank, _ONE_STICK)

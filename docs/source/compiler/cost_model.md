@@ -323,6 +323,11 @@ K slice; a loop that tiles an output dimension walks its output once and makes o
 
 ### Delivering the operand a loop walks
 
+The single-pass delivery estimate applies only when every op in the bundle is
+single-pass and the operand is partitioned and unreused (`replication == 1` and
+`matmul_macs <= elems`). Symbolic replication receives this charge only where it
+equals 1, complementing replicated-read pricing. Unknown reuse does not qualify.
+
 A `for_each_tile` loop that reads one expert bank (or one KV page) per trip streams that
 operand from main memory one slice per trip. When too few cores stream it, delivery is
 slower than the shared peak. The allocator adds that excess time for an input of a
@@ -354,6 +359,12 @@ The report leaves this estimate out. It extracts features without the legal menu
 condition 3 never holds there, and its totals need not rank eligible looped-matmul plans
 the way the allocator does.
 
+The loop estimate reuses the single-pass rate, selected by the 32/128/512-token
+expert-loop sweep. Scaling it by replication did not improve that screen; a
+replication-aware model needs a measured multicast rate. Coarse loops are excluded
+from this delivery estimate because their delivery was not measured and they have
+separate re-read pricing.
+
 ### DMA requests of a loop matmul's operand reads
 
 A core reads its slice of an operand as contiguous runs, and each run is one DMA request.
@@ -367,6 +378,9 @@ law prices each HBM input of a matmul inside a loop (`loop_trip > 1`):
 - each request costs the calibrated ns of the largest calibrated core count at or below
   the op's (22 cores take the 16-core rate, 11 take the 8-core rate);
 - the excess over `bytes / peak`, times the trips, times `(1 - is_lx)`.
+
+This includes coarse loops with proven operand geometry. They receive the request
+estimate but not the `for_each_tile` delivery estimate above.
 
 Toy example: one expert of the MoE gate bank is `[2816, 704]` in a layout that keeps each
 row's 11 sticks together. Split the columns 11 ways (on 22 cores) and every core gets one
@@ -391,10 +405,12 @@ Where it does not apply:
   or a stick split that some candidate of the menu cannot keep whole) keeps its previous
   price for every candidate;
 - plain copies keep their existing transport term. One-input/one-output arithmetic
-  ops with proven geometry use that term too, including outside looped matmuls; the
+  ops with proven geometry use that term too, in any bundle, looped or not; the
   general read-burst term then declines them to avoid a second request charge.
   This arithmetic extension uses the per-trip footprint and the rate at the largest
-  calibrated core count below the choice. A matmul never enters the transport term.
+  calibrated core count at or below the choice. At an uncalibrated count this adds
+  pricing where the general burst term charged zero. A matmul never enters the
+  transport term.
 
 The report has no menu, so the delivery estimate is absent there and the report charges
 the whole request excess. Two things are assumptions, not measurements: the rate at core

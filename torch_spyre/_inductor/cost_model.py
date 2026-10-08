@@ -190,11 +190,10 @@ from typing import Optional
 
 import sympy
 
-
-# These min/max wrappers dispatch symbolic operands to SymPy.
 from .work_division import (
     _matmul_execution_cost,
     _matmul_multicast_penalty,
+    # These wrappers dispatch symbolic operands to SymPy.
     min,
     max,
     log2,

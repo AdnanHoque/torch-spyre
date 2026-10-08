@@ -726,6 +726,14 @@ def test_loop_operand_requests_skip_resident_and_single_pass_reads():
     fallback.args[2] = dataclasses.replace(fallback.args[2], read_run_bytes=128)
     assert _loop_operand_request_excess([fallback], p) == 0
     assert _read_burst_excess_ns([fallback], p) > 0
+    # A coarse loop has no for_each_tile advance verdict. Proven request geometry
+    # still owns its read, but it receives no loop-delivery estimate.
+    coarse = _with_run(_expert_loop_projection(16), 128, advances_with_loop_var=False)
+    assert _partitioned_operand_read_excess([coarse], p) == 0
+    assert _loop_operand_request_excess([coarse], p) == pytest.approx(
+        _requests_excess_ns(128)
+    )
+    assert _read_burst_excess_ns([coarse], p) == 0
 
 
 @pytest.mark.parametrize("boundary", [True, False])
@@ -771,20 +779,29 @@ def test_cp_sat_composes_two_symbolic_readers_by_ownership(boundary):
     extra = _loop_operand_request_excess(uses, _COST_PARAMS)
     assert delivery.free_symbols == extra.free_symbols == {n, k}
     menu = [(4, 16), (16, 4), (32, 16), (16, 32)]
+    rows = []
     for i, cores in enumerate(menu):
         parts = [max(0, _excess_ns(c)) for c in cores]
         requests = [
-            max(0, _requests_excess_ns(extent / c, ns=3.75 if c == 32 else 7.5))
+            max(
+                0,
+                _requests_excess_ns(
+                    extent / c, ns=_COST_PARAMS.transport_dma_ns_per_request[c]
+                ),
+            )
             for c, extent in zip(cores, (4096, 8192))
         ]
         aggregate = max if boundary else sum
-        expected = aggregate([max(a, b) for a, b in zip(parts, requests)])
+        rows.append([max(a, b) for a, b in zip(parts, requests)])
+        expected = aggregate(rows[-1])
         assert float(
             (delivery + extra).subs(dict(zip((n, k), cores)))
         ) == pytest.approx(expected)
         assert _solve_pinned(delivery + extra, menu, i) == pytest.approx(
             expected, abs=2.0
         )
+    assert any(min(row) > 0 for row in rows)  # shared max differs from internal sum
+    assert len({row.index(max(row)) for row in rows}) == 2
 
 
 def test_explain_reports_the_limit():
