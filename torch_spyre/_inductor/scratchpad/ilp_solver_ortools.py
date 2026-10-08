@@ -1368,17 +1368,12 @@ class CpSatLayoutSolver(CoreDivisionLayoutSolver):
         )
         try:
             planned = seed.plan_layout_and_core_divisions(folded)
-        except (
-            AssertionError,
-            NameError,
-            TypeError,
-            ValueError,
-            ZeroDivisionError,
-            RuntimeError,
-        ):
+        except Exception as error:
             # Optional hints must not bypass CP-SAT's normal objective fallback.
+            logger.debug("SA seed skipped", exc_info=True)
             return {
-                "skipped": "cost scorer unavailable",
+                "skipped": "SA seed failed",
+                "error": type(error).__name__,
                 "seconds": time.perf_counter() - started,
             }
         seconds = time.perf_counter() - started
