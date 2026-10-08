@@ -69,6 +69,7 @@ class TestLoadModelToSpyre(TestCase):
     def test_compiled_alias_write_invalidates_zero_padding(self):
         """A separately versioned alias can write the allocation's physical tail."""
         from torch._inductor.utils import run_and_get_code
+        import torch_spyre._C as native
         from torch_spyre._C import (
             SpyreTensorLayout,
             _certify_zero_padding,
@@ -106,10 +107,40 @@ class TestLoadModelToSpyre(TestCase):
         self.assertEqual(get_spyre_tensor_layout(base).zero_padding_valid_size, [1, 64])
 
         write = torch.compile(lambda x: x.add_(1), fullgraph=True)
-        _, code = run_and_get_code(write, tail)
-        self.assertIn("_invalidate_zero_padding(", "\n".join(code))
-        torch.testing.assert_close(tail.cpu(), torch.ones(128, dtype=torch.float16))
-        torch.testing.assert_close(base.cpu(), torch.ones(64, dtype=torch.float16))
+        invalidate = native._invalidate_zero_padding
+        enabled = False
+        writes_to_base = []
+
+        def invalidate_write(tensor):
+            if tensor.untyped_storage()._cdata == base.untyped_storage()._cdata:
+                writes_to_base.append(enabled)
+            if enabled:
+                invalidate(tensor)
+
+        with mock.patch.object(native, "_invalidate_zero_padding", invalidate_write):
+            # Reproduce the omitted invalidation at the actual compiled write.
+            # This must not be an eager copy_ epilogue that clears proof anyway.
+            _, code = run_and_get_code(write, tail)
+            self.assertIn("_invalidate_zero_padding(", "\n".join(code))
+            self.assertTrue(writes_to_base)
+            self.assertFalse(any(writes_to_base))
+            self.assertEqual(
+                get_spyre_tensor_layout(base).zero_padding_valid_size, [1, 64]
+            )
+            torch.testing.assert_close(tail.cpu(), torch.ones(128, dtype=torch.float16))
+            self.assertEqual(base._version, version)
+            before = len(writes_to_base)
+            enabled = True
+            write(tail)
+            self.assertTrue(writes_to_base[before:])
+            self.assertTrue(all(writes_to_base[before:]))
+
+        torch.testing.assert_close(
+            tail.cpu(), torch.full((128,), 2, dtype=torch.float16)
+        )
+        torch.testing.assert_close(
+            base.cpu(), torch.full((64,), 2, dtype=torch.float16)
+        )
         self.assertEqual(base._version, version)
         for alias in (base, independent, tail):
             self.assertEqual(get_spyre_tensor_layout(alias).zero_padding_valid_size, [])
