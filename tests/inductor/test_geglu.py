@@ -57,10 +57,11 @@ def reference(x, wi, wo, *, approximate="tanh"):
     [(False, "none"), (False, "tanh"), (True, "tanh")],
     ids=["native-none", "native-tanh", "decomposed-tanh"],
 )
-def test_fused_geglu(tokens, decomposed, approximate):
+def test_fused_geglu(request, tokens, decomposed, approximate):
     # Keep the final-output-only graph: returning intermediates changes fusion
     # and allocation, so it could mask a defect. Match the GELU approximation.
     import torch_spyre  # noqa: F401
+    from utils_inductor import strict_xfail
 
     # Each parameter case must compile independently of earlier guard sets.
     torch._dynamo.reset()
@@ -79,6 +80,17 @@ def test_fused_geglu(tokens, decomposed, approximate):
     assert torch.isfinite(actual).all()
     difference = (actual.float() - expected.float()).abs()
     bad = difference > 0.05
+    # Keep compile/runtime errors and nonfinite outputs outside this expectation.
+    if tokens == 2048 and not decomposed:
+        strict_xfail(
+            request,
+            raises=AssertionError,
+            reason=(
+                "Native GELU returns finite wrong values at 2048 tokens due to "
+                "backend FIFO data order: "
+                "https://github.com/torch-spyre/torch-spyre/issues/5458"
+            ),
+        )
     torch.testing.assert_close(
         actual,
         expected,
@@ -94,7 +106,7 @@ def test_fused_geglu(tokens, decomposed, approximate):
     )
 
 
-def test_gelu_pinned_layout_reorder():
+def test_gelu_pinned_layout_reorder(request):
     """Keep #5458 covered even if Inductor changes its preferred GEGLU layout."""
     from sympy import Integer, Mod, floor, symbols
 
@@ -102,6 +114,7 @@ def test_gelu_pinned_layout_reorder():
     from torch_spyre._C import DataFormats, ElementArrangement, SpyreTensorLayout
     from torch_spyre._inductor import config
     from torch_spyre._inductor.op_spec import OpSpec, TensorArg
+    from utils_inductor import strict_xfail
 
     c0, c1, core_id = symbols("c0 c1 core_id")
     dtype = DataFormats.SEN169_FP16
@@ -146,4 +159,13 @@ def test_gelu_pinned_layout_reorder():
     with config.patch(bundle_symbolic_args=True):
         run_op_specs("gelu_pinned_layout_5458", [op], [source, actual], layouts=layouts)
     assert torch.isfinite(actual).all()
+    strict_xfail(
+        request,
+        raises=AssertionError,
+        reason=(
+            "GELU returns finite wrong values for the pinned layout reorder due to "
+            "backend FIFO data order: "
+            "https://github.com/torch-spyre/torch-spyre/issues/5458"
+        ),
+    )
     torch.testing.assert_close(actual, expected, atol=0.05, rtol=0)
