@@ -309,6 +309,67 @@ class FiredRelayoutGroup:
         return groups
 
 
+def _project_affine_slice_axis(
+    coordinate: sympy.Expr,
+    device_extent: int,
+    split: int,
+    iteration_space: Mapping[sympy.Symbol, sympy.Expr],
+) -> tuple[sympy.Symbol, sympy.Expr] | None:
+    """Prove that one loop owns slices of a multi-loop affine coordinate.
+
+    A reshaped Q read has stick coordinate ``2 * head + pair``. Splitting
+    sixteen sticks four ways cuts the head loop, while the two rotation-pair
+    values stay inside every owned slice. Counting free symbols alone rejects
+    that legal projection. Bound the *whole* affine rectangle for each loop
+    partition, including every other loop, before using its zero-origin line
+    in the existing ownership proof. This proves containment, not permission
+    to change an access, its physical layout, or the owners.
+
+    Deliberately decline nonlinear, reversed, symbolic and ambiguous cases.
+    No Cartesian enumeration or relaxed proof budget is needed: extrema of
+    an ascending affine rectangle occur at its endpoints.
+    """
+    symbols = coordinate.free_symbols
+    if len(symbols) < 2 or not symbols <= iteration_space.keys():
+        return None
+    origin = coordinate.xreplace(dict.fromkeys(symbols, sympy.S.Zero))
+    coefficients = {symbol: coordinate.coeff(symbol) for symbol in symbols}
+    if (
+        origin.is_Integer is not True
+        or any(c.is_Integer is not True or c <= 0 for c in coefficients.values())
+        or sympy.expand(
+            coordinate - origin - sum(c * s for s, c in coefficients.items())
+        )
+        != 0
+    ):
+        return None
+    extents = {}
+    for symbol in symbols:
+        extent = iteration_space[symbol]
+        extent = sympy.sympify(extent[0] if isinstance(extent, tuple) else extent)
+        if extent.is_Integer is not True or extent <= 0:
+            return None
+        extents[symbol] = int(extent)
+    width = device_extent // split
+    projections = []
+    for loop, extent in extents.items():
+        if extent % split:
+            continue
+        step = coefficients[loop]
+        other_span = sum(
+            coefficients[s] * (size - 1) for s, size in extents.items() if s != loop
+        )
+        loop_width = extent // split
+        for slot in range(split):
+            low = origin + step * slot * loop_width
+            high = low + step * (loop_width - 1) + other_span
+            if not slot * width <= low <= high < (slot + 1) * width:
+                break
+        else:
+            projections.append((loop, origin + step * loop))
+    return projections[0] if len(projections) == 1 else None
+
+
 def work_division_from_view(
     view: PerCoreView | None,
     device_size: Sequence[int],
@@ -330,6 +391,9 @@ def work_division_from_view(
         raise ValueError("duplicate physical dimensions")
     rows = owner_slots(slots, physical_splits, n)
     axes_by_loop: dict[sympy.Symbol, list[int]] = {}
+    # Only the local proof coordinates may be reduced. Callers and emitted
+    # tensor accesses retain the original multi-loop coordinate expressions.
+    proof_coordinates = list(device_coordinates)
     for axis, split in physical_splits.items():
         if (
             not 0 <= axis < len(device_size)
@@ -341,9 +405,16 @@ def work_division_from_view(
                 f"unsupported ownership input: axis {axis} not divisible by {split}"
             )
         symbols = device_coordinates[axis].free_symbols
-        if len(symbols) != 1 or not symbols <= iteration_space.keys():
-            raise ValueError(f"cannot map device dimension {axis} to one loop")
-        axes_by_loop.setdefault(next(iter(symbols)), []).append(axis)
+        if len(symbols) == 1 and symbols <= iteration_space.keys():
+            loop = next(iter(symbols))
+        else:
+            projected = _project_affine_slice_axis(
+                device_coordinates[axis], int(device_size[axis]), split, iteration_space
+            )
+            if projected is None:
+                raise ValueError(f"cannot map device dimension {axis} to one loop")
+            loop, proof_coordinates[axis] = projected
+        axes_by_loop.setdefault(loop, []).append(axis)
 
     any_fused = any(len(axes) > 1 for axes in axes_by_loop.values())
     splits, owners, expected = {}, {}, {}
@@ -395,9 +466,7 @@ def work_division_from_view(
         try:
             bounds = _loop_regions(
                 extent,
-                tuple(
-                    device_coordinates[a].xreplace({loop: _LOOP_POINT}) for a in axes
-                ),
+                tuple(proof_coordinates[a].xreplace({loop: _LOOP_POINT}) for a in axes),
                 tuple(int(device_size[a]) for a in axes),
                 split,
             )
