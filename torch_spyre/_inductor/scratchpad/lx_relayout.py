@@ -45,7 +45,7 @@ from ..core_mapping import (
     select_unique_partition_division,
     transfer_edges,
 )
-from ..cost_model import OpFeatures, relayout_ns
+from ..cost_model import CostParams, OpFeatures, relayout_ns
 from ..dump_cost_model import governing_run_split
 from ..ir import FixedTiledLayout
 from ..logging_utils import get_inductor_logger
@@ -72,6 +72,13 @@ _REGISTRY = "_spyre_lx_relayout_copies"
 # larger gather can fail register initialization even when individual cores
 # need fewer distinct values. Apply this conservative bound before placement.
 _MAX_SHUFFLE_FANIN = 8
+# Largest governing split the solver may be offered for a GROUPED movement (a
+# gather into a replicated view, a broadcast onto more cores): the splits it was
+# offered before the relayout law was re-measured. The law is fitted on
+# permutations; a gather into a matmul's replicated operand measured 1.8-16x
+# above it at every split from 4 to 32, so no grouped split is added before
+# grouped movements have a measured price of their own.
+_GROUPED_SPLIT_MAX = 8
 
 
 @dataclasses.dataclass(frozen=True)
@@ -862,13 +869,24 @@ def solver_relayout_pair_cost(
       slice, which is what every destination core receives in a broadcast. The
       grouped-relayout sweep (2026-09-09, 43 rows) measured the grouped
       shuffle's marginal cost at or below that law (<= 0.3 us gathers, <= 1.6
-      us broadcasts, flat in fan-out), so this over-states, never under-states,
-      the shuffle; the decision is dominated by the consumer's replicated HBM
-      re-read on the demote side, priced by the cost model since #4454;
-    - a governing split outside the law's fitted range [2, 8] is DECLINED, not
+      us broadcasts, flat in fan-out); measured as its own program (2026-10-16),
+      a gather into a matmul's replicated operand costs 1.8-16x the law, so for
+      gathers this price is low. The decision is dominated by the consumer's
+      replicated HBM re-read on the demote side, priced by the cost model since
+      #4454;
+    - a governing split outside the law's measured range is DECLINED, not
       clamped: the reporting path clamps because the shuffle it prices already
       exists, but the solver must never be offered an option at a price the
-      law was not fitted for.
+      law was not fitted for. For a permutation (a complete partition onto a
+      complete partition of the same cores) that range is
+      [``relayout_split_min``, ``relayout_split_max``] = [2, 32]; a grouped
+      movement keeps [2, ``_GROUPED_SPLIT_MAX``] = [2, 8].
+
+    For example, a row-split normalization on 32 cores holds 16 whole rows of
+    each stick column per core (governing split 32). Moving that 4 MB output to
+    an 8 x 4 tile view of 32 cores is a permutation, priced at the law's 8.85
+    us (7.3-8.3 us measured); before the range was measured it was declined, and
+    the output went to HBM and back.
 
     The price is ``relayout_ns`` on a minimal feature vector - the same function
     the reporting path uses, so the two paths cannot drift.
@@ -880,7 +898,13 @@ def solver_relayout_pair_cost(
     than tolerating an out-of-range slot.
     """
     run_elems, split = governing_run_split(source_view, destination_view, device_dims)
-    if run_elems <= 0 or not 2 <= split <= 8:
+    p = params or CostParams()
+    permutation = (
+        destination_view.split_product == num_cores
+        and (destination_num_cores or num_cores) == num_cores
+    )
+    top = p.relayout_split_max if permutation else _GROUPED_SPLIT_MAX
+    if run_elems <= 0 or not p.relayout_split_min <= split <= top:
         return None
     if not movement_supported(
         source_view, destination_view, num_cores, destination_num_cores or num_cores
@@ -897,7 +921,7 @@ def solver_relayout_pair_cost(
         relayout_run_elems=run_elems,
         relayout_split=split,
     )
-    return relayout_ns(features, params)
+    return relayout_ns(features, p)
 
 
 def collect_lx_relayout_plans(
