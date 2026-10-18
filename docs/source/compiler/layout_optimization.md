@@ -239,6 +239,7 @@ Some ops impose hardware requirements on which device position a particular dime
 
 Applies performance-motivated reorderings, respecting `pinned_dims` from phase 1. Currently this includes:
 
+- **Flat-M projection** (tried first on a matmul's activation input): a dense projection that reads a higher-rank contiguous view (for example an SDPA output `[B, L, H, D]`) as the matrix `[B*L, H*D]` gets the canonical flat `[M, K]` layout, K-sticks outer with contiguous rows. It applies when the output is a logical matrix (every dim before its last two is 1, so a batch-1 `[1, L, N]` output qualifies), the input has more dims than the output, and the weight is rank-2. The projection then reads its input in place instead of through a restickify. If it fires, the perf reorder below is skipped for that buffer.
 - **Matmul perf reorder**: a fixed heuristic that swaps the largest non-pinned non-stick dim into the slot between the two stick dims (`outer_stick+1`). Applied to matmul input buffers by default; output buffer reorder is off by default (`SPYRE_NDO_MATMUL_OUTPUT_REORDER=1` to enable).
 
 For `ComputedBuffer`s, both phases update `committed_stl` in place. Cases that require inserting copy nodes — graph inputs and scatter mutation destinations — are deferred to `reorder_nonstick_dims_mutation`.

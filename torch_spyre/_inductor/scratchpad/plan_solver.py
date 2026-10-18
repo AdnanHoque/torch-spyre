@@ -388,6 +388,20 @@ class CoreDivisionBuffer(LifetimeBoundBuffer):
     chosen_relayouts: dict[str, "ChosenRelayout"] = field(default_factory=dict)
     boundary: BufferType = BufferType.Intermediate
 
+    def per_core_size(self, division: int) -> int:
+        """Bytes one core holds of this buffer under ``core_divisions[division]``.
+
+        ``size`` is the buffer's total over every core. A division slices the
+        output ``output_partition`` ways (a reduction split repeats it, it does
+        not slice it), and a coarse tiling keeps one output tile resident at a
+        time, so each core holds
+        ``ceil_div(size, output_partition * tiling.output_tile_count)`` -- the
+        same quotient :attr:`min_footprint` minimizes. Untiled, the tile count
+        is 1. It is the footprint the engines that place by menu index reserve
+        for the division they choose."""
+        cd = self.core_divisions[division]
+        return ceil_div(self.size, cd.output_partition * cd.tiling.output_tile_count)
+
     @property
     def min_footprint(self) -> int:
         """Smallest per-core footprint any candidate division allows. With no
@@ -777,7 +791,7 @@ class RelayoutCopyBuffer(CoreDivisionBuffer):
     def per_core_footprint(self) -> int:
         """The destination span: what one core must hold for the copy to be
         resident (``size`` is that span times the destination core count)."""
-        return ceil_div(self.size, self.num_cores)
+        return self.per_core_size(0)
 
     @property
     def consumers(self) -> tuple[str, ...]:

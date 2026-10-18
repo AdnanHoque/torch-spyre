@@ -39,10 +39,12 @@ Pass 1 — ``reorder_nonstick_dims``
       A fused SDPA output may retain a higher-rank host view (e.g. [B, L, H, D])
       even though the downstream projection matmul reads it as a flat 2-D matrix
       [B*L, H*D]. Retaining those outer axes causes the backend to treat the op
-      as a BMM rather than the cheaper flat MM. This transform collapses
-      committed_stl to the canonical flat-M shape [M, K] when the access is
-      provably a single dense row-major 2-D matrix with a rank-2 weight. If it
-      fires, dim reorder is skipped for that buffer.
+      as a BMM rather than the cheaper flat MM, or, for a batch-1 [1, L, N]
+      output, to read the input through a rows-outermost restickify. This
+      transform collapses committed_stl to the canonical flat-M shape [M, K]
+      when the access is provably a single dense row-major 2-D matrix with a
+      rank-2 weight and the output is a logical matrix. If it fires, dim
+      reorder is skipped for that buffer.
     matmul perf reorder (tried if flat-M did not fire)
       For factorised-stick layouts, swaps the largest non-pinned nonstick dim
       into the slot between the two stick dims (outer_stick+1) so the widest
@@ -156,14 +158,24 @@ def _flat_dense_projection_x_layout(
     A fused attention producer can retain a higher-rank contiguous host view
     such as [B, L, H, D] even though the downstream projection reads it as the
     logical matrix [B*L, H*D]. Preserving those outer axes causes the backend
-    to encode the op as a BMM rather than a flat MM. Collapse only when the
-    access is provably one dense row-major 2-D matrix and the weight is rank-2.
+    to encode the op as a BMM rather than a flat MM. When the projection
+    output keeps unit leading dims instead ([1, L, N], as a batch-1 model
+    writes it), the factorized input cannot be read in place either: it is
+    restickified to the matmul's collapsed requirement, whose unit batch dim
+    takes the tile slot: the rows stay outermost and each row's K slice is a
+    separate short read.
+
+    Collapse only when the access is provably one dense row-major 2-D matrix:
+    the output is a logical matrix (every dim before its last two is the
+    constant 1), the input is a higher-rank view than that output, and the
+    weight is rank-2.
     """
     if (
         m_size <= 1
         or n_size <= 1
-        or len(output.size) != 2
-        or len(x.layout.size) <= 2
+        or len(output.size) < 2
+        or any(size != 1 for size in output.size[:-2])
+        or len(x.layout.size) <= len(output.size)
         or len(y.layout.size) != 2
         or not x.layouts
         or x.layouts[0].element_arrangement != ElementArrangement.STANDARD
