@@ -21,6 +21,8 @@ path is pinned to, so the enumeration path and the reporting path cannot
 drift apart.
 """
 
+from types import SimpleNamespace
+
 import pytest
 from sympy import Eq, Mod, Piecewise, Symbol, floor
 
@@ -400,3 +402,63 @@ def test_consumer_rules_are_shared_with_the_committed_collector(monkeypatch):
     )
     assert grouped_gather_rejection(pointwise, 8, _DST) is None  # a permutation
     assert grouped_gather_rejection(pointwise, 2, _FOUR_ON_8) is None  # a broadcast
+
+
+@pytest.mark.parametrize("invalid", [None, "offset", "compact_stride", "inner_tail"])
+def test_prefix_lx_contraction_requires_exact_backing_stride(invalid):
+    import torch
+    from torch._inductor.dependencies import MemoryDep, ReadWrites
+    from torch._inductor.ir import ComputedBuffer, Pointwise, Reduction
+    from torch._inductor.runtime.hints import ReductionHint
+    from torch.utils._ordered_set import OrderedSet
+    from torch_spyre._C import ElementArrangement
+    from torch_spyre._inductor.constants import BATCH_MATMUL_OP
+    from torch_spyre._inductor.ir import FixedTiledLayout
+
+    m, physical, logical, n = 512, 3328, 3200, 4096
+    a, b, k = [Symbol(name, integer=True, nonnegative=True) for name in ("a", "b", "k")]
+    stl = SimpleNamespace(
+        device_size=[52, m, 64],
+        stride_map=[64, physical, 1],
+        elems_per_stick=lambda: 64,
+        element_arrangement=ElementArrangement.STANDARD,
+    )
+    if invalid == "inner_tail":
+        stl.device_size, stl.stride_map = [m, 52, 64], [physical, 64, 1]
+    layout = FixedTiledLayout(
+        torch.device("cpu"), torch.float16, [m, physical], [physical, 1], stl
+    )
+    source = ComputedBuffer(
+        name="source",
+        layout=layout,
+        data=Pointwise(
+            device=torch.device("cpu"),
+            dtype=torch.float16,
+            inner_fn=lambda idx: 0,
+            ranges=[m, physical],
+        ),
+    )
+    consumer = ComputedBuffer(
+        name="down",
+        layout=layout.unallocated_copy(),
+        data=Reduction(
+            device=torch.device("cpu"),
+            dtype=torch.float16,
+            src_dtype=torch.float16,
+            inner_fn=lambda idx, red: (0, 0),
+            ranges=[m, n],
+            reduction_ranges=[logical],
+            reduction_type=BATCH_MATMUL_OP,
+            reduction_hint=ReductionHint.DEFAULT,
+        ),
+    )
+    stride = logical if invalid == "compact_stride" else physical
+    offset = 64 if invalid == "offset" else 0
+    read = MemoryDep("source", stride * a + k + offset, (a, b, k), (m, n, logical))
+    weight = MemoryDep("weight", logical * b + k, (a, b, k), (m, n, logical))
+    write = MemoryDep("down", n * a + b, (a, b), (m, n))
+    consumer.get_read_writes = lambda: ReadWrites(
+        OrderedSet([read, weight]), OrderedSet([write]), OrderedSet()
+    )
+    axis = lx_relayout.prefix_lx_contraction_axis(source, consumer)
+    assert axis == (0 if invalid is None else None)
