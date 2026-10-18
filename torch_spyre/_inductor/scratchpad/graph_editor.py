@@ -225,14 +225,7 @@ class GraphEditor:
 
         layout = buffer.layout
         assert isinstance(layout, FixedTiledLayout)
-        clone_layout = FixedTiledLayout(
-            layout.device,
-            layout.dtype,
-            list(layout.size),
-            list(layout.stride),
-            layout.device_layout,
-            offset=layout.offset,
-        )
+        clone_layout = layout.unallocated_copy()
         # Input buffers have no loop metadata, so input clones inherit it from
         # their consumer. Output clones inherit it from their producer.
         metadata_source = buffer_users[0] if input else buffer
