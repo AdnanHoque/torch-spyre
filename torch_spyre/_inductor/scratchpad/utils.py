@@ -293,6 +293,36 @@ def is_empty_tiled_layout(layout: object) -> bool:
     )
 
 
+def storage_has_single_writer(
+    graph: GraphLowering,
+    producer: Operation,
+    *,
+    transferred_mutation: Operation | None = None,
+) -> bool:
+    """Prove fresh storage has no aliases or writers beyond its producer.
+
+    An explicitly transferred mutation (a collective moved onto a private
+    drain) may be exempted. Ordinary gathered sources have no exemption.
+    Inspect mutation/alias declarations as well as liveness dependencies.
+    """
+    name = producer.get_name()
+    for op in graph.operations:
+        try:
+            if (
+                (op is not transferred_mutation and name in op.get_mutation_names())
+                or name in op.get_inputs_that_alias_output()
+                or (
+                    op is not producer
+                    and op is not transferred_mutation
+                    and any(dep.name == name for dep in op_read_writes(op).writes)
+                )
+            ):
+                return False
+        except NotImplementedError:
+            return False
+    return True
+
+
 def buffer_not_read_in_full(graph: GraphLowering, buf_name: str) -> bool:
     """True if any consumer reads less than the whole ``buf_name`` (a sliced,
     partial, or multi-offset read), or if the footprint can't be proven to
