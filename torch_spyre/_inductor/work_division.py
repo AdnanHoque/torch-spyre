@@ -2465,6 +2465,28 @@ def _matmul_split_cost(
     )
     if isinf(execution_us):
         return execution_us
+    preferences = _matmul_split_preferences(
+        b_axis, m_axis, n_axis, k_axis, max_cores, shared_weight, operand_bytes
+    )
+    for preference in preferences.values():
+        execution_us += preference
+    return execution_us
+
+
+def _matmul_split_preferences(
+    b_axis,
+    m_axis,
+    n_axis,
+    k_axis,
+    max_cores,
+    shared_weight=False,
+    operand_bytes=_DTYPE_BYTES,
+):
+    """Standalone ranking preferences in us, without execution or HBM charges.
+
+    Keep the chooser's addition order. The three tile-shape amounts remain
+    grouped, so these seven entries contain all nine standalone preferences.
+    """
     (_, b), (M, m), (N, n), (K, k) = b_axis, m_axis, n_axis, k_axis
     cores_used = b * m * n * k
     m_t = M // m if m else 1
@@ -2548,16 +2570,15 @@ def _matmul_split_cost(
     # small additive split overhead instead of multiplying the whole estimate.
     batch_split_us = 0.0 if shared_weight else log2(b) * _BMM_BATCH_SPLIT_PENALTY_US
 
-    return (
-        execution_us
-        + pt_underfill_us
-        + m_lane_underuse_us
-        + m_tile_underfill_us
-        + wide_n_us
-        + large_m_tile_shape_us
-        + core_underuse_us
-        + batch_split_us
-    )
+    return {
+        "pt_underfill": pt_underfill_us,
+        "m_lane_underuse": m_lane_underuse_us,
+        "m_tile_underfill": m_tile_underfill_us,
+        "wide_n": wide_n_us,
+        "large_m_tile_shape": large_m_tile_shape_us,
+        "core_underuse": core_underuse_us,
+        "batch_split": batch_split_us,
+    }
 
 
 def _single_input_row_dims(

@@ -300,6 +300,20 @@ compute = (B·M·N·K / (b·m·n·k)) / peak_MACs_per_core
 A short per-core M slice adds no compute time here. The short-tile
 preference below ranks such splits instead.
 
+The graph allocator also uses all nine standalone preferences in its objective,
+after it has built the candidate menu. For example, a true batched matmul split
+four ways over batch gets the standalone `10 * log2(4) = 20` microsecond score
+once. This replaces the graph's separate batch-versus-M charge. The score guides
+the choice; it does not mean that the device takes 20 microseconds longer.
+
+`_matmul_split_preferences` holds the shared formulas. The graph evaluates them
+numerically for each existing division and rounds their sum to integer
+nanoseconds. This preserves floors, logs and the short-tile fractional power
+without a symbolic approximation. The score enters the compute side before
+compute/memory overlap and uses the same output-pass count as execution work.
+Time predictions keep these preferences off. Graph feature rules still decide
+whether weights are shared; they can differ from the standalone chooser's rules.
+
 **HBM time** is bytes moved divided by aggregate LPDDR5 bandwidth,
 scaled by a cohort penalty:
 
