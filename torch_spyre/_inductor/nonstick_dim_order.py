@@ -153,22 +153,13 @@ def _flat_dense_projection_x_layout(
     m_size: int,
     n_size: int,
 ) -> SpyreTensorLayout | None:
-    """Return a canonical flat-M STL for a logically 2-D dense projection, or None.
+    """Return a flat-M STL for a dense projection input, or None.
 
-    A fused attention producer can retain a higher-rank contiguous host view
-    such as [B, L, H, D] even though the downstream projection reads it as the
-    logical matrix [B*L, H*D]. Preserving those outer axes causes the backend
-    to encode the op as a BMM rather than a flat MM. When the projection
-    output keeps unit leading dims instead ([1, L, N], as a batch-1 model
-    writes it), the factorized input cannot be read in place either: it is
-    restickified to the matmul's collapsed requirement, whose unit batch dim
-    takes the tile slot: the rows stay outermost and each row's K slice is a
-    separate short read.
-
-    Collapse only when the access is provably one dense row-major 2-D matrix:
-    the output is a logical matrix (every dim before its last two is the
-    constant 1), the input is a higher-rank view than that output, and the
-    weight is rank-2.
+    Lets the matmul read a higher-rank input in place, without a restickify
+    copy. Output dims before the last two must be 1: an [M, N] output
+    qualifies, and so does [1, L, N] from input [1, L, H, D]. Also required:
+    input rank above output rank, a shared 2-D weight, and the dense-access
+    checks below.
     """
     if (
         m_size <= 1
