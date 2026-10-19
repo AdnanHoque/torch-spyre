@@ -155,11 +155,16 @@ def _flat_dense_projection_x_layout(
 ) -> SpyreTensorLayout | None:
     """Return a flat-M STL for a dense projection input, or None.
 
-    Lets the matmul read a higher-rank input in place, without a restickify
-    copy. Output dims before the last two must be 1: an [M, N] output
-    qualifies, and so does [1, L, N] from input [1, L, H, D]. Also required:
-    input rank above output rank, a shared 2-D weight, and the dense-access
-    checks below.
+    The matmul reads the input as [M, K], uses a 2-D weight [N, K], and writes
+    [M, N]. M is the number of rows, K is the number of input features, and N
+    is the number of output features. An input [B, L, H, D] (batch size B,
+    sequence length L, H heads of size D) gives M = B*L and K = H*D. With the
+    flat layout, the matmul reads the input without a restickify copy.
+
+    All output dims before the last two must be 1. An [M, N] output is
+    accepted. A [1, L, N] output is also accepted: it has one batch, so it
+    holds the same data as [L, N]. The input must have more dims than the
+    output, the weight must be 2-D, and the dense-access checks below must pass.
     """
     if (
         m_size <= 1
