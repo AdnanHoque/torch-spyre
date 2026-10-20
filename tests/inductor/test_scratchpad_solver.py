@@ -151,8 +151,8 @@ class TestExhaustiveSearchResidency(TestCase):
         self.assertEqual(result["producer"].spill_reason, "core div mismatch")
 
     @staticmethod
-    def _four_output_tiles():
-        return CoreDivision(tiling=TileSpec((TileAxis(host_dim=0, count=4),)))
+    def _four_output_cores():
+        return CoreDivision(splits={sympy.Symbol("output"): 4})
 
     @staticmethod
     def _solve(buffers, lx_size):
@@ -161,30 +161,27 @@ class TestExhaustiveSearchResidency(TestCase):
         )
         return {b.name: b for b in solver.plan_layout_and_core_divisions()}
 
-    def test_four_tile_candidate_resides_where_untiled_cannot(self):
-        """The search reserves one output tile per core for a tiled candidate."""
-        # Without tiles, one core holds all 1024 bytes. This is more than the
-        # 256 bytes of LX. With four output tiles, one core holds one 256-byte
-        # tile at a time, and this fits. If the costs are equal, the search keeps
-        # candidate 0, which is untiled.
+    def test_tiled_candidates_are_rejected(self):
+        """A tile-sized reservation is unsafe without matching graph tiling."""
         buffer = CoreDivisionBuffer(
             "buffer",
             1024,
             [0, 1],
-            core_divisions=[CoreDivision(), self._four_output_tiles()],
+            core_divisions=[
+                CoreDivision(),
+                CoreDivision(tiling=TileSpec((TileAxis(host_dim=0, count=4),))),
+            ],
         )
-        result = self._solve([buffer], lx_size=256)["buffer"]
-
-        self.assertEqual(result.chosen_division, 1)
-        self.assertEqual(result.address, 0)
+        with self.assertRaisesRegex(ValueError, "requires untiled candidates"):
+            self._solve([buffer], lx_size=256)
 
     def test_in_place_reuse_compares_per_core_sizes(self):
         """In-place reuse compares the bytes that one core holds of each buffer."""
         # In each case, the child starts at the last use of the parent. At that
         # tick, both buffers are live.
-        with self.subTest("tiled parent, untiled child"):
+        with self.subTest("partitioned parent, whole child"):
             parent = CoreDivisionBuffer(
-                "parent", 1024, [0, 1], core_divisions=[self._four_output_tiles()]
+                "parent", 1024, [0, 1], core_divisions=[self._four_output_cores()]
             )
             child = CoreDivisionBuffer(
                 "child",
@@ -193,15 +190,13 @@ class TestExhaustiveSearchResidency(TestCase):
                 core_divisions=[CoreDivision()],
                 in_place_parents=["parent"],
             )
-            # One core holds one 256-byte tile of the parent. The 512-byte child
-            # does not fit in that slot, so the child must use a different
-            # address. The 768 bytes of LX hold the tile and the child side by
-            # side.
+            # Each core holds 256 bytes of the parent. The 512-byte child
+            # cannot reuse that slot; both fit side by side in 768 bytes.
             result = self._solve([parent, child], lx_size=768)
             self.assertEqual(result["parent"].address, 0)
             self.assertEqual(result["child"].address, 256)
 
-        with self.subTest("untiled parent, tiled child"):
+        with self.subTest("whole parent, partitioned child"):
             parent = CoreDivisionBuffer(
                 "parent", 512, [0, 1], core_divisions=[CoreDivision()]
             )
@@ -209,12 +204,11 @@ class TestExhaustiveSearchResidency(TestCase):
                 "child",
                 1024,
                 [1, 2],
-                core_divisions=[self._four_output_tiles()],
+                core_divisions=[self._four_output_cores()],
                 in_place_parents=["parent"],
             )
-            # One core holds one 256-byte tile of the child. That tile fits in the
-            # 512-byte slot of the parent. The parent uses all 512 bytes of LX, so
-            # the child stays in LX only if it takes the slot of the parent.
+            # Each core holds 256 bytes of the child, which fits in the
+            # parent's 512-byte slot. LX is full, so the child must reuse it.
             result = self._solve([parent, child], lx_size=512)
             self.assertEqual(result["parent"].address, 0)
             self.assertEqual(result["child"].address, 0)

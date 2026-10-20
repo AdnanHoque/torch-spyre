@@ -132,6 +132,12 @@ class ExhaustiveSearchSolver(CoreDivisionLayoutSolver):
     ) -> list[CoreDivisionBuffer]:
         # TODO: use cost_expr here
         buffers_list = cast("list[CoreDivisionBuffer]", self.buffers)
+        # This solver does not apply graph tiling. Direct callers must follow
+        # the allocator's untiled-only menu so reserved sizes match the graph.
+        if any(
+            not cd.tiling.is_untiled for b in buffers_list for cd in b.core_divisions
+        ):
+            raise ValueError("Exhaustive search requires untiled candidates")
 
         buf_by_name: dict[str, CoreDivisionBuffer] = {b.name: b for b in buffers_list}
         children_by_parent: dict[
