@@ -634,47 +634,77 @@ def test_relayout_on_other_dtypes(monkeypatch, dtype):
 
 
 def test_cross_group_coarse_tiled_edges_are_never_offered(monkeypatch):
-    """A coarse-tiled edge that crosses for_each_tile scopes must enumerate NO
-    relayout candidates, even though a same-group coarse-tiled edge now can
-    (see test_same_group_coarse_tiled_edge_is_offered_and_priced_per_trip
-    below, torch-spyre#5057).
+    """Relayouts must stay within one coarse-tile scope.
 
-    The producer sits in one for_each_tile body and the consumer in a
-    separate, sibling body with its own loop_group_id, so this is a true
-    cross-group edge, not merely two ops that happen to both be tiled. A
-    relayout taken at that seam would still be stale on the next outer
-    iteration the same way an in-loop one would be; the solver path must
-    decline at enumeration (loop_info gate), not merely decline to fire.
-
-    The two for_each_tile calls tile different axes of the intermediate (dim
-    0 then dim 1) specifically to force two genuinely distinct loop scopes.
-    Verified empirically, not just by inspection: equal tile_size/dims
-    siblings over the same shape fuse into one shared while_loop body (both
-    intermediates named ``while_loop_body_graph_0_0_*``); giving the second
-    call a different tile_size ALONE (same dim) still fuses the same way,
-    byte-identical candidate list. Only a different tiled axis keeps the
-    splicer from inlining the producer directly into the consumer's body --
-    which is not the cross-group case this test means to cover."""
+    The two for_each_tile bodies tile different axes to retain distinct
+    scopes. Check every offered and materialized edge by its endpoint
+    metadata; valid edges inside either body may still offer relayouts.
+    The candidate unit test also probes real sibling and nested group IDs
+    to prove that the scope gate rejects them before layout inspection.
+    """
+    from torch_spyre._inductor.loop_info import CoarseTileInfo
     from torch_spyre._inductor.wsr.for_each_tile import for_each_tile
 
-    tables = []
+    groups_seen = set()
+
+    def assert_same_scope(producer, consumer):
+        prod_info = getattr(producer, "loop_info", None)
+        cons_info = getattr(consumer, "loop_info", None)
+        if prod_info is None and cons_info is None:
+            return
+        assert isinstance(prod_info, CoarseTileInfo)
+        assert isinstance(cons_info, CoarseTileInfo)
+        assert prod_info.loop_group_id == cons_info.loop_group_id, (
+            f"cross-group relayout: {producer.get_name()} "
+            f"{prod_info.loop_group_id} -> {consumer.get_name()} "
+            f"{cons_info.loop_group_id}"
+        )
+
     orig_tables = alloc_mod.CoOptimizingAllocator._cd_parent_relayouts
 
-    def spy_tables(self, *args, **kwargs):
-        out = orig_tables(self, *args, **kwargs)
-        if out:
-            tables.append(out)
+    def spy_tables(
+        self,
+        graph,
+        consumer_op,
+        consumer_divs,
+        parent_names,
+        divisions,
+        op_by_name,
+        *args,
+        **kwargs,
+    ):
+        out = orig_tables(
+            self,
+            graph,
+            consumer_op,
+            consumer_divs,
+            parent_names,
+            divisions,
+            op_by_name,
+            *args,
+            **kwargs,
+        )
+        for op in [consumer_op, *(op_by_name.get(name) for name in parent_names)]:
+            info = getattr(op, "loop_info", None)
+            if isinstance(info, CoarseTileInfo):
+                groups_seen.add(info.loop_group_id)
+        for parent, candidates in out.items():
+            if candidates:
+                assert_same_scope(op_by_name[parent], consumer_op)
         return out
 
     monkeypatch.setattr(
         alloc_mod.CoOptimizingAllocator, "_cd_parent_relayouts", spy_tables
     )
 
-    recorded = []
     real_materialize = alloc_mod.materialize_lx_relayouts
 
     def spy_mat(graph, plans):
-        recorded.extend(plans)
+        for plan in plans:
+            for name in plan.consumer_names:
+                assert_same_scope(
+                    graph.get_buffer(plan.source_name), graph.get_buffer(name)
+                )
         return real_materialize(graph, plans)
 
     monkeypatch.setattr(alloc_mod, "materialize_lx_relayouts", spy_mat)
@@ -707,15 +737,7 @@ def test_cross_group_coarse_tiled_edges_are_never_offered(monkeypatch):
     ):
         out = torch.compile(fn, dynamic=False, fullgraph=True)(a, b)
 
-    # Graph-global, same as the test this replaces: also covers each body's
-    # own within-scope edges, which happen to offer nothing for this graph's
-    # shapes. A future same-group change that makes one of those offer could
-    # fail this assert looking like a cross-group regression when it isn't;
-    # the printed table disambiguates by parent/consumer name.
-    assert tables == [], (
-        f"cross-group coarse-tiled edges were offered relayout: {tables}"
-    )
-    assert recorded == []
+    assert len(groups_seen) >= 2, "fixture did not retain distinct coarse-tile scopes"
     ref = ((torch.abs(ha.float()) + hb.float()) * 2).to(torch.float16)
     torch.testing.assert_close(out.cpu(), ref, rtol=2**-8, atol=2**-6)
 
