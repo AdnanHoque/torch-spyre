@@ -417,9 +417,8 @@ class OpFeatures:
     # producer and its consumers own an LX buffer under different per-core divisions.
     # Its traffic is entirely LX, which this model charges at zero -- calibrated for
     # ops whose LX traffic rides beside a larger HBM stream, and exactly wrong for the
-    # one op that is nothing but LX traffic. Measured on 53 configurations it costs
-    # 2.3-24.2 us at 2.1 MB / 8 cores depending on slice geometry alone, so it gets an
-    # additive term (see ``relayout_ns`` in predict_ops) keyed on these features.
+    # one op that is nothing but LX traffic. Use an additive term
+    # (see ``relayout_ns`` in predict_ops) keyed on these features.
     # ``is_lx_relayout`` derives from the planner's materialization registry, never
     # inferred; the other two are 0 when it is False. The bytes moved are NOT a
     # separate feature: a relayout copy is an identity clone, so they are exactly
@@ -1322,8 +1321,7 @@ def relayout_ns(o: "OpFeatures", params: "CostParams | None" = None) -> float:
     The split is clamped into the measured range [``relayout_split_min``,
     ``relayout_split_max``] = [2, 32]. Below 2 cannot occur for a real ownership
     change (and would turn the fitted intercept negative). Inside the range the law
-    is evaluated at the true split; for example a 4 MB permutation on 32 cores at
-    split 32 prices at 8.85 us against 7.3-8.3 us measured.
+    is evaluated at the true split.
     """
     if not o.is_lx_relayout or o.out_elems <= 0:
         return 0.0
@@ -2882,8 +2880,7 @@ def predict_ops(ops: list, params: CostParams | None = None) -> float:
     # allocator's half-tick lifetime scheme depends on exactly that) -- so it ADDS to
     # the kernel time rather than overlapping, and sits OUTSIDE the compute/memory
     # overlap term below. Measured directly: fusing never recovers it (fused total
-    # == unfused sum +/- 2%), and it costs its full time beside a 223 us bmm exactly
-    # as beside a 25 us relu, so it does not hide behind PT-array work either. See
+    # == unfused sum +/- 2%), so it does not hide behind PT-array work either. See
     # relayout_ns() and the CostParams note for the fitted law and its validity range.
     rel_ns = sum(relayout_ns(o, p) for o in ops)
     # INPUT CLONE-IN: the clone of a resident graph input is likewise its own DSC, a
