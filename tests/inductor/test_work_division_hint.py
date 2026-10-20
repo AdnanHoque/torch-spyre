@@ -1201,8 +1201,8 @@ def test_diagonal_access_cannot_become_a_complete_relayout_source():
 
 
 def test_lx_relayout_activation_policy_is_source_wide():
-    dep = SimpleNamespace(name="input")
-    graph = SimpleNamespace()
+    dep = SimpleNamespace(name="input", is_indirect=lambda: False)
+    graph = SimpleNamespace(graph_inputs={"input": None}, operations=[])
     producer = SimpleNamespace()
     with (
         mock_patch.object(lx_relayout_module, "is_restickify_op", return_value=True),

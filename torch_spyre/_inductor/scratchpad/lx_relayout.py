@@ -682,9 +682,10 @@ def movement_supported(
     Edges are ownership intersections, never a separate geometry calculation.
     A complete source may feed uniformly repeated destination slices. Across
     unequal core counts, a larger complete destination partition may gather
-    several disjoint source fragments. Replicated destinations retain the
-    one-source broadcast rule. Equal destination slices have identical sources
-    by construction.
+    several disjoint source fragments. A full replicated destination may also
+    gather a complete source partition (the cache-transpose to QK handoff).
+    Partially partitioned replicas retain the one-source broadcast rule.
+    Equal destination slices have identical sources by construction.
     Incoming fragments must also fit the current shuffle lowering's address
     register budget; broadcast fan-out does not consume this budget.
     """
@@ -725,7 +726,9 @@ def movement_supported(
     # Every distinct destination slice is covered.
     if len(replicas) != destination_slices:
         return False
-    # Within one core domain, each slice has equally many copies.
+    # Within one core domain, each slice has equally many copies. A larger
+    # full-replica gather has only one distinct slice, so is uniform as well.
+    # Preserve the existing one-source broadcast rule for other expansions.
     if source_num_cores == destination_num_cores and len(set(replicas.values())) != 1:
         return False
 
@@ -756,10 +759,14 @@ def movement_supported(
     # A complete destination is an exact repartition, including an expansion
     # onto more cores. The shuffle's per-tensor maps describe the two domains;
     # STCDP intersects their pieces rather than assuming one source per reader.
-    # Keep the narrower existing rule for replicated larger destinations.
+    # A full replica is the union of every complete, disjoint source slice.
+    # STCDP already multicasts each source piece to every destination; the
+    # same-core piece uses its local LX path. The fanin bound above still
+    # applies. Do not generalize to partially partitioned replica expansions.
     return (
         source_num_cores == destination_num_cores
         or destination_slices == destination_num_cores
+        or (destination_slices == 1 and fanin[0] == source_num_cores)
         or (fanout[0] == destination_num_cores // source_num_cores and fanin[0] == 1)
     )
 
@@ -769,7 +776,8 @@ def core_domain_rejection(source_num_cores: int, consumer_num_cores: int) -> str
     ``consumer_num_cores`` through a relayout, from the core counts alone, or
     ``None`` when they are compatible. Equal counts are always fine
     (permutations and gathers). A larger consumer domain is either a complete
-    repartition or a grouped broadcast, supported only onto every compute core.
+    repartition, a grouped broadcast, or a full replicated gather, supported
+    only onto every compute core.
     The geometric half of that rule is :func:`movement_supported`'s.
     Shared by the committed collector and the solver's enumeration so the two
     paths cannot drift."""
@@ -876,13 +884,42 @@ def _single_write(op: ComputedBuffer, name: str) -> MemoryDep | None:
 def _is_activation_source(
     graph: GraphLowering, operations: dict[str, Operation], op: Operation
 ) -> bool:
-    """Exclude restickified graph inputs and weights from activation relayout."""
+    """Allow computed activations and snapshots of an updated input cache.
 
-    return not is_restickify_op(op, graph) or any(
-        isinstance(operations.get(dep.name), ComputedBuffer)
-        for dep in op_read_writes(op).reads
-        if isinstance(dep, MemoryDep)
-    )
+    Only the immutable restickification result is eligible. The mutation and
+    its target stay in place; cache contents, aliases, indexing and ordering
+    still flow through the original load and scheduler dependencies. A cache
+    read cannot be replaced with the new values alone: untouched history may
+    be read too. Unmodified inputs/weights retain the existing exclusion.
+    """
+
+    if not is_restickify_op(op, graph):
+        return True
+    reads = [d for d in op_read_writes(op).reads if isinstance(d, MemoryDep)]
+    if any(isinstance(operations.get(dep.name), ComputedBuffer) for dep in reads):
+        return True
+    if (
+        len(reads) != 1
+        or reads[0].is_indirect()
+        or reads[0].name not in graph.graph_inputs
+    ):
+        return False
+    # Match the storage name obtained by unwrapping mutation target views,
+    # rather than an op name or a heuristic such as "cache" in the input name.
+    # Require an earlier, ordinary in-graph mutation. This is eligibility,
+    # not an ordering repair: we never rewrite the restickification's load.
+    updated = False
+    for previous in graph.operations:
+        if previous is op:
+            return updated
+        if (
+            isinstance(previous, ComputedBuffer)
+            and isinstance(previous.layout, MutationLayoutSHOULDREMOVE)
+            and getattr(previous, "loop_info", None) is None
+            and previous.layout.get_buffer().get_name() == reads[0].name
+        ):
+            updated = True
+    return False
 
 
 def _unsupported_relayout_transition_reason(
@@ -1262,7 +1299,7 @@ def collect_lx_relayout_plans(
             continue
 
         # Activation eligibility belongs to the producer, not to an individual
-        # edge. Never relayout a restickified graph input or weight.
+        # edge. Only updated input caches escape the graph-input exclusion.
         if not _is_activation_source(graph, operations, producer):
             continue
 
