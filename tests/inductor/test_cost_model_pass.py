@@ -32,7 +32,6 @@ No Spyre device or backend compiler is required -- ops are injected directly.
 
 import dataclasses
 import json
-import os
 import threading
 
 import pytest
@@ -763,16 +762,6 @@ def test_relayout_term_reproduces_measured_rows(
     assert abs(pred_us - measured_us) / measured_us < 0.20
     # The term is the whole price of an LX-only op: predict_ops == relayout_ns.
     assert cost_model.predict_ops([f]) == pytest.approx(cost_model.relayout_ns(f))
-
-
-_RELAYOUT_RECORDS = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "..",
-    "tools",
-    "cost_model",
-    "relayout_records.json",
-)
 
 
 def test_relayout_term_is_zero_for_everything_else():

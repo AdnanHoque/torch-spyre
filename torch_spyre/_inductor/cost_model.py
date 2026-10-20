@@ -720,10 +720,8 @@ class CostParams:
     # -24%), split 32 mean +24% (worst +44%, the 0.5-1 MB rows). The canonical row
     # reproduces (8.70 us measured, 8.78 law). So the term clamps the split into
     # [relayout_split_min, relayout_split_max]; past 8 the former clamp to 8
-    # under-priced these moves by 39-71%. The measured rows are
-    # tools/cost_model/relayout_records.json; tools/cost_model/fit_relayout_law.py
-    # scores the law against them and applies the range rule (records from two
-    # geometries, |mean| <= 25%, RMS <= 30% at a split).
+    # under-priced these moves by 39-71%. The range rule requires records from
+    # two geometries, |mean| <= 25%, and RMS <= 30% at each split.
     # GROUPED movements (a gather into a replicated view, a broadcast) were never
     # fitted: the same sweep measured gathers into a matmul's replicated operand at
     # 1.8-16x this law at the true split (5.6-16x the price clamped to 8), at every
