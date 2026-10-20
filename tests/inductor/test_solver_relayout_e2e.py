@@ -1313,7 +1313,7 @@ def _assert_cache_update_persistence(specs, cache_writes, source_address, elemen
         assert pool_writers == [init_index, i], "cache history has an unrelated writer"
 
 
-@pytest.mark.parametrize("rows", [512])
+@pytest.mark.parametrize("rows", [512, 128, 64])
 def test_attention_cache_transpose_handoff(monkeypatch, rows):
     """Update persistent K, restickify its prefix, gather, then run two QKs.
 
