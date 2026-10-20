@@ -82,6 +82,7 @@ class _Observed:
         # plan edge -> materialized copy buffer name, and each consumer's read
         # names right after materialization (V.graph is live inside the pass).
         self.copies: dict = {}
+        self.source_layouts: dict = {}
         self.consumer_reads: dict[str, set[str]] = {}
         real_materialize = alloc_mod.materialize_lx_relayouts
 
@@ -102,6 +103,12 @@ class _Observed:
                 for edge, (copy_name, _plan) in materialized_lx_relayouts(graph).items()
             }
             for plan in plans:
+                layout = graph.get_buffer(plan.source_name).get_layout()
+                self.source_layouts[plan.edge] = (
+                    list(layout.device_layout.device_size),
+                    list(layout.device_layout.stride_map),
+                    list(layout.stride),
+                )
                 for name in plan.consumer_names:
                     op = graph.get_buffer(name)
                     self.consumer_reads[name] = {
@@ -864,3 +871,91 @@ def test_sa_cooptimizer_keeps_its_objective_and_decides_no_relayout(monkeypatch)
         )
     ref = torch.relu(torch.neg(host.float())).to(torch.float16)
     torch.testing.assert_close(out.cpu(), ref, rtol=1e-3, atol=1e-3)
+
+
+@pytest.mark.parametrize(
+    "rows,width,dtype,batched,strided",
+    [
+        (512, 4096, torch.float16, False, False),
+        (64, 512, torch.float16, False, False),
+        (128, 1024, torch.float16, False, False),
+        (512, 4096, torch.float16, True, False),
+        (64, 512, torch.float32, False, True),
+    ],
+)
+def test_complete_partition_expansion_fires_and_preserves_values(
+    monkeypatch, rows, width, dtype, batched, strided
+):
+    """A real 16-to-32-core transfer with four-source destination gathers."""
+    import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
+    from torch_spyre._inductor import spyre_hint
+    from torch_spyre._inductor.scratchpad.lx_relayout import _core_slices
+
+    observed = _Observed(monkeypatch, force=False)
+
+    def fn(t):
+        with spyre_hint(work_div={"R": 16}):
+            hidden = torch.neg(t)
+        with spyre_hint(work_div={"R": 4, "H": 8}):
+            return torch.relu(hidden)
+
+    # Distinct signed, exactly representable SEN169 values expose routing and
+    # offset mistakes without requiring a tolerance for fp16 arithmetic.
+    storage_width = width * (2 if strided else 1)
+    host = (
+        (torch.arange(rows * storage_width).reshape(rows, storage_width) * 17) % 251
+        - 125
+    ).to(dtype)
+    if strided:
+        host = host[:, ::2]
+        assert not host.is_contiguous()
+    names = ["R", "H"]
+    if batched:
+        # Give all 128 source/feature fragments distinct value ranges. The
+        # flat modular pattern above alone can alias some diagonal tile moves.
+        # Keep every input negative so relu(-t) observes every destination.
+        row_ids = torch.arange(rows).reshape(-1, 1)
+        column_ids = torch.arange(width).reshape(1, -1)
+        fragment = (row_ids // (rows // 16)) * 8 + column_ids // (width // 8)
+        offset = (row_ids * 37 + column_ids * 17) % 8
+        host = -(fragment * 8 + offset + 1).to(dtype).unsqueeze(0)
+        names = ["B", *names]
+        _pnd.declare_tensor_dim("B", 1)
+    for name, size in (("R", rows), ("H", width)):
+        _pnd.declare_tensor_dim(name, size)
+    x = _pnd.name_tensor_dims(host.to("spyre"), names)
+    with config.patch({**_COOPT, "sencores": 32}):
+        out = torch.compile(fn, dynamic=False)(x)
+
+    observed.assert_emitted_in_lx(expected_plans=1)
+    (plan,) = observed.plans
+    assert plan.num_cores == 16 and plan.destination_view.num_cores == 32
+    # Physical dimension order may change when a singleton batch is present.
+    # Locate row and outer-stick axes from the committed tensor's strides,
+    # independently of the per-core views being checked.
+    dims, strides, logical_strides = observed.source_layouts[plan.edge]
+    row_axes = [
+        i
+        for i, (size, stride) in enumerate(zip(dims, strides))
+        if size == rows and stride == logical_strides[-2]
+    ]
+    column_axes = [
+        i
+        for i, (size, stride) in enumerate(zip(dims[:-1], strides[:-1]))
+        if size == width // dims[-1] and stride == logical_strides[-1] * dims[-1]
+    ]
+    assert len(row_axes) == len(column_axes) == 1
+    row_axis, column_axis = row_axes[0], column_axes[0]
+    assert row_axis != column_axis
+    assert _core_slices(plan.source_view, 16) == {c: {row_axis: c} for c in range(16)}
+    assert _core_slices(plan.destination_view, 32) == {
+        c: {column_axis: c // 4, row_axis: c % 4} for c in range(32)
+    }
+    assert plan.source_footprint_bytes == rows * width * host.element_size() // 16
+    assert plan.destination_footprint_bytes == rows * width * host.element_size() // 32
+    assert (
+        plan.source_address + plan.source_footprint_bytes <= plan.destination_address
+        or plan.destination_address + plan.destination_footprint_bytes
+        <= plan.source_address
+    ), "live source and destination LX spans overlap"
+    assert torch.equal(out.cpu(), torch.relu(-host))
