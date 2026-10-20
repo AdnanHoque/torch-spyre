@@ -2417,16 +2417,7 @@ class TestAOTAnnotationAssumptions(DynamoTestCase):
 
 @pytest.mark.parametrize(
     "expression,width_extent",
-    [
-        ("2*h+floor(w/64)", 192),  # crosses a head shard
-        ("2*h+floor(w/64)+1", 128),
-        ("2*h-floor(w/64)", 128),
-        ("floor(h*w/64)", 128),
-        ("2*h+floor(w/divisor)", 128),
-        ("floor(h/2)+floor(w/64)", 128),  # two floors are out of scope
-        ("2*h+2*floor(w/64)", 128),  # nonunit floor coefficient
-        ("2*h+floor(w/64)+1/2", 128),  # nonintegral outside term
-    ],
+    [("2*h+floor(w/64)", 192), ("floor(h*w/64)", 128)],
 )
 def test_floor_slice_projection_rejects_unproven_access(expression, width_extent):
     from torch_spyre._inductor.scratchpad.lx_relayout import (
@@ -2446,3 +2437,66 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     run_tests()
+
+
+@pytest.mark.parametrize(
+    "case", ["hole", "offset", "reversed", "overlap", "tail", "crossing", "dynamic"]
+)
+def test_factored_slice_rejects_inexact_products(case):
+    h, f = Symbol("head"), Symbol("feature")
+    coordinate, extents, size, split = 2 * h + floor(f / 64), {h: 2, f: 128}, 4, 4
+    if case == "hole":
+        coordinate, size = 3 * h + floor(f / 64), 6
+    elif case == "offset":
+        coordinate += 1
+    elif case == "reversed":
+        coordinate = 2 * h - floor(f / 64)
+    elif case == "overlap":
+        coordinate = h + floor(f / 64)
+    elif case == "tail":
+        extents[f] = 127
+    elif case == "crossing":
+        coordinate, extents, size, split = 3 * h + f, {h: 2, f: 3}, 6, 3
+    else:
+        extents[f] = Symbol("dynamic")
+    assert (
+        lx_relayout_module._factor_slice_axis(
+            coordinate, size, split, _CORE_ID, extents
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "source_address,destination_address,source_bytes,destination_bytes,error",
+    [
+        (0, 8192, 8192, 16384, None),
+        (16384, 0, 8192, 16384, None),
+        (0, 8191, 8192, 16384, "overlap"),
+        (16383, 0, 8192, 16384, "overlap"),
+        (-1, 8192, 8192, 16384, "invalid physical span"),
+        (16384, -1, 8192, 16384, "invalid physical span"),
+        (0, 8192, 0, 16384, "invalid physical span"),
+        (16384, 0, 8192, 0, "invalid physical span"),
+        (None, 8192, 8192, 16384, "missing an allocated address"),
+        (16384, None, 8192, 16384, "missing an allocated address"),
+    ],
+)
+def test_contraction_requires_disjoint_full_physical_spans(
+    source_address, destination_address, source_bytes, destination_bytes, error
+):
+    plan = replace(
+        _relayout_plan(),
+        source_view=_view({0: 32}, {0: _CORE_ID}, 32),
+        destination_view=_view({0: 16}, {0: _CORE_ID}, 16),
+        num_cores=32,
+        source_address=source_address,
+        destination_address=destination_address,
+        source_footprint_bytes=source_bytes,
+        destination_footprint_bytes=destination_bytes,
+    )
+    if error is None:
+        lx_relayout_module.validate_relayout_spans(plan)
+    else:
+        with pytest.raises(RuntimeError, match=error):
+            lx_relayout_module.validate_relayout_spans(plan)
