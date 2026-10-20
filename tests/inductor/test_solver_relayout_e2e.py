@@ -1102,10 +1102,45 @@ def test_attention_output_repack_handoff(monkeypatch, rows):
     The test ends at O's HBM graph output; distributed collectives remain a
     separate production-harness requirement.
     """
+    from torch._inductor.dependencies import MemoryDep
+    from torch._inductor.ir import ComputedBuffer, Pointwise
+
     import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
     from torch_spyre._inductor import spyre_hint
+    from torch_spyre._inductor.pass_utils import op_read_writes
 
     observed = _Observed(monkeypatch, force=False)
+    restickify_inputs = {}
+    real_materialize = alloc_mod.materialize_lx_relayouts
+
+    def capture_restickify_inputs(graph, plans):
+        for plan in plans:
+            source = graph.get_buffer(plan.source_name)
+            if not (
+                isinstance(source, ComputedBuffer)
+                and isinstance(source.data, Pointwise)
+                and {node.target for node in source.origins}
+                == {torch.ops.spyre.restickify.default}
+            ):
+                continue
+            # This layout copy can merge head/width factors without changing
+            # the within-stick dimension. Require its actual lowering origin
+            # and one identity read, not a general path through other ops.
+            rw = op_read_writes(source)
+            assert len(rw.reads) == len(rw.writes) == 1
+            (read,), (write,) = list(rw.reads), list(rw.writes)
+            assert isinstance(read, MemoryDep) and isinstance(write, MemoryDep)
+            assert read.index == write.index and read.ranges == write.ranges
+            restickify_inputs[plan.source_name] = (
+                read.name,
+                graph.get_buffer(read.name).get_layout(),
+                source.get_layout(),
+            )
+        return real_materialize(graph, plans)
+
+    monkeypatch.setattr(
+        alloc_mod, "materialize_lx_relayouts", capture_restickify_inputs
+    )
 
     def fn(scores, values, weight):
         with spyre_hint(work_div={"R": 32}):
@@ -1154,7 +1189,13 @@ def test_attention_output_repack_handoff(monkeypatch, rows):
         )
     observed.assert_emitted_in_lx(expected_plans=2)
     first, second = observed.plans
-    assert second.source_name in first.consumer_names
+    if second.source_name not in first.consumer_names:
+        assert second.source_name in restickify_inputs
+        input_name, input_layout, output_layout = restickify_inputs[second.source_name]
+        assert input_name in first.consumer_names
+        assert (
+            set(input_layout.allocation) == set(output_layout.allocation) == {"lx"}
+        ), "the repack layout copy must keep both endpoints in LX"
     assert first.source_view.split_product == first.destination_view.split_product == 32
     assert second.source_view.split_product == 32
     assert second.destination_view.split_product == 4
