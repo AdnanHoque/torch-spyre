@@ -2338,8 +2338,8 @@ def _pt_underfill_factor(m_tile):
     at most ``_TARGET_PT_PASSES ** _PT_EFFICIENCY_EXPONENT`` (1.50 at 8 rows).
     It is a preference of the standalone chooser, not an operation latency:
     measured matmuls with 8 to 40 rows per core and the input in LX ran no
-    slower than taller cuts of the same shape on the same cores
-    (tools/cost_model/matmul_short_tile_fit.py), so ``_matmul_execution_cost``,
+    slower than taller cuts of the same shape on the same cores,
+    so ``_matmul_execution_cost``,
     the latency that the co-optimizing planner sums, does not carry it. With the
     input in HBM a short tile can run slower; that is a cost of the HBM read,
     not of the PT array.
@@ -2410,7 +2410,7 @@ def _matmul_execution_cost(
     # Compute: per-core MACs over peak. A short per-core M tile carries no
     # extra compute time here: on the card, matmuls with 8 to 40 rows per core
     # and the input in LX ran no slower than taller cuts of the same shape on
-    # the same cores (fit and data: tools/cost_model/matmul_short_tile_fit.py).
+    # the same cores.
     # The PT short-tile factor stays a ranking preference of
     # ``_matmul_split_cost``.
     compute_us = _matmul_compute_us(b_axis, m_axis, n_axis, k_axis)

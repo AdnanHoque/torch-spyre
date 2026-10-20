@@ -337,7 +337,7 @@ shapes the codegen handles poorly:
   8 rows per core: it adds `(factor − 1) × compute`. It is a ranking
   preference, not a kernel time. On the card, matmuls with 8 to 40 rows
   per core and the input in LX ran no slower than taller cuts of the same
-  shape on the same cores (`tools/cost_model/matmul_short_tile_fit.py`),
+  shape on the same cores,
   so the execution estimate that the co-optimizing planner sums does not
   carry it. With the input in HBM a short tile can run slower; that is a
   cost of the HBM read, not of the PT array.
