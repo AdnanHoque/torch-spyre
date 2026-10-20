@@ -692,44 +692,13 @@ class CostParams:
     # This is compute-side execution throughput, not another byte stream: applying
     # the LX spill/underfill derates to it would count the same bottleneck twice.
     fused_reduction_elems_per_core_ns: float = 1.5
-    # LX RELAYOUT (shuffle) term: per-core serial descriptor cost plus a stride-limited
-    # walk. Fitted 2026-08-17 on 21 direct per-kernel rows (main @ 65508a02, fp16,
-    # BUNDLE_SYMBOLIC_ARGS=0 -- a method #3741 has since removed; re-measuring needs
-    # the fused swap estimator at ~+/-8%): mean +2.5%, RMS 10.0% over bytes 0.52-4.19
-    # MB, cores 4-32, run 128-4096 B, split 2-8.
-    #
-    #   relayout_ns = runs_per_core * (a + b*log2(split)) + span_per_core / K
-    #     runs_per_core = bytes/cores / run_bytes
-    #     span_per_core = bytes/cores * split   (the engine walks the whole strided
-    #                                            span; a core keeps 1/split of it --
-    #                                            BW*split measured 588/540/549, so K
-    #                                            is per-core and split-invariant)
-    #
-    # The log2 in the per-run cost is FITTED, no mechanism behind it. Carries a +/-25%
-    # error bar from the non-governing side of the view pair -- reproducible scatter
-    # with no consistent direction (destination sweep, 10 pairs x 15 reps), so it is
-    # an error bar and not a term. Fanout was measured NOT to be a term (2/4/8 at fixed
-    # geometry, no trend). NO loop_trip factor: a relayout inside a coarse-tiling loop
-    # is structurally impossible today (the planner rejects coarse_tile_copy
-    # consumers).
-    # MEASURED RANGE: splits 2..32 for PERMUTATIONS. Re-measured 2026-10-16 (main @
-    # 55212fbc and cf275104, DeepTools 50663c1b, fp16, one profiler record per
-    # program): 96 rows of permutations between complete partitions, splits 2-32,
-    # cores 8-32 (split 16 on 16 and on 32 cores), 0.5-4.2 MB, both directions. With
-    # the constants below and no clamp: mean -3%, RMS 20%; split 16 mean -7% (worst
-    # -24%), split 32 mean +24% (worst +44%, the 0.5-1 MB rows). The canonical row
-    # reproduces (8.70 us measured, 8.78 law). So the term clamps the split into
-    # [relayout_split_min, relayout_split_max]; past 8 the former clamp to 8
-    # under-priced these moves by 39-71%. The range rule requires records from
-    # two geometries, |mean| <= 25%, and RMS <= 30% at each split.
-    # GROUPED movements (a gather into a replicated view, a broadcast) were never
-    # fitted: the same sweep measured gathers into a matmul's replicated operand at
-    # 1.8-16x this law at the true split (5.6-16x the price clamped to 8), at every
-    # split from 4 to 32, so the solver's enumeration keeps them at the splits it
-    # offered before (see ``solver_relayout_pair_cost``).
-    # The negative intercept is the fitted value, not a typo: a small-run
-    # extrapolation artifact of the linear-in-log2(split) per-run form. The split's
-    # floor of 2 keeps the per-run term positive over its domain.
+    # LX relayout cost: serial descriptor cost plus a stride-limited walk.
+    # relayout_ns = runs_per_core * (a + b*log2(split)) + span_per_core / K
+    # runs_per_core = bytes/cores / run_bytes
+    # span_per_core = bytes/cores * split
+    # Permutations use measured splits 2..32. Grouped movements keep the solver's
+    # existing split limit; their cost was not fitted.
+    # The fitted negative intercept is valid with the split floor of 2.
     relayout_run_a_ns: float = -1.14  # per-run cost intercept
     relayout_run_b_ns: float = 3.92  # per-run cost log2(split) slope
     relayout_span_gbps: float = 547.0  # per-core stride-limited walk rate
