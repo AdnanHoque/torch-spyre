@@ -1331,7 +1331,8 @@ def test_attention_cache_transpose_handoff(monkeypatch, rows):
 
     def fn(cache, indices, keys, queries, other_queries, mask):
         alias = cache.view_as(cache)
-        with spyre_hint(work_div={"R": 16}):
+        # The int32 indices occupy 32-element sticks: split only whole sticks.
+        with spyre_hint(work_div={"R": rows // 32}):
             fresh = torch.neg(keys)
             cache.index_copy_(2, indices, fresh)
         with spyre_hint(work_div={"S": 2}, named_dims=["KV", "D", "S"]):
