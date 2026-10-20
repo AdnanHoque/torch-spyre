@@ -705,21 +705,38 @@ class CostParams:
     #                                            BW*split measured 588/540/549, so K
     #                                            is per-core and split-invariant)
     #
-    # The log2 in the per-run cost is FITTED, no mechanism behind it. VALID FOR SPLITS
-    # 2..8 ONLY: past 8 the law over-predicts 12-40% (measured at split 16), so the
-    # term clamps split into [2, 8] rather than extrapolate. Carries a +/-25% error
-    # bar from the non-governing side of the view pair -- reproducible scatter with no
-    # consistent direction (destination sweep, 10 pairs x 15 reps), so it is an error
-    # bar and not a term. Fanout was measured NOT to be a term (2/4/8 at fixed
+    # The log2 in the per-run cost is FITTED, no mechanism behind it. Carries a +/-25%
+    # error bar from the non-governing side of the view pair -- reproducible scatter
+    # with no consistent direction (destination sweep, 10 pairs x 15 reps), so it is
+    # an error bar and not a term. Fanout was measured NOT to be a term (2/4/8 at fixed
     # geometry, no trend). NO loop_trip factor: a relayout inside a coarse-tiling loop
     # is structurally impossible today (the planner rejects coarse_tile_copy
     # consumers).
+    # MEASURED RANGE: splits 2..32 for PERMUTATIONS. Re-measured 2026-10-16 (main @
+    # 55212fbc and cf275104, DeepTools 50663c1b, fp16, one profiler record per
+    # program): 96 rows of permutations between complete partitions, splits 2-32,
+    # cores 8-32 (split 16 on 16 and on 32 cores), 0.5-4.2 MB, both directions. With
+    # the constants below and no clamp: mean -3%, RMS 20%; split 16 mean -7% (worst
+    # -24%), split 32 mean +24% (worst +44%, the 0.5-1 MB rows). The canonical row
+    # reproduces (8.70 us measured, 8.78 law). So the term clamps the split into
+    # [relayout_split_min, relayout_split_max]; past 8 the former clamp to 8
+    # under-priced these moves by 39-71%. The measured rows are
+    # tools/cost_model/relayout_records.json; tools/cost_model/fit_relayout_law.py
+    # scores the law against them and applies the range rule (records from two
+    # geometries, |mean| <= 25%, RMS <= 30% at a split).
+    # GROUPED movements (a gather into a replicated view, a broadcast) were never
+    # fitted: the same sweep measured gathers into a matmul's replicated operand at
+    # 1.8-16x this law at the true split (5.6-16x the price clamped to 8), at every
+    # split from 4 to 32, so the solver's enumeration keeps them at the splits it
+    # offered before (see ``solver_relayout_pair_cost``).
     # The negative intercept is the fitted value, not a typo: a small-run
-    # extrapolation artifact of the linear-in-log2(split) per-run form. The
-    # split clamp to [2, 8] keeps the per-run term positive over its domain.
+    # extrapolation artifact of the linear-in-log2(split) per-run form. The split's
+    # floor of 2 keeps the per-run term positive over its domain.
     relayout_run_a_ns: float = -1.14  # per-run cost intercept
     relayout_run_b_ns: float = 3.92  # per-run cost log2(split) slope
     relayout_span_gbps: float = 547.0  # per-core stride-limited walk rate
+    relayout_split_min: int = 2  # measured governing split range, low end
+    relayout_split_max: int = 32  # measured governing split range, high end
     # Matmul operand RE-READ (tile spill): the per-core OUTPUT-accumulator tile has area
     # (M/m)*(N/n); once it exceeds the on-chip capacity (~64K fp16 elems/core) it no
     # longer stays resident, so the operands are re-streamed from HBM. The re-read
@@ -1335,21 +1352,22 @@ def relayout_ns(o: "OpFeatures", params: "CostParams | None" = None) -> float:
     evaluates THIS function per candidate division and folds the result into an
     AddElement table -- one source of truth for both paths.
 
-    The split is clamped into [2, 8], the fitted range. Below 2 cannot occur for a
-    real ownership change (and would turn the fitted intercept negative); above 8
-    the law over-predicts by 12-40% (measured at split 16), so the clamp bounds the
-    error instead of extrapolating an unmeasured log2.
+    The split is clamped into the measured range [``relayout_split_min``,
+    ``relayout_split_max``] = [2, 32]. Below 2 cannot occur for a real ownership
+    change (and would turn the fitted intercept negative). Inside the range the law
+    is evaluated at the true split; for example a 4 MB permutation on 32 cores at
+    split 32 prices at 8.85 us against 7.3-8.3 us measured.
     """
     if not o.is_lx_relayout or o.out_elems <= 0:
         return 0.0
     if o.relayout_run_elems <= 0 or o.cores <= 0:
         return 0.0
+    p = params or CostParams()
     # Bytes moved == the copy's device bytes: a relayout is an identity clone.
     per_core = o.out_elems * o.dtype_bytes / o.cores
     run_bytes = o.relayout_run_elems * o.dtype_bytes
-    split = min(8, max(2, o.relayout_split))
+    split = min(p.relayout_split_max, max(p.relayout_split_min, o.relayout_split))
     runs = per_core / run_bytes
-    p = params or CostParams()
     return (
         runs * (p.relayout_run_a_ns + p.relayout_run_b_ns * math.log2(split))
         + per_core * split / p.relayout_span_gbps
