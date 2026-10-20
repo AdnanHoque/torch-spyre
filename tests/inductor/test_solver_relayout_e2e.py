@@ -1089,3 +1089,86 @@ def test_q_projection_rope_handoff_preserves_pairs_and_other_consumer(
     ), "simultaneously live Q and its relayout copy overlap"
     assert torch.equal(out.cpu(), expected)
     assert torch.equal(side.cpu(), q_ref + 1)
+
+
+@pytest.mark.parametrize("rows", [512, 128, 64])
+def test_attention_output_repack_handoff(monkeypatch, rows):
+    """Produce softmax/PV/divide before repack/O; no implicit LX live-in.
+
+    One unmasked key per query makes exp and the denominator exactly 0/1.
+    Sparse O weights select every input feature, so wrong head/row/width
+    routing cannot hide in a wide GEMM tolerance. A second divide consumer
+    verifies that rewriting the repack read preserves the original lifetime.
+    The test ends at O's HBM graph output; distributed collectives remain a
+    separate production-harness requirement.
+    """
+    import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
+    from torch_spyre._inductor import spyre_hint
+
+    observed = _Observed(monkeypatch, force=False)
+
+    def fn(scores, values, weight):
+        with spyre_hint(work_div={"R": 32}):
+            shifted = scores - scores.amax(-1, keepdim=True)
+            probability = torch.exp(shifted)
+            denominator = probability.sum(-1, keepdim=True)
+            numerator = torch.ops.spyre.batched_matmul(probability, values)
+            divided = numerator / denominator
+            side = torch.neg(divided)
+        # Reshape merges KV/G into one loop; a hint names that loop once.
+        with spyre_hint(work_div={"R": 8, "G": 4}):
+            packed = divided.reshape(1, 8, rows, 128).transpose(1, 2).contiguous()
+        with spyre_hint(work_div={"R": 4, "O": 8}):
+            result = torch.nn.functional.linear(packed.reshape(1, rows, 1024), weight)
+        return result, side
+
+    selected = (torch.arange(rows) * 13 + 17) % 512
+    scores = torch.full((1, 2, 4, rows, 512), -float("inf"), dtype=torch.float16)
+    scores[:, :, :, torch.arange(rows), selected] = 0
+    k = torch.arange(512).reshape(1, 1, 1, 512, 1)
+    h = torch.arange(2).reshape(1, 2, 1, 1, 1)
+    d = torch.arange(128).reshape(1, 1, 1, 1, 128)
+    values = ((k * 37 + h * 257 + d * 3) % 1021 / 1024).to(torch.float16)
+    selectors = (torch.arange(4096) * 37) % 1024
+    weight = torch.zeros(4096, 1024, dtype=torch.float16)
+    weight[torch.arange(4096), selectors] = 1
+    divided = values[:, :, :, selected, :].expand(1, 2, 4, rows, 128)
+    packed = divided.reshape(1, 8, rows, 128).transpose(1, 2).reshape(1, rows, 1024)
+    expected = packed[:, :, selectors]
+    for name, size in (
+        ("B", 1),
+        ("KV", 2),
+        ("G", 4),
+        ("R", rows),
+        ("S", 512),
+        ("D", 128),
+        ("O", 4096),
+    ):
+        _pnd.declare_tensor_dim(name, size)
+    score_arg = _pnd.name_tensor_dims(scores.to("spyre"), ["KV", "G", "R", "S"])
+    value_arg = _pnd.name_tensor_dims(values.to("spyre"), ["KV", "S", "D"])
+    weight_arg = _pnd.name_tensor_dims(weight.to("spyre"), ["O", "KV", "G", "D"])
+    with config.patch({**_COOPT, "sencores": 32}):
+        result, side = torch.compile(fn, dynamic=False, fullgraph=True)(
+            score_arg, value_arg, weight_arg
+        )
+    observed.assert_emitted_in_lx(expected_plans=2)
+    first, second = observed.plans
+    assert second.source_name in first.consumer_names
+    assert first.source_view.split_product == first.destination_view.split_product == 32
+    assert second.source_view.split_product == 32
+    assert second.destination_view.split_product == 4
+    assert (
+        first.source_footprint_bytes == first.destination_footprint_bytes == rows * 64
+    )
+    assert second.source_footprint_bytes == rows * 64
+    assert second.destination_footprint_bytes == rows * 512
+    for plan in observed.plans:
+        assert (
+            plan.source_address + plan.source_footprint_bytes
+            <= plan.destination_address
+            or plan.destination_address + plan.destination_footprint_bytes
+            <= plan.source_address
+        ), "live source and copy overlap"
+    assert torch.equal(result.cpu(), expected)
+    assert torch.equal(side.cpu(), -divided)

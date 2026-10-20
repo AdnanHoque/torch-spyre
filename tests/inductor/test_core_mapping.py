@@ -1101,6 +1101,63 @@ def test_prepare_per_core_view_does_not_record_repeat_info():
     assert graph._repeat_info == before
 
 
+def _attention_repack_view_prep(*, width=128, offset=0):
+    """The actual GKSPILL5 buf7 write, before SDSC factors its feature axis."""
+    row, head, feature = sympy.symbols(
+        "row head feature", integer=True, nonnegative=True
+    )
+    prep = _view_prep(
+        iter_space={row: 512, head: 8, feature: width},
+        write_index=1024 * row + 128 * head + feature,
+        dep_coeff={row: 1024, head: 128, feature: 1},
+        dep_device_coordinates=(
+            2 * head + sympy.floor(feature / 64) + offset,
+            row,
+            sympy.Mod(feature, 64),
+        ),
+        device_size=[16, 512, 64],
+        stride_map=[64, 1024, 1],
+        device_stride_to_dim={64: 0, 1024: 1, 1: 2},
+        stick_host_stride=1,
+        num_stick_dim=0,
+        num_stick=16,
+        num_stick_stride=64,
+    )
+    return prep, row, head, feature
+
+
+@pytest.mark.parametrize(
+    "width,offset,relayout_enabled,representable",
+    [
+        (128, 0, True, True),
+        (192, 0, True, False),
+        (128, 1, True, False),
+        (128, 0, False, False),
+    ],
+)
+def test_attention_repack_maps_only_complete_head_shards(
+    monkeypatch, width, offset, relayout_enabled, representable
+):
+    monkeypatch.setattr(
+        pass_utils_module.config, "lx_planner_relayout", relayout_enabled
+    )
+    prep, row, head, feature = _attention_repack_view_prep(width=width, offset=offset)
+    coordinates = prep.dep_device_coordinates
+    view, partial, actual = pass_utils_module._per_core_view_from_prep(
+        prep, {row: 8, head: 4, feature: 1}
+    )
+    assert actual is representable
+    assert not partial
+    assert prep.dep_device_coordinates == coordinates
+    if representable:
+        assert view.num_cores == 32
+        assert dict(view.work_slice_dims) == {0: 4, 1: 8}
+        owners = dict(view.core_to_slot)
+        for core in range(32):
+            assert int(owners[0].subs(_CORE_ID, core)) == core // 8
+            assert int(owners[1].subs(_CORE_ID, core)) == core % 8
+
+
 @pytest.mark.parametrize("relayout_enabled", [False, True])
 def test_reshape_changes_per_core_ownership_within_one_device_axis(
     monkeypatch, relayout_enabled
