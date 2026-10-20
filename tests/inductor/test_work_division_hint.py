@@ -2417,7 +2417,16 @@ class TestAOTAnnotationAssumptions(DynamoTestCase):
 
 @pytest.mark.parametrize(
     "expression,width_extent",
-    [("2*h+floor(w/64)", 192), ("floor(h*w/64)", 128)],
+    [
+        ("2*h+floor(w/64)", 192),  # crosses a head shard
+        ("2*h+floor(w/64)+1", 128),
+        ("2*h-floor(w/64)", 128),
+        ("floor(h*w/64)", 128),
+        ("2*h+floor(w/divisor)", 128),
+        ("floor(h/2)+floor(w/64)", 128),  # two floors are out of scope
+        ("2*h+2*floor(w/64)", 128),  # nonunit floor coefficient
+        ("2*h+floor(w/64)+1/2", 128),  # nonintegral outside term
+    ],
 )
 def test_floor_slice_projection_rejects_unproven_access(expression, width_extent):
     from torch_spyre._inductor.scratchpad.lx_relayout import (
