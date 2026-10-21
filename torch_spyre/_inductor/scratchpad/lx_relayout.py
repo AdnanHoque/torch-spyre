@@ -1091,9 +1091,10 @@ def _pointwise_scatter_materializer(graph, producer, consumer, source_name) -> b
         if isinstance(dep, MemoryDep)
         and isinstance(graph.try_get_buffer(dep.name), ComputedBuffer)
     ]
-    if len(parents) != 1 or local_lx_subrange_geometry(
-        graph, parents[0], producer
-    ) is None:
+    if (
+        len(parents) != 1
+        or local_lx_subrange_geometry(graph, parents[0], producer) is None
+    ):
         return False
     reads = [dep for dep in op_read_writes(consumer).reads if dep.name == source_name]
     if len(reads) != 1 or not isinstance(reads[0], MemoryDep) or reads[0].is_indirect():
@@ -1678,10 +1679,12 @@ def local_lx_subrange_certificate(
         ]
         certificate = certify_dense_subrange_transfer(
             shape,
-            *rectangle,
+            rectangle[0],
+            rectangle[1],
             dict(source_view.work_slice_dims),
             dict(read_view.work_slice_dims),
-            *maps,
+            maps[0],
+            maps[1],
             element_bytes=producer.get_dtype().itemsize,
         )
         local_subrange_byte_offset(certificate)
