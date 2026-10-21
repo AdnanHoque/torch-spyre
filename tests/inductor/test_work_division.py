@@ -2387,6 +2387,13 @@ class TestResidencyEdgeMatching(unittest.TestCase):
         # the consumer's, the edge its producer's -- so each name is patched
         # wherever it is bound.
         stack = ExitStack()
+        # This ownership-policy fixture supplies views, not physical read geometry.
+        stack.enter_context(
+            patch(
+                "torch_spyre._inductor.scratchpad.lx_relayout.is_partial_lx_read",
+                return_value=False,
+            )
+        )
         for target, kwargs in [
             ("_view_for_div", {"side_effect": self._view_for_div}),
             ("op_read_writes", {"side_effect": lambda op: self.rw[op]}),
@@ -4266,6 +4273,13 @@ class TestMultiReadEdgeInversion(unittest.TestCase):
 
         with ExitStack() as stack:
             stack.enter_context(pass_utils_module.V.set_graph_handler(graph))
+            # This inverse-ownership sweep does not build a subrange proof graph.
+            stack.enter_context(
+                patch(
+                    "torch_spyre._inductor.scratchpad.lx_relayout.is_partial_lx_read",
+                    return_value=False,
+                )
+            )
             stack.enter_context(
                 patch.object(
                     pass_utils_module,
