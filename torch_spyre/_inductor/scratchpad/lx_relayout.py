@@ -73,12 +73,7 @@ _REGISTRY = "_spyre_lx_relayout_copies"
 # larger gather can fail register initialization even when individual cores
 # need fewer distinct values. Apply this conservative bound before placement.
 _MAX_SHUFFLE_FANIN = 8
-# Largest governing split the solver may be offered for a GROUPED movement (a
-# gather into a replicated view, a broadcast onto more cores): the splits it was
-# offered before the relayout law was re-measured. The law is fitted on
-# permutations; a gather into a matmul's replicated operand measured 1.8-16x
-# above it at every split from 4 to 32, so no grouped split is added before
-# grouped movements have a measured price of their own.
+# Largest governing split the solver may be offered for a GROUPED movement.
 _GROUPED_SPLIT_MAX = 8
 
 
@@ -1129,49 +1124,18 @@ def solver_relayout_pair_cost(
 ) -> float | None:
     """Price one candidate relayout (source view -> destination view), in ns.
 
-    ``None`` when the pair cannot host a relayout, or should not be offered:
+    Return ``None`` for matching ownership, unsupported movement, or a split
+    outside the measured range. Permutations use the cost model's split range;
+    grouped movements use [``relayout_split_min``, ``_GROUPED_SPLIT_MAX``].
+    The caller also applies the consumer's core-domain and gather rules.
 
-    - views with the same physical ownership need no relayout (that pair
-      belongs to ``cd_parent_matches``), compared with ``same_partition`` so a
-      differently spelled slot expression cannot masquerade as movement;
-    - ``movement_supported``, the committed path's own gate (#3440), admits
-      what the emitter can move: uniform partition transfers, grouped gathers and
-      grouped broadcasts, so the solver never prices a movement the emitter
-      cannot execute; the enumeration adds the collector's consumer rules
-      (:func:`core_domain_rejection`, :func:`grouped_gather_rejection`) on top. A
-      grouped movement is priced by the same law as a permutation of the same
-      tensor on the SOURCE's cores, keyed on the finer side's geometry as
-      always: ``cores=num_cores`` makes the law's per-core bytes the source
-      slice, which is what every destination core receives in a broadcast. The
-      grouped-relayout sweep (2026-09-09, 43 rows) measured the grouped
-      shuffle's marginal cost at or below that law (<= 0.3 us gathers, <= 1.6
-      us broadcasts, flat in fan-out); measured as its own program (2026-10-16),
-      a gather into a matmul's replicated operand costs 1.8-16x the law, so for
-      gathers this price is low. The decision is dominated by the consumer's
-      replicated HBM re-read on the demote side, priced by the cost model since
-      #4454;
-    - a governing split outside the law's measured range is DECLINED, not
-      clamped: the reporting path clamps because the shuffle it prices already
-      exists, but the solver must not extrapolate beyond its split range. For a
-      complete source and destination partition that range is
-      [``relayout_split_min``, ``relayout_split_max``] = [2, 32]; a grouped
-      movement with replicated destinations keeps
-      [2, ``_GROUPED_SPLIT_MAX``] = [2, 8]. Unequal complete partitions use
-      the same estimate on the smaller domain; this is not a separately fitted law.
+    Unequal complete partitions use the same estimate on the smaller domain;
+    this is not a separately fitted law.
 
-    For example, a row-split normalization on 32 cores holds 16 whole rows of
-    each stick column per core (governing split 32). Moving that 4 MB output to
-    an 8 x 4 tile view of 32 cores is a permutation, priced at the law's 8.85
-    us (7.3-8.3 us measured); before the range was measured it was declined, and
-    the output went to HBM and back.
-
-    Both the feature vector and ``relayout_ns`` are shared with reporting.
-
-    Each view must be built FOR its own core count (every core's owner slot
-    within its split): the source for ``num_cores``, the destination for
-    ``destination_num_cores`` (the source's count when omitted). The caller's
-    cores_used gates guarantee that, and ``_core_slices`` asserts it rather
-    than tolerating an out-of-range slot.
+    Use the reporting path's feature vector and ``relayout_ns`` with the finer
+    view's geometry. Build each view for its own core
+    count: ``num_cores`` for the source and ``destination_num_cores`` for the
+    destination (defaults to the source's count).
     """
     features = relayout_cost_features(
         source_view,
