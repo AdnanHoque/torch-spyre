@@ -2486,10 +2486,10 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         )
         if num_cores != operation_cores:
             # A contraction must schedule every source core. Repeat the
-            # operation's destination frame within its original domain;
-            # per-tensor maps below keep the exact source/destination domains.
-            # In particular, a plain core_id row owner must not become row 16
-            # on source core 16 when the output has only sixteen row slices.
+            # operation's destination frame within its original domain; the
+            # per-tensor maps below keep the exact source and destination
+            # domains. Example: with 16 output row slices, source core 16 must
+            # not become row 16.
             core_id_to_work_slice = {
                 dim: owner.xreplace(
                     {Symbol("core_id"): Mod(Symbol("core_id"), operation_cores)}
