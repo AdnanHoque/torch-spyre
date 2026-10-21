@@ -59,6 +59,7 @@ from .errors import Unsupported
 from .ir import FixedTiledLayout, SpyreConstantFallback
 from .scratchpad.lx_relayout import (
     materialized_lx_relayout_for_destination,
+    normalize_local_lx_subrange,
     work_division_from_view,
 )
 from .pass_utils import (
@@ -904,6 +905,9 @@ class SpyreKernel(Kernel[CSEVariable]):
             work_division=work_division,
             kernel_local=kernel_local,
             replicated_scalar=replicated_scalar,
+        )
+        tensor_arg = normalize_local_lx_subrange(
+            V.graph, name, operation, tensor_arg, it_space
         )
         if (
             "lx" not in tensor.layout.allocation

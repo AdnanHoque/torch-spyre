@@ -156,6 +156,7 @@ from torch_spyre._inductor.scratchpad.lx_relayout import (
     solver_relayout_pair_cost,
     prefix_lx_contraction_axis,
     prefix_lx_gather_source,
+    local_lx_subrange_source,
     work_division_from_view,
 )
 from torch_spyre._inductor.cost_model import CostParams
@@ -1184,8 +1185,8 @@ class ScratchpadAllocator:
                 # re-anchors that clone after the whole counted loop instead, so
                 # only the plan clears this refusal.
                 return "graph output mutated after production"
-        # A prefix read is legal only through the same guaranteed full-buffer
-        # gather used for a back gap. Keep every other partial read in HBM.
+        # Partial reads need either the existing full-buffer prefix gather or
+        # a certified local read into an already present compact materializer.
         prefix_gather = (
             config.lx_planner_relayout
             and not config.ktir_emitter
@@ -1201,7 +1202,11 @@ class ScratchpadAllocator:
                 )
             )
         )
-        if buffer_not_read_in_full(graph, name) and not prefix_gather:
+        if (
+            buffer_not_read_in_full(graph, name)
+            and not prefix_gather
+            and not local_lx_subrange_source(graph, name, uses)
+        ):
             return "partial/offset read"
         if division_is_fixed and ncores.get(name, -1) < 0:
             reason = ncores_reasons.get(name, "core div mismatch")

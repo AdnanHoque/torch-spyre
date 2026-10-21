@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from functools import lru_cache
-from itertools import permutations
+from itertools import permutations, product
 from typing import Any, Callable
 
 from sympy import Expr, Integer, Mod, Symbol, floor, sympify
@@ -32,6 +33,15 @@ from .op_spec import TensorWorkDivision
 # pass_utils imports this module; keep its PerCoreView type out of this layer.
 # TensorWorkDivision imports the comparator only when its method is called.
 _MAX_OWNER_PERMUTATION_DIMS = 5
+
+# The current shuffle lowering can need one mandatory L3LU address-bound
+# register per incoming fragment. There are eight LBRs on Spyre. Deeptools
+# does not common these values per core for fully global programs, so a
+# larger gather can fail register initialization even when individual cores
+# need fewer distinct values. Apply this conservative bound before placement.
+# Shared by complete-partition admission and subrange geometry; the latter
+# does not independently certify native register legality or a measured price.
+_MAX_SHUFFLE_FANIN = 8
 
 
 _MAX_EXACT_OWNERSHIP_POINTS = 1024
@@ -101,8 +111,12 @@ def owner_slots(
     return tuple(rows)
 
 
+def _intervals_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    return a_start < b_end and b_start < a_end
+
+
 def _overlap(a: int, an: int, b: int, bn: int) -> bool:
-    return a * bn < (b + 1) * an and b * an < (a + 1) * bn
+    return _intervals_overlap(a * bn, (a + 1) * bn, b * an, (b + 1) * an)
 
 
 def transfer_edges(
@@ -130,6 +144,313 @@ def transfer_edges(
             else:
                 result.add((s_core, d_core))
     return result
+
+
+@dataclass(frozen=True)
+class SubrangeTransferFragment:
+    """One exact rectangular intersection, with byte offsets in local storage.
+
+    ``parent_origin`` and ``extent`` use the parent's physical coordinates.
+    Offsets are relative to the full source allocation and the compact child
+    allocation. Strides are dense *local* strides, not parent HBM strides.
+    This record describes geometry; it is not a native shuffle descriptor.
+    """
+
+    source_core: int
+    destination_core: int
+    parent_origin: tuple[int, ...]
+    extent: tuple[int, ...]
+    source_offset_bytes: int
+    destination_offset_bytes: int
+    source_strides_bytes: tuple[int, ...]
+    destination_strides_bytes: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class DenseSubrangeTransfer:
+    """Checked geometry returned by :func:`certify_dense_subrange_transfer`.
+
+    All fields are immutable values. A consumer must still prove fresh storage,
+    single-writer and reader eligibility, scheduling, native emission and cost.
+    This certificate alone must never enable LX residency or shorten a lifetime.
+    """
+
+    parent_shape: tuple[int, ...]
+    origin: tuple[int, ...]
+    extent: tuple[int, ...]
+    element_bytes: int
+    source_splits: tuple[int, ...]
+    destination_splits: tuple[int, ...]
+    source_owners: tuple[tuple[int, ...], ...]
+    destination_owners: tuple[tuple[int, ...], ...]
+    source_local_shape: tuple[int, ...]
+    destination_local_shape: tuple[int, ...]
+    source_reservation_bytes: int
+    destination_reservation_bytes: int
+    fragments: tuple[SubrangeTransferFragment, ...]
+
+    @property
+    def destination_identity(self) -> tuple:
+        """Destination sharing key within one parent buffer's identity.
+
+        Equal child shapes and owner maps do not identify equal source bytes.
+        The caller must also key by the actual parent buffer identity.
+        """
+        return (
+            self.parent_shape,
+            self.origin,
+            self.extent,
+            self.element_bytes,
+            self.destination_splits,
+            self.destination_owners,
+        )
+
+
+def _dense_subrange_partition(
+    shape: tuple[int, ...],
+    splits: Mapping[int, int],
+    owners: Mapping[int, Mapping[int, int]],
+    *,
+    allow_replicas: bool,
+) -> tuple[tuple[int, ...], tuple[tuple[int, ...], ...], tuple[int, ...]]:
+    """Validate already projected physical-axis owner maps without inferring order."""
+    rank = len(shape)
+    if any(type(axis) is not int or not 0 <= axis < rank for axis in splits):
+        raise ValueError("partition has an invalid physical axis")
+    full_splits = tuple(splits.get(axis, 1) for axis in range(rank))
+    if (
+        any(
+            type(split) is not int or split <= 0 or size % split
+            for size, split in zip(shape, full_splits)
+        )
+        or full_splits[-1] != 1
+    ):
+        raise ValueError("partition must divide each axis and retain complete sticks")
+    if not owners or any(type(core) is not int for core in owners):
+        raise ValueError("partition requires concrete physical core IDs")
+    if set(owners) != set(range(len(owners))):
+        raise ValueError(
+            "partition core IDs must describe its complete physical domain"
+        )
+    partitions = math.prod(full_splits)
+    if len(owners) % partitions or (not allow_replicas and len(owners) != partitions):
+        raise ValueError("partition owners do not cover the complete domain")
+    rows = []
+    counts: dict[tuple[int, ...], int] = {}
+    for core in range(len(owners)):
+        row = owners[core]
+        if any(type(axis) is not int or not 0 <= axis < rank for axis in row):
+            raise ValueError("owner has an invalid physical axis")
+        slots = tuple(row.get(axis, 0) for axis in range(rank))
+        if any(
+            (split > 1 and axis not in row)
+            or type(slot) is not int
+            or not 0 <= slot < split
+            for axis, (slot, split) in enumerate(zip(slots, full_splits))
+        ):
+            raise ValueError(
+                "owner slot is missing, nonintegral or outside its partition"
+            )
+        rows.append(slots)
+        counts[slots] = counts.get(slots, 0) + 1
+    expected = set(product(*(range(split) for split in full_splits)))
+    if set(counts) != expected:
+        raise ValueError("partition owners do not cover the complete domain")
+    if len(set(counts.values())) != 1 or (
+        not allow_replicas and max(counts.values()) != 1
+    ):
+        raise ValueError(
+            "source owners must be unique and destination replicas uniform"
+        )
+    return (
+        full_splits,
+        tuple(rows),
+        tuple(size // split for size, split in zip(shape, full_splits)),
+    )
+
+
+def certify_dense_subrange_transfer(
+    parent_shape: Sequence[int],
+    origin: Sequence[int],
+    extent: Sequence[int],
+    source_splits: Mapping[int, int],
+    destination_splits: Mapping[int, int],
+    source_map: Mapping[int, Mapping[int, int]],
+    destination_map: Mapping[int, Mapping[int, int]],
+    *,
+    element_bytes: int,
+) -> DenseSubrangeTransfer:
+    """Certify a static dense, complete-stick rectangular child of a parent.
+
+    Coordinates and owner maps must already be projected onto physical axes by
+    the existing view/ownership machinery. The source partitions the *entire*
+    parent uniquely; destinations partition the compact child, optionally with
+    uniform replicas. Intersections share the ordinary transfer-edge overlap
+    authority. Inactive source owners remain part of the parent's reservation.
+
+    This certifies geometry, not a native transfer descriptor. Local pointwise
+    reads additionally require ``local_subrange_byte_offset`` and the allocator's
+    storage guards. Packed elements, incomplete sticks, symbolic coordinates,
+    incomplete ownership and more than eight sources per destination fail closed.
+    It does not replace storage, reduction or mutation proofs.
+    Callers must separately check physical device limits and compatibility of
+    source/destination core domains; contiguous map keys alone do not prove them.
+    """
+    parent_shape, origin, extent = map(tuple, (parent_shape, origin, extent))
+    rank = len(parent_shape)
+    if (
+        rank < 2
+        or len(origin) != rank
+        or len(extent) != rank
+        or type(element_bytes) is not int
+        or element_bytes not in (1, 2, 4)
+        or any(type(value) is not int for value in (*parent_shape, *origin, *extent))
+        or any(
+            size <= 0 or start < 0 or width <= 0 or start + width > size
+            for size, start, width in zip(parent_shape, origin, extent)
+        )
+    ):
+        raise ValueError("subrange requires positive static extents inside the parent")
+    if (
+        parent_shape[-1] * element_bytes != 128
+        or origin[-1] != 0
+        or extent[-1] != parent_shape[-1]
+    ):
+        raise ValueError("subrange must contain complete aligned 128-byte sticks")
+    src_splits, src_owners, src_shape = _dense_subrange_partition(
+        parent_shape, source_splits, source_map, allow_replicas=False
+    )
+    dst_splits, dst_owners, dst_shape = _dense_subrange_partition(
+        extent, destination_splits, destination_map, allow_replicas=True
+    )
+    src_strides = tuple(
+        math.prod(src_shape[axis + 1 :]) * element_bytes for axis in range(rank)
+    )
+    dst_strides = tuple(
+        math.prod(dst_shape[axis + 1 :]) * element_bytes for axis in range(rank)
+    )
+    source_span = math.prod(src_shape) * element_bytes
+    destination_span = math.prod(dst_shape) * element_bytes
+    fragments = []
+    for destination_core, dst_slots in enumerate(dst_owners):
+        dst_start = tuple(
+            start + slot * size
+            for start, slot, size in zip(origin, dst_slots, dst_shape)
+        )
+        incoming = []
+        for source_core, src_slots in enumerate(src_owners):
+            src_start = tuple(slot * size for slot, size in zip(src_slots, src_shape))
+            bounds = [
+                (a, a + an, b, b + bn)
+                for a, an, b, bn in zip(src_start, src_shape, dst_start, dst_shape)
+            ]
+            if not all(_intervals_overlap(*axis) for axis in bounds):
+                continue
+            start = tuple(max(a, b) for a, _, b, _ in bounds)
+            widths = tuple(
+                min(a_end, b_end) - low
+                for (_, a_end, _, b_end), low in zip(bounds, start)
+            )
+            src_offset = sum(
+                (low - base) * stride
+                for low, base, stride in zip(start, src_start, src_strides)
+            )
+            dst_offset = sum(
+                (low - base) * stride
+                for low, base, stride in zip(start, dst_start, dst_strides)
+            )
+            # Inclusive last-element addresses are checked against full local
+            # reservations, not a clipped rectangle's smaller byte count.
+            for offset, strides, span in (
+                (src_offset, src_strides, source_span),
+                (dst_offset, dst_strides, destination_span),
+            ):
+                end = (
+                    offset
+                    + sum(
+                        (width - 1) * stride for width, stride in zip(widths, strides)
+                    )
+                    + element_bytes
+                )
+                if offset < 0 or offset % 128 or end > span:
+                    raise ValueError(
+                        "subrange fragment exceeds its reserved local span"
+                    )
+            incoming.append(
+                SubrangeTransferFragment(
+                    source_core,
+                    destination_core,
+                    start,
+                    widths,
+                    src_offset,
+                    dst_offset,
+                    src_strides,
+                    dst_strides,
+                )
+            )
+        if not incoming or len(incoming) > _MAX_SHUFFLE_FANIN:
+            raise ValueError(
+                "subrange destination exceeds the eight-source fragment limit"
+            )
+        # Complete unique source ownership proves disjointness; the exact volume
+        # check independently guards against an omitted clipped intersection.
+        if sum(math.prod(fragment.extent) for fragment in incoming) != math.prod(
+            dst_shape
+        ):
+            raise ValueError(
+                "subrange fragments do not completely cover the destination"
+            )
+        fragments.extend(incoming)
+    return DenseSubrangeTransfer(
+        parent_shape,
+        origin,
+        extent,
+        element_bytes,
+        src_splits,
+        dst_splits,
+        src_owners,
+        dst_owners,
+        src_shape,
+        dst_shape,
+        source_span,
+        destination_span,
+        tuple(fragments),
+    )
+
+
+def local_subrange_byte_offset(certificate: DenseSubrangeTransfer) -> int:
+    """Require one dense, equally offset local read on every physical core.
+
+    This is the ordinary pointwise descriptor's contract, not permission to
+    emit a shuffle. The parent keeps its complete reservation.
+    """
+    count = len(certificate.source_owners)
+    if (
+        len(certificate.destination_owners) != count
+        or len(certificate.fragments) != count
+    ):
+        raise ValueError("local subrange needs one fragment on every source core")
+    offsets = set()
+    for core, fragment in enumerate(certificate.fragments):
+        if (
+            fragment.source_core != core
+            or fragment.destination_core != core
+            or fragment.destination_offset_bytes != 0
+            or fragment.extent != certificate.destination_local_shape
+            or any(
+                size > 1 and source != destination
+                for size, source, destination in zip(
+                    fragment.extent,
+                    fragment.source_strides_bytes,
+                    fragment.destination_strides_bytes,
+                )
+            )
+        ):
+            raise ValueError("subrange is not a compact same-core read")
+        offsets.add(fragment.source_offset_bytes)
+    if len(offsets) != 1:
+        raise ValueError("local subrange needs one common byte offset")
+    return offsets.pop()
 
 
 def same_owner_maps(

@@ -1525,6 +1525,24 @@ class ResidencyEdge:
             parent_view is not None
             and consumer_view is not None
             and parent_view.same_partition(consumer_view)
+            and self._local_reads_compatible(parent_view, consumer_view)
+        )
+
+    def _local_reads_compatible(self, parent_view, consumer_view) -> bool:
+        """Equal owners do not prove partial-read addresses or compact strides."""
+        from torch._inductor.virtualized import V
+        from .scratchpad.lx_relayout import (
+            is_partial_lx_read,
+            local_lx_subrange_certificate,
+        )
+
+        if not any(is_partial_lx_read(self.parent_op, dep) for dep in self.read_deps):
+            return True
+        return (
+            local_lx_subrange_certificate(
+                V.graph, self.parent_op, self.consumer_op, parent_view, consumer_view
+            )
+            is not None
         )
 
     def consumer_division_for(
@@ -1608,6 +1626,10 @@ class ResidencyEdge:
         prep = _prep_for(op, dep, self.buf_name, self.prep_cache)
         is_parent_side = op is self.parent_op
         wanted = other.tiling if space.admits_tiling(other.tiling) else UNTILED
+        if self._has_partial_read():
+            if not other.tiling.is_untiled:
+                return None
+            wanted = UNTILED
         attempts = (wanted,) if wanted.is_untiled else (wanted, UNTILED)
         for tiling in attempts:
 
@@ -1670,7 +1692,20 @@ class ResidencyEdge:
             and parent_tile.same_partition(consumer_tile)
             and self._cores_used(parent_divisions[i])
             == self._cores_used(consumer_divisions[j])
+            and self._local_reads_compatible(parent_view, consumer_view)
+            and (
+                not self._has_partial_read()
+                or (
+                    parent_divisions[i].tiling.is_untiled
+                    and consumer_divisions[j].tiling.is_untiled
+                )
+            )
         ]
+
+    def _has_partial_read(self) -> bool:
+        from .scratchpad.lx_relayout import is_partial_lx_read
+
+        return any(is_partial_lx_read(self.parent_op, dep) for dep in self.read_deps)
 
 
 def build_residency_edge(
