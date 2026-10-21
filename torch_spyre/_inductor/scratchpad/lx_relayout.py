@@ -31,6 +31,7 @@ from torch._inductor.ir import (
     MutationLayoutSHOULDREMOVE,
     Operation,
     Pointwise,
+    Scatter,
 )
 from torch_spyre._C import ElementArrangement
 
@@ -53,7 +54,7 @@ from ..core_mapping import (
 )
 from ..cost_model import CostParams, relayout_ns
 from ..dump_cost_model import relayout_cost_features
-from ..ir import FixedTiledLayout
+from ..ir import FixedTiledLayout, SpyreConstantFallback
 from ..loop_info import CoarseTileInfo
 from ..logging_utils import get_inductor_logger
 from ..op_spec import TensorArg, TensorWorkDivision
@@ -65,6 +66,8 @@ from ..pass_utils import (
     commit_tensor_work_division,
     completed_reduction_split_on_buf,
     iteration_space_from_op,
+    iteration_space_with_splits,
+    make_iteration_space_ownership,
     op_read_writes,
     try_device_coordinates,
 )
@@ -1069,13 +1072,53 @@ def _unsupported_relayout_transition_reason(
     return None
 
 
+def _pointwise_scatter_materializer(graph, producer, consumer, source_name) -> bool:
+    """Certify a fresh compact materializer for the existing full-buffer relay."""
+    if (
+        not isinstance(producer, ComputedBuffer)
+        or not isinstance(producer.data, Pointwise)
+        or not isinstance(consumer.data, Scatter)
+        or consumer.data.scatter_mode is not None
+        or producer.get_name() != source_name
+        or source_name in graph.get_output_names()
+        or producer.get_device() != consumer.get_device()
+        or producer.get_dtype() != consumer.get_dtype()
+    ):
+        return False
+    parents = [
+        graph.try_get_buffer(dep.name)
+        for dep in op_read_writes(producer).reads
+        if isinstance(dep, MemoryDep)
+        and isinstance(graph.try_get_buffer(dep.name), ComputedBuffer)
+    ]
+    if len(parents) != 1 or local_lx_subrange_geometry(
+        graph, parents[0], producer
+    ) is None:
+        return False
+    reads = [dep for dep in op_read_writes(consumer).reads if dep.name == source_name]
+    if len(reads) != 1 or not isinstance(reads[0], MemoryDep) or reads[0].is_indirect():
+        return False
+    layout = producer.layout.device_layout
+    coordinates = try_device_coordinates(layout, reads[0], None)
+    if coordinates is None:
+        return False
+    try:
+        shape = tuple(map(int, layout.device_size))
+        return _dense_read_rectangle(shape, coordinates, reads[0].ranges) == (
+            (0,) * len(shape),
+            shape,
+        )
+    except (*_EVALUATION_ERRORS, NotImplementedError):
+        return False
+
+
 def _persistent_scatter_consumer(
     graph: GraphLowering,
     producer: ComputedBuffer,
     consumer: ComputedBuffer,
     source_name: str,
 ) -> bool:
-    """Permit only a fresh matmul value feeding an external cache scatter.
+    """Permit a fresh matmul or certified materializer at an external scatter.
 
     A direct read is insufficient: the value must have independent storage,
     no aliasing users or later writes, and precede this mutation. Require a
@@ -1085,7 +1128,10 @@ def _persistent_scatter_consumer(
     external target is never a candidate LX allocation.
     """
     if (
-        not _is_matmul_op(producer)
+        not (
+            _is_matmul_op(producer)
+            or _pointwise_scatter_materializer(graph, producer, consumer, source_name)
+        )
         or not isinstance(consumer.data, Pointwise)
         or getattr(producer, "loop_info", None) is not None
         or getattr(consumer, "loop_info", None) is not None
@@ -1426,6 +1472,43 @@ def _dense_read_rectangle(device_size, coordinates, iteration_space):
     return tuple(origin), tuple(extent)
 
 
+def _local_lx_parent_read(graph, producer, consumer):
+    """Select one parent read; other reads must be immutable scalar literals.
+
+    Keep the scalar dependencies and arguments intact. A scalar-shaped tensor
+    input or computed activation is not a literal, even if its index is zero.
+    """
+    parent_reads = []
+    for dep in op_read_writes(consumer).reads:
+        if dep.name == producer.get_name():
+            parent_reads.append(dep)
+            continue
+        if (
+            not isinstance(dep, MemoryDep)
+            or dep.is_indirect()
+            or dep.index != 0
+            or dep.ranges
+        ):
+            return None
+        constant = graph.try_get_buffer(dep.name)
+        if (
+            not isinstance(constant, SpyreConstantFallback)
+            or not isinstance(constant.layout, FixedTiledLayout)
+            or constant.get_size() != []
+            or constant.layout.offset != 0
+            or constant.get_device() != consumer.get_device()
+            or constant.get_dtype() != consumer.get_dtype()
+            or constant.inputs
+            or len(constant.constant_args) != 1
+            or type(constant.constant_args[0]) not in (bool, int, float)
+            or op_read_writes(constant).reads
+            or getattr(constant, "loop_info", None) is not None
+            or not storage_has_single_writer(graph, constant)
+        ):
+            return None
+    return parent_reads[0] if len(parent_reads) == 1 else None
+
+
 def local_lx_subrange_geometry(graph, producer, consumer):
     """A fresh compact pointwise output reading one dense parent subrange.
 
@@ -1457,17 +1540,15 @@ def local_lx_subrange_geometry(graph, producer, consumer):
         )
     ):
         return None
-    reads = list(op_read_writes(consumer).reads)
+    read = _local_lx_parent_read(graph, producer, consumer)
     write = _single_write(producer, producer.get_name())
     child_write = _single_write(consumer, consumer.get_name())
     if (
         write is None
         or child_write is None
-        or len(reads) != 1
-        or not isinstance(reads[0], MemoryDep)
-        or reads[0].name != producer.get_name()
-        or reads[0].is_indirect()
-        or not is_partial_lx_read(producer, reads[0])
+        or not isinstance(read, MemoryDep)
+        or read.is_indirect()
+        or not is_partial_lx_read(producer, read)
     ):
         return None
     source, child = producer.layout.device_layout, consumer.layout.device_layout
@@ -1479,7 +1560,7 @@ def local_lx_subrange_geometry(graph, producer, consumer):
     ):
         return None
     try:
-        coordinates = try_device_coordinates(source, reads[0], None)
+        coordinates = try_device_coordinates(source, read, None)
         written = try_device_coordinates(source, write, None)
         if coordinates is None or written is None:
             return None
@@ -1489,7 +1570,7 @@ def local_lx_subrange_geometry(graph, producer, consumer):
             shape,
         ):
             return None
-        rectangle = _dense_read_rectangle(shape, coordinates, reads[0].ranges)
+        rectangle = _dense_read_rectangle(shape, coordinates, read.ranges)
         origin, extent = rectangle
         child_coordinates = try_device_coordinates(child, child_write, None)
         child_shape = tuple(map(int, child.device_size))
@@ -1500,7 +1581,7 @@ def local_lx_subrange_geometry(graph, producer, consumer):
         if (
             origin[-1] != 0
             or extent[-1] != source.elems_per_stick()
-            or math.prod(extent) != reads[0].get_numel()
+            or math.prod(extent) != read.get_numel()
             or math.prod(extent) != math.prod(child.device_size)
         ):
             return None
@@ -1567,6 +1648,26 @@ def local_lx_subrange_source(graph, name: str, uses: list[int]) -> bool:
     return found
 
 
+def _local_lx_emission_view(op, dep, name):
+    """Use the pointwise division transported to the scheduler at emission.
+
+    Scheduler finalization removes iteration_space_ownership. Decode its
+    existing coefficient transport exactly as create_op_spec does; retain all
+    physical-view comparisons and final TensorArg ownership checks below.
+    """
+    ownership = getattr(op, "iteration_space_ownership", None)
+    if ownership is None:
+        if not isinstance(op.data, Pointwise) or not hasattr(op, "op_it_space_splits"):
+            raise ValueError(f"{name}: local LX emission lacks a committed division")
+        transported = iteration_space_with_splits(
+            op, op_read_writes(op), iteration_space_from_op(op)
+        )
+        ownership = make_iteration_space_ownership(
+            op, {symbol: split for symbol, (_, split) in transported.items()}
+        )
+    return _per_core_view_on_buf(op, dep, name, ownership_override=ownership)
+
+
 def normalize_local_lx_subrange(
     graph, name, consumer, argument: TensorArg, iteration_space
 ) -> TensorArg:
@@ -1597,8 +1698,8 @@ def normalize_local_lx_subrange(
         raise ValueError(f"{name}: partial LX input lacks a local certificate")
     layout = producer.layout
     write = _single_write(producer, name)
-    source_view, partial, source_ok = _per_core_view_on_buf(producer, write, name)
-    read_view, _, read_ok = _per_core_view_on_buf(consumer, reads[0], name)
+    source_view, partial, source_ok = _local_lx_emission_view(producer, write, name)
+    read_view, _, read_ok = _local_lx_emission_view(consumer, reads[0], name)
     if (
         partial
         or not source_ok
