@@ -39,8 +39,8 @@ _MAX_OWNER_PERMUTATION_DIMS = 5
 # does not common these values per core for fully global programs, so a
 # larger gather can fail register initialization even when individual cores
 # need fewer distinct values. Apply this conservative bound before placement.
-# Shared by complete-partition admission and subrange geometry; the latter
-# does not independently certify native register legality or a measured price.
+# Complete-partition admission and subrange geometry share this bound. It does
+# not prove native register legality or a measured price for subranges.
 _MAX_SHUFFLE_FANIN = 8
 
 

@@ -144,8 +144,7 @@ def materialize_hinted_views(graph):
     }
     safe = {}
     for node in list(graph.nodes):
-        # A clone is already an explicit materializer. This also makes a second
-        # invocation on the same graph a no-op.
+        # Skip clone users: a clone already materializes. A second run is a no-op.
         if node.op != "call_function" or node.target not in (
             torch.ops.aten.view.default,
             torch.ops.aten.reshape.default,
@@ -169,8 +168,8 @@ def materialize_hinted_views(graph):
         width = value.numel() // rows
         row_axis = next(i for i, size in enumerate(value.shape) if size != 1)
         hint = _row_hint(node, row_axis)
-        # Use the same two-dimensional compact reader as ordinary dense matrix
-        # clones. The following view restores the user's logical head geometry.
+        # Clone as a 2-D matrix, as ordinary dense clones do, then restore the
+        # user's head geometry with a view.
         with graph.inserting_before(users[0]):
             flat = graph.call_function(
                 torch.ops.aten.view.default, (node, [rows, width])
