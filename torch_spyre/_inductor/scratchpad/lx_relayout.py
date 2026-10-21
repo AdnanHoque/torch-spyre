@@ -1278,9 +1278,11 @@ def solver_relayout_edge_context(
         is_partial_lx_read(producer, read_dep)
         and prefix_lx_contraction_axis(producer, consumer) is None
     ):
-        # A local certificate never licenses a full-parent synthetic clone.
-        # Changed-owner subranges need a separate native descriptor contract.
-        return None
+        # Move the complete parent, then certify a same-core compact read.
+        # The candidate checks this certificate under its destination view;
+        # no partial domain is ever presented to the shuffle emitter.
+        if local_lx_subrange_geometry(graph, producer, consumer) is None:
+            return None
     producer_coords = try_device_coordinates(
         producer.layout.device_layout, write_dep, None
     )
@@ -1509,6 +1511,64 @@ def _local_lx_parent_read(graph, producer, consumer):
     return parent_reads[0] if len(parent_reads) == 1 else None
 
 
+def _local_lx_pointwise_read(graph, producer, consumer):
+    """Allow one local subrange alongside one complete pointwise activation.
+
+    The second operand keeps its own dependency, allocation and residency
+    constraints. It must be a fresh, dense, complete input with the output's
+    physical shape; broadcasts, other subranges and aliases remain excluded.
+    """
+    read = _local_lx_parent_read(graph, producer, consumer)
+    if read is not None:
+        return read
+    reads = list(op_read_writes(consumer).reads)
+    parent = [dep for dep in reads if dep.name == producer.get_name()]
+    other = [dep for dep in reads if dep.name != producer.get_name()]
+    if len(parent) != 1 or len(other) != 1:
+        return None
+    dep = other[0]
+    if not isinstance(dep, MemoryDep) or dep.is_indirect():
+        return None
+    sibling = graph.try_get_buffer(dep.name)
+    if (
+        not isinstance(sibling, ComputedBuffer)
+        or not isinstance(sibling.data, Pointwise)
+        or not isinstance(sibling.layout, FixedTiledLayout)
+        or sibling.layout.offset != 0
+        or sibling.get_device() != consumer.get_device()
+        or sibling.get_dtype() != consumer.get_dtype()
+        or getattr(sibling, "loop_info", None) is not None
+        or getattr(sibling, "_input_layout_overrides", None)
+        or not storage_has_single_writer(graph, sibling)
+        or is_partial_lx_read(sibling, dep)
+    ):
+        return None
+    layout = sibling.layout.device_layout
+    child = consumer.layout.device_layout
+    if (
+        layout.element_arrangement != ElementArrangement.STANDARD
+        or layout.device_dtype != child.device_dtype
+        or tuple(layout.device_size) != tuple(child.device_size)
+    ):
+        return None
+    try:
+        shape = tuple(map(int, layout.device_size))
+        write = _single_write(sibling, dep.name)
+        if write is None:
+            return None
+        for access in (dep, write):
+            coordinates = try_device_coordinates(layout, access, None)
+            if coordinates is None or _dense_read_rectangle(
+                shape, coordinates, access.ranges
+            ) != ((0,) * len(shape), shape):
+                return None
+        if dep.get_numel() != math.prod(shape):
+            return None
+    except (*_EVALUATION_ERRORS, NotImplementedError):
+        return None
+    return parent[0]
+
+
 def local_lx_subrange_geometry(graph, producer, consumer):
     """A fresh compact pointwise output reading one dense parent subrange.
 
@@ -1540,7 +1600,7 @@ def local_lx_subrange_geometry(graph, producer, consumer):
         )
     ):
         return None
-    read = _local_lx_parent_read(graph, producer, consumer)
+    read = _local_lx_pointwise_read(graph, producer, consumer)
     write = _single_write(producer, producer.get_name())
     child_write = _single_write(consumer, consumer.get_name())
     if (
@@ -1997,8 +2057,17 @@ def collect_lx_relayout_plans(
                     is not None
                 ):
                     continue
-                rejection_reason = "cannot emit: subrange is not a certified local read"
-                break
+                if (
+                    reduction is not None
+                    or local_lx_subrange_certificate(
+                        graph, producer, consumer, view, view
+                    )
+                    is None
+                ):
+                    rejection_reason = (
+                        "cannot emit: subrange is not local after full-parent relayout"
+                    )
+                    break
             if reduction is None and view.same_partition(source_view):
                 continue
             is_matmul = _is_matmul_op(consumer)
@@ -2062,6 +2131,11 @@ def collect_lx_relayout_plans(
                 # Copy the full physical domain before the logical-K read.
                 # Projecting 832-wide owners onto 800-wide logical quarters
                 # would invent different ownership; the reader owns all K.
+                consumer_coordinates = producer_coordinates
+                consumer_space = iteration_space_from_op(producer)
+            elif is_partial_lx_read(producer, dep):
+                # The local certificate above covers the compact read. The
+                # transfer itself always traverses the complete parent frame.
                 consumer_coordinates = producer_coordinates
                 consumer_space = iteration_space_from_op(producer)
             transfers.append(
@@ -2342,6 +2416,29 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
     # must not authorize overwriting a live source during a cross-core gather.
     for plan in plans:
         validate_relayout_spans(plan)
+        source = graph.get_buffer(plan.source_name)
+        for name in plan.consumer_names:
+            consumer = graph.get_buffer(name)
+            for dep in op_read_writes(consumer).reads:
+                if (
+                    dep.name != plan.source_name
+                    or not is_partial_lx_read(source, dep)
+                    or prefix_lx_contraction_axis(source, consumer) is not None
+                ):
+                    continue
+                read_view, _, representable = _per_core_view_on_buf(
+                    consumer, dep, plan.source_name
+                )
+                if (
+                    not representable
+                    or local_lx_subrange_certificate(
+                        graph, source, consumer, plan.destination_view, read_view
+                    )
+                    is None
+                ):
+                    raise RuntimeError(
+                        "full-parent relayout lost its certified local reader"
+                    )
     editor = GraphEditor(graph)
     setattr(graph, _REGISTRY, copies)
     for plan in plans:

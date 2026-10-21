@@ -157,6 +157,8 @@ from torch_spyre._inductor.scratchpad.lx_relayout import (
     prefix_lx_contraction_axis,
     prefix_lx_gather_source,
     local_lx_subrange_source,
+    local_lx_subrange_geometry,
+    local_lx_subrange_certificate,
     work_division_from_view,
 )
 from torch_spyre._inductor.cost_model import CostParams
@@ -5035,6 +5037,9 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             write_dep, read_dep, prod_coords, cons_coords, prod_space, cons_space = (
                 context
             )
+            local_subrange = (
+                local_lx_subrange_geometry(graph, parent_op, consumer_op) is not None
+            )
             parent_divs = divisions[parent]
             # Same per-candidate view screens as _cd_parent_matches: the source
             # gets LX-pinned exactly like a matched producer, so the same
@@ -5139,6 +5144,14 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                         # Uniform tail gaps apply only to a full K row. A K
                         # split would require ragged ownership/offset support.
                         continue
+                    if (
+                        local_subrange
+                        and local_lx_subrange_certificate(
+                            graph, parent_op, consumer_op, cv, cv
+                        )
+                        is None
+                    ):
+                        continue
                     if _candidate_tiled(consumer_divs[j]):
                         continue
                     ncores = parent_divs[i].cores_used
@@ -5164,7 +5177,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                     # the unsplit-K reader's view was checked independently.
                     copy_coords, copy_space, copy_frame = (
                         (prod_coords, prod_space, "prod")
-                        if padded_axis is not None
+                        if padded_axis is not None or local_subrange
                         else (cons_coords, cons_space, "cons")
                     )
                     src_division = _projected(pv, copy_coords, copy_space, copy_frame)
