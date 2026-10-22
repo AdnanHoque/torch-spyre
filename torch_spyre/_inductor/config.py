@@ -412,6 +412,12 @@ _cpsat_warn_on_cost_expr: bool = True
 # torch._inductor.config.force_disable_caches = True.
 spyre_kernel_cache: bool = os.environ.get("SPYRE_KERNEL_CACHE", "0") == "1"
 
+# Same-tile-group relayout search is opt-in because it can slow cold compilation.
+# Set SPYRE_LX_SAME_TILE_GROUP_RELAYOUT=1 to enable this search.
+lx_same_tile_group_relayout: bool = (
+    os.environ.get("SPYRE_LX_SAME_TILE_GROUP_RELAYOUT", "0") == "1"
+)
+
 # Settings left out of the Inductor FX graph cache key. This module is the Spyre
 # backend's ``device_custom_config``, so ``save_config_portable`` puts every
 # other setting's value in the key. A setting belongs here when it describes the
