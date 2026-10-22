@@ -347,10 +347,21 @@ The checks, in evaluation order (the first failure is the reason reported):
 | `index tensor or indirectly accessed` | index tensors and the value tensors they index into are read via data-dependent addressing, so they must stay in HBM |
 | `graph output (no clone)` / `graph input (no clone)` | without boundary cloning there is nothing to redirect |
 | `graph output is a ReinterpretView` | output cloning cannot rewrap the view |
-| `partial/offset read` | a sliced or multi-offset read mis-addresses a single LX base |
+| `partial/offset read` | sliced or multi-offset reads are rejected, except the certified zero-offset prefix below |
 | `core div mismatch: …` | the buffer's users disagree on core slicing (**placement path only**: the joint solver *chooses* the division, so its slicing gate decides instead) |
 | `no consumer reads it from LX` | residency would save nothing |
-| `lx back gap` | `backGap` is supported for HBM but not LX |
+| `lx back gap` | generic LX gaps are rejected; the certified prefix below permits a uniform per-core gap |
+
+A narrow exception permits an untiled matmul to read a zero-offset prefix made
+of complete storage sticks. It requires one private, full-width producer and a
+separate gather of its **complete backing buffer**, with the original physical
+row stride preserved. The reader must not split K. Source and copy spans must
+be disjoint, and both must fit in frontend LX. Only the outermost stick axis
+may have an unused tail. Other offset, strided, partial, aliased or multi-reader
+cases remain excluded. The fixed placement path must already have a copy plan;
+the joint solver must guarantee the copy through its relayout decision.
+
+This untiled exception does not require same-tile-group relayout search.
 
 That last distinction is the only difference between the two allocators,
 and it is a parameter (`division_is_fixed`) rather than a second predicate.
