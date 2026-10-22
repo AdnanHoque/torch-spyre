@@ -85,6 +85,7 @@ class _Observed:
         # names right after materialization (V.graph is live inside the pass).
         self.copies: dict = {}
         self.source_layouts: dict = {}
+        self.copy_layouts: dict = {}
         self.consumer_reads: dict[str, set[str]] = {}
         real_materialize = alloc_mod.materialize_lx_relayouts
 
@@ -110,6 +111,13 @@ class _Observed:
                     list(layout.device_layout.device_size),
                     list(layout.device_layout.stride_map),
                     list(layout.stride),
+                )
+                copy_layout = graph.get_buffer(self.copies[plan.edge]).get_layout()
+                self.copy_layouts[plan.edge] = (
+                    list(copy_layout.size),
+                    list(copy_layout.stride),
+                    list(copy_layout.device_layout.device_size),
+                    list(copy_layout.device_layout.stride_map),
                 )
                 for name in plan.consumer_names:
                     op = graph.get_buffer(name)
@@ -747,7 +755,8 @@ def test_cross_group_coarse_tiled_edges_are_never_offered(monkeypatch):
 def test_same_group_coarse_tiled_edge_is_offered_and_priced_per_trip(monkeypatch):
     """A coarse-tiled edge within a SINGLE for_each_tile body may be offered a
     relayout candidate (the same-group exception in
-    ``solver_relayout_edge_context``, torch-spyre#5057), and that candidate's
+    ``solver_relayout_edge_context``, torch-spyre#5057), when
+    ``lx_same_tile_group_relayout`` is enabled, and that candidate's
     cost must carry the loop's own trip-count multiplier
     (``_coarse_tile_loop_trip_count``, see TestCoarseTileLoopTripCount in
     test_scratchpad_solver.py) -- a relayout taken once but paid on every
@@ -797,7 +806,11 @@ def test_same_group_coarse_tiled_edge_is_offered_and_priced_per_trip(monkeypatch
             a = ha.to("spyre")
             b = hb.to("spyre")
             with config.patch(
-                {"co_optimizing_lx_planning": True, "layout_solver": "cpsat"}
+                {
+                    "co_optimizing_lx_planning": True,
+                    "layout_solver": "cpsat",
+                    "lx_same_tile_group_relayout": True,
+                }
             ):
                 out = torch.compile(fn, dynamic=False, fullgraph=True)(a, b)
         candidates = [c for table in tables for cs in table.values() for c in cs]
@@ -1108,6 +1121,8 @@ def _check_projection_rope_handoff(
     ), "simultaneously live projection and its relayout copy overlap"
     assert torch.equal(out.cpu(), expected)
     assert torch.equal(side.cpu(), q_ref + 1)
+
+
 
 
 @pytest.mark.parametrize("rows", [512])
@@ -1445,9 +1460,6 @@ def test_attention_cache_transpose_handoff(monkeypatch, rows):
     assert alias.data_ptr() == cache_arg.data_ptr()
 
 
-# Indexed int32 rows are distributed in 32-element sticks: 512 rows admit
-# the target 16-way scatter. At 64 rows, the unhinted scatter must keep the
-# original HBM path: a 32-to-2 copy exceeds the supported shuffle fan-in.
 @pytest.mark.parametrize("rows,inner,strided", [(512, 65, True), (64, 65, True)])
 def test_v_projection_cache_handoff_preserves_persistent_alias(
     monkeypatch, rows, inner, strided
@@ -1589,6 +1601,8 @@ def test_v_projection_cache_handoff_preserves_persistent_alias(
     ] == [16]
 
 
+
+
 def test_gate_up_full_parent_repartition(monkeypatch):
     """Saved TP4 geometry: one whole-parent copy, then two local half reads."""
     import torch_spyre._inductor.spyre_kernel as sk_mod
@@ -1664,3 +1678,80 @@ def test_gate_up_full_parent_repartition(monkeypatch):
         c: {0: c // 8, 1: c % 8} for c in range(32)
     }
     assert _core_slices(plan.destination_view, 32) == {c: {1: c} for c in range(32)}
+
+
+def test_prefix_linear_reads_a_separate_full_backing_lx_gather(monkeypatch):
+    """A 3200-wide linear reads a gathered 3328-wide physical allocation."""
+    import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
+    from torch_spyre._C import SpyreTensorLayout, get_device_dtype, get_elem_in_stick
+    from torch_spyre._inductor import spyre_hint
+
+    observed = _Observed(monkeypatch, force=False)
+    rows, physical, logical, outputs = 512, 3328, 3200, 512
+
+    def fn(value, weight):
+        with spyre_hint(work_div={"M": 8, "P": 4}):
+            backing = torch.neg(value)
+        with spyre_hint(work_div={"M": 4, "N": 8}):
+            return torch.nn.functional.linear(backing[:, :logical], weight)
+
+    for name, size in (("M", rows), ("P", physical), ("K", logical), ("N", outputs)):
+        _pnd.declare_tensor_dim(name, size)
+    selected = (torch.arange(outputs) * 37) % logical
+    selected[-1] = logical - 1
+    weight = torch.zeros(outputs, logical, dtype=torch.float16)
+    weight[torch.arange(outputs), selected] = 1
+    device_weight = _pnd.name_tensor_dims(weight.to("spyre"), ["N", "K"])
+    eps = get_elem_in_stick(torch.float16)
+    assert eps == 64
+    layout = SpyreTensorLayout(
+        device_size=[physical // eps, rows, eps],
+        stride_map=[eps, physical, 1],
+        device_dtype=get_device_dtype(torch.float16),
+    )
+    compiled = torch.compile(fn, dynamic=False, fullgraph=True)
+    with config.patch({**_COOPT, "sencores": 32, "lx_same_tile_group_relayout": False}):
+        for tail in (512.0, float("nan")):
+            # One selected element per output makes the reduction exact. Every
+            # row differs; a compacted stride or a read into the tail is visible.
+            host = (
+                (torch.arange(rows * physical).reshape(rows, physical) * 17) % 251 - 125
+            ).to(torch.float16)
+            host[:, logical:] = tail
+            value = _pnd.name_tensor_dims(
+                host.to("spyre", device_layout=layout), ["M", "P"]
+            )
+            out = compiled(value, device_weight).cpu()
+            expected = -host[:, selected]
+            control = torch.nn.functional.linear(
+                -host[:, :logical].float(), weight.float()
+            )
+            assert torch.equal(control, expected.float())
+            assert torch.isfinite(out).all()
+            assert torch.equal(out, expected)
+
+    observed.assert_emitted_in_lx(expected_plans=1)
+    (plan,) = observed.plans
+    assert plan.num_cores == plan.destination_view.num_cores == 32
+    assert observed.source_layouts[plan.edge] == (
+        [physical // eps, rows, eps],
+        [eps, physical, 1],
+        [physical, 1],
+    )
+    assert observed.copy_layouts[plan.edge] == (
+        [rows, physical],
+        [physical, 1],
+        [physical // eps, rows, eps],
+        [eps, physical, 1],
+    )
+    assert dict(plan.source_view.work_slice_dims) == {0: 4, 1: 8}
+    destination = dict(plan.destination_view.work_slice_dims)
+    assert destination.get(0, 1) == 1, "the linear reader must not split K"
+    assert destination.get(1, 1) == 4
+    assert plan.source_footprint_bytes == rows * physical * 2 // 32
+    assert plan.destination_footprint_bytes == rows * physical * 2 // 4
+    assert (
+        plan.source_address + plan.source_footprint_bytes <= plan.destination_address
+        or plan.destination_address + plan.destination_footprint_bytes
+        <= plan.source_address
+    ), "the full-backing gather must have separate LX storage"
