@@ -1123,8 +1123,6 @@ def _check_projection_rope_handoff(
     assert torch.equal(side.cpu(), q_ref + 1)
 
 
-
-
 @pytest.mark.parametrize("rows", [512])
 def test_attention_output_repack_handoff(monkeypatch, rows):
     """Produce softmax/PV/divide before repack/O; no implicit LX live-in.
@@ -1599,8 +1597,6 @@ def test_v_projection_cache_handoff_preserves_persistent_alias(
     assert [
         int(split) for _, split in update.iteration_space.values() if int(split) > 1
     ] == [16]
-
-
 
 
 def test_gate_up_full_parent_repartition(monkeypatch):
