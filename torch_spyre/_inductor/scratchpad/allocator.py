@@ -232,7 +232,9 @@ def _handoff_parent_end(
     return max(last, lifetime_end_overrides.get(name, last + 1) - 1)
 
 
-def _extern_kernel_in_live_range(graph: GraphLowering, uses: list[int]) -> bool:
+def _extern_kernel_in_live_range(
+    graph: GraphLowering, uses: list[int], *, excluded_op: Operation | None = None
+) -> bool:
     """True if an opaque extern kernel runs at any point while the buffer is live.
 
     The LX scratchpad is a fixed per-core resource shared by *every* compiled
@@ -255,6 +257,7 @@ def _extern_kernel_in_live_range(graph: GraphLowering, uses: list[int]) -> bool:
     return any(
         isinstance(graph.operations[i], ExternKernel)
         and not isinstance(graph.operations[i], SpyreEmptyFallback)
+        and graph.operations[i] is not excluded_op
         for i in range(min(uses), max(uses) + 1)
     )
 
@@ -3373,7 +3376,8 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                 or origin_in_graph(consumer.origins, graph.graph) is None
             ):
                 continue
-            if _extern_kernel_in_live_range(graph, list(range(b.uses[0], b.uses[-1]))):
+            # The selected collective reads the HBM drain.
+            if _extern_kernel_in_live_range(graph, b.uses, excluded_op=consumer):
                 continue
             if not _collective_stage_storage_is_private(graph, op, consumer):
                 continue
