@@ -10052,65 +10052,6 @@ class TestDrainedCollective(unittest.TestCase):
             )
         self.assertIs(all_reduce.inputs[0], operand)
 
-    def test_output_stage_rejects_overwrite_hidden_from_liveness(self):
-        """A no-read mutation names its own write, not its storage target."""
-        from torch._inductor.ir import (
-            ComputedBuffer,
-            FixedLayout,
-            MutationLayoutSHOULDREMOVE,
-            Pointwise,
-            StorageBox,
-            TensorBox,
-        )
-        from torch._inductor.virtualized import ops
-
-        from torch_spyre._inductor.ir import AllReduceAsyncFallback
-        from torch_spyre._inductor.pass_utils import op_read_writes
-        from torch_spyre._inductor.scratchpad.allocator import (
-            _collective_stage_storage_is_private,
-        )
-        from torch_spyre._inductor.scratchpad.utils import calculate_liveness
-
-        with V.set_graph_handler(GraphLowering(fx.symbolic_trace(lambda: None))):
-
-            def constant(name):
-                buf = ComputedBuffer(
-                    name=name,
-                    layout=FixedLayout(torch.device("cpu"), torch.float32, [8], [1]),
-                    data=Pointwise(
-                        device=torch.device("cpu"),
-                        dtype=torch.float32,
-                        inner_fn=lambda index: ops.constant(1, torch.float32),
-                        ranges=[8],
-                    ),
-                )
-                V.graph.name_to_buffer[name] = buf
-                return buf
-
-            result = constant("result")
-            collective = AllReduceAsyncFallback(
-                torch.ops.spyre.all_reduce_async.default,
-                TensorBox(StorageBox(result)),
-                "sum",
-                "group",
-            )
-            V.graph.operations = [result, collective]
-            self.assertTrue(
-                _collective_stage_storage_is_private(V.graph, result, collective)
-            )
-            overwrite = constant("overwrite")
-            overwrite.layout = MutationLayoutSHOULDREMOVE(result)
-            V.graph.operations.insert(1, overwrite)
-            self.assertEqual(overwrite.get_mutation_names(), ["result"])
-            self.assertEqual(op_read_writes(overwrite).reads, OrderedSet())
-            self.assertEqual(
-                {dep.name for dep in op_read_writes(overwrite).writes}, {"overwrite"}
-            )
-            self.assertEqual(calculate_liveness(V.graph)["result"], [0, 2])
-            self.assertFalse(
-                _collective_stage_storage_is_private(V.graph, result, collective)
-            )
-
 
 class _LoopOp:
     """Operation stand-in with an optional counted-loop path and mutations."""

@@ -208,6 +208,7 @@ def test_split_product_must_equal_core_count():
     )
 
 
+@config.patch({"lx_same_tile_group_relayout": True})
 def test_coarse_tiled_endpoints_are_declined_at_the_edge_gate():
     """Cross-group endpoints must stop before any layout inspection.
 
