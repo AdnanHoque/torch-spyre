@@ -746,8 +746,7 @@ def test_same_group_coarse_tiled_edge_is_offered_and_priced_per_trip(monkeypatch
     """A coarse-tiled edge within a SINGLE for_each_tile body may be offered a
     relayout candidate (the same-group exception in
     ``solver_relayout_edge_context``, torch-spyre#5057), when
-    ``lx_same_tile_group_relayout`` is enabled (off by default as of #5632,
-    pending that PR's compile-time investigation), and that candidate's
+    ``lx_same_tile_group_relayout`` is enabled, and that candidate's
     cost must carry the loop's own trip-count multiplier
     (``_coarse_tile_loop_trip_count``, see TestCoarseTileLoopTripCount in
     test_scratchpad_solver.py) -- a relayout taken once but paid on every
