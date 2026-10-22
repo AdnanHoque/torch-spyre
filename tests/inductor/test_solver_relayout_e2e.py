@@ -1003,7 +1003,7 @@ def test_prefix_linear_reads_a_separate_full_backing_lx_gather(monkeypatch):
     from torch_spyre._inductor import spyre_hint
 
     observed = _Observed(monkeypatch, force=False)
-    rows, physical, logical, outputs = 512, 3328, 3200, 256
+    rows, physical, logical, outputs = 512, 3328, 3200, 512
 
     def fn(value, weight):
         with spyre_hint(work_div={"M": 8, "P": 4}):
