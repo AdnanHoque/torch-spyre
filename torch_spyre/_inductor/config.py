@@ -412,11 +412,10 @@ _cpsat_warn_on_cost_expr: bool = True
 # torch._inductor.config.force_disable_caches = True.
 spyre_kernel_cache: bool = os.environ.get("SPYRE_KERNEL_CACHE", "0") == "1"
 
-# Enable same-tile-group relayout search to retain its LX residency opportunity.
-# Enumerating and pricing divisions can increase cold compile time.
-# Set SPYRE_LX_SAME_TILE_GROUP_RELAYOUT=0 to disable this search.
+# Same-tile-group relayout search is opt-in because it can slow cold compilation.
+# Set SPYRE_LX_SAME_TILE_GROUP_RELAYOUT=1 to enable this search.
 lx_same_tile_group_relayout: bool = (
-    os.environ.get("SPYRE_LX_SAME_TILE_GROUP_RELAYOUT", "1") == "1"
+    os.environ.get("SPYRE_LX_SAME_TILE_GROUP_RELAYOUT", "0") == "1"
 )
 
 # Settings left out of the Inductor FX graph cache key. This module is the Spyre
