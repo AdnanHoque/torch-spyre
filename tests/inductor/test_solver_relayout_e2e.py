@@ -1123,8 +1123,6 @@ def _check_projection_rope_handoff(
     assert torch.equal(side.cpu(), q_ref + 1)
 
 
-
-
 @pytest.mark.parametrize("rows", [512])
 def test_attention_output_repack_handoff(monkeypatch, rows):
     """Produce softmax/PV/divide before repack/O; no implicit LX live-in.
