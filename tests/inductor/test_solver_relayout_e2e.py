@@ -1230,8 +1230,6 @@ def test_attention_output_repack_handoff(monkeypatch, rows):
     assert torch.equal(side.cpu(), -divided)
 
 
-
-
 def _assert_cache_update_persistence(specs, cache_writes, source_address, elements):
     """Require direct persistence or a complete ordered functionalized copyback."""
     from torch_spyre._inductor.constants import RESTICKIFY_OP
