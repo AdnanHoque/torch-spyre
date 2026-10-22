@@ -1599,8 +1599,6 @@ def test_v_projection_cache_handoff_preserves_persistent_alias(
     ] == [16]
 
 
-
-
 def test_gate_up_full_parent_repartition(monkeypatch):
     """Saved TP4 geometry: one whole-parent copy, then two local half reads."""
     import torch_spyre._inductor.spyre_kernel as sk_mod
