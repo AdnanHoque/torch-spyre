@@ -980,6 +980,7 @@ def test_complete_partition_expansion_fires_and_preserves_values(
     assert _core_slices(plan.destination_view, 32) == {
         c: {column_axis: c // 4, row_axis: c % 4} for c in range(32)
     }
+    # Striding doubles host backing storage, not this logical device tensor's LX span.
     assert plan.source_footprint_bytes == rows * width * host.element_size() // 16
     assert plan.destination_footprint_bytes == rows * width * host.element_size() // 32
     assert (
