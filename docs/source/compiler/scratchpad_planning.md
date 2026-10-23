@@ -366,6 +366,19 @@ This untiled exception does not require same-tile-group relayout search.
 That last distinction is the only difference between the two allocators,
 and it is a parameter (`division_is_fixed`) rather than a second predicate.
 
+### Certified exception contracts
+
+An ownership proof does not replace storage, lifetime or capacity checks.
+Each exception must name its proof and tests. The checks still run in their
+existing order; this table does not add a separate rule engine.
+
+| Admission check | Permitted case | Required proof and storage conditions | Covering tests |
+|---|---|---|---|
+| `partial/offset read`, `lx back gap` | Zero-offset linear prefix | `prefix_lx_contraction_axis` proves the physical stride and complete-stick prefix. `prefix_lx_gather_source` requires one reader and a single writer. Residency requires a served full-backing copy with unsplit K and disjoint LX spans. | `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather` |
+
+The untiled prefix case does not depend on same-tile-group search. Later
+ownership exceptions must retain this contract and add their own rows.
+
 ### Per-core size and core-division mismatch
 
 A buffer's LX footprint is its **per-core** size, not its total size: a
