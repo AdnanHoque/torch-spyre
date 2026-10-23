@@ -1854,7 +1854,6 @@ class TestSolverCapabilities(unittest.TestCase):
         "generates_divisions",
         "chooses_tilings",
         "tilings_from_menu",
-        "replans_after_tiling",
         "linear_cost_only",
     )
 
@@ -1897,7 +1896,6 @@ class TestSolverCapabilities(unittest.TestCase):
                 "decides_lx_relayouts": True,
                 "chooses_tilings": True,
                 "tilings_from_menu": True,
-                "replans_after_tiling": True,
                 "linear_cost_only": True,
             },
             ExhaustiveSearchSolver.wrapping(GreedyLayoutSolver): joint,
@@ -1965,18 +1963,14 @@ class TestSolverCapabilities(unittest.TestCase):
 
         joint = placement(**all_false)
         joint["plan_layout_and_core_divisions"] = lambda self, cost_expr=None: []
-        for implied in ("tilings_from_menu", "replans_after_tiling"):
-            with (
-                self.subTest(implied=implied),
-                self.assertRaisesRegex(
-                    TypeError, f"{implied}\\(\\) requires chooses_tilings"
-                ),
-            ):
-                type(
-                    "WithoutTilings",
-                    (CoreDivisionLayoutSolver,),
-                    {**joint, implied: classmethod(lambda cls: True)},
-                )
+        with self.assertRaisesRegex(
+            TypeError, "tilings_from_menu\\(\\) requires chooses_tilings"
+        ):
+            type(
+                "WithoutTilings",
+                (CoreDivisionLayoutSolver,),
+                {**joint, "tilings_from_menu": classmethod(lambda cls: True)},
+            )
         with self.assertRaisesRegex(TypeError, "chooses_core_divisions"):
             type(
                 "JointThatDenies",
