@@ -132,7 +132,8 @@ def test_pair_cost_reproduces_the_canonical_row(kind, monkeypatch):
     with V.set_graph_handler(graph):
         reported = dcm.extract_op_features(op)
     assert reported.is_lx_relayout
-    assert reported.cores == min(source.num_cores, destination.num_cores)
+    assert reported.cores == destination.split_product
+    assert reported.relayout_cores == min(source.num_cores, destination.num_cores)
     assert relayout_ns(reported) == pytest.approx(cost, rel=1e-12)
     # Direction does not enter (measured: 8.721 vs 8.701 us reversed).
     reverse = solver_relayout_pair_cost(
