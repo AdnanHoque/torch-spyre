@@ -2509,3 +2509,82 @@ def test_contraction_requires_disjoint_full_physical_spans(
     else:
         with pytest.raises(RuntimeError, match=error):
             lx_relayout_module.validate_relayout_spans(plan)
+
+
+@pytest.mark.parametrize(
+    "source_cores,destination_cores", [(32, 16), (16, 16), (16, 32)]
+)
+def test_relayout_codegen_wraps_only_a_contracted_operation_frame(
+    source_cores, destination_cores
+):
+    """Keep tensor domains distinct while scheduling every required core.
+
+    C4 tracks replacing this shape-derived frame correction with explicit
+    domains end-to-end in torch-spyre#5575.
+    """
+    row, feature = Symbol("row"), Symbol("feature")
+    source = TensorWorkDivision(
+        {row: source_cores // 2, feature: 2},
+        {row: floor(_CORE_ID / 2), feature: Mod(_CORE_ID, 2)},
+        num_cores=source_cores,
+    )
+    destination = TensorWorkDivision(
+        {row: destination_cores, feature: 1},
+        {row: _CORE_ID, feature: Integer(0)},
+        num_cores=destination_cores,
+    )
+    base = TensorArg(
+        True,
+        -1,
+        DataFormats.SEN169_FP16,
+        [512, 2, 64],
+        [row, floor(feature / 64), Mod(feature, 64)],
+        {"lx": 0},
+    )
+    spec = OpSpec(
+        IDENTITY_OP,
+        False,
+        {row: (512, destination_cores), feature: (128, 1)},
+        [
+            replace(base, work_division=source),
+            replace(
+                base,
+                is_input=False,
+                allocation={"lx": 8192},
+                work_division=destination,
+            ),
+        ],
+        {LX_RELAYOUT_INFO_KEY: True},
+        core_id_to_work_slice={row: _CORE_ID, feature: Integer(0)},
+    )
+    parsed, renamed = parse_op_spec(spec)
+    r, f = renamed[row], renamed[feature]
+    assert parsed.opfunc == "shuffle", "unequal ownership became an ordinary identity"
+    assert parsed.num_cores == max(source_cores, destination_cores)
+    assert parsed.work_slices == {r: destination_cores, f: 1}
+    frame = parsed.core_id_to_work_slice
+    if source_cores > destination_cores:
+        assert frame[r] == Mod(_CORE_ID, destination_cores)
+    else:
+        assert frame[r] == _CORE_ID, "equal/expanded operation frame was repeated"
+    assert frame[f] == 0
+    assert [int(frame[r].subs(_CORE_ID, core)) for core in range(parsed.num_cores)] == [
+        core % destination_cores for core in range(parsed.num_cores)
+    ]
+    actual_source, actual_destination = [arg.work_division for arg in parsed.args]
+    assert actual_source.num_cores == source_cores
+    assert actual_source.work_slices == {r: source_cores // 2, f: 2}
+    assert actual_source.core_id_to_work_slice == {
+        r: floor(_CORE_ID / 2),
+        f: Mod(_CORE_ID, 2),
+    }
+    assert actual_destination.num_cores == destination_cores
+    assert actual_destination.work_slices == {r: destination_cores, f: 1}
+    assert actual_destination.core_id_to_work_slice == {r: _CORE_ID, f: 0}
+    assert not actual_source.same_ownership(actual_destination)
+    assert spec.core_id_to_work_slice == {row: _CORE_ID, feature: 0}
+    assert spec.args[0].work_division is source
+    assert spec.args[1].work_division is destination
+    # The certificate and per-tensor-ownership guard remain mandatory.
+    with pytest.raises(AssertionError, match="per-tensor ownership"):
+        parse_op_spec(replace(spec, op_info={}))
