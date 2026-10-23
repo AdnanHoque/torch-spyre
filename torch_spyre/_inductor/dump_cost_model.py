@@ -1086,16 +1086,19 @@ def relayout_cost_features(
     Preserve the existing estimate on the smaller physical domain. Replicated
     destinations do not multiply that tensor size; this remains a permutation-
     based estimate, not a calibrated model of replicated receive traffic.
+    At fixed run and split, the smaller count charges more than the larger
+    count. This does not establish an upper bound on measured transfer time.
     """
     run_elems, split = governing_run_split(source_view, destination_view, device_dims)
     return OpFeatures(
         name="lx_relayout",
         is_reduction=False,
         out_elems=out_elems,
-        cores=min(num_cores, destination_num_cores or num_cores),
+        cores=num_cores,
         dtype_bytes=dtype_bytes,
         args=[],
         is_lx_relayout=True,
+        relayout_cores=min(num_cores, destination_num_cores or num_cores),
         relayout_run_elems=run_elems,
         relayout_split=split,
     )
@@ -1716,7 +1719,7 @@ def extract_op_features(
         name=_op_name(op),
         is_reduction=is_reduction,
         out_elems=out_elems,
-        cores=_rl.cores if _rl is not None else cores,
+        cores=cores,
         dtype_bytes=dtype_bytes,
         args=args,
         reduction_cores=reduction_cores,
@@ -1737,6 +1740,7 @@ def extract_op_features(
         transport_tile_elems=transport_tile_elems,
         transport_compute_read=bool(compute_read and transport_tile_elems),
         is_lx_relayout=_rl is not None,
+        relayout_cores=_rl.relayout_cores if _rl is not None else 0,
         relayout_run_elems=_rl.relayout_run_elems if _rl is not None else 0,
         relayout_split=_rl.relayout_split if _rl is not None else 0,
         # The byte-count check defines which store geometry gets the rate estimate.
