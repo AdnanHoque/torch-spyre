@@ -10115,6 +10115,122 @@ class TestDrainedCollective(unittest.TestCase):
             )
 
 
+class TestCollectiveStageCurrentUses(unittest.TestCase):
+    """Post-solve staging uses current accesses, not saved operation positions."""
+
+    def _run_stage(self, extra_reader=False):
+        from torch._inductor.ir import ComputedBuffer
+
+        from torch_spyre._inductor.ir import FixedTiledLayout
+        from torch_spyre._inductor.scratchpad import allocator as allocator_module
+        from torch_spyre._inductor.scratchpad.allocator import CoOptimizingAllocator
+        from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
+
+        def access(name, reads=(), writes=()):
+            deps = inductor_deps.ReadWrites(
+                OrderedSet(
+                    inductor_deps.MemoryDep(n, sympy.S.Zero, (), ()) for n in reads
+                ),
+                OrderedSet(
+                    inductor_deps.MemoryDep(n, sympy.S.Zero, (), ()) for n in writes
+                ),
+                OrderedSet(),
+            )
+            return SimpleNamespace(
+                get_name=lambda: name,
+                get_read_writes=lambda: deps,
+                origins=(),
+            )
+
+        inserted = access("inserted", writes=("other",))
+        producer = MagicMock(spec=ComputedBuffer)
+        producer.get_name.return_value = "result"
+        producer.layout = MagicMock(spec=FixedTiledLayout)
+        producer.origins = ()
+        producer.get_read_writes.return_value = access(
+            "result", writes=("result",)
+        ).get_read_writes()
+        collective = access("all_reduce", reads=("result",))
+        operations = [inserted, producer, collective]
+        if extra_reader:
+            operations.insert(2, access("reader", reads=("result",)))
+        graph = SimpleNamespace(
+            operations=operations,
+            graph_input_names=[],
+            get_output_names=lambda: [],
+            get_buffer=lambda name: producer,
+            graph=object(),
+        )
+        buffer = LifetimeBoundBuffer("result", 64, [0, 1])
+        allocator = CoOptimizingAllocator.__new__(CoOptimizingAllocator)
+        allocator.size = 1024
+        gap_solver = MagicMock()
+        gap_solver.alignment = 64
+        gap_solver._pick_gap.return_value = SimpleNamespace(start=0)
+        with (
+            patch.object(
+                allocator_module, "clone_at_graph_boundaries", return_value=True
+            ),
+            patch.object(
+                allocator_module, "_is_matmul_op", side_effect=lambda op: op is producer
+            ),
+            patch.object(allocator_module, "_access_group_path", return_value=()),
+            patch.object(allocator_module, "_is_tiled_advancing", return_value=False),
+            patch.object(
+                allocator_module.GraphEditor,
+                "collective_operand_name",
+                side_effect=lambda op: "result" if op is collective else None,
+            ),
+            patch.object(allocator_module, "origin_in_graph", return_value=object()),
+            patch.object(
+                allocator_module, "_extern_kernel_in_live_range", return_value=False
+            ) as external,
+            patch.object(
+                allocator_module,
+                "_collective_stage_storage_is_private",
+                return_value=True,
+            ),
+            patch.object(
+                allocator_module, "buffer_not_read_in_full", return_value=False
+            ),
+            patch.object(
+                allocator_module, "_would_produce_lx_back_gap", return_value=False
+            ) as gap,
+            patch.object(
+                allocator_module,
+                "get_ncores_for_buffers",
+                return_value=({}, {}, {"result": object()}),
+            ) as views,
+            patch.object(allocator_module, "partition_footprint", return_value=64),
+            patch.object(
+                allocator_module, "FirstFitLayoutSolver", return_value=gap_solver
+            ),
+        ):
+            allocator._stage_collective_outputs(
+                graph, [buffer], [SimpleNamespace(consumer_names=("result",))]
+            )
+        self.assertEqual(buffer.uses, [0, 1])
+        return allocator, buffer, graph, collective, external, gap, views
+
+    def test_inserted_operation_does_not_hide_eligible_stage(self):
+        allocator, buffer, graph, collective, external, gap, views = self._run_stage()
+        self.assertEqual(allocator._collective_output_stages, {"result": collective})
+        self.assertEqual(buffer.address, 0)
+        external.assert_called_once_with(graph, [1, 2], excluded_op=collective)
+        gap.assert_called_once_with(graph, "result", [1, 2])
+        views.assert_called_once()
+
+    def test_new_current_reader_prevents_stage(self):
+        allocator, buffer, _, _, external, gap, views = self._run_stage(
+            extra_reader=True
+        )
+        self.assertEqual(allocator._collective_output_stages, {})
+        self.assertIsNone(buffer.address)
+        external.assert_not_called()
+        gap.assert_not_called()
+        views.assert_not_called()
+
+
 class _LoopOp:
     """Operation stand-in with an optional counted-loop path and mutations."""
 

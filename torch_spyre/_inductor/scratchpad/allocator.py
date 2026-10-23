@@ -3406,6 +3406,9 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         self._collective_output_stages = {}
         if not clone_at_graph_boundaries():
             return
+        # Chosen tilings can insert operations after the solve. Read current
+        # graph positions without changing the solver's lifetime records.
+        current_uses = calculate_liveness(graph)
         by_name = {b.name: b for b in allocation}
         placed: list[LifetimeBoundBuffer] = []
         for b in allocation:
@@ -3427,9 +3430,10 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         candidates: dict[str, Operation] = {}
         copy_readers = {n for plan in relayouts for n in plan.consumer_names}
         for b in allocation:
-            if b.address is not None or b.name in outputs or len(b.uses) != 2:
+            uses = current_uses.get(b.name, [])
+            if b.address is not None or b.name in outputs or len(uses) != 2:
                 continue
-            op, consumer = (graph.operations[i] for i in b.uses)
+            op, consumer = (graph.operations[i] for i in uses)
             if (
                 not isinstance(op, ComputedBuffer)
                 or op.get_name() != b.name
@@ -3444,12 +3448,12 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             ):
                 continue
             # The selected collective reads the HBM drain.
-            if _extern_kernel_in_live_range(graph, b.uses, excluded_op=consumer):
+            if _extern_kernel_in_live_range(graph, uses, excluded_op=consumer):
                 continue
             if not _collective_stage_storage_is_private(graph, op, consumer):
                 continue
             if buffer_not_read_in_full(graph, b.name) or _would_produce_lx_back_gap(
-                graph, b.name, b.uses
+                graph, b.name, uses
             ):
                 continue
             if b.name not in copy_readers and not any(
