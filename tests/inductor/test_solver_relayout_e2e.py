@@ -1596,11 +1596,73 @@ def test_v_projection_cache_handoff_preserves_persistent_alias(
 
 def test_prefix_linear_reads_a_separate_full_backing_lx_gather(monkeypatch):
     """A 3200-wide linear reads a gathered 3328-wide physical allocation."""
+    _run_prefix_linear_case(monkeypatch, mode="served")
+
+
+def test_prefix_linear_without_served_copy_spills_the_source(monkeypatch):
+    """Removing this edge's candidates must remove its route to LX residency."""
+    _run_prefix_linear_case(monkeypatch, mode="no_copy")
+
+
+def _run_prefix_linear_case(monkeypatch, *, mode):
     import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
     from torch_spyre._C import SpyreTensorLayout, get_device_dtype, get_elem_in_stick
     from torch_spyre._inductor import spyre_hint
+    from torch_spyre._inductor.scratchpad.lx_relayout import (
+        prefix_lx_contraction_axis,
+    )
 
     observed = _Observed(monkeypatch, force=False)
+    prefix_sources, removed_candidates, source_residency = set(), [], []
+    real_tables = alloc_mod.CoOptimizingAllocator._cd_parent_relayouts
+
+    def tables(
+        allocator,
+        graph,
+        consumer,
+        consumer_divs,
+        parents,
+        divisions,
+        op_by_name,
+        *args,
+        **kwargs,
+    ):
+        result = real_tables(
+            allocator,
+            graph,
+            consumer,
+            consumer_divs,
+            parents,
+            divisions,
+            op_by_name,
+            *args,
+            **kwargs,
+        )
+        for parent in parents:
+            if parent not in op_by_name or consumer is None:
+                continue
+            if prefix_lx_contraction_axis(op_by_name[parent], consumer) is None:
+                continue
+            prefix_sources.add(parent)
+            if mode == "no_copy":
+                # cap=0 means unlimited. Remove only the actual prefix edge's
+                # candidates, leaving all unrelated allocator choices intact.
+                removed_candidates.extend(result.pop(parent, []))
+        return result
+
+    real_post_solve = alloc_mod.CoOptimizingAllocator._post_solve
+
+    def post_solve(allocator, graph, allocation, plans):
+        source_residency.extend(
+            (buffer.name, buffer.address)
+            for buffer in allocation
+            if buffer.name in prefix_sources
+        )
+        return real_post_solve(allocator, graph, allocation, plans)
+
+    monkeypatch.setattr(alloc_mod.CoOptimizingAllocator, "_cd_parent_relayouts", tables)
+    monkeypatch.setattr(alloc_mod.CoOptimizingAllocator, "_post_solve", post_solve)
+
     rows, physical, logical, outputs = 512, 3328, 3200, 512
 
     def fn(value, weight):
@@ -1624,7 +1686,10 @@ def test_prefix_linear_reads_a_separate_full_backing_lx_gather(monkeypatch):
         device_dtype=get_device_dtype(torch.float16),
     )
     compiled = torch.compile(fn, dynamic=False, fullgraph=True)
-    with config.patch({**_COOPT, "sencores": 32, "lx_same_tile_group_relayout": False}):
+    options = {**_COOPT, "sencores": 32, "lx_same_tile_group_relayout": False}
+    if mode == "no_copy":
+        options["lx_solver_relayout_groups_per_edge"] = 0
+    with config.patch(options):
         for tail in (512.0, float("nan")):
             # One selected element per output makes the reduction exact. Every
             # row differs; a compacted stride or a read into the tail is visible.
@@ -1644,6 +1709,16 @@ def test_prefix_linear_reads_a_separate_full_backing_lx_gather(monkeypatch):
             assert torch.isfinite(out).all()
             assert torch.equal(out, expected)
 
+    assert prefix_sources and source_residency, (
+        "the fixture did not reach the prefix edge"
+    )
+    if mode == "no_copy":
+        assert removed_candidates, "the negative arm removed no prefix candidates"
+        assert all(address is None for _, address in source_residency), (
+            f"a prefix producer resided without a served gather: {source_residency}"
+        )
+        observed.assert_nothing_emitted()
+        return
     observed.assert_emitted_in_lx(expected_plans=1)
     (plan,) = observed.plans
     assert plan.num_cores == plan.destination_view.num_cores == 32
