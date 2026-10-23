@@ -669,7 +669,10 @@ def _extractable_op(name, reads):
 def test_relayout_price_does_not_replace_execution_cores(monkeypatch, execution_cores):
     from dataclasses import replace
 
-    from torch._inductor.virtualized import V
+    import torch
+    from torch._inductor.dependencies import MemoryDep
+    from torch._inductor.ir import Pointwise
+    from torch._inductor.virtualized import V, ops
 
     price = OpFeatures(
         name="lx_relayout",
@@ -685,9 +688,19 @@ def test_relayout_price_does_not_replace_execution_cores(monkeypatch, execution_
     )
     monkeypatch.setattr(dcm, "_relayout_features", lambda *_: price)
     op = _extractable_op("buf1", ["buf0"])
+    row = sympy.Symbol("row", integer=True)
+    op.data = Pointwise(
+        device=torch.device("cpu"),
+        dtype=torch.float16,
+        inner_fn=lambda index: ops.load("buf0", index[0]),
+        ranges=[64],
+    )
+    op.get_read_writes = lambda: SimpleNamespace(
+        reads=[MemoryDep("buf0", row, (row,), (64,))],
+        writes=[MemoryDep("buf1", row, (row,), (64,))],
+    )
     graph = _StubGraph(inputs=[], outputs=[])
     graph.get_buffer = lambda name: _extractable_op(name, [])
-    row = sympy.Symbol("row", integer=True)
     with V.set_graph_handler(graph):
         feature = dcm.extract_op_features(
             op, {row: execution_cores}, is_lx={"buf0": True, "buf1": True}

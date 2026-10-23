@@ -129,7 +129,7 @@ class SingleWriterTest(TestCase):
     def test_output_alias_is_rejected(self):
         with V.set_graph_handler(self.graph):
             producer = self._producer()
-            alias = OperationBuffer("alias", NonOwningLayout(producer))
+            alias = OperationBuffer(name="alias", layout=NonOwningLayout(producer))
             self.assertIn(_BUF, alias.get_inputs_that_alias_output())
             self.graph.operations = [producer, alias]
             self.assertFalse(storage_has_single_writer(self.graph, producer))
@@ -139,7 +139,7 @@ class SingleWriterTest(TestCase):
             producer = self._producer()
             # OperationBuffer cannot describe its writes. Unknown operations must
             # fail closed rather than be treated as read-only.
-            unknown = OperationBuffer("unknown", producer.get_layout())
+            unknown = OperationBuffer(name="unknown", layout=producer.get_layout())
             with self.assertRaises(NotImplementedError):
                 unknown.get_read_writes()
             self.graph.operations = [producer, unknown]
