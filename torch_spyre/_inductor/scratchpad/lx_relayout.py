@@ -306,8 +306,6 @@ class FiredRelayoutGroup:
         return groups
 
 
-
-
 def work_division_from_view(
     view: PerCoreView | None,
     device_size: Sequence[int],

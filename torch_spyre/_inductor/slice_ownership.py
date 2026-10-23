@@ -80,7 +80,6 @@ def project_affine_slice_axis(
     return projections[0] if len(projections) == 1 else None
 
 
-
 def project_slice_axis(
     coordinate: sympy.Expr,
     device_extent: int,
@@ -92,6 +91,4 @@ def project_slice_axis(
     """Apply the caller's containment policy without changing its access."""
     if floor_only:
         return None
-    return project_affine_slice_axis(
-        coordinate, device_extent, split, iteration_space
-    )
+    return project_affine_slice_axis(coordinate, device_extent, split, iteration_space)
