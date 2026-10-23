@@ -3643,8 +3643,12 @@ def _per_core_view_from_prep(
         # multi-axis decomposition below cannot infer a single driven axis.
         # Reuse the relayout projector's whole-rectangle containment proof;
         # do not infer ownership just from a divisible host stride.
-        if dev_dim is None and config.lx_planner_relayout:
-            from .scratchpad.lx_relayout import _project_floor_affine_slice_axis
+        if (
+            dev_dim is None
+            and config.lx_planner_relayout
+            and config.lx_extended_ownership
+        ):
+            from .slice_ownership import project_slice_axis
 
             driven = [
                 axis
@@ -3658,8 +3662,12 @@ def _per_core_view_from_prep(
                     per_sym.get(other, 1) == 1
                     for other in coordinate.free_symbols - {sym}
                 ):
-                    projected = _project_floor_affine_slice_axis(
-                        coordinate, int(device_size[axis]), split, iter_space
+                    projected = project_slice_axis(
+                        coordinate,
+                        int(device_size[axis]),
+                        split,
+                        iter_space,
+                        floor_only=True,
                     )
                     if projected is not None and projected[0] == sym:
                         dev_dim = axis
