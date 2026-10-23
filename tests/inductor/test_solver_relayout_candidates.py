@@ -179,6 +179,38 @@ def test_grouped_gather_is_priced_like_a_permutation_of_the_same_tensor():
     ), "same tensor, same cores, same governing geometry: same price"
 
 
+@pytest.mark.parametrize("source_cores", [2, 8])
+def test_broadcast_report_uses_the_solver_price_domain(source_cores):
+    from dataclasses import replace
+
+    from torch._inductor.virtualized import V
+
+    from torch_spyre._inductor import dump_cost_model as dcm
+
+    source = PerCoreView(((0, source_cores),), ((0, _CORE_ID),), num_cores=source_cores)
+    destination = PerCoreView(((0, 2),), ((0, Mod(_CORE_ID, 2)),), num_cores=8)
+    # Each of the two destination pieces is held by four cores.
+    plan = lx_relayout.LXRelayoutPlan(
+        "source", ("consumer",), source, destination, source_cores
+    )
+    graph = SimpleNamespace(_spyre_lx_relayout_copies={plan.edge: ("copy", plan)})
+    with V.set_graph_handler(graph):
+        reported = dcm._relayout_features(
+            SimpleNamespace(get_name=lambda: "copy"), [64], 2
+        )
+
+    assert reported is not None
+    assert reported.relayout_cores == source_cores
+    price = relayout_ns(reported)
+    old_execution_domain = relayout_ns(replace(reported, cores=8, relayout_cores=0))
+    assert price > 0
+    assert price == pytest.approx(old_execution_domain * 8 / source_cores)
+    solver_price = solver_relayout_pair_cost(
+        source, destination, source_cores, [64], 64, 2, destination_num_cores=8
+    )
+    assert solver_price == pytest.approx(price)
+
+
 @pytest.mark.parametrize("fragments", [8, 10, 11, 16])
 def test_gather_fanin_respects_shuffle_register_budget(fragments):
     # A row/column split feeding a row-only matmul view. The innermost
@@ -504,6 +536,8 @@ def test_expansion_rejects_replicated_multisource_destination(columns, supported
 @pytest.mark.parametrize("balanced", [True, False])
 def test_expansion_rejects_nonuniform_fanout(balanced):
     """Keep coverage and fan-in valid while changing only source fan-out."""
+    # Four slices on eight cores use the existing replicated-broadcast path.
+    # This checks its shared fan-out guard, not the complete-destination arm.
     destination = PerCoreView(
         ((0, 4),),
         (
@@ -533,6 +567,38 @@ def test_expansion_rejects_nonuniform_fanout(balanced):
         {0: 4, 1: 4} if balanced else {0: 3, 1: 5}
     )
     assert lx_relayout.movement_supported(_TWO_ON_2, destination, 2, 8) == balanced
+
+
+@pytest.mark.parametrize("balanced", [True, False])
+def test_complete_destination_rejects_nonuniform_fanout(balanced):
+    source = PerCoreView(((0, 4),), ((0, _CORE_ID),), num_cores=4)
+    rows, columns = (4, 3) if balanced else (3, 4)
+    destination = PerCoreView(
+        ((0, rows), (1, columns)),
+        ((0, floor(_CORE_ID / columns)), (1, Mod(_CORE_ID, columns))),
+        num_cores=12,
+    )
+    edges = lx_relayout.transfer_edges(
+        dict(source.work_slice_dims),
+        dict(destination.work_slice_dims),
+        lx_relayout._core_slices(source, 4),
+        lx_relayout._core_slices(destination, 12),
+    )
+    assert destination.split_product == destination.num_cores == 12
+    assert (
+        len(
+            {
+                tuple(row.items())
+                for row in lx_relayout._core_slices(destination, 12).values()
+            }
+        )
+        == 12
+    )
+    assert set(Counter(dst for _, dst in edges).values()) == ({1} if balanced else {2})
+    assert Counter(src for src, _ in edges) == (
+        {0: 3, 1: 3, 2: 3, 3: 3} if balanced else {0: 4, 1: 8, 2: 8, 3: 4}
+    )
+    assert lx_relayout.movement_supported(source, destination, 4, 12) == balanced
 
 
 def test_destination_views_are_interned_by_ownership():
