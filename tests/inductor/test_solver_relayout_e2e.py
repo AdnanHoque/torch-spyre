@@ -926,26 +926,20 @@ def test_complete_partition_expansion_fires_and_preserves_values(
         with spyre_hint(work_div={"R": 4, "H": 8}):
             return torch.relu(hidden)
 
-    # Distinct signed, exactly representable SEN169 values expose routing and
-    # offset mistakes without requiring a tolerance for fp16 arithmetic.
+    # Give all 128 source/feature fragments distinct value ranges.
+    # Keep inputs negative so relu(-t) observes every destination.
     storage_width = width * (2 if strided else 1)
-    host = (
-        (torch.arange(rows * storage_width).reshape(rows, storage_width) * 17) % 251
-        - 125
-    ).to(dtype)
+    row_ids = torch.arange(rows).reshape(-1, 1)
+    column_ids = torch.arange(storage_width).reshape(1, -1) // (2 if strided else 1)
+    fragment = (row_ids // (rows // 16)) * 8 + column_ids // (width // 8)
+    offset = (row_ids * 37 + column_ids * 17) % 8
+    host = -(fragment * 8 + offset + 1).to(dtype)
     if strided:
         host = host[:, ::2]
         assert not host.is_contiguous()
     names = ["R", "H"]
     if batched:
-        # Give all 128 source/feature fragments distinct value ranges. The
-        # flat modular pattern above alone can alias some diagonal tile moves.
-        # Keep every input negative so relu(-t) observes every destination.
-        row_ids = torch.arange(rows).reshape(-1, 1)
-        column_ids = torch.arange(width).reshape(1, -1)
-        fragment = (row_ids // (rows // 16)) * 8 + column_ids // (width // 8)
-        offset = (row_ids * 37 + column_ids * 17) % 8
-        host = -(fragment * 8 + offset + 1).to(dtype).unsqueeze(0)
+        host = host.unsqueeze(0)
         names = ["B", *names]
         _pnd.declare_tensor_dim("B", 1)
     for name, size in (("R", rows), ("H", width)):
@@ -978,6 +972,7 @@ def test_complete_partition_expansion_fires_and_preserves_values(
     assert _core_slices(plan.destination_view, 32) == {
         c: {column_axis: c // 4, row_axis: c % 4} for c in range(32)
     }
+    # Striding doubles host backing storage, not this logical device tensor's LX span.
     assert plan.source_footprint_bytes == rows * width * host.element_size() // 16
     assert plan.destination_footprint_bytes == rows * width * host.element_size() // 32
     assert (

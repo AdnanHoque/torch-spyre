@@ -21,6 +21,8 @@ path is pinned to, so the enumeration path and the reporting path cannot
 drift apart.
 """
 
+from collections import Counter
+
 import pytest
 from sympy import Eq, Mod, Piecewise, Symbol, floor
 
@@ -384,6 +386,87 @@ def test_broadcast_to_a_larger_core_domain_is_admitted_and_priced():
         )
         is None
     )
+
+
+@pytest.mark.parametrize("fragments", [4, 8, 16])
+def test_complete_partition_expansion_respects_fanin(fragments):
+    """Complete 16-to-32 repartitions reach the fan-in guard, including eight."""
+    source = PerCoreView(((0, 16),), ((0, _CORE_ID),), num_cores=16)
+    rows = 16 // fragments
+    destination = PerCoreView(
+        ((0, rows), (1, 2 * fragments)),
+        ((0, Mod(_CORE_ID, rows)), (1, floor(_CORE_ID / rows))),
+        num_cores=32,
+    )
+    edges = lx_relayout.transfer_edges(
+        dict(source.work_slice_dims),
+        dict(destination.work_slice_dims),
+        lx_relayout._core_slices(source, 16),
+        lx_relayout._core_slices(destination, 32),
+    )
+    assert destination.split_product == 32
+    assert set(Counter(src for src, _ in edges).values()) == {2 * fragments}
+    assert set(Counter(dst for _, dst in edges).values()) == {fragments}
+    assert lx_relayout.movement_supported(source, destination, 16, 32) == (
+        fragments <= 8
+    )
+
+
+@pytest.mark.parametrize("columns,supported", [(8, True), (4, False)])
+def test_expansion_rejects_replicated_multisource_destination(columns, supported):
+    """Replication cannot use the complete-destination gather exception."""
+    source = PerCoreView(((0, 16),), ((0, _CORE_ID),), num_cores=16)
+    destination = PerCoreView(
+        ((0, 4), (1, columns)),
+        ((0, Mod(_CORE_ID, 4)), (1, Mod(floor(_CORE_ID / 4), columns))),
+        num_cores=32,
+    )
+    edges = lx_relayout.transfer_edges(
+        dict(source.work_slice_dims),
+        dict(destination.work_slice_dims),
+        lx_relayout._core_slices(source, 16),
+        lx_relayout._core_slices(destination, 32),
+    )
+    # Both geometries pass uniformity and the register budget; only the
+    # rejected arm has replicated destination slices (16 slices on 32 cores).
+    assert set(Counter(src for src, _ in edges).values()) == {8}
+    assert set(Counter(dst for _, dst in edges).values()) == {4}
+    assert destination.split_product == 4 * columns
+    assert lx_relayout.movement_supported(source, destination, 16, 32) == supported
+
+
+@pytest.mark.parametrize("balanced", [True, False])
+def test_expansion_rejects_nonuniform_fanout(balanced):
+    """Keep coverage and fan-in valid while changing only source fan-out."""
+    destination = PerCoreView(
+        ((0, 4),),
+        (
+            (
+                0,
+                Piecewise(
+                    (0, Eq(_CORE_ID, 0)),
+                    (1, _CORE_ID < (4 if balanced else 3)),
+                    (2, Eq(_CORE_ID, 4 if balanced else 3)),
+                    (3, True),
+                ),
+            ),
+        ),
+        num_cores=8,
+    )
+    source_map = lx_relayout._core_slices(_TWO_ON_2, 2)
+    destination_map = lx_relayout._core_slices(destination, 8)
+    assert {row[0] for row in destination_map.values()} == {0, 1, 2, 3}
+    edges = lx_relayout.transfer_edges(
+        dict(_TWO_ON_2.work_slice_dims),
+        dict(destination.work_slice_dims),
+        source_map,
+        destination_map,
+    )
+    assert set(Counter(dst for _, dst in edges).values()) == {1}
+    assert Counter(src for src, _ in edges) == (
+        {0: 4, 1: 4} if balanced else {0: 3, 1: 5}
+    )
+    assert lx_relayout.movement_supported(_TWO_ON_2, destination, 2, 8) == balanced
 
 
 def test_destination_views_are_interned_by_ownership():
