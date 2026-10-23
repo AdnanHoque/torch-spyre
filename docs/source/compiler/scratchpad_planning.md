@@ -375,9 +375,16 @@ existing order; this table does not add a separate rule engine.
 | Admission check | Permitted case | Required proof and storage conditions | Covering tests |
 |---|---|---|---|
 | `partial/offset read`, `lx back gap` | Zero-offset linear prefix | `prefix_lx_contraction_axis` proves the physical stride and complete-stick prefix. `prefix_lx_gather_source` requires one reader and a single writer. Residency requires a served full-backing copy with unsplit K and disjoint LX spans. | `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather` |
+| Unrepresentable multi-loop ownership | One loop contains the complete affine read rectangle in its slice | `project_slice_axis` uses the affine containment proof. Original coordinates, storage and lifetime checks remain. | `test_q_rope_ownership_keeps_the_whole_pair_in_its_slice`; `test_q_projection_rope_handoff_preserves_pairs_and_other_consumer` |
 
 The untiled prefix case does not depend on same-tile-group search. Later
 ownership exceptions must retain this contract and add their own rows.
+
+`SPYRE_LX_EXTENDED_OWNERSHIP=0` disables the additional ownership proofs while
+retaining the earlier prefix-copy rules. Its default is ON. The flag does not
+disable storage, alias, lifetime or capacity validation. Compare successive
+revisions with this flag OFF in both; do not compare a later OFF result with
+the preceding revision's ON result.
 
 ### Per-core size and core-division mismatch
 
