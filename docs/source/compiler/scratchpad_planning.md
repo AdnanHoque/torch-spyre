@@ -366,6 +366,30 @@ This untiled exception does not require same-tile-group relayout search.
 That last distinction is the only difference between the two allocators,
 and it is a parameter (`division_is_fixed`) rather than a second predicate.
 
+### Certified exception contracts
+
+An ownership proof does not replace storage, lifetime or capacity checks.
+Each exception must name its proof and tests. The checks still run in their
+existing order; this table does not add a separate rule engine.
+
+| Admission check | Permitted case | Required proof and storage conditions | Covering tests |
+|---|---|---|---|
+| `partial/offset read`, `lx back gap` | Zero-offset linear prefix | `prefix_lx_contraction_axis` proves the physical stride and complete-stick prefix. `prefix_lx_gather_source` requires one reader and a single writer. Residency requires a served full-backing copy with unsplit K and disjoint LX spans. | `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather` |
+| Unrepresentable multi-loop ownership | One loop contains the complete affine read rectangle in its slice | `project_slice_axis` uses the affine containment proof. Original coordinates, storage and lifetime checks remain. | `test_q_rope_ownership_keeps_the_whole_pair_in_its_slice`; `test_q_projection_rope_handoff_preserves_pairs_and_other_consumer` |
+
+| Unrepresentable floor-affine ownership | One loop contains the full floor-affine rectangle | `project_slice_axis` retains affine-then-floor order. The view rescue uses only floor proofs for one non-stick driven axis, with its other split restrictions unchanged. | `test_floor_slice_projection_rejects_unproven_access`; `test_attention_output_repack_handoff` |
+| Updated-cache snapshot and full replica | Earlier ordinary cache mutation, immutable restickification, complete disjoint source slices, bounded uniform fan-in and existing consumer rule | Original cache storage, mutation order, alias and lifetime guards stay active. | Cache-transpose and full-replica candidate cases |
+| Factored ownership and persistent scatter | Exact dense mixed-radix rectangle; immutable source with one indirect write to an external cache target | Stick axis, aliases, mutation order, disjoint spans and full-copy requirements stay active. | Factored ownership and persistent-scatter acceptance/rejection cases |
+
+The untiled prefix case does not depend on same-tile-group search. Later
+ownership exceptions must retain this contract and add their own rows.
+
+`SPYRE_LX_EXTENDED_OWNERSHIP=0` disables the additional ownership proofs while
+retaining the earlier prefix-copy rules. Its default is ON. The flag does not
+disable storage, alias, lifetime or capacity validation. Compare successive
+revisions with this flag OFF in both; do not compare a later OFF result with
+the preceding revision's ON result.
+
 ### Per-core size and core-division mismatch
 
 A buffer's LX footprint is its **per-core** size, not its total size: a
