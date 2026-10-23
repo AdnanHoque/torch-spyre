@@ -4793,7 +4793,12 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             ),
             None,
         )
-        if full_replica is not None and full_replica not in kept and cost_kept:
+        if (
+            config.lx_extended_ownership
+            and full_replica is not None
+            and full_replica not in kept
+            and cost_kept
+        ):
             kept.remove(unpinned[remaining - 1])
             kept.add(full_replica)
         logger.debug(

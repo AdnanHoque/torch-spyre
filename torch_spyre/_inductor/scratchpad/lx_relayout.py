@@ -47,6 +47,7 @@ from ..core_mapping import (
 )
 from ..cost_model import CostParams, relayout_ns
 from ..dump_cost_model import relayout_cost_features
+from ..slice_ownership import project_slice_axis
 from ..ir import FixedTiledLayout
 from ..loop_info import CoarseTileInfo
 from ..logging_utils import get_inductor_logger
@@ -152,11 +153,11 @@ class RelayoutCandidate:
 
     @property
     def destination_num_cores(self) -> int:
-        """The consumer's core count, carried by the destination view: equal to
-        ``num_cores`` for permutations and gathers, a multiple of it for a
-        broadcast or complete repartition, where the copy lives on the destination's
-        cores while
-        the plan's ``num_cores`` stays the source's."""
+        """The destination view's physical core count.
+
+        The copy lives on these cores. The plan's ``num_cores`` remains the
+        source count, including when the two domains differ.
+        """
         return cast(int, self.destination_view.num_cores)
 
     def __post_init__(self) -> None:
@@ -305,121 +306,6 @@ class FiredRelayoutGroup:
         return groups
 
 
-def _project_affine_slice_axis(
-    coordinate: sympy.Expr,
-    device_extent: int,
-    split: int,
-    iteration_space: Mapping[sympy.Symbol, sympy.Expr],
-) -> tuple[sympy.Symbol, sympy.Expr] | None:
-    """Prove that one loop owns slices of a multi-loop affine coordinate.
-
-    A reshaped Q read has stick coordinate ``2 * head + pair``. Splitting
-    sixteen sticks four ways cuts the head loop, while the two rotation-pair
-    values stay inside every owned slice. Counting free symbols alone rejects
-    that legal projection. Bound the *whole* affine rectangle for each loop
-    partition, including every other loop, before using its zero-origin line
-    in the existing ownership proof. This proves containment, not permission
-    to change an access, its physical layout, or the owners.
-
-    Deliberately decline nonlinear, reversed, symbolic and ambiguous cases.
-    No Cartesian enumeration or relaxed proof budget is needed: extrema of
-    an ascending affine rectangle occur at its endpoints.
-    """
-    symbols = coordinate.free_symbols
-    if len(symbols) < 2 or not symbols <= iteration_space.keys():
-        return None
-    origin = coordinate.xreplace(dict.fromkeys(symbols, sympy.S.Zero))
-    coefficients = {symbol: coordinate.coeff(symbol) for symbol in symbols}
-    if (
-        origin.is_Integer is not True
-        or any(c.is_Integer is not True or c <= 0 for c in coefficients.values())
-        or sympy.expand(
-            coordinate - origin - sum(c * s for s, c in coefficients.items())
-        )
-        != 0
-    ):
-        return None
-    extents = {}
-    for symbol in symbols:
-        extent = iteration_space[symbol]
-        extent = sympy.sympify(extent[0] if isinstance(extent, tuple) else extent)
-        if extent.is_Integer is not True or extent <= 0:
-            return None
-        extents[symbol] = int(extent)
-    width = device_extent // split
-    projections = []
-    for loop, extent in extents.items():
-        if extent % split:
-            continue
-        step = coefficients[loop]
-        other_span = sum(
-            coefficients[s] * (size - 1) for s, size in extents.items() if s != loop
-        )
-        loop_width = extent // split
-        for slot in range(split):
-            low = origin + step * slot * loop_width
-            high = low + step * (loop_width - 1) + other_span
-            if not slot * width <= low <= high < (slot + 1) * width:
-                break
-        else:
-            projections.append((loop, origin + step * loop))
-    return projections[0] if len(projections) == 1 else None
-
-
-def _project_floor_affine_slice_axis(
-    coordinate: sympy.Expr,
-    device_extent: int,
-    split: int,
-    iteration_space: Mapping[sympy.Symbol, sympy.Expr],
-) -> tuple[sympy.Symbol, sympy.Expr] | None:
-    """Certify a single floor of an ascending affine coordinate.
-
-    Attention repack writes feature sticks at ``2*head + floor(width/64)``.
-    The width loop stays within a head shard, but is not itself affine. For
-    integer loops, an integer-affine A satisfies A + floor(B) = floor(A+B).
-    After clearing the positive integer denominator D, containment of the
-    integer numerator in [D*lo, D*hi) proves containment of its floor in
-    [lo, hi). Reuse the affine proof on that scaled physical axis, then return
-    the ORIGINAL access's representative line. No emitted access changes.
-
-    Only one floor with unit coefficient is admitted. Nonlinear numerators,
-    symbolic divisors, reversed accesses and crossing slices still fail the
-    existing affine containment proof.
-    """
-    floors = coordinate.atoms(sympy.floor)
-    if len(floors) != 1:
-        return None
-    quotient = next(iter(floors))
-    integer_part = sympy.expand(coordinate - quotient)
-    symbols = coordinate.free_symbols
-    origin = integer_part.xreplace(dict.fromkeys(symbols, sympy.S.Zero))
-    coefficients = {symbol: integer_part.coeff(symbol) for symbol in symbols}
-    if (
-        origin.is_Integer is not True
-        or any(c.is_Integer is not True for c in coefficients.values())
-        or sympy.expand(
-            integer_part - origin - sum(c * s for s, c in coefficients.items())
-        )
-        != 0
-    ):
-        return None
-    numerator, denominator = sympy.together(
-        integer_part + quotient.args[0]
-    ).as_numer_denom()
-    if denominator.is_Integer is not True or denominator <= 0:
-        return None
-    projected = _project_affine_slice_axis(
-        sympy.expand(numerator),
-        device_extent * int(denominator),
-        split,
-        iteration_space,
-    )
-    if projected is None:
-        return None
-    loop, _ = projected
-    return loop, coordinate.xreplace(dict.fromkeys(symbols - {loop}, sympy.S.Zero))
-
-
 def work_division_from_view(
     view: PerCoreView | None,
     device_size: Sequence[int],
@@ -458,16 +344,11 @@ def work_division_from_view(
         if len(symbols) == 1 and symbols <= iteration_space.keys():
             loop = next(iter(symbols))
         else:
-            projected = _project_affine_slice_axis(
+            if not config.lx_extended_ownership:
+                raise ValueError(f"cannot map device dimension {axis} to one loop")
+            projected = project_slice_axis(
                 device_coordinates[axis], int(device_size[axis]), split, iteration_space
             )
-            if projected is None:
-                projected = _project_floor_affine_slice_axis(
-                    device_coordinates[axis],
-                    int(device_size[axis]),
-                    split,
-                    iteration_space,
-                )
             if projected is None:
                 raise ValueError(f"cannot map device dimension {axis} to one loop")
             loop, proof_coordinates[axis] = projected
@@ -665,12 +546,29 @@ def partition_footprint(layout: FixedTiledLayout, view: PerCoreView) -> int:
     )
 
 
-@cache
 def movement_supported(
     source: PerCoreView,
     destination: PerCoreView,
     source_num_cores: int,
     destination_num_cores: int,
+) -> bool:
+    """Check transfer geometry with the current ownership rollout policy."""
+    return _movement_supported(
+        source,
+        destination,
+        source_num_cores,
+        destination_num_cores,
+        config.lx_extended_ownership,
+    )
+
+
+@cache
+def _movement_supported(
+    source: PerCoreView,
+    destination: PerCoreView,
+    source_num_cores: int,
+    destination_num_cores: int,
+    extended_ownership: bool,
 ) -> bool:
     """Certify uniform partition transfers, gathers and broadcasts.
 
@@ -754,14 +652,17 @@ def movement_supported(
     # A complete destination is an exact repartition, including an expansion
     # onto more cores. The shuffle's per-tensor maps describe the two domains;
     # STCDP intersects their pieces rather than assuming one source per reader.
-    # A full replica is the union of every complete, disjoint source slice.
-    # STCDP already multicasts each source piece to every destination; the
-    # same-core piece uses its local LX path. The fanin bound above still
-    # applies. Do not generalize to partially partitioned replica expansions.
+    # Every destination slice is present. One distinct slice per core is a
+    # complete partition; a full replica instead joins all disjoint sources.
+    # The latter remains part of the optional ownership proofs.
     return (
         source_num_cores == destination_num_cores
         or destination_slices == destination_num_cores
-        or (destination_slices == 1 and fanin[0] == source_num_cores)
+        or (
+            extended_ownership
+            and destination_slices == 1
+            and fanin[0] == source_num_cores
+        )
         or (fanout[0] == destination_num_cores // source_num_cores and fanin[0] == 1)
     )
 
@@ -786,13 +687,16 @@ def core_domain_rejection(source_num_cores: int, consumer_num_cores: int) -> str
 def grouped_gather_rejection(
     consumer: Operation, source_num_cores: int, destination_view: PerCoreView
 ) -> str | None:
-    """Why ``consumer``'s ``destination_view`` may not be a grouped gather of a
-    producer on ``source_num_cores``, or ``None``. A destination with fewer
-    owners than the source has cores assembles each slice from several source
-    slices (#3440), which the emitter supports for a matmul consumer only; a
-    complete partition (a permutation) or a broadcast is not a gather and passes.
-    The consumer half of the rule; the geometry is :func:`movement_supported`'s.
-    Shared by the committed collector and the solver's enumeration."""
+    """Reject a replicated grouped gather without a matmul consumer.
+
+    A #3440 grouped gather repeats assembled destination slices across cores.
+    This replicated layout supports matmul consumers only.
+    A complete destination partition has no replicas. Shuffle lowering can
+    assemble its disjoint source pieces for a pointwise consumer too, including
+    expansion onto more cores. ``movement_supported`` checks its uniform
+    routes and fan-in bound. Both candidate pricing and committed copies use
+    this consumer rule.
+    """
     owners = math.prod(dict(destination_view.work_slice_dims).values())
     if owners < source_num_cores and not _is_matmul_op(consumer):
         return "cannot emit: grouped gather requires a matmul consumer"
@@ -893,6 +797,8 @@ def _is_activation_source(
     reads = [d for d in op_read_writes(op).reads if isinstance(d, MemoryDep)]
     if any(isinstance(operations.get(dep.name), ComputedBuffer) for dep in reads):
         return True
+    if not config.lx_extended_ownership:
+        return False
     if (
         len(reads) != 1
         or reads[0].is_indirect()
@@ -1169,6 +1075,8 @@ def solver_relayout_pair_cost(
 
     Unequal complete partitions use the same estimate on the smaller domain;
     this is not a separately fitted law.
+    It charges more than the larger-domain formula, not a proven upper bound
+    on hardware time.
 
     Use the reporting path's feature vector and ``relayout_ns`` with the finer
     view's geometry. Build each view for its own core

@@ -2429,13 +2429,13 @@ class TestAOTAnnotationAssumptions(DynamoTestCase):
     ],
 )
 def test_floor_slice_projection_rejects_unproven_access(expression, width_extent):
-    from torch_spyre._inductor.scratchpad.lx_relayout import (
-        _project_floor_affine_slice_axis,
+    from torch_spyre._inductor.slice_ownership import (
+        project_floor_affine_slice_axis,
     )
 
     h, w = sympy.symbols("h w")
     assert (
-        _project_floor_affine_slice_axis(
+        project_floor_affine_slice_axis(
             sympy.sympify(expression), 16, 4, {h: 8, w: width_extent}
         )
         is None
