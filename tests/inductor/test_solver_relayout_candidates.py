@@ -574,10 +574,27 @@ def test_consumer_rules_are_shared_with_the_committed_collector(monkeypatch):
 
 @pytest.mark.parametrize(
     "violation",
-    ["view_target", "cache_read", "direct_write", "source_mutated", "source_aliased"],
+    [
+        None,
+        "view_target",
+        "internal_target",
+        "late_producer",
+        "lx_target",
+        "cache_read",
+        "direct_write",
+        "mutation_name",
+        "opaque_aliases",
+        "other_write",
+        "source_mutated",
+        "source_aliased",
+        "producer_alias",
+        "tiled_consumer",
+        "tiled_producer",
+    ],
 )
+@pytest.mark.parametrize("enabled", [True, False])
 def test_persistent_scatter_requires_independent_immutable_source(
-    monkeypatch, violation
+    monkeypatch, violation, enabled
 ):
     """Structural proof must reject alias/order violations before placement."""
     from types import SimpleNamespace
@@ -655,9 +672,10 @@ def test_persistent_scatter_requires_independent_immutable_source(
     monkeypatch.setattr(lx_relayout, "MemoryDep", Dep)
     monkeypatch.setattr(lx_relayout, "_is_matmul_op", lambda op: op is source)
     monkeypatch.setattr(lx_relayout, "op_read_writes", lambda op: op.deps)
-    assert lx_relayout._persistent_scatter_consumer(graph, source, update, "value") is (
-        violation is None
-    )
+    with config.patch(lx_extended_ownership=enabled):
+        assert lx_relayout._persistent_scatter_consumer(
+            graph, source, update, "value"
+        ) is (enabled and violation is None)
 
 
 @pytest.mark.parametrize("invalid", [None, "offset", "compact_stride", "inner_tail"])
