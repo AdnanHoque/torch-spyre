@@ -153,11 +153,11 @@ class RelayoutCandidate:
 
     @property
     def destination_num_cores(self) -> int:
-        """The consumer's core count, carried by the destination view: equal to
-        ``num_cores`` for permutations and gathers, a multiple of it for a
-        broadcast or complete repartition, where the copy lives on the destination's
-        cores while
-        the plan's ``num_cores`` stays the source's."""
+        """The destination view's physical core count.
+
+        The copy lives on these cores. The plan's ``num_cores`` remains the
+        source count, including when the two domains differ.
+        """
         return cast(int, self.destination_view.num_cores)
 
     def __post_init__(self) -> None:
@@ -635,6 +635,8 @@ def movement_supported(
     # onto more cores. The shuffle's per-tensor maps describe the two domains;
     # STCDP intersects their pieces rather than assuming one source per reader.
     # Keep the narrower existing rule for replicated larger destinations.
+    # The guards above require every destination slice to be present. With
+    # as many distinct slices as cores, each core therefore owns one slice.
     return (
         source_num_cores == destination_num_cores
         or destination_slices == destination_num_cores
@@ -661,13 +663,16 @@ def core_domain_rejection(source_num_cores: int, consumer_num_cores: int) -> str
 def grouped_gather_rejection(
     consumer: Operation, source_num_cores: int, destination_view: PerCoreView
 ) -> str | None:
-    """Why ``consumer``'s ``destination_view`` may not be a grouped gather of a
-    producer on ``source_num_cores``, or ``None``. A destination with fewer
-    owners than the source has cores assembles each slice from several source
-    slices (#3440), which the emitter supports for a matmul consumer only; a
-    complete partition (a permutation) or a broadcast is not a gather and passes.
-    The consumer half of the rule; the geometry is :func:`movement_supported`'s.
-    Shared by the committed collector and the solver's enumeration."""
+    """Reject a replicated grouped gather without a matmul consumer.
+
+    A #3440 grouped gather repeats assembled destination slices across cores.
+    This replicated layout supports matmul consumers only.
+    A complete destination partition has no replicas. Shuffle lowering can
+    assemble its disjoint source pieces for a pointwise consumer too, including
+    expansion onto more cores. ``movement_supported`` checks its uniform
+    routes and fan-in bound. Both candidate pricing and committed copies use
+    this consumer rule.
+    """
     owners = math.prod(dict(destination_view.work_slice_dims).values())
     if owners < source_num_cores and not _is_matmul_op(consumer):
         return "cannot emit: grouped gather requires a matmul consumer"
@@ -1015,6 +1020,8 @@ def solver_relayout_pair_cost(
 
     Unequal complete partitions use the same estimate on the smaller domain;
     this is not a separately fitted law.
+    It charges more than the larger-domain formula, not a proven upper bound
+    on hardware time.
 
     Use the reporting path's feature vector and ``relayout_ns`` with the finer
     view's geometry. Build each view for its own core
