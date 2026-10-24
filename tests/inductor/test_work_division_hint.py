@@ -2538,15 +2538,20 @@ def test_relayout_operation_frame_keeps_tensor_domains(source_cores, destination
             dict(enumerate(destination_rows)),
         )
     )
+    assert {source for source, _ in routes} == set(range(source_cores))
+    assert {destination for _, destination in routes} == set(range(destination_cores))
+    # Ordinary copies do not select terminal reduction producers. Production
+    # leaves this field empty; route edges can repeat a source on expansion.
     spec = _completed_route_spec(
         source,
         destination,
         [512, 64],
         [row, lane],
         {row: (512, destination_cores), lane: (64, 1)},
-        routes,
+        (),
         65536,
     )
+    assert spec.completed_producer_cores == ()
     simplify_op_spec(spec)
     operation_cores = math.prod(count for _, count in spec.iteration_space.values())
     original_tensor_domains = [arg.work_division.num_cores for arg in spec.args]
