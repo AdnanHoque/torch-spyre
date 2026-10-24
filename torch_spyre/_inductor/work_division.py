@@ -1538,6 +1538,8 @@ class ResidencyEdge:
 
         if not any(is_partial_lx_read(self.parent_op, dep) for dep in self.read_deps):
             return True
+        if not config.lx_extended_ownership:
+            return False
         return (
             local_lx_subrange_certificate(
                 V.graph, self.parent_op, self.consumer_op, parent_view, consumer_view

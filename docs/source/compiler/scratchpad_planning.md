@@ -769,3 +769,12 @@ bugs that the hand-written cases miss.
 - [`hbm_pool_planning.md`](hbm_pool_planning.md) describes the
   complementary device-memory pass, which packs every intermediate that
   LX planning did not claim into a shared HBM segment.
+
+### Cumulative local-read rollout
+
+`SPYRE_LX_EXTENDED_OWNERSHIP=0` also disables the optional local subrange
+admissions. This includes same-core compact readers and full-parent copies
+that serve them. The geometry helpers remain available for validation.
+Existing prefix support remains active. Mandatory span, ownership, lifetime,
+alias and final-emission checks stay active. The switch is part of the compile
+cache key; reuse of an ON plan cannot establish an OFF-plan comparison.

@@ -1126,7 +1126,10 @@ def solver_relayout_edge_context(
         # Move the complete parent, then certify a same-core compact read.
         # The candidate checks this certificate under its destination view;
         # no partial domain is ever presented to the shuffle emitter.
-        if local_lx_subrange_geometry(graph, producer, consumer) is None:
+        if (
+            not config.lx_extended_ownership
+            or local_lx_subrange_geometry(graph, producer, consumer) is None
+        ):
             return None
     producer_coords = try_device_coordinates(
         producer.layout.device_layout, write_dep, None
@@ -1539,6 +1542,8 @@ def local_lx_subrange_certificate(
 
 def local_lx_subrange_source(graph, name: str, uses: list[int]) -> bool:
     """Every partial reader must already have a fresh compact materializer."""
+    if not config.lx_extended_ownership:
+        return False
     producer = graph.get_buffer(name)
     found = False
     for index in uses:
@@ -1867,6 +1872,9 @@ def collect_lx_relayout_plans(
                 is_partial_lx_read(producer, dep)
                 and prefix_lx_contraction_axis(producer, consumer) is None
             ):
+                if not config.lx_extended_ownership:
+                    rejection_reason = "local subrange ownership is disabled"
+                    break
                 if (
                     reduction is None
                     and local_lx_subrange_certificate(
