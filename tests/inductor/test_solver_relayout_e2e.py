@@ -912,7 +912,7 @@ def test_sa_cooptimizer_keeps_its_objective_and_decides_no_relayout(monkeypatch)
 
 @pytest.mark.parametrize(
     "rows,width,dtype,batched,strided",
-    [(512, 4096, torch.float16, True, False)],
+    [(512, 4096, torch.float16, True, False), (64, 512, torch.float32, False, True)],
 )
 def test_complete_partition_expansion_fires_and_preserves_values(
     monkeypatch, rows, width, dtype, batched, strided
@@ -1536,20 +1536,22 @@ def test_v_projection_cache_handoff_preserves_persistent_alias(
     assert torch.equal(alias.cpu(), expected), "persistent cache alias lost its update"
     assert torch.equal(out.cpu(), expected)
     assert torch.equal(side.cpu(), v_ref + 1), "cache write changed a live projection"
+    projections = [s for s in specs.values() if s.op == "batchmatmul"]
+    assert len(projections) == 1
+    projection = projections[0]
+    projected = projection.args[-1]
+    # Match the actual indirect cache store, not another identity/host copy.
+    updates = [
+        s
+        for s in specs.values()
+        if s.op == "identity"
+        and any("IndirectAccess" in str(c) for c in s.args[-1].device_coordinates)
+    ]
+    assert len(updates) == 1
+    update = updates[0]
     if rows == 64:
         observed.assert_emitted_in_lx(expected_plans=0)
-        projections = [s for s in specs.values() if s.op == "batchmatmul"]
-        assert len(projections) == 1
-        projected = projections[0].args[-1]
         assert set(projected.allocation) == {"hbm_pool"}
-        updates = [
-            s
-            for s in specs.values()
-            if s.op == "identity"
-            and any("IndirectAccess" in str(c) for c in s.args[-1].device_coordinates)
-        ]
-        assert len(updates) == 1
-        update = updates[0]
         assert set(update.args[-1].allocation) == {"hbm"}
         assert any(
             arg.allocation == projected.allocation for arg in update.args[:-1]
@@ -1567,20 +1569,7 @@ def test_v_projection_cache_handoff_preserves_persistent_alias(
     assert len(plan.consumer_names) == 1, (
         "later original reader was unnecessarily rewritten"
     )
-    projections = [s for s in specs.values() if s.op == "batchmatmul"]
-    assert len(projections) == 1
-    projection = projections[0]
-    projected = projection.args[-1]
     assert set(projected.allocation) == {"lx"}, "V projection still stages in HBM"
-    # Match the actual indirect cache store, not another identity/host copy.
-    updates = [
-        s
-        for s in specs.values()
-        if s.op == "identity"
-        and any("IndirectAccess" in str(c) for c in s.args[-1].device_coordinates)
-    ]
-    assert len(updates) == 1
-    update = updates[0]
     assert set(update.args[-1].allocation) == {"hbm"}, "cache persistence was removed"
     values = [a for a in update.args[:-1] if set(a.allocation) == {"lx"}]
     assert len(values) == 1, "cache update did not read the LX projection copy"

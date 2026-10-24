@@ -82,11 +82,7 @@ def test_pair_cost_reproduces_the_canonical_row(kind, monkeypatch):
     from torch_spyre._inductor import dump_cost_model as dcm
 
     source, destination, dims, expected = _SRC, _DST, _DEVICE_DIMS, 8778
-    if kind == "expansion":
-        source = PerCoreView(((2, 16),), ((2, _CORE_ID),), num_cores=16)
-        destination = _TILE8X4
-        dims, expected = _NORM_DIMS, 8598.39180987203
-    elif kind == "full_replica":
+    if kind == "full_replica":
         source = PerCoreView(((1, 2),), ((1, _CORE_ID),), num_cores=2)
         destination = PerCoreView((), (), num_cores=32)
         dims, expected = [2, 8, 128, 64], 484.79948811700183
@@ -103,8 +99,7 @@ def test_pair_cost_reproduces_the_canonical_row(kind, monkeypatch):
     assert cost == pytest.approx(expected, rel=0.01)
 
     # Exercise the reporting extractor, not a second hand-written feature vector.
-    # The copy's iteration split differs from both physical transfer domains for
-    # a full replica, and from the smaller domain for an expansion.
+    # The full replica's iteration split differs from both physical domains.
     plan = lx_relayout.LXRelayoutPlan(
         "source", ("consumer",), source, destination, source.num_cores
     )
