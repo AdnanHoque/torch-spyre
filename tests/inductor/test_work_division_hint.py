@@ -2561,6 +2561,7 @@ def test_relayout_codegen_wraps_only_a_contracted_operation_frame(
     assert parsed.opfunc == "shuffle", "unequal ownership became an ordinary identity"
     assert parsed.num_cores == max(source_cores, destination_cores)
     assert parsed.work_slices == {r: destination_cores, f: 1}
+    assert parsed.core_id_to_work_slice[f] == 0
     actual_source, actual_destination = [arg.work_division for arg in parsed.args]
     assert actual_source.num_cores == source_cores
     assert actual_source.work_slices == {r: source_cores // 2, f: 2}
