@@ -793,3 +793,27 @@ bugs that the hand-written cases miss.
 - [`hbm_pool_planning.md`](hbm_pool_planning.md) describes the
   complementary device-memory pass, which packs every intermediate that
   LX planning did not claim into a shared HBM segment.
+
+### Matched OFF-plan comparison
+
+Use `tools/run_off_plan_capture.py` on the same existing fixture at each adjacent
+source pair. Set `SPYRE_LX_EXTENDED_OWNERSHIP=0` before either process starts.
+Use fresh compile caches and the same upstream commit, inputs, hints, planner
+seed, worker count and other compiler settings. The contract records the
+verified input and hint hashes. Do not compare unmatched source configurations.
+
+The read-only observer records successful final codegen. It keeps final graph
+storage and physical layouts, dependencies, relayout registry, complete OpSpecs,
+argument binding and HBM pool size. It does not force a layout or a division.
+Unknown fields stop capture. Empty captures and cache hits cannot pass.
+Buffer names and program order remain significant; differences require review.
+
+Compare the two saved records with `tools/lx_semantic_plan.py`. Repeat the
+adjacent OFF/OFF comparison through the final stack, then compare its OFF plan
+with the matched #5160 OFF plan. Numerical checks remain separate. Host tests
+of the recorder do not establish that these native comparisons have passed.
+
+The pre-flag reference is #5160 at `525dfd8c`. Only that verified source and its
+matching config file may omit `lx_extended_ownership`; it represents the OFF
+baseline. Other missing settings stop capture. Iteration-axis order remains
+significant in the saved plan.
