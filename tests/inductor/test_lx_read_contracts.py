@@ -79,6 +79,18 @@ def test_facts_rebase_only_the_final_argument():
         geometry.origin = (0, 0, 0)
 
 
+@pytest.mark.parametrize("consumer_allocation", [(), (("hbm_pool", 0),)])
+def test_external_consumer_allocation_is_not_rewritten(consumer_allocation):
+    _, contract, argument, space = _local_read()
+    contract = replace(contract, consumer_allocation=consumer_allocation)
+    result = normalize_local_read(
+        contract, "parent", argument, space, allow_extended=True
+    )
+    assert result.allocation == {"lx": 4096}
+    assert contract.consumer_allocation == consumer_allocation
+    assert argument.allocation == {"lx": 0}
+
+
 @pytest.mark.parametrize(
     "case",
     [
@@ -188,3 +200,18 @@ def test_residency_edge_declines_partial_reads_without_planner_facts():
     edge.local_read_geometry = None
     edge._has_partial_read = lambda: False
     assert check(edge, contract.source_view, contract.source_view)
+
+
+def test_rollout_off_declines_partial_facts_before_certification(monkeypatch):
+    from torch_spyre._inductor import config
+    from torch_spyre._inductor import work_division
+
+    def unexpected_certificate(*args):
+        raise AssertionError("OFF queried an optional local-read certificate")
+
+    monkeypatch.setattr(work_division, "local_read_certificate", unexpected_certificate)
+    edge = SimpleNamespace(local_read_geometry=object(), _has_partial_read=lambda: True)
+    with config.patch(lx_extended_ownership=False):
+        assert not work_division.ResidencyEdge._local_reads_compatible(edge, None, None)
+        edge._has_partial_read = lambda: False
+        assert work_division.ResidencyEdge._local_reads_compatible(edge, None, None)
