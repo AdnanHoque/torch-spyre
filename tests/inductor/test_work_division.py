@@ -2389,8 +2389,9 @@ class TestResidencyEdgeMatching(unittest.TestCase):
         stack = ExitStack()
         # This ownership-policy fixture supplies views, not physical read geometry.
         stack.enter_context(
-            patch(
-                "torch_spyre._inductor.scratchpad.lx_relayout.is_partial_lx_read",
+            patch.object(
+                work_division_module.ResidencyEdge,
+                "_has_partial_read",
                 return_value=False,
             )
         )
@@ -4278,8 +4279,9 @@ class TestMultiReadEdgeInversion(unittest.TestCase):
             stack.enter_context(pass_utils_module.V.set_graph_handler(graph))
             # This inverse-ownership sweep does not build a subrange proof graph.
             stack.enter_context(
-                patch(
-                    "torch_spyre._inductor.scratchpad.lx_relayout.is_partial_lx_read",
+                patch.object(
+                    work_division_module.ResidencyEdge,
+                    "_has_partial_read",
                     return_value=False,
                 )
             )
