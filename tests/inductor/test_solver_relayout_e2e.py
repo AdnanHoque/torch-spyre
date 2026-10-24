@@ -1009,6 +1009,7 @@ def test_prefix_linear_scheduler_demotion_retains_valid_hbm_clone(monkeypatch):
 def _run_prefix_linear_case(monkeypatch, *, mode):
     import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
     import torch_spyre._inductor.scheduler as sched_mod
+    import torch_spyre._inductor.passes as passes_mod
     from torch._inductor.virtualized import V
     from torch_spyre._inductor.pass_utils import op_read_writes
     from torch_spyre._inductor.scratchpad.utils import storage_has_single_writer
@@ -1169,6 +1170,7 @@ def _run_prefix_linear_case(monkeypatch, *, mode):
 
         monkeypatch.setattr(sched_mod.SuperDSCScheduling, "prepare_kernel", prepare)
         monkeypatch.setattr(sched_mod, "prepare_spyre_kernels", prepare_all)
+        monkeypatch.setattr(passes_mod, "prepare_spyre_kernels", prepare_all)
 
     rows, physical, logical, outputs = 512, 3328, 3200, 512
 
