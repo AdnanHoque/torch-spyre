@@ -1495,9 +1495,7 @@ def local_lx_emission_contract(graph, name, consumer) -> LocalReadEmission | Non
         element_arrangement=ElementArrangement.STANDARD,
         source_allocation=tuple(layout.allocation.items()),
         consumer_name=consumer.get_name(),
-        consumer_allocation=tuple(
-            getattr(consumer.layout, "allocation", {}).items()
-        ),
+        consumer_allocation=tuple(getattr(consumer.layout, "allocation", {}).items()),
     )
 
 
