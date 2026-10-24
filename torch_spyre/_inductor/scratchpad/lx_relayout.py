@@ -694,10 +694,8 @@ def _movement_supported(
     fanout = [0] * source_num_cores
     fanin = [0] * destination_num_cores
     for src, dst in edges:
-        for core in range(source_num_cores):
-            fanout[core] += src == core
-        for core in range(destination_num_cores):
-            fanin[core] += dst == core
+        fanout[src] += 1
+        fanin[dst] += 1
 
     # Every source sends to the same number of destination cores.
     if len(set(fanout)) != 1:
