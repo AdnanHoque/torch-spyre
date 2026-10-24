@@ -2588,3 +2588,47 @@ def test_relayout_codegen_wraps_only_a_contracted_operation_frame(
     # The certificate and per-tensor-ownership guard remain mandatory.
     with pytest.raises(AssertionError, match="per-tensor ownership"):
         parse_op_spec(replace(spec, op_info={}))
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_local_read_rollout_declines_before_graph_access(enabled):
+    class GraphAccess(Exception):
+        pass
+
+    class Graph:
+        def get_buffer(self, name):
+            raise GraphAccess
+
+    with config.patch(lx_extended_ownership=enabled):
+        if enabled:
+            with pytest.raises(GraphAccess):
+                lx_relayout_module.local_lx_subrange_source(Graph(), "source", [])
+        else:
+            assert not lx_relayout_module.local_lx_subrange_source(
+                Graph(), "source", []
+            )
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_hinted_reader_rollout_declines_before_fx_access(enabled):
+    from torch_spyre._inductor.materialize_hinted_views import materialize_hinted_views
+
+    class GraphAccess(Exception):
+        pass
+
+    class Graph:
+        @property
+        def nodes(self):
+            raise GraphAccess
+
+    with config.patch(
+        lx_extended_ownership=enabled,
+        lx_planning=True,
+        co_optimizing_lx_planning=True,
+        lx_planner_relayout=True,
+    ):
+        if enabled:
+            with pytest.raises(GraphAccess):
+                materialize_hinted_views(Graph())
+        else:
+            assert materialize_hinted_views(Graph()) is None

@@ -134,6 +134,7 @@ def materialize_hinted_views(graph):
         config.lx_planning
         and config.co_optimizing_lx_planning
         and config.lx_planner_relayout
+        and config.lx_extended_ownership
     ):
         return
     parents = {
