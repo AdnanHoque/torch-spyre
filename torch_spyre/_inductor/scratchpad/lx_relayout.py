@@ -978,22 +978,9 @@ def _persistent_scatter_consumer(
     # FixedTiledLayout is fresh storage, but aliases introduced by other ops
     # could still mutate it or extend its lifetime behind the planner's back.
     # Reject those graphs rather than infer safety from a solver placement.
-    for op in operations:
-        try:
-            if (
-                source_name in op.get_mutation_names()
-                or source_name in op.get_inputs_that_alias_output()
-                or (
-                    op is not producer
-                    and any(
-                        dep.name == source_name for dep in op_read_writes(op).writes
-                    )
-                )
-            ):
-                return False
-        except NotImplementedError:
-            return False
-    return True
+    if source_name != producer.get_name():
+        return False
+    return storage_has_single_writer(graph, producer)
 
 
 def _supported_consumer_layout(graph, producer, consumer, source_name) -> bool:
