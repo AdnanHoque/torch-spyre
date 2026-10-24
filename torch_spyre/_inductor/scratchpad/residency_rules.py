@@ -72,6 +72,9 @@ PREFIX_GATHER = ResidencyException(
     (
         "test_prefix_lx_contraction_requires_exact_backing_stride",
         "test_prefix_linear_reads_a_separate_full_backing_lx_gather",
+        "test_prefix_linear_without_served_copy_spills_the_source",
+        "test_prefix_linear_scheduler_demotion_retains_valid_hbm_clone",
+        "test_prefix_lx_contraction_requires_exact_backing_stride[second_reader]",
     ),
 )
 
