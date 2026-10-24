@@ -54,7 +54,6 @@ from ..lx_read_contracts import (
     LocalReadEmission,
     has_partial_read,
     local_read_certificate,
-    normalize_local_read,
 )
 from ..ir import FixedTiledLayout, SpyreConstantFallback
 from ..loop_info import CoarseTileInfo
@@ -1358,32 +1357,6 @@ def local_lx_emission_contract(graph, name, consumer) -> LocalReadEmission | Non
         source_allocation=tuple(layout.allocation.items()),
         consumer_name=consumer.get_name(),
         consumer_allocation=tuple(consumer.layout.allocation.items()),
-    )
-
-
-def normalize_local_lx_subrange(
-    graph, name, consumer, argument: TensorArg, iteration_space
-) -> TensorArg:
-    """Compatibility entry point; storage permission remains planner-owned."""
-    if (
-        not config.lx_planner_relayout
-        or config.ktir_emitter
-        or not argument.is_input
-        or "lx" not in argument.allocation
-        or not isinstance(consumer, ComputedBuffer)
-        or not isinstance(consumer.data, Pointwise)
-    ):
-        return argument
-    producer = graph.get_buffer(name)
-    reads = [dep for dep in op_read_writes(consumer).reads if dep.name == name]
-    if not has_partial_read(producer.layout.size, reads):
-        return argument
-    return normalize_local_read(
-        local_lx_emission_contract(graph, name, consumer),
-        name,
-        argument,
-        iteration_space,
-        allow_extended=config.lx_extended_ownership,
     )
 
 
