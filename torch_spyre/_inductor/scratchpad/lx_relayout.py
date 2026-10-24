@@ -40,7 +40,7 @@ from ..core_mapping import (
     work_division_from_view as physical_work_division_from_view,
     dense_read_rectangle as _dense_read_rectangle,
     DenseSubrangeTransfer,
-    owner_slots,
+    core_slices as _core_slices,
     partition_lx_size_bytes,
     _EVALUATION_ERRORS,
     _MAX_SHUFFLE_FANIN,
@@ -386,18 +386,6 @@ def demote_lx_relayout_group(
         if isinstance(layout, FixedTiledLayout):
             _clear_lx_state(layout)
     logger.info("demoted %s out of LX: %s", ", ".join(sorted(names)), reason)
-
-
-def _core_slices(view: PerCoreView, num_cores: int) -> dict[int, dict[int, int]]:
-    if view.num_cores is not None and view.num_cores <= 0:
-        raise ValueError(f"physical core count must be positive, got {view.num_cores}")
-    if view.num_cores is not None and view.num_cores != num_cores:
-        raise ValueError(
-            "ownership core count differs from the communication domain: "
-            f"{view.num_cores} != {num_cores}"
-        )
-    rows = owner_slots(dict(view.core_to_slot), dict(view.work_slice_dims), num_cores)
-    return dict(enumerate(rows))
 
 
 def partition_footprint(layout: FixedTiledLayout, view: PerCoreView) -> int:

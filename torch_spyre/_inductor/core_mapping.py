@@ -1083,6 +1083,19 @@ class PerCoreView:
         )
 
 
+def core_slices(view: PerCoreView, num_cores: int) -> dict[int, dict[int, int]]:
+    if view.num_cores is not None and view.num_cores <= 0:
+        raise ValueError(f"physical core count must be positive, got {view.num_cores}")
+    if view.num_cores is not None and view.num_cores != num_cores:
+        raise ValueError(
+            "ownership core count differs from the communication domain: "
+            f"{view.num_cores} != {num_cores}"
+        )
+    rows = owner_slots(dict(view.core_to_slot), dict(view.work_slice_dims), num_cores)
+    return dict(enumerate(rows))
+
+
+
 def work_division_from_view(
     view: PerCoreView | None,
     device_size: Sequence[int],
