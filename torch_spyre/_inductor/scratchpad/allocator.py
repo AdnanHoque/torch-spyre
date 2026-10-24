@@ -3410,12 +3410,17 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         # graph positions without changing the solver's lifetime records.
         current_uses = calculate_liveness(graph)
         by_name = {b.name: b for b in allocation}
+        gaps = FirstFitLayoutSolver([], self.size)
         placed: list[LifetimeBoundBuffer] = []
         for b in allocation:
             if b.address is None:
                 continue
             if isinstance(b, CoreDivisionBuffer):
                 if b.chosen_division is None:
+                    logger.debug(
+                        "collective output staging stopped: %s has no chosen division",
+                        b.name,
+                    )
                     return
                 # Use the span actually reserved by the solver, including
                 # integer/index buffers and pending relayout copies. The
@@ -3423,7 +3428,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
                 span = b.per_core_size(b.chosen_division)
             else:
                 span = b.size
-            span = round_up_to_alignment(span, _LX_ALLOCATION_GRANULARITY_BYTES)
+            span = round_up_to_alignment(span, gaps.alignment)
             placed.append(LifetimeBoundBuffer(b.name, span, [0], address=b.address))
 
         outputs = set(graph.get_output_names())
@@ -3469,10 +3474,15 @@ class CoOptimizingAllocator(ScratchpadAllocator):
             graph,
             drained_readers={name: op.get_name() for name, op in candidates.items()},
         )
-        gaps = FirstFitLayoutSolver([], self.size)
         for name, collective in candidates.items():
             view = views.get(name)
             if view is None:
+                # The ownership judge also rejects K-split writers: only the
+                # last reduction cores hold the complete result.
+                logger.debug(
+                    "collective output staging skipped: %s has no accepted ownership",
+                    name,
+                )
                 continue
             try:
                 span = partition_footprint(graph.get_buffer(name).layout, view)
