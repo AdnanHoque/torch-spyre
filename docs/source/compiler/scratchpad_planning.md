@@ -818,7 +818,6 @@ lifetimes and supported emission.
 functions. `dump_cost_model.py` keeps diagnostic output and latest-report state.
 This extraction does not change coefficients, units or physical core domains.
 
-
 ### Matched OFF-plan comparison
 
 Use `tools/run_off_plan_capture.py` on the same existing fixture at each adjacent
