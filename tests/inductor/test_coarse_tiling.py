@@ -10119,7 +10119,9 @@ class TestDrainedCollective(unittest.TestCase):
 class TestCollectiveStageCurrentUses(unittest.TestCase):
     """Post-solve staging uses current accesses, not saved operation positions."""
 
-    def _run_stage(self, extra_reader=False):
+    def _run_stage(self, extra_reader=False, *, placed=(), span=64, real_gaps=False):
+        from contextlib import nullcontext
+
         from torch._inductor.ir import ComputedBuffer
 
         from torch_spyre._inductor.ir import FixedTiledLayout
@@ -10202,13 +10204,15 @@ class TestCollectiveStageCurrentUses(unittest.TestCase):
                 "get_ncores_for_buffers",
                 return_value=({}, {}, {"result": object()}),
             ) as views,
-            patch.object(allocator_module, "partition_footprint", return_value=64),
-            patch.object(
+            patch.object(allocator_module, "partition_footprint", return_value=span),
+            nullcontext()
+            if real_gaps
+            else patch.object(
                 allocator_module, "FirstFitLayoutSolver", return_value=gap_solver
             ),
         ):
             allocator._stage_collective_outputs(
-                graph, [buffer], [SimpleNamespace(consumer_names=("result",))]
+                graph, [*placed, buffer], [SimpleNamespace(consumer_names=("result",))]
             )
         self.assertEqual(buffer.uses, [0, 1])
         return allocator, buffer, graph, collective, external, gap, views
@@ -10230,6 +10234,176 @@ class TestCollectiveStageCurrentUses(unittest.TestCase):
         external.assert_not_called()
         gap.assert_not_called()
         views.assert_not_called()
+
+    def test_real_gap_solver_keeps_stages_disjoint_or_declines(self):
+        from torch_spyre._inductor.scratchpad.plan_solver import (
+            LifetimeBoundBuffer,
+            RelayoutCopyBuffer,
+        )
+
+        out, reduction = sympy.symbols("out reduction", integer=True)
+        placed = [
+            CoreDivisionBuffer(
+                "split_k",
+                512,
+                [90],
+                address=0,
+                core_divisions=[
+                    CoreDivision(
+                        splits={out: 2, reduction: 4},
+                        reduction_syms=frozenset({reduction}),
+                    )
+                ],
+                chosen_division=0,
+            ),
+            RelayoutCopyBuffer(
+                "__spyre_lx_relayout__:copy",
+                128,
+                [91],
+                address=384,
+                core_divisions=[CoreDivision()],
+                chosen_division=0,
+            ),
+            LifetimeBoundBuffer("late", 256, [92], address=768),
+        ]
+        # Reduction cores retain the full output part. Lifetimes do not
+        # overlap the candidate, but staging must still avoid every span.
+        self.assertEqual(placed[0].per_core_size(0), 256)
+        spans = ((0, 256), (384, 512), (768, 1024))
+        for span in (256, 384):
+            with self.subTest(span=span):
+                allocator, staged, _, collective, *_ = self._run_stage(
+                    placed=placed,
+                    span=span,
+                    real_gaps=True,
+                )
+                self.assertEqual([b.address for b in placed], [0, 384, 768])
+                if span == 384:
+                    self.assertIsNone(staged.address)
+                    self.assertEqual(allocator._collective_output_stages, {})
+                else:
+                    self.assertEqual(staged.address, 512)
+                    self.assertEqual(
+                        allocator._collective_output_stages, {"result": collective}
+                    )
+                    for start, end in spans:
+                        self.assertTrue(
+                            staged.address + span <= start or end <= staged.address
+                        )
+
+    def test_stage_push_rewrites_a_captured_matmul_collective(self):
+        from torch._inductor.ir import ComputedBuffer
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        from torch_spyre._C import SpyreTensorLayout
+        from torch_spyre._inductor.ir import AllReduceAsyncFallback, FixedTiledLayout
+        from torch_spyre._inductor.lowering import enable_spyre_lowerings
+        from torch_spyre._inductor.pass_utils import (
+            _is_matmul_op,
+            op_read_writes,
+            origin_in_graph,
+        )
+        from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
+        from torch_spyre._inductor.scratchpad.graph_editor import (
+            GraphEditor,
+            unwrapped_buffer_name,
+        )
+        from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
+        from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
+
+        def fn(x, weight):
+            return torch.ops._c10d_functional.all_reduce.default(
+                x @ weight, "sum", "test_staging"
+            )
+
+        args = (
+            torch.empty(8, 16, dtype=torch.float16),
+            torch.empty(16, 64, dtype=torch.float16),
+        )
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        inputs = [n.meta["val"] for n in gm.graph.nodes if n.op == "placeholder"]
+        fake_mode = inputs[0].fake_mode
+        graph = GraphLowering(gm, example_inputs=inputs, shape_env=fake_mode.shape_env)
+        with (
+            V.set_graph_handler(graph),
+            V.set_fake_mode(fake_mode),
+            enable_spyre_lowerings(),
+        ):
+            graph.run(*inputs)
+            (collective,) = [
+                op for op in graph.operations if isinstance(op, AllReduceAsyncFallback)
+            ]
+            source = graph.get_buffer(GraphEditor.collective_operand_name(collective))
+            self.assertIsInstance(source, ComputedBuffer)
+            self.assertTrue(_is_matmul_op(source))
+            size, stride = list(source.layout.size), list(source.layout.stride)
+            source.layout = FixedTiledLayout(
+                torch.device("cpu"),
+                torch.float16,
+                size,
+                stride,
+                SpyreTensorLayout(size, stride, torch.float16, [0, 1]),
+            )
+            # CPU lowering does not index the extern operand's users. Include
+            # the real collective wrapper to test the editor's index update.
+            collective_user = graph.graph_outputs[0]
+            self.assertEqual(
+                unwrapped_buffer_name(collective_user), collective.get_name()
+            )
+            if collective_user not in graph.name_to_users[source.get_name()]:
+                graph.name_to_users[source.get_name()].append(collective_user)
+            original_operand = collective.inputs[0]
+            old_users = list(graph.name_to_users[source.get_name()])
+            moved_users = [
+                user
+                for user in old_users
+                if unwrapped_buffer_name(user) == collective.get_name()
+            ]
+            kept_users = [user for user in old_users if user not in moved_users]
+            self.assertTrue(moved_users)
+            allocator = ScratchpadAllocator(GreedyLayoutSolver, 4096)
+            allocator._collective_output_stages = {source.get_name(): collective}
+            view = object()
+            allocator._push_allocation(
+                graph,
+                [
+                    LifetimeBoundBuffer(
+                        source.get_name(),
+                        1024,
+                        [0, 1],
+                        address=128,
+                        lx_view=view,
+                    )
+                ],
+                [],
+            )
+
+            drain_name = GraphEditor.collective_operand_name(collective)
+            self.assertNotEqual(drain_name, source.get_name())
+            drain = graph.get_buffer(drain_name)
+            self.assertIs(graph.operations[graph.operations.index(source) + 1], drain)
+            self.assertLess(
+                graph.operations.index(drain), graph.operations.index(collective)
+            )
+            self.assertEqual(collective.get_mutation_names(), [drain_name])
+            self.assertIn(
+                drain_name, {dep.name for dep in op_read_writes(collective).reads}
+            )
+            self.assertEqual(original_operand.get_name(), source.get_name())
+            self.assertEqual(graph.name_to_users[drain_name], moved_users)
+            self.assertEqual(graph.name_to_users[source.get_name()], kept_users)
+            self.assertEqual(source.layout.allocation, {"lx": 128})
+            self.assertIs(source.layout.lx_view, view)
+            self.assertEqual(drain.layout.allocation, {})
+            self.assertIsNone(drain.layout.lx_view)
+            self.assertEqual(drain.layout.stride, source.layout.stride)
+            self.assertIs(
+                drain.origin_node.args[0], origin_in_graph(source.origins, gm.graph)
+            )
+            self.assertIs(
+                origin_in_graph(collective.origins, gm.graph).args[0], drain.origin_node
+            )
+            gm.graph.lint()
 
 
 class _LoopOp:
