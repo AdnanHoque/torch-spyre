@@ -2530,6 +2530,8 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
             # per-tensor maps below keep the exact source and destination
             # domains. Example: with 16 output row slices, source core 16 must
             # not become row 16.
+            # Explicit core domains:
+            # https://github.com/torch-spyre/torch-spyre/issues/5716
             core_id_to_work_slice = {
                 dim: owner.xreplace(
                     {Symbol("core_id"): Mod(Symbol("core_id"), operation_cores)}
