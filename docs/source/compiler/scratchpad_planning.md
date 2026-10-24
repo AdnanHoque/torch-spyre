@@ -404,9 +404,16 @@ conditions and its tests. Add later ownership exceptions to the registry.
 An ownership proof does not replace storage, lifetime or capacity checks.
 The untiled prefix case does not require same-tile-group search.
 
-| Admission check | Permitted case | Required proof and storage conditions | Covering tests |
+The symbolic proof registry below is separate from storage permission. It
+selects the existing containment proofs in order. The view-recovery caller
+keeps its floor-only, single-driven-axis restriction. An emitted-access proof
+alone does not authorize a recovery candidate.
+
+<!-- BEGIN GENERATED OWNERSHIP PROOFS -->
+| Ownership proof | Certificate | Requires | Covering tests |
 |---|---|---|---|
-| Unrepresentable multi-loop ownership | One loop contains the complete affine read rectangle in its slice | `project_slice_axis` uses the affine containment proof. Original coordinates, storage and lifetime checks remain. | `test_q_rope_ownership_keeps_the_whole_pair_in_its_slice`; `test_q_projection_rope_handoff_preserves_pairs_and_other_consumer` |
+| Affine rectangle containment; emitted access | `project_affine_slice_axis` | one contained loop partition, complete read rectangle, unchanged physical coordinates | `test_q_rope_ownership_keeps_the_whole_pair_in_its_slice`; `test_q_projection_rope_handoff_preserves_pairs_and_other_consumer`; `test_ownership_callers_keep_their_admission_policy` |
+<!-- END GENERATED OWNERSHIP PROOFS -->
 
 `SPYRE_LX_EXTENDED_OWNERSHIP=0` disables the additional ownership proofs while
 retaining the earlier prefix-copy rules. Its default is ON. The flag does not
