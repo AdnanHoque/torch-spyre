@@ -53,6 +53,11 @@ from .ir import (
 )
 from .logging_utils import get_inductor_logger
 from .op_spec import IndirectAccess
+from .lx_read_contracts import (
+    LocalReadGeometry,
+    has_partial_read,
+    local_read_certificate,
+)
 from .pass_utils import (
     PerCoreView,
     SchedNodeArg,
@@ -1441,6 +1446,7 @@ class ResidencyEdge:
     write_dep: MemoryDep
     read_deps: tuple[MemoryDep, ...]
     prep_cache: dict
+    local_read_geometry: LocalReadGeometry | None = None
 
     def parent_view(self, division: CoreDivision) -> Optional[PerCoreView]:
         """The producer's write-view under ``division``, or ``None`` when that
@@ -1529,19 +1535,11 @@ class ResidencyEdge:
         )
 
     def _local_reads_compatible(self, parent_view, consumer_view) -> bool:
-        """Equal owners do not prove partial-read addresses or compact strides."""
-        from torch._inductor.virtualized import V
-        from .scratchpad.lx_relayout import (
-            is_partial_lx_read,
-            local_lx_subrange_certificate,
-        )
-
-        if not any(is_partial_lx_read(self.parent_op, dep) for dep in self.read_deps):
+        """Interpret the planner's read facts without querying its graph state."""
+        if not self._has_partial_read():
             return True
         return (
-            local_lx_subrange_certificate(
-                V.graph, self.parent_op, self.consumer_op, parent_view, consumer_view
-            )
+            local_read_certificate(self.local_read_geometry, parent_view, consumer_view)
             is not None
         )
 
@@ -1703,9 +1701,10 @@ class ResidencyEdge:
         ]
 
     def _has_partial_read(self) -> bool:
-        from .scratchpad.lx_relayout import is_partial_lx_read
-
-        return any(is_partial_lx_read(self.parent_op, dep) for dep in self.read_deps)
+        try:
+            return has_partial_read(self.parent_op.layout.size, self.read_deps)
+        except (AttributeError, TypeError, ValueError, NotImplementedError):
+            return True
 
 
 def build_residency_edge(
@@ -1715,6 +1714,8 @@ def build_residency_edge(
     consumer_reads: Iterable[Dep],
     residency_reason: Optional[str],
     prep_cache: dict,
+    *,
+    local_read_geometry: LocalReadGeometry | None = None,
 ) -> Optional[ResidencyEdge]:
     """The :class:`ResidencyEdge` for this producer-consumer pair, or ``None``
     when the edge can never host a residency."""
@@ -1741,6 +1742,7 @@ def build_residency_edge(
         write_dep=write_dep,
         read_deps=read_deps,
         prep_cache=prep_cache,
+        local_read_geometry=local_read_geometry,
     )
 
 

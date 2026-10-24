@@ -785,3 +785,20 @@ lifetimes and supported emission.
 `cost_features.py` owns feature extraction. Planning and reporting use the same
 functions. `dump_cost_model.py` keeps diagnostic output and latest-report state.
 This extraction does not change coefficients, units or physical core domains.
+
+### Local-read permission and final facts
+
+The planner checks graph structure, independent storage, writers, aliases and
+lifetimes. It exports `LocalReadGeometry` for one residency edge. Work division
+uses this immutable value to test physical ownership. Missing facts decline a
+partial match. Geometry alone cannot authorize storage.
+
+At the actual emitted read, the scheduler's provider repeats the planner's
+live checks. It returns a frozen `LocalReadEmission` value. The emitter checks
+that the final TensorArg still has the certified shape, format, owner map and
+allocation. It checks addresses and overlap before rebasing the read. A missing
+provider fails closed. A preparation retry creates a fresh provider and facts;
+no local-read certificate is reused across demotion.
+
+The earlier materialized-relayout registry still certifies copy identities.
+This interface does not alter that contract or add a new attention operation.

@@ -1605,16 +1605,16 @@ def test_gate_up_full_parent_repartition(monkeypatch):
     local_reads = []
     normalize = sk_mod.normalize_local_lx_subrange
 
-    def capture(graph, name, consumer, argument, iteration_space):
-        result = normalize(graph, name, consumer, argument, iteration_space)
+    def capture(contract, name, argument, iteration_space, **kwargs):
+        result = normalize(contract, name, argument, iteration_space, **kwargs)
         if result is not argument:
             local_reads.append(
                 {
                     "source": name,
-                    "consumer": consumer.get_name(),
+                    "consumer": contract.consumer_name,
                     "parent_allocation": dict(argument.allocation),
                     "read_allocation": dict(result.allocation),
-                    "child_allocation": dict(consumer.layout.allocation),
+                    "child_allocation": dict(contract.consumer_allocation),
                     "parent_shape": list(argument.device_size),
                     "child_shape": list(result.device_size),
                 }

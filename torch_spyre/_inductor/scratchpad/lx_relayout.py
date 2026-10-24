@@ -39,16 +39,9 @@ from .. import config
 from ..core_mapping import (
     work_division_from_view as physical_work_division_from_view,
     dense_read_rectangle as _dense_read_rectangle,
-    certify_dense_subrange_transfer,
     DenseSubrangeTransfer,
-    core_mappings_equal,
-    local_subrange_byte_offset,
     owner_slots,
     partition_lx_size_bytes,
-    _loop_regions,
-    _LOOP_POINT,
-    _MAX_EXACT_DIRECT_AXIS_POINTS,
-    _MAX_EXACT_OWNERSHIP_POINTS,
     _EVALUATION_ERRORS,
     _MAX_SHUFFLE_FANIN,
     select_unique_partition_division,
@@ -56,6 +49,13 @@ from ..core_mapping import (
 )
 from ..cost_model import CostParams, relayout_ns
 from ..cost_features import relayout_cost_features
+from ..lx_read_contracts import (
+    LocalReadGeometry,
+    LocalReadEmission,
+    has_partial_read,
+    local_read_certificate,
+    normalize_local_read,
+)
 from ..ir import FixedTiledLayout, SpyreConstantFallback
 from ..loop_info import CoarseTileInfo
 from ..logging_utils import get_inductor_logger
@@ -332,6 +332,7 @@ def work_division_from_view(
         iteration_space,
         allow_extended=config.lx_extended_ownership,
     )
+
 
 def materialized_lx_relayouts(
     graph: GraphLowering,
@@ -1091,8 +1092,6 @@ def is_partial_lx_read(producer: Operation, dep: MemoryDep) -> bool:
         return True
 
 
-
-
 def _local_lx_parent_read(graph, producer, consumer):
     """Select one parent read; other reads must be immutable scalar literals.
 
@@ -1269,46 +1268,35 @@ def local_lx_subrange_geometry(graph, producer, consumer):
         return None
 
 
+def local_lx_read_geometry(graph, producer, consumer) -> LocalReadGeometry | None:
+    """Check graph and storage permission before exporting immutable geometry."""
+    try:
+        reads = [
+            dep
+            for dep in op_read_writes(consumer).reads
+            if dep.name == producer.get_name()
+        ]
+        if not has_partial_read(producer.layout.size, reads):
+            return None
+        rectangle = local_lx_subrange_geometry(graph, producer, consumer)
+        if rectangle is None:
+            return None
+        return LocalReadGeometry(
+            tuple(map(int, producer.layout.device_layout.device_size)),
+            tuple(rectangle[0]),
+            tuple(rectangle[1]),
+            producer.get_dtype().itemsize,
+        )
+    except (*_EVALUATION_ERRORS, NotImplementedError):
+        return None
+
+
 def local_lx_subrange_certificate(
     graph, producer, consumer, source_view, read_view
 ) -> DenseSubrangeTransfer | None:
-    """Certify the live parent and child domains without creating a copy plan."""
-    rectangle = local_lx_subrange_geometry(graph, producer, consumer)
-    if (
-        rectangle is None
-        or source_view is None
-        or read_view is None
-        or not source_view.same_partition(read_view)
-    ):
-        return None
-    try:
-        shape = tuple(map(int, producer.layout.device_layout.device_size))
-        maps = [
-            dict(
-                enumerate(
-                    owner_slots(
-                        dict(view.core_to_slot),
-                        dict(view.work_slice_dims),
-                        view.num_cores,
-                    )
-                )
-            )
-            for view in (source_view, read_view)
-        ]
-        certificate = certify_dense_subrange_transfer(
-            shape,
-            rectangle[0],
-            rectangle[1],
-            dict(source_view.work_slice_dims),
-            dict(read_view.work_slice_dims),
-            maps[0],
-            maps[1],
-            element_bytes=producer.get_dtype().itemsize,
-        )
-        local_subrange_byte_offset(certificate)
-        return certificate
-    except (*_EVALUATION_ERRORS, NotImplementedError):
-        return None
+    return local_read_certificate(
+        local_lx_read_geometry(graph, producer, consumer), source_view, read_view
+    )
 
 
 def local_lx_subrange_source(graph, name: str, uses: list[int]) -> bool:
@@ -1349,31 +1337,19 @@ def _local_lx_emission_view(op, dep, name):
     return _per_core_view_on_buf(op, dep, name, ownership_override=ownership)
 
 
-def normalize_local_lx_subrange(
-    graph, name, consumer, argument: TensorArg, iteration_space
-) -> TensorArg:
-    """Rebase only an emitted input; keep the full parent IR and allocation.
-
-    Recompute the certificate from the committed writer and reader, then
-    compare it with the final access before the aligner changes its frame.
-    No generic shuffle masks, name-only rewrites or shared child storage.
-    """
-    if (
-        not config.lx_planner_relayout
-        or config.ktir_emitter
-        or not argument.is_input
-        or "lx" not in argument.allocation
-    ):
-        return argument
+def local_lx_emission_contract(graph, name, consumer) -> LocalReadEmission | None:
+    """Recheck the live graph at the actual read, then export immutable facts."""
+    if not config.lx_planner_relayout or config.ktir_emitter:
+        return None
     producer = graph.get_buffer(name)
     reads = [dep for dep in op_read_writes(consumer).reads if dep.name == name]
     if not any(is_partial_lx_read(producer, dep) for dep in reads):
-        return argument
+        return None
     # Existing full-buffer prefix gathers have their own matmul emission.
     if not isinstance(consumer, ComputedBuffer) or not isinstance(
         consumer.data, Pointwise
     ):
-        return argument
+        return None
     rectangle = local_lx_subrange_geometry(graph, producer, consumer)
     if rectangle is None or len(reads) != 1:
         raise ValueError(f"{name}: partial LX input lacks a local certificate")
@@ -1394,49 +1370,42 @@ def normalize_local_lx_subrange(
     certificate = local_lx_subrange_certificate(
         graph, producer, consumer, source_view, read_view
     )
-    if (
-        certificate is None
-        or tuple(argument.device_size) != certificate.parent_shape
-        or argument.device_dtype != layout.device_layout.device_dtype
-        or argument.element_arrangement != ElementArrangement.STANDARD
-        or argument.allocation != layout.allocation
-        or set(argument.allocation) != {"lx"}
-        or argument.device_tile_advance_expr is not None
-        or _dense_read_rectangle(
-            argument.device_size, argument.device_coordinates, iteration_space
-        )
-        != rectangle
-    ):
+    if certificate is None:
         raise ValueError(f"{name}: emitted LX access differs from its certificate")
-    base = argument.allocation["lx"]
-    if type(base) is not int or base < 0 or base % 128:
-        raise ValueError(f"{name}: local LX base is not a concrete stick address")
-    if "lx" in consumer.layout.allocation:
-        child_base = consumer.layout.allocation["lx"]
-        if (
-            base < child_base + certificate.destination_reservation_bytes
-            and child_base < base + certificate.source_reservation_bytes
-        ):
-            raise ValueError(f"{name}: compact child overlaps its live parent")
-    coordinates = [
-        coordinate - start
-        for coordinate, start in zip(argument.device_coordinates, certificate.origin)
-    ]
-    division = work_division_from_view(
-        layout.lx_view, certificate.extent, coordinates, iteration_space
+    return LocalReadEmission(
+        certificate=certificate,
+        source_view=layout.lx_view,
+        device_dtype=layout.device_layout.device_dtype,
+        element_arrangement=ElementArrangement.STANDARD,
+        source_allocation=tuple(layout.allocation.items()),
+        consumer_name=consumer.get_name(),
+        consumer_allocation=tuple(consumer.layout.allocation.items()),
     )
+
+
+def normalize_local_lx_subrange(
+    graph, name, consumer, argument: TensorArg, iteration_space
+) -> TensorArg:
+    """Compatibility entry point; storage permission remains planner-owned."""
     if (
-        argument.work_division is None
-        or division is None
-        or not argument.work_division.same_ownership(division)
+        not config.lx_planner_relayout
+        or config.ktir_emitter
+        or not argument.is_input
+        or "lx" not in argument.allocation
+        or not isinstance(consumer, ComputedBuffer)
+        or not isinstance(consumer.data, Pointwise)
     ):
-        raise ValueError(f"{name}: rebasing changed the committed LX ownership")
-    return dataclasses.replace(
+        return argument
+    producer = graph.get_buffer(name)
+    reads = [dep for dep in op_read_writes(consumer).reads if dep.name == name]
+    if not has_partial_read(producer.layout.size, reads):
+        return argument
+    return normalize_local_read(
+        local_lx_emission_contract(graph, name, consumer),
+        name,
         argument,
-        device_size=list(certificate.extent),
-        device_coordinates=coordinates,
-        allocation={"lx": base + local_subrange_byte_offset(certificate)},
-        work_division=division,
+        iteration_space,
+        allow_extended=config.lx_extended_ownership,
     )
 
 
