@@ -335,23 +335,23 @@ state, so it lives on `MemoryPlanSolver.excluded` alongside the tag.
 The checks, in evaluation order (the first failure is the reason reported):
 
 <!-- BEGIN GENERATED BUFFER RESIDENCY RULES -->
-| Rule / reason | Requires | Exceptions / certificate | Covering tests |
-|---|---|---|---|
-| `op not allowed` | supported producer | None | `TestLoopCarryLxEligibility` |
-| `unsized (no device layout)` | computable footprint | None | `TestEmptyLxEligibility` |
-| `empty tensor` | nonempty output | None | `TestEmptyLxEligibility` |
-| `mutation target` | no mutation target | Counted-loop carry: `_is_loop_carry_storage` (joint division choice) | `TestLoopCarryLxEligibility` |
-| `tiled (advancing)` | fixed LX address | None | `TestLoopCarryLxEligibility` |
-| `read by restickify` | fixed divisions agree or exact local-read proof | None | `TestRestickifyBarrierDeferredOnJointPath` |
-| `extern kernel user or live across extern kernel` | extern boundary protected | None | `test_allocator_residency_registry_preserves_guard_order` |
-| `live across multi-output extern kernel` | multi-output boundary protected | None | `test_allocator_residency_registry_preserves_guard_order` |
-| `index tensor or indirectly accessed` | direct addressing | None | `test_allocator_residency_registry_preserves_guard_order` |
-| `graph output is a ReinterpretView` | rewritable output clone | None | `test_allocator_residency_registry_preserves_guard_order` |
-| `graph output mutated after production` | output clone sees final value | Validated output drain: `validated_drain_plans` (clone follows counted loop) | `TestLoopCarryLxEligibility` |
-| `partial/offset read` | complete read | Zero-offset linear prefix: `prefix_lx_gather_source` (one reader and one writer, full-backing served copy, physical stride preserved, unsplit K, disjoint LX spans) | `TestRestickifyBarrierDeferredOnJointPath`; `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather`; `test_prefix_linear_without_served_copy_spills_the_source`; `test_prefix_linear_scheduler_demotion_retains_valid_hbm_clone`; `test_prefix_lx_contraction_requires_exact_backing_stride[second_reader]` |
-| `core div mismatch: ...` | compatible fixed division | None | `TestRestickifyBarrierDeferredOnJointPath` |
-| `graph output (no clone); no consumer reads it from LX` | untiled reuse or boundary clone | None | `TestLoopCarryLxEligibility` |
-| `lx back gap` | no unsupported LX gap | Zero-offset linear prefix: `prefix_lx_gather_source` (one reader and one writer, full-backing served copy, physical stride preserved, unsplit K, disjoint LX spans) | `test_prefix_linear_reads_a_separate_full_backing_lx_gather`; `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_without_served_copy_spills_the_source`; `test_prefix_linear_scheduler_demotion_retains_valid_hbm_clone`; `test_prefix_lx_contraction_requires_exact_backing_stride[second_reader]` |
+| Rule / reason | Why | Requires | Exceptions / certificate | Covering tests |
+|---|---|---|---|---|
+| `op not allowed` | Only supported computed outputs can be placed. Mutation layouts use external storage; the debug flag only bypasses the operation-name denylist. | supported producer | None | `TestLoopCarryLxEligibility` |
+| `unsized (no device layout)` | Without a device layout, the allocator cannot measure the LX footprint. | computable footprint | None | `TestEmptyLxEligibility`; `test_buffer_residency_adapter_rejection_strings` |
+| `empty tensor` | A zero-sized tensor needs no LX reservation. | nonempty output | None | `TestEmptyLxEligibility` |
+| `mutation target` | Offset writes cannot use one fixed LX base. A counted-loop carry is accepted only when the solver also chooses its update division. | no mutation target | Counted-loop carry: `_is_loop_carry_storage` (joint division choice) | `TestLoopCarryLxEligibility` |
+| `tiled (advancing)` | LX addresses cannot use affine.apply symbols. The write or read advances per tile; loop_info supplies the tile geometry. | fixed LX address | None | `TestLoopCarryLxEligibility`; `test_buffer_residency_adapter_rejection_strings` |
+| `read by restickify` | A transposed or uncertified local read may cross cores. The joint solver checks each candidate division, so the committed-division barrier can reject a valid candidate (#4655). | fixed divisions agree or exact local-read proof | None | `TestRestickifyBarrierDeferredOnJointPath` |
+| `extern kernel user or live across extern kernel` | Extern kernels read HBM. PR #3683 added this guard; enable_lx_context_switching uses LxContextSwitchingPass to dump and restore LX around the call. | extern boundary protected | None | `test_buffer_residency_adapter_rejection_strings` |
+| `live across multi-output extern kernel` | Multi-output extern calls need HBM under either flag setting. LxContextSwitchingPass does not bracket them; the earlier extern guard handles the disabled case. | multi-output boundary protected | None | `test_buffer_residency_adapter_rejection_strings` |
+| `index tensor or indirectly accessed` | Data-dependent indices and the values they address resolve through HBM. | direct addressing | None | `test_buffer_residency_adapter_rejection_strings` |
+| `graph output is a ReinterpretView` | A boundary output clone cannot rewrap a ReinterpretView. | rewritable output clone | None | `test_buffer_residency_adapter_rejection_strings` |
+| `graph output mutated after production` | An output clone placed after its producer would copy a stale value before a later mutation. Only a validated drain plan moves that clone after the counted loop. | output clone sees final value | Validated output drain: `validated_drain_plans` (clone follows counted loop) | `TestLoopCarryLxEligibility` |
+| `partial/offset read` | Sliced or multi-offset LX reads can address the wrong data. A certified zero-offset prefix needs a served full-backing gather. | complete read | Zero-offset linear prefix: `prefix_lx_gather_source` (one reader and one writer, full-backing served copy, physical stride preserved, unsplit K, disjoint LX spans) | `TestRestickifyBarrierDeferredOnJointPath`; `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather`; `test_prefix_linear_without_served_copy_spills_the_source`; `test_prefix_linear_scheduler_demotion_retains_valid_hbm_clone`; `test_prefix_lx_contraction_requires_exact_backing_stride[second_reader]` |
+| `core div mismatch: ...` | Fixed divisions must agree across users. The joint solver chooses compatible divisions instead of rejecting a provisional mismatch. | compatible fixed division | None | `TestRestickifyBarrierDeferredOnJointPath` |
+| `graph output (no clone); no consumer reads it from LX` | Without a boundary clone, a graph output must land in HBM. Residency also saves no reads when the producer has no LX consumer. | untiled reuse or boundary clone | None | `TestLoopCarryLxEligibility` |
+| `lx back gap` | A generic LX back gap can misaddress a read. The prefix exception needs a full-backing copy, an unsplit-K reader and a uniform per-core gap. | no unsupported LX gap | Zero-offset linear prefix: `prefix_lx_gather_source` (one reader and one writer, full-backing served copy, physical stride preserved, unsplit K, disjoint LX spans) | `test_prefix_linear_reads_a_separate_full_backing_lx_gather`; `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_without_served_copy_spills_the_source`; `test_prefix_linear_scheduler_demotion_retains_valid_hbm_clone`; `test_prefix_lx_contraction_requires_exact_backing_stride[second_reader]` |
 <!-- END GENERATED BUFFER RESIDENCY RULES -->
 
 This table comes from `BUFFER_RESIDENCY_RULES` in
