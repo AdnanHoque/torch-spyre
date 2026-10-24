@@ -2645,6 +2645,8 @@ def test_relayout_operation_frame_keeps_tensor_domains(source_cores, destination
     )
     (split_dim,) = [dim for dim, count in parsed.work_slices.items() if count > 1]
     owner = parsed.core_id_to_work_slice[split_dim]
+    if source_cores <= destination_cores:
+        assert owner == _CORE_ID, "equal/expanded operation frame was repeated"
     assert [int(owner.subs(_CORE_ID, core)) for core in range(parsed.num_cores)] == [
         core % destination_cores for core in range(parsed.num_cores)
     ]
