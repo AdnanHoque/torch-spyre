@@ -4403,3 +4403,69 @@ class TestJointTilingAndDivisionExemption(unittest.TestCase):
         rebuilt = SimpleNamespace()
         copy_op_metadata(self._tiled_op(marked=True), rebuilt)
         self.assertTrue(getattr(rebuilt, JOINT_TILING_AND_DIVISION_ATTR, False))
+
+
+class TestResidencyRuleRegistry(unittest.TestCase):
+    def test_allocator_residency_registry_preserves_guard_order(self):
+        from torch_spyre._inductor.scratchpad.residency_rules import (
+            BUFFER_RESIDENCY_RULES,
+            buffer_residency_reason,
+        )
+
+        for failure_index, failing in enumerate(BUFFER_RESIDENCY_RULES):
+            visited = []
+            checks = SimpleNamespace()
+            for rule in BUFFER_RESIDENCY_RULES:
+
+                def check(rule=rule):
+                    visited.append(rule.name)
+                    return rule.reason if rule is failing else None
+
+                setattr(checks, rule.name, check)
+            checks.loop_carry = lambda: False
+            checks.drain = lambda: False
+            checks.prefix_gather = lambda: False
+            with self.subTest(rule=failing.name):
+                self.assertEqual(buffer_residency_reason(checks), failing.reason)
+                self.assertEqual(
+                    visited,
+                    [r.name for r in BUFFER_RESIDENCY_RULES[: failure_index + 1]],
+                )
+
+    def test_registry_exception_keeps_later_guards(self):
+        from torch_spyre._inductor.scratchpad.residency_rules import (
+            BUFFER_RESIDENCY_RULES,
+            buffer_residency_reason,
+        )
+
+        checks = SimpleNamespace(
+            **{rule.name: (lambda: None) for rule in BUFFER_RESIDENCY_RULES}
+        )
+        checks.mutation = lambda: "mutation target"
+        checks.loop_carry = lambda: True
+        checks.advancing = lambda: "tiled (advancing)"
+        self.assertEqual(buffer_residency_reason(checks), "tiled (advancing)")
+        checks.mutation = lambda: None
+        checks.advancing = lambda: None
+        checks.partial_read = lambda: "partial/offset read"
+        checks.prefix_gather = lambda: True
+        checks.core_division = lambda: "core div mismatch: reader"
+        self.assertEqual(buffer_residency_reason(checks), "core div mismatch: reader")
+        checks.prefix_gather = lambda: False
+        self.assertEqual(buffer_residency_reason(checks), "partial/offset read")
+
+    def test_registry_documentation_matches_runtime_rules(self):
+        from pathlib import Path
+        from torch_spyre._inductor.scratchpad.residency_rules import (
+            residency_rules_markdown,
+        )
+
+        path = Path(__file__).resolve().parents[2] / (
+            "docs/source/compiler/scratchpad_planning.md"
+        )
+        body = (
+            path.read_text()
+            .split("<!-- BEGIN GENERATED BUFFER RESIDENCY RULES -->\n", 1)[1]
+            .split("<!-- END GENERATED BUFFER RESIDENCY RULES -->", 1)[0]
+        )
+        self.assertEqual(body, residency_rules_markdown())

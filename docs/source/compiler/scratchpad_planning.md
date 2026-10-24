@@ -334,24 +334,33 @@ state, so it lives on `MemoryPlanSolver.excluded` alongside the tag.
 
 The checks, in evaluation order (the first failure is the reason reported):
 
-| Reason | Why |
-|---|---|
-| `op not allowed` | not a `ComputedBuffer`, a mutation layout, or an op name inside `OP_OUTPUT_NOT_GOOD_FOR_LX_REUSE` (the debug flag `config.allow_all_ops_in_lx_planning` bypasses the op-name gate) |
-| `unsized (no device layout)` | no computable footprint (e.g. a `MultiOutputLayout` tuple op) |
-| `empty tensor` | A zero-sized tensor needs no LX reservation |
-| `mutation target` | filled by offset writes, so one LX base mis-addresses it |
-| `tiled (advancing)` | LX addresses cannot be `affine.apply` symbols; the advancing-tile check reads `loop_info` (the sole source of truth for per-tile geometry) |
-| `read by restickify (cross-frame barrier)` | the read and write frames are transposes, so a per-core LX slice is not self-sufficient (the buffer a restickify reads; its own output is safe and is not barred) |
-| `read by restickify (local-read proof failed)` | Relayout is enabled, but exact physical ownership could not prove that every restickify read stays on the same core |
-| `extern kernel user` | extern ops read from HBM |
-| `index tensor or indirectly accessed` | index tensors and the value tensors they index into are read via data-dependent addressing, so they must stay in HBM |
-| `graph input (no clone)` | without boundary cloning there is nothing to redirect |
-| `graph output is a ReinterpretView` | output cloning cannot rewrap the view |
-| `partial/offset read` | sliced or multi-offset reads are rejected, except the certified zero-offset prefix below |
-| `core div mismatch: …` | the buffer's users disagree on core slicing (**placement path only**: the joint solver *chooses* the division, so its slicing gate decides instead) |
-| `graph output (no clone)` | without boundary cloning there is nothing to redirect |
-| `no consumer reads it from LX` | residency would save nothing |
-| `lx back gap` | generic LX gaps are rejected; the certified prefix below permits a uniform per-core gap |
+<!-- BEGIN GENERATED BUFFER RESIDENCY RULES -->
+| Rule / reason | Requires | Exceptions / certificate | Covering tests |
+|---|---|---|---|
+| `op not allowed` | supported producer | None | `TestLoopCarryLxEligibility` |
+| `unsized (no device layout)` | computable footprint | None | `TestEmptyLxEligibility` |
+| `empty tensor` | nonempty output | None | `TestEmptyLxEligibility` |
+| `mutation target` | no mutation target | Counted-loop carry: `_is_loop_carry_storage` (joint division choice) | `TestLoopCarryLxEligibility` |
+| `tiled (advancing)` | fixed LX address | None | `TestLoopCarryLxEligibility` |
+| `read by restickify` | fixed divisions agree or exact local-read proof | None | `TestRestickifyBarrierDeferredOnJointPath` |
+| `extern kernel user or live across extern kernel` | extern boundary protected | None | `test_allocator_residency_registry_preserves_guard_order` |
+| `live across multi-output extern kernel` | multi-output boundary protected | None | `test_allocator_residency_registry_preserves_guard_order` |
+| `index tensor or indirectly accessed` | direct addressing | None | `test_allocator_residency_registry_preserves_guard_order` |
+| `graph output is a ReinterpretView` | rewritable output clone | None | `test_allocator_residency_registry_preserves_guard_order` |
+| `graph output mutated after production` | output clone sees final value | Validated output drain: `validated_drain_plans` (clone follows counted loop) | `TestLoopCarryLxEligibility` |
+| `partial/offset read` | complete read | Zero-offset linear prefix: `prefix_lx_gather_source` (one reader and one writer, full-backing served copy, physical stride preserved, unsplit K, disjoint LX spans) | `TestRestickifyBarrierDeferredOnJointPath`; `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather` |
+| `core div mismatch: ...` | compatible fixed division | None | `TestRestickifyBarrierDeferredOnJointPath` |
+| `graph output (no clone); no consumer reads it from LX` | untiled reuse or boundary clone | None | `TestLoopCarryLxEligibility` |
+| `lx back gap` | no unsupported LX gap | Zero-offset linear prefix: `prefix_lx_gather_source` (one reader and one writer, full-backing served copy, physical stride preserved, unsplit K, disjoint LX spans) | `test_prefix_linear_reads_a_separate_full_backing_lx_gather`; `test_prefix_lx_contraction_requires_exact_backing_stride` |
+<!-- END GENERATED BUFFER RESIDENCY RULES -->
+
+This table comes from `BUFFER_RESIDENCY_RULES` in
+`scratchpad/residency_rules.py`. Run `python tools/generate_residency_rules.py`
+to update it. The allocator evaluates these rules in this order. An exception
+clears only its own rule. Storage, lifetime, capacity and later rules still apply.
+
+Graph inputs use `_input_residency_reason`. They also require boundary cloning,
+rewritable uses, complete reads and useful LX reuse.
 
 A narrow exception permits an untiled matmul to read a zero-offset prefix made
 of complete storage sticks. It requires one private, full-width producer and a
@@ -375,16 +384,10 @@ the op.
 
 ### Certified exception contracts
 
+The generated table names each exception, its certificate, its required
+conditions and its tests. Add later ownership exceptions to the registry.
 An ownership proof does not replace storage, lifetime or capacity checks.
-Each exception must name its proof and tests. The checks still run in their
-existing order; this table does not add a separate rule engine.
-
-| Admission check | Permitted case | Required proof and storage conditions | Covering tests |
-|---|---|---|---|
-| `partial/offset read`, `lx back gap` | Zero-offset linear prefix | `prefix_lx_contraction_axis` proves the physical stride and complete-stick prefix. `prefix_lx_gather_source` requires one reader and a single writer. Residency requires a served full-backing copy with unsplit K and disjoint LX spans. | `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather` |
-
-The untiled prefix case does not depend on same-tile-group search. Later
-ownership exceptions must retain this contract and add their own rows.
+The untiled prefix case does not require same-tile-group search.
 
 ### Per-core size and core-division mismatch
 
