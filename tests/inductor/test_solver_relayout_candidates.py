@@ -663,6 +663,7 @@ def test_persistent_scatter_requires_independent_immutable_source(
 ):
     """Structural proof must reject alias/order violations before placement."""
     from types import SimpleNamespace
+    from torch_spyre._inductor.scratchpad import utils as scratchpad_utils
 
     import torch
     from torch._inductor.ir import FixedLayout, InputBuffer, MutationLayoutSHOULDREMOVE
@@ -743,6 +744,7 @@ def test_persistent_scatter_requires_independent_immutable_source(
     monkeypatch.setattr(lx_relayout, "MemoryDep", Dep)
     monkeypatch.setattr(lx_relayout, "_is_matmul_op", lambda op: op is source)
     monkeypatch.setattr(lx_relayout, "op_read_writes", lambda op: op.deps)
+    monkeypatch.setattr(scratchpad_utils, "op_read_writes", lambda op: op.deps)
     with config.patch(lx_extended_ownership=enabled):
         assert lx_relayout._persistent_scatter_consumer(
             graph, source, update, "value"

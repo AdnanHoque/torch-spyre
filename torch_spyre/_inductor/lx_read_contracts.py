@@ -27,7 +27,7 @@ from .core_mapping import (
     certify_dense_subrange_transfer,
     dense_read_rectangle,
     local_subrange_byte_offset,
-    owner_slots,
+    core_slices,
     work_division_from_view,
 )
 from .op_spec import TensorArg
@@ -78,22 +78,10 @@ def local_read_certificate(
     ):
         return None
     try:
-        maps = []
-        for view in (source_view, read_view):
-            count = view.num_cores
-            if count is None:
-                return None
-            maps.append(
-                dict(
-                    enumerate(
-                        owner_slots(
-                            dict(view.core_to_slot),
-                            dict(view.work_slice_dims),
-                            count,
-                        )
-                    )
-                )
-            )
+        maps = [
+            core_slices(source_view, source_view.num_cores),
+            core_slices(read_view, read_view.num_cores),
+        ]
         certificate = certify_dense_subrange_transfer(
             geometry.parent_shape,
             geometry.origin,

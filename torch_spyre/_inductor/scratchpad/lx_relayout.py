@@ -40,7 +40,7 @@ from ..core_mapping import (
     work_division_from_view as physical_work_division_from_view,
     dense_read_rectangle as _dense_read_rectangle,
     DenseSubrangeTransfer,
-    owner_slots,
+    core_slices as _core_slices,
     partition_lx_size_bytes,
     _EVALUATION_ERRORS,
     _MAX_SHUFFLE_FANIN,
@@ -54,7 +54,6 @@ from ..lx_read_contracts import (
     LocalReadEmission,
     has_partial_read,
     local_read_certificate,
-    normalize_local_read,
 )
 from ..ir import FixedTiledLayout, SpyreConstantFallback
 from ..loop_info import CoarseTileInfo
@@ -389,18 +388,6 @@ def demote_lx_relayout_group(
     logger.info("demoted %s out of LX: %s", ", ".join(sorted(names)), reason)
 
 
-def _core_slices(view: PerCoreView, num_cores: int) -> dict[int, dict[int, int]]:
-    if view.num_cores is not None and view.num_cores <= 0:
-        raise ValueError(f"physical core count must be positive, got {view.num_cores}")
-    if view.num_cores is not None and view.num_cores != num_cores:
-        raise ValueError(
-            "ownership core count differs from the communication domain: "
-            f"{view.num_cores} != {num_cores}"
-        )
-    rows = owner_slots(dict(view.core_to_slot), dict(view.work_slice_dims), num_cores)
-    return dict(enumerate(rows))
-
-
 def partition_footprint(layout: FixedTiledLayout, view: PerCoreView) -> int:
     """Measure a relayout candidate in normalized standard device layout.
 
@@ -513,10 +500,8 @@ def _movement_supported(
     fanout = [0] * source_num_cores
     fanin = [0] * destination_num_cores
     for src, dst in edges:
-        for core in range(source_num_cores):
-            fanout[core] += src == core
-        for core in range(destination_num_cores):
-            fanin[core] += dst == core
+        fanout[src] += 1
+        fanin[dst] += 1
 
     # Every source sends to the same number of destination cores.
     if len(set(fanout)) != 1:
@@ -872,22 +857,9 @@ def _persistent_scatter_storage_safe(graph, producer, consumer, source_name):
     # FixedTiledLayout is fresh storage, but aliases introduced by other ops
     # could still mutate it or extend its lifetime behind the planner's back.
     # Reject those graphs rather than infer safety from a solver placement.
-    for op in operations:
-        try:
-            if (
-                source_name in op.get_mutation_names()
-                or source_name in op.get_inputs_that_alias_output()
-                or (
-                    op is not producer
-                    and any(
-                        dep.name == source_name for dep in op_read_writes(op).writes
-                    )
-                )
-            ):
-                return False
-        except NotImplementedError:
-            return False
-    return True
+    if source_name != producer.get_name():
+        return False
+    return storage_has_single_writer(graph, producer)
 
 
 def _supported_consumer_layout(graph, producer, consumer, source_name) -> bool:
@@ -1499,32 +1471,6 @@ def local_lx_emission_contract(graph, name, consumer) -> LocalReadEmission | Non
     )
 
 
-def normalize_local_lx_subrange(
-    graph, name, consumer, argument: TensorArg, iteration_space
-) -> TensorArg:
-    """Compatibility entry point; storage permission remains planner-owned."""
-    if (
-        not config.lx_planner_relayout
-        or config.ktir_emitter
-        or not argument.is_input
-        or "lx" not in argument.allocation
-        or not isinstance(consumer, ComputedBuffer)
-        or not isinstance(consumer.data, Pointwise)
-    ):
-        return argument
-    producer = graph.get_buffer(name)
-    reads = [dep for dep in op_read_writes(consumer).reads if dep.name == name]
-    if not has_partial_read(producer.layout.size, reads):
-        return argument
-    return normalize_local_read(
-        local_lx_emission_contract(graph, name, consumer),
-        name,
-        argument,
-        iteration_space,
-        allow_extended=config.lx_extended_ownership,
-    )
-
-
 def solver_relayout_pair_cost(
     source_view: PerCoreView,
     destination_view: PerCoreView,
@@ -2122,8 +2068,6 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
     editor = GraphEditor(graph)
     setattr(graph, _REGISTRY, copies)
     for plan in plans:
-        if plan.source_address is None or plan.destination_address is None:
-            raise RuntimeError("LX relayout plan is missing an allocated address")
         source = cast(ComputedBuffer, graph.get_buffer(plan.source_name))
         if plan.source_view.same_partition(plan.destination_view):
             raise RuntimeError("LX relayout plan has identical source and destination")
@@ -2145,13 +2089,6 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
                     or dict(plan.destination_view.work_slice_dims).get(axis, 1) != 1
                 ):
                     raise RuntimeError("padded LX gather lost its full-K read contract")
-            if not (
-                plan.source_address + plan.source_footprint_bytes
-                <= plan.destination_address
-                or plan.destination_address + plan.destination_footprint_bytes
-                <= plan.source_address
-            ):
-                raise RuntimeError("padded LX gather source and destination overlap")
         mutations = []
         for consumer in consumers:
             if isinstance(consumer.layout, MutationLayoutSHOULDREMOVE):
