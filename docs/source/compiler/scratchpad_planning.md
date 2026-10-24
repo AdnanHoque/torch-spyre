@@ -334,24 +334,33 @@ state, so it lives on `MemoryPlanSolver.excluded` alongside the tag.
 
 The checks, in evaluation order (the first failure is the reason reported):
 
-| Reason | Why |
-|---|---|
-| `op not allowed` | not a `ComputedBuffer`, a mutation layout, or an op name inside `OP_OUTPUT_NOT_GOOD_FOR_LX_REUSE` (the debug flag `config.allow_all_ops_in_lx_planning` bypasses the op-name gate) |
-| `unsized (no device layout)` | no computable footprint (e.g. a `MultiOutputLayout` tuple op) |
-| `empty tensor` | A zero-sized tensor needs no LX reservation |
-| `mutation target` | filled by offset writes, so one LX base mis-addresses it |
-| `tiled (advancing)` | LX addresses cannot be `affine.apply` symbols; the advancing-tile check reads `loop_info` (the sole source of truth for per-tile geometry) |
-| `read by restickify (cross-frame barrier)` | the read and write frames are transposes, so a per-core LX slice is not self-sufficient (the buffer a restickify reads; its own output is safe and is not barred) |
-| `read by restickify (local-read proof failed)` | Relayout is enabled, but exact physical ownership could not prove that every restickify read stays on the same core |
-| `extern kernel user` | extern ops read from HBM |
-| `index tensor or indirectly accessed` | index tensors and the value tensors they index into are read via data-dependent addressing, so they must stay in HBM |
-| `graph input (no clone)` | without boundary cloning there is nothing to redirect |
-| `graph output is a ReinterpretView` | output cloning cannot rewrap the view |
-| `partial/offset read` | sliced or multi-offset reads are rejected, except the certified zero-offset prefix below |
-| `core div mismatch: …` | the buffer's users disagree on core slicing (**placement path only**: the joint solver *chooses* the division, so its slicing gate decides instead) |
-| `graph output (no clone)` | without boundary cloning there is nothing to redirect |
-| `no consumer reads it from LX` | residency would save nothing |
-| `lx back gap` | generic LX gaps are rejected; the certified prefix below permits a uniform per-core gap |
+<!-- BEGIN GENERATED BUFFER RESIDENCY RULES -->
+| Rule / reason | Requires | Exceptions / certificate | Covering tests |
+|---|---|---|---|
+| `op not allowed` | supported producer | None | `TestLoopCarryLxEligibility` |
+| `unsized (no device layout)` | computable footprint | None | `TestEmptyLxEligibility` |
+| `empty tensor` | nonempty output | None | `TestEmptyLxEligibility` |
+| `mutation target` | no mutation target | Counted-loop carry: `_is_loop_carry_storage` (joint division choice) | `TestLoopCarryLxEligibility` |
+| `tiled (advancing)` | fixed LX address | None | `TestLoopCarryLxEligibility` |
+| `read by restickify` | fixed divisions agree or exact local-read proof | None | `TestRestickifyBarrierDeferredOnJointPath` |
+| `extern kernel user or live across extern kernel` | extern boundary protected | None | `test_allocator_residency_registry_preserves_guard_order` |
+| `live across multi-output extern kernel` | multi-output boundary protected | None | `test_allocator_residency_registry_preserves_guard_order` |
+| `index tensor or indirectly accessed` | direct addressing | None | `test_allocator_residency_registry_preserves_guard_order` |
+| `graph output is a ReinterpretView` | rewritable output clone | None | `test_allocator_residency_registry_preserves_guard_order` |
+| `graph output mutated after production` | output clone sees final value | Validated output drain: `validated_drain_plans` (clone follows counted loop) | `TestLoopCarryLxEligibility` |
+| `partial/offset read` | complete read | Zero-offset linear prefix: `prefix_lx_gather_source` (one reader and one writer, full-backing served copy, physical stride preserved, unsplit K, disjoint LX spans) | `TestRestickifyBarrierDeferredOnJointPath`; `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather` |
+| `core div mismatch: ...` | compatible fixed division | None | `TestRestickifyBarrierDeferredOnJointPath` |
+| `graph output (no clone); no consumer reads it from LX` | untiled reuse or boundary clone | None | `TestLoopCarryLxEligibility` |
+| `lx back gap` | no unsupported LX gap | Zero-offset linear prefix: `prefix_lx_gather_source` (one reader and one writer, full-backing served copy, physical stride preserved, unsplit K, disjoint LX spans) | `test_prefix_linear_reads_a_separate_full_backing_lx_gather`; `test_prefix_lx_contraction_requires_exact_backing_stride` |
+<!-- END GENERATED BUFFER RESIDENCY RULES -->
+
+This table comes from `BUFFER_RESIDENCY_RULES` in
+`scratchpad/residency_rules.py`. Run `python tools/generate_residency_rules.py`
+to update it. The allocator evaluates these rules in this order. An exception
+clears only its own rule. Storage, lifetime, capacity and later rules still apply.
+
+Graph inputs use `_input_residency_reason`. They also require boundary cloning,
+rewritable uses, complete reads and useful LX reuse.
 
 A narrow exception permits an untiled matmul to read a zero-offset prefix made
 of complete storage sticks. It requires one private, full-width producer and a
@@ -373,29 +382,52 @@ LX`: both hold only while the op is untiled. The buffer carries the reason as
 `untiled_bar` instead, and the CP-SAT solve keeps it out of LX unless it tiles
 the op.
 
+### Prefix demotion contract
+
+If preparation rejects a prefix gather, scheduling retries after clearing the
+source and copy LX allocations, their physical LX views and their relayout
+registry entry. The ordinary HBM clone remains. It has one writer and keeps the
+full physical extent and stride. Its consumers keep valid reads from that clone.
+Preparation discards the rejected kernels and builds kernels for the HBM path.
+Unrelated LX allocations stay unchanged.
+
+This is an amendment to D6-2 in the merge plan. It does not remove the clone or
+restore the original graph topology. It is not plan-exact rollback. The focused
+test checks finite and NaN unused tails against the existing exact reference.
+A bitwise HBM-placement comparison requires a matched same-division control;
+this test does not force an allocator result to create one.
+
 ### Certified exception contracts
 
+The generated table names each exception, its certificate, its required
+conditions and its tests. Add later ownership exceptions to the registry.
 An ownership proof does not replace storage, lifetime or capacity checks.
-Each exception must name its proof and tests. The checks still run in their
-existing order; this table does not add a separate rule engine.
+The untiled prefix case does not require same-tile-group search.
 
-| Admission check | Permitted case | Required proof and storage conditions | Covering tests |
+The symbolic proof registry below is separate from storage permission. It
+selects the existing containment proofs in order. The view-recovery caller
+keeps its floor-only, single-driven-axis restriction. An emitted-access proof
+alone does not authorize a recovery candidate.
+
+<!-- BEGIN GENERATED OWNERSHIP PROOFS -->
+| Ownership proof | Certificate | Requires | Covering tests |
 |---|---|---|---|
-| `partial/offset read`, `lx back gap` | Zero-offset linear prefix | `prefix_lx_contraction_axis` proves the physical stride and complete-stick prefix. `prefix_lx_gather_source` requires one reader and a single writer. Residency requires a served full-backing copy with unsplit K and disjoint LX spans. | `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather` |
-| Unrepresentable multi-loop ownership | One loop contains the complete affine read rectangle in its slice | `project_slice_axis` uses the affine containment proof. Original coordinates, storage and lifetime checks remain. | `test_q_rope_ownership_keeps_the_whole_pair_in_its_slice`; `test_q_projection_rope_handoff_preserves_pairs_and_other_consumer` |
-
-| Unrepresentable floor-affine ownership | One loop contains the full floor-affine rectangle | `project_slice_axis` retains affine-then-floor order. The view rescue uses only floor proofs for one non-stick driven axis, with its other split restrictions unchanged. | `test_floor_slice_projection_rejects_unproven_access`; `test_attention_output_repack_handoff` |
-| Updated-cache snapshot and full replica | Earlier ordinary cache mutation, immutable restickification, complete disjoint source slices, bounded uniform fan-in and existing consumer rule | Original cache storage, mutation order, alias and lifetime guards stay active. | Cache-transpose and full-replica candidate cases |
-| Factored ownership and persistent scatter | Exact dense mixed-radix rectangle; immutable source with one indirect write to an external cache target | Stick axis, aliases, mutation order, disjoint spans and full-copy requirements stay active. | Factored ownership and persistent-scatter acceptance/rejection cases |
-
-The untiled prefix case does not depend on same-tile-group search. Later
-ownership exceptions must retain this contract and add their own rows.
+| Affine rectangle containment; emitted access | `project_affine_slice_axis` | one contained loop partition, complete read rectangle, unchanged physical coordinates | `test_q_rope_ownership_keeps_the_whole_pair_in_its_slice`; `test_q_projection_rope_handoff_preserves_pairs_and_other_consumer`; `test_ownership_callers_keep_their_admission_policy` |
+| Floor-affine rectangle containment; floor-only recovery | `project_floor_affine_slice_axis` | one ascending affine floor, complete physical read rectangle, unchanged coordinates and caller admission | `test_floor_slice_projection_rejects_unproven_access`; `test_attention_output_repack_handoff`; `test_ownership_callers_keep_their_admission_policy` |
+<!-- END GENERATED OWNERSHIP PROOFS -->
 
 `SPYRE_LX_EXTENDED_OWNERSHIP=0` disables the additional ownership proofs while
 retaining the earlier prefix-copy rules. Its default is ON. The flag does not
 disable storage, alias, lifetime or capacity validation. Compare successive
 revisions with this flag OFF in both; do not compare a later OFF result with
 the preceding revision's ON result.
+
+Updated-cache snapshots retain the earlier mutation order and complete disjoint
+source slices. Existing storage, alias and lifetime checks remain active.
+
+Factored ownership retains an exact dense mixed-radix rectangle. Persistent
+cache scatters still require an immutable source, one external indirect write,
+and the original alias, mutation-order and lifetime checks.
 
 ### Per-core size and core-division mismatch
 
@@ -769,3 +801,27 @@ bugs that the hand-written cases miss.
 - [`hbm_pool_planning.md`](hbm_pool_planning.md) describes the
   complementary device-memory pass, which packs every intermediate that
   LX planning did not claim into a shared HBM segment.
+
+### Matched OFF-plan comparison
+
+Use `tools/run_off_plan_capture.py` on the same existing fixture at each adjacent
+source pair. Set `SPYRE_LX_EXTENDED_OWNERSHIP=0` before either process starts.
+Use fresh compile caches and the same upstream commit, inputs, hints, planner
+seed, worker count and other compiler settings. The contract records the
+verified input and hint hashes. Do not compare unmatched source configurations.
+
+The read-only observer records successful final codegen. It keeps final graph
+storage and physical layouts, dependencies, relayout registry, complete OpSpecs,
+argument binding and HBM pool size. It does not force a layout or a division.
+Unknown fields stop capture. Empty captures and cache hits cannot pass.
+Buffer names and program order remain significant; differences require review.
+
+Compare the two saved records with `tools/lx_semantic_plan.py`. Repeat the
+adjacent OFF/OFF comparison through the final stack, then compare its OFF plan
+with the matched #5160 OFF plan. Numerical checks remain separate. Host tests
+of the recorder do not establish that these native comparisons have passed.
+
+The pre-flag reference is #5160 at `525dfd8c`. Only that verified source and its
+matching config file may omit `lx_extended_ownership`; it represents the OFF
+baseline. Other missing settings stop capture. Iteration-axis order remains
+significant in the saved plan.
