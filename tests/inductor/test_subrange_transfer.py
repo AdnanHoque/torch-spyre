@@ -194,17 +194,26 @@ def test_gate_up_siblings_have_distinct_copy_identity():
 
 @pytest.mark.parametrize("first", [0, 2])
 def test_cache_head_subrange_preserves_post_rope_parent(first):
+    from sympy import Mod, Symbol, floor
+    from torch_spyre._inductor.core_mapping import dense_read_rectangle
+
+    row, feature = (
+        Symbol(name, integer=True, nonnegative=True) for name in ("row", "feature")
+    )
+    coordinates = (floor(feature / 64) + first, row, Mod(feature, 64))
+    origin, extent = dense_read_rectangle(
+        (4, 512, 64), coordinates, {row: 512, feature: 128}
+    )
+    assert origin == (first, 0, 0) and extent == (2, 512, 64)
     certificate = _certificate(
-        shape=(4, 512, 64),
-        origin=(first, 0, 0),
-        extent=(2, 512, 64),
-        source_splits={1: 32},
-        source_map=_owners(32, 1),
+        shape=(4, 512, 64), origin=origin, extent=extent,
+        source_splits={1: 32}, source_map=_owners(32, 1),
     )
     _address_oracle(certificate)
     assert certificate.source_reservation_bytes == 8192
     assert certificate.destination_reservation_bytes == 4096
     assert {f.source_offset_bytes for f in certificate.fragments} == {first * 16 * 128}
+    assert local_subrange_byte_offset(certificate) == first * 2048
 
 
 def test_permuted_physical_owners_keep_their_real_source_addresses():
@@ -274,30 +283,7 @@ def test_legacy_transfer_edges_keep_exact_partition_semantics():
         )
 
 
-def test_local_cache_heads_keep_the_full_parent_reservation():
-    from sympy import Mod, Symbol, floor
-    from torch_spyre._inductor.core_mapping import dense_read_rectangle
-
-    row, feature = (
-        Symbol(name, integer=True, nonnegative=True) for name in ("row", "feature")
-    )
-    for head in range(2):
-        coordinates = (floor(feature / 64) + 2 * head, row, Mod(feature, 64))
-        origin, extent = dense_read_rectangle(
-            (4, 512, 64), coordinates, {row: 512, feature: 128}
-        )
-        certificate = _certificate(
-            shape=(4, 512, 64),
-            origin=origin,
-            extent=extent,
-            source_splits={1: 32},
-            source_map=_owners(32, 1),
-        )
-        assert certificate.source_reservation_bytes == 8192
-        assert certificate.destination_reservation_bytes == 4096
-        assert local_subrange_byte_offset(certificate) == head * 4096
-        _address_oracle(certificate)
-    # Equal row owners cannot make a feature slice with local gaps compact.
+def test_gapped_local_cache_read_is_not_compact():
     gapped = certify_dense_subrange_transfer(
         (512, 4, 64),
         (0, 2, 0),
