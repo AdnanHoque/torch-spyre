@@ -1472,7 +1472,7 @@ def test_geometry_and_feature_import_layers():
     import ast
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[2] / "torch_spyre" / "_inductor"
+    root = Path(core_mapping_module.__file__).resolve().parent
     for path in (root / "scratchpad").glob("*.py"):
         tree = ast.parse(path.read_text())
         assert not any(

@@ -163,7 +163,9 @@ def test_work_division_and_emission_use_the_fact_interface():
     import ast
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[2] / "torch_spyre" / "_inductor"
+    from torch_spyre._inductor import lx_read_contracts as contracts_module
+
+    root = Path(contracts_module.__file__).resolve().parent
     forbidden = {
         "normalize_local_lx_subrange",
         "local_lx_subrange_certificate",
