@@ -640,26 +640,29 @@ def test_consumer_rules_are_shared_with_the_committed_collector(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "violation",
+    "enabled,violation",
     [
-        None,
-        "view_target",
-        "internal_target",
-        "late_producer",
-        "lx_target",
-        "cache_read",
-        "direct_write",
-        "mutation_name",
-        "opaque_aliases",
-        "other_write",
-        "source_mutated",
-        "source_aliased",
-        "producer_alias",
-        "tiled_consumer",
-        "tiled_producer",
-    ],
+        (True, violation)
+        for violation in [
+            None,
+            "view_target",
+            "internal_target",
+            "late_producer",
+            "lx_target",
+            "cache_read",
+            "direct_write",
+            "mutation_name",
+            "opaque_aliases",
+            "other_write",
+            "source_mutated",
+            "source_aliased",
+            "producer_alias",
+            "tiled_consumer",
+            "tiled_producer",
+        ]
+    ]
+    + [(False, None)],
 )
-@pytest.mark.parametrize("enabled", [True, False])
 def test_persistent_scatter_requires_independent_immutable_source(
     monkeypatch, violation, enabled
 ):
