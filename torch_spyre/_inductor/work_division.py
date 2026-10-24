@@ -1538,6 +1538,8 @@ class ResidencyEdge:
         """Interpret the planner's read facts without querying its graph state."""
         if not self._has_partial_read():
             return True
+        if not config.lx_extended_ownership:
+            return False
         return (
             local_read_certificate(self.local_read_geometry, parent_view, consumer_view)
             is not None

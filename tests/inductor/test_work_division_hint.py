@@ -2582,3 +2582,22 @@ def test_relayout_operation_frame_keeps_tensor_domains(source_cores, destination
         assert [
             int(formula.subs(_CORE_ID, core)) for core in range(physical_count)
         ] == [int(expected.subs(_CORE_ID, core)) for core in range(physical_count)]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_local_read_rollout_declines_before_graph_access(enabled):
+    class GraphAccess(Exception):
+        pass
+
+    class Graph:
+        def get_buffer(self, name):
+            raise GraphAccess
+
+    with config.patch(lx_extended_ownership=enabled):
+        if enabled:
+            with pytest.raises(GraphAccess):
+                lx_relayout_module.local_lx_subrange_source(Graph(), "source", [])
+        else:
+            assert not lx_relayout_module.local_lx_subrange_source(
+                Graph(), "source", []
+            )

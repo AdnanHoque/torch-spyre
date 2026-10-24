@@ -859,3 +859,13 @@ The pre-flag reference is #5160 at `525dfd8c`. Only that verified source and its
 matching config file may omit `lx_extended_ownership`; it represents the OFF
 baseline. Other missing settings stop capture. Iteration-axis order remains
 significant in the saved plan.
+
+
+### Cumulative local-read rollout
+
+`SPYRE_LX_EXTENDED_OWNERSHIP=0` also disables the optional local subrange
+admissions. This includes same-core compact readers and full-parent copies
+that serve them. The geometry helpers remain available for validation.
+Existing prefix support remains active. Mandatory span, ownership, lifetime,
+alias and final-emission checks stay active. The switch is part of the compile
+cache key; reuse of an ON plan cannot establish an OFF-plan comparison.
