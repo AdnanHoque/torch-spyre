@@ -1414,7 +1414,7 @@ def local_lx_subrange_certificate(
 
 
 def local_lx_subrange_source(graph, name: str, uses: list[int]) -> bool:
-    """Every partial reader must already have a fresh compact materializer."""
+    """Every partial reader needs a certified same-core access."""
     if not config.lx_extended_ownership:
         return False
     producer = graph.get_buffer(name)

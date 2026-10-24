@@ -187,7 +187,7 @@ BUFFER_RESIDENCY_RULES = (
                 lambda c: c.local_subrange(),
                 (
                     "rollout enabled",
-                    "existing compact materializer",
+                    "compact materializer or certified cache scatter",
                     "storage and lifetime permission",
                     "exact local byte coverage",
                 ),
