@@ -282,7 +282,7 @@ def buffer_residency_reason(checks: ResidencyChecks) -> Optional[str]:
 def residency_rules_markdown() -> str:
     """Generate the output-buffer table from the checks used by the allocator."""
     lines = [
-        "| Rule / reason | Why | Requires | Exceptions / certificate | Covering tests |",
+        "| Rule / reason label | Why | Requires | Exceptions / certificate | Covering tests |",
         "|---|---|---|---|---|",
     ]
     for rule in BUFFER_RESIDENCY_RULES:

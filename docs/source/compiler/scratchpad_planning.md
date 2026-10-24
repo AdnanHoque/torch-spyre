@@ -335,7 +335,7 @@ state, so it lives on `MemoryPlanSolver.excluded` alongside the tag.
 The checks, in evaluation order (the first failure is the reason reported):
 
 <!-- BEGIN GENERATED BUFFER RESIDENCY RULES -->
-| Rule / reason | Why | Requires | Exceptions / certificate | Covering tests |
+| Rule / reason label | Why | Requires | Exceptions / certificate | Covering tests |
 |---|---|---|---|---|
 | `op not allowed` | Only supported computed outputs can be placed. Mutation layouts use external storage; the debug flag only bypasses the operation-name denylist. | supported producer | None | `TestLoopCarryLxEligibility` |
 | `unsized (no device layout)` | Without a device layout, the allocator cannot measure the LX footprint. | computable footprint | None | `TestEmptyLxEligibility`; `test_buffer_residency_adapter_rejection_strings` |
@@ -358,6 +358,9 @@ This table comes from `BUFFER_RESIDENCY_RULES` in
 `scratchpad/residency_rules.py`. Run `python tools/generate_residency_rules.py`
 to update it. The allocator evaluates these rules in this order. An exception
 clears only its own rule. Storage, lifetime, capacity and later rules still apply.
+Reason labels group related diagnostics. A returned reason can include more
+detail, such as the restickify proof failure or the mismatched core division.
+The adapter tests check the returned strings; the table does not replace them.
 
 Graph inputs use `_input_residency_reason`. They also require boundary cloning,
 rewritable uses, complete reads and useful LX reuse.

@@ -203,6 +203,60 @@ class TestLoopCarryLxEligibility(unittest.TestCase):
     def setUp(self):
         self.allocator = ScratchpadAllocator(GreedyLayoutSolver, 2**20)
 
+    def test_shared_residency_facts_are_lazy_and_local_to_one_check(self):
+        from torch_spyre._inductor.scratchpad.allocator import _BufferResidencyChecks
+
+        op = _computed_buffer((64, 64), name="buf")
+        self.allocator._decides_lx_relayouts = True
+        checks = _BufferResidencyChecks(
+            allocator=self.allocator,
+            graph=_residency_graph(op),
+            name="buf",
+            uses=[0, 1],
+            op=op,
+            mutated_buffers={"buf"},
+            graph_output_names={"buf"},
+            reinterpret_output_names=set(),
+            ncores={"buf": 32},
+            ncores_reasons={},
+            division_is_fixed=False,
+            buf_user_deps={},
+            planned_lx_buffers=frozenset(),
+            lx_relayout_plans=(),
+            drain_plans=(),
+            tileable=False,
+        )
+        with (
+            allocator_module.config.patch(lx_planner_relayout=True, ktir_emitter=False),
+            patch.object(
+                allocator_module, "clone_at_graph_boundaries", return_value=True
+            ) as clone,
+            patch.object(
+                allocator_module, "prefix_lx_gather_source", return_value=True
+            ) as prefix,
+            patch.object(
+                allocator_module, "buffer_not_read_in_full", return_value=False
+            ),
+        ):
+            clone.assert_not_called()
+            prefix.assert_not_called()
+            # These consumers can request their facts before the other rules.
+            self.assertEqual(
+                checks.mutated_output(), "graph output mutated after production"
+            )
+            self.assertTrue(checks.prefix_gather())
+            self.assertIsNone(checks.reinterpret_output())
+            self.assertIsNone(checks.partial_read())
+            clone.assert_called_once_with()
+            prefix.assert_called_once_with(checks.graph, "buf", [0, 1])
+            fresh = dataclasses.replace(checks)
+            self.assertEqual(
+                fresh.mutated_output(), "graph output mutated after production"
+            )
+            self.assertTrue(fresh.prefix_gather())
+            self.assertEqual(clone.call_count, 2)
+            self.assertEqual(prefix.call_count, 2)
+
     def test_buffer_residency_adapter_rejection_strings(self):
         cases = (
             ("sized", None, "unsized (no device layout)"),
@@ -4553,6 +4607,13 @@ class TestResidencyRuleRegistry(unittest.TestCase):
         self.assertEqual(buffer_residency_reason(checks), "core div mismatch: reader")
         checks.prefix_gather = lambda: False
         self.assertEqual(buffer_residency_reason(checks), "partial/offset read")
+        checks.mutated_output = lambda: "graph output mutated after production"
+        checks.drain = lambda: True
+        self.assertEqual(buffer_residency_reason(checks), "partial/offset read")
+        checks.drain = lambda: False
+        self.assertEqual(
+            buffer_residency_reason(checks), "graph output mutated after production"
+        )
 
     def test_registry_documentation_matches_runtime_rules(self):
         from pathlib import Path
