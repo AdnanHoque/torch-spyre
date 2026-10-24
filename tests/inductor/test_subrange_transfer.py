@@ -206,8 +206,11 @@ def test_cache_head_subrange_preserves_post_rope_parent(first):
     )
     assert origin == (first, 0, 0) and extent == (2, 512, 64)
     certificate = _certificate(
-        shape=(4, 512, 64), origin=origin, extent=extent,
-        source_splits={1: 32}, source_map=_owners(32, 1),
+        shape=(4, 512, 64),
+        origin=origin,
+        extent=extent,
+        source_splits={1: 32},
+        source_map=_owners(32, 1),
     )
     _address_oracle(certificate)
     assert certificate.source_reservation_bytes == 8192
