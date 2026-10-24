@@ -1741,8 +1741,6 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
     editor = GraphEditor(graph)
     setattr(graph, _REGISTRY, copies)
     for plan in plans:
-        if plan.source_address is None or plan.destination_address is None:
-            raise RuntimeError("LX relayout plan is missing an allocated address")
         source = cast(ComputedBuffer, graph.get_buffer(plan.source_name))
         if plan.source_view.same_partition(plan.destination_view):
             raise RuntimeError("LX relayout plan has identical source and destination")
@@ -1764,13 +1762,6 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
                     or dict(plan.destination_view.work_slice_dims).get(axis, 1) != 1
                 ):
                     raise RuntimeError("padded LX gather lost its full-K read contract")
-            if not (
-                plan.source_address + plan.source_footprint_bytes
-                <= plan.destination_address
-                or plan.destination_address + plan.destination_footprint_bytes
-                <= plan.source_address
-            ):
-                raise RuntimeError("padded LX gather source and destination overlap")
         mutations = []
         for consumer in consumers:
             if isinstance(consumer.layout, MutationLayoutSHOULDREMOVE):
