@@ -32,7 +32,7 @@ from types import SimpleNamespace
 import pytest
 import sympy
 
-import torch_spyre._inductor.dump_cost_model as dcm
+import torch_spyre._inductor.cost_features as dcm
 from torch_spyre._inductor import cost_model, logging_utils
 from torch_spyre._inductor.cost_model import (
     ArgTraffic,

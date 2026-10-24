@@ -3045,7 +3045,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
     @staticmethod
     def _direct_read_candidates_priced(op, divisions, buffers) -> bool:
         from torch_spyre._inductor.cost_model import transport_dma_cost_available
-        from torch_spyre._inductor.dump_cost_model import extract_op_features
+        from torch_spyre._inductor.cost_features import extract_op_features
         from torch_spyre._inductor.scratchpad.sa_cooptimizer import _work_slices
 
         if op is None or not any(buf.name == op.get_name() for buf in buffers):
@@ -3281,7 +3281,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         variable for that axis. With no tiled candidate there are none, and the
         extractor reads the op's committed tiling (``loop_info``) as before.
         """
-        from torch_spyre._inductor.dump_cost_model import extract_op_features
+        from torch_spyre._inductor.cost_features import extract_op_features
         from torch_spyre._inductor.scratchpad.coarse_tiling import (
             try_resolve_tile_axis_loop_vars,
         )
@@ -4635,7 +4635,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         Extract once per consumer division, not once per source/destination pair.
         """
         from torch_spyre._inductor.cost_model import predict_ops
-        from torch_spyre._inductor.dump_cost_model import extract_op_features
+        from torch_spyre._inductor.cost_features import extract_op_features
         from torch_spyre._inductor.scratchpad.sa_cooptimizer import _work_slices
 
         is_lx = {dep.name: False for dep in op_read_writes(consumer_op).reads}
