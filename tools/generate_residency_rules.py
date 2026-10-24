@@ -25,22 +25,27 @@ def main() -> int:
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    registry = runpy.run_path(
-        str(root / "torch_spyre/_inductor/scratchpad/residency_rules.py")
-    )
     path = root / "docs/source/compiler/scratchpad_planning.md"
-    old = path.read_text()
-    start = "<!-- BEGIN GENERATED BUFFER RESIDENCY RULES -->\n"
-    end = "<!-- END GENERATED BUFFER RESIDENCY RULES -->"
-    before, rest = old.split(start, 1)
-    _, after = rest.split(end, 1)
-    new = before + start + registry["residency_rules_markdown"]() + end + after
-    ownership = runpy.run_path(str(root / "torch_spyre/_inductor/slice_ownership.py"))
-    start = "<!-- BEGIN GENERATED OWNERSHIP PROOFS -->\n"
-    end = "<!-- END GENERATED OWNERSHIP PROOFS -->"
-    before, rest = new.split(start, 1)
-    _, after = rest.split(end, 1)
-    new = before + start + ownership["ownership_proofs_markdown"]() + end + after
+    old = new = path.read_text()
+    for module, marker, render in (
+        (
+            "scratchpad/residency_rules.py",
+            "BUFFER RESIDENCY RULES",
+            "residency_rules_markdown",
+        ),
+        ("slice_ownership.py", "OWNERSHIP PROOFS", "ownership_proofs_markdown"),
+        (
+            "scratchpad/residency_rules.py",
+            "TRANSFER CERTIFICATES",
+            "transfer_certificates_markdown",
+        ),
+    ):
+        registry = runpy.run_path(str(root / "torch_spyre/_inductor" / module))
+        start = f"<!-- BEGIN GENERATED {marker} -->\n"
+        end = f"<!-- END GENERATED {marker} -->"
+        before, rest = new.split(start, 1)
+        _, after = rest.split(end, 1)
+        new = before + start + registry[render]() + end + after
     if args.check:
         if old != new:
             parser.exit(1, "Residency-rule documentation is out of date.\n")

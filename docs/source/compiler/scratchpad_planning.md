@@ -416,14 +416,20 @@ alone does not authorize a recovery candidate.
 | Floor-affine rectangle containment; floor-only recovery | `project_floor_affine_slice_axis` | one ascending affine floor, complete physical read rectangle, unchanged coordinates and caller admission | `test_floor_slice_projection_rejects_unproven_access`; `test_attention_output_repack_handoff`; `test_ownership_callers_keep_their_admission_policy` |
 <!-- END GENERATED OWNERSHIP PROOFS -->
 
+The following rows describe existing transfer proofs; they do not change
+admission order or authorize storage reuse.
+
+<!-- BEGIN GENERATED TRANSFER CERTIFICATES -->
+| Certificate | Function | Requires | Predicate tests | Integration tests |
+|---|---|---|---|---|
+| Updated-input cache snapshot | `torch_spyre._inductor.scratchpad.lx_relayout._is_activation_source` | earlier direct cache mutation; immutable restickified snapshot; original cache load and dependencies preserved | `test_work_division_hint.py::test_lx_relayout_activation_policy_is_source_wide` | `test_solver_relayout_e2e.py::test_attention_cache_transpose_handoff` |
+<!-- END GENERATED TRANSFER CERTIFICATES -->
+
 `SPYRE_LX_EXTENDED_OWNERSHIP=0` disables the additional ownership proofs while
 retaining the earlier prefix-copy rules. Its default is ON. The flag does not
 disable storage, alias, lifetime or capacity validation. Compare successive
 revisions with this flag OFF in both; do not compare a later OFF result with
 the preceding revision's ON result.
-
-Updated-cache snapshots retain the earlier mutation order and complete disjoint
-source slices. Existing storage, alias and lifetime checks remain active.
 
 ### Per-core size and core-division mismatch
 

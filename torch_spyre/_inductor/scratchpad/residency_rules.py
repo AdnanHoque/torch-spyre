@@ -239,3 +239,46 @@ def residency_rules_markdown() -> str:
             f"{exceptions} | {'; '.join(f'`{t}`' for t in tests)} |"
         )
     return "\n".join(lines) + "\n"
+
+
+@dataclass(frozen=True)
+class TransferCertificate:
+    """Describe an existing proof; these rows never dispatch admission."""
+
+    name: str
+    certificate: str
+    requires: str
+    predicate_tests: tuple[str, ...]
+    integration_tests: tuple[str, ...]
+
+
+TRANSFER_CERTIFICATES = (
+    TransferCertificate(
+        "Updated-input cache snapshot",
+        "torch_spyre._inductor.scratchpad.lx_relayout._is_activation_source",
+        "earlier direct cache mutation; immutable restickified snapshot; "
+        "original cache load and dependencies preserved",
+        (
+            "test_work_division_hint.py::test_lx_relayout_activation_policy_is_source_wide",
+        ),
+        ("test_solver_relayout_e2e.py::test_attention_cache_transpose_handoff",),
+    ),
+)
+
+
+def transfer_certificates_markdown() -> str:
+    """List certificates outside the ordered residency/projection dispatch."""
+    lines = [
+        "| Certificate | Function | Requires | Predicate tests | Integration tests |",
+        "|---|---|---|---|---|",
+    ]
+    for row in TRANSFER_CERTIFICATES:
+        tests = [
+            "; ".join(f"`{test}`" for test in group) or "None"
+            for group in (row.predicate_tests, row.integration_tests)
+        ]
+        lines.append(
+            f"| {row.name} | `{row.certificate}` | {row.requires} | "
+            f"{tests[0]} | {tests[1]} |"
+        )
+    return "\n".join(lines) + "\n"
