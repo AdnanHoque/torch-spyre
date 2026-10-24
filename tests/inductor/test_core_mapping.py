@@ -1465,3 +1465,26 @@ def test_the_probe_bound_covers_the_callers_filter_too():
     assert unbounded > 1, "this target has to offer more than one candidate"
     assert probes(unbounded - 1) == unbounded - 1
     assert probes(1) == 1
+
+
+def test_geometry_and_feature_import_layers():
+    """Planner queries must not import a reporting module."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "torch_spyre" / "_inductor"
+    for path in (root / "scratchpad").glob("*.py"):
+        tree = ast.parse(path.read_text())
+        assert not any(
+            isinstance(node, ast.ImportFrom)
+            and node.module is not None
+            and node.module.endswith("dump_cost_model")
+            for node in ast.walk(tree)
+        ), path
+    tree = ast.parse((root / "core_mapping.py").read_text())
+    assert not any(
+        isinstance(node, ast.ImportFrom)
+        and node.module is not None
+        and ("scratchpad" in node.module or node.module.endswith("pass_utils"))
+        for node in ast.walk(tree)
+    )
