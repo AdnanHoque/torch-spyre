@@ -1001,12 +1001,23 @@ def test_prefix_linear_without_served_copy_spills_the_source(monkeypatch):
     _run_prefix_linear_case(monkeypatch, mode="no_copy")
 
 
+def test_prefix_linear_scheduler_demotion_retains_valid_hbm_clone(monkeypatch):
+    """Amended D6-2: retry through the ordinary HBM clone, not topology rollback."""
+    _run_prefix_linear_case(monkeypatch, mode="demoted")
+
+
 def _run_prefix_linear_case(monkeypatch, *, mode):
     import torch_spyre._inductor.wsr.propagate_named_dims as _pnd
+    import torch_spyre._inductor.scheduler as sched_mod
+    import torch_spyre._inductor.passes as passes_mod
+    from torch._inductor.virtualized import V
+    from torch_spyre._inductor.pass_utils import op_read_writes
+    from torch_spyre._inductor.scratchpad.utils import storage_has_single_writer
     from torch_spyre._C import SpyreTensorLayout, get_device_dtype, get_elem_in_stick
     from torch_spyre._inductor import spyre_hint
     from torch_spyre._inductor.scratchpad.lx_relayout import (
         prefix_lx_contraction_axis,
+        materialized_lx_relayouts,
     )
 
     observed = _Observed(monkeypatch, force=False)
@@ -1059,6 +1070,107 @@ def _run_prefix_linear_case(monkeypatch, *, mode):
 
     monkeypatch.setattr(alloc_mod.CoOptimizingAllocator, "_cd_parent_relayouts", tables)
     monkeypatch.setattr(alloc_mod.CoOptimizingAllocator, "_post_solve", post_solve)
+
+    rejected, restored, final_kernels = [], [], []
+    if mode == "demoted":
+        real_prepare = sched_mod.SuperDSCScheduling.prepare_kernel
+        real_prepare_all = sched_mod.prepare_spyre_kernels
+
+        def layout_facts(layout):
+            return (
+                tuple(layout.size),
+                tuple(layout.stride),
+                tuple(layout.device_layout.device_size),
+                tuple(layout.device_layout.stride_map),
+            )
+
+        def prepare(backend, bundle, kernel):
+            graph = V.graph
+            if rejected:
+                plan, copy_name, copy_buffer, original_facts, unrelated, _ = rejected[0]
+                assert all(
+                    edge[0] != plan.source_name
+                    for edge in materialized_lx_relayouts(graph)
+                )
+                source_layout = graph.get_buffer(plan.source_name).get_layout()
+                copy_layout = copy_buffer.get_layout()
+                for layout in (source_layout, copy_layout):
+                    assert "lx" not in layout.allocation
+                    assert layout.lx_view is None
+                assert graph.get_buffer(copy_name) is copy_buffer
+                assert copy_buffer in graph.operations
+                assert layout_facts(copy_layout) == original_facts
+                assert storage_has_single_writer(graph, copy_buffer)
+                for name in plan.consumer_names:
+                    reads = {
+                        dep.name for dep in op_read_writes(graph.get_buffer(name)).reads
+                    }
+                    assert copy_name in reads and plan.source_name not in reads
+                assert plan.source_name in {
+                    dep.name for dep in op_read_writes(copy_buffer).reads
+                }
+                for name, allocation, view in unrelated:
+                    layout = graph.get_buffer(name).get_layout()
+                    assert layout.allocation == allocation and layout.lx_view == view
+                restored.append(copy_name)
+            else:
+                for copy_name, plan in materialized_lx_relayouts(graph).values():
+                    if plan.source_name not in prefix_sources:
+                        continue
+                    for node in sched_mod._all_scheduler_nodes([bundle]):
+                        if not any(
+                            dep.name == copy_name for dep in node.read_writes.writes
+                        ):
+                            continue
+                        copy_buffer = graph.get_buffer(copy_name)
+                        assert storage_has_single_writer(graph, copy_buffer)
+                        unrelated = []
+                        for op in graph.operations:
+                            name = op.get_name()
+                            layout = op.get_layout()
+                            if (
+                                name not in (plan.source_name, copy_name)
+                                and hasattr(layout, "allocation")
+                                and "lx" in layout.allocation
+                            ):
+                                unrelated.append(
+                                    (name, dict(layout.allocation), layout.lx_view)
+                                )
+                        rejected.append(
+                            (
+                                plan,
+                                copy_name,
+                                copy_buffer,
+                                layout_facts(copy_buffer.get_layout()),
+                                unrelated,
+                                kernel,
+                            )
+                        )
+                        kernel.failed_node = node
+                        raise ValueError("prefix gather test: reject LX finalization")
+            result = real_prepare(backend, bundle, kernel)
+            if rejected:
+                plan, copy_name, _, _, _, _ = rejected[0]
+                for name, arg in kernel.spyre_kernel_args:
+                    if name in (plan.source_name, copy_name):
+                        assert "lx" not in arg.allocation
+                        assert arg.work_division is None
+            return result
+
+        def prepare_all(nodes):
+            result = real_prepare_all(nodes)
+            if rejected:
+                failed_kernel = rejected[0][-1]
+                for node in result:
+                    prepared = getattr(node, "prepared_kernel", None)
+                    if prepared is not None:
+                        assert prepared is not failed_kernel
+                        final_kernels.append(prepared)
+            return result
+
+        monkeypatch.setattr(sched_mod.SuperDSCScheduling, "prepare_kernel", prepare)
+        monkeypatch.setattr(sched_mod, "prepare_spyre_kernels", prepare_all)
+        monkeypatch.setattr(passes_mod, "prepare_spyre_kernels", prepare_all)
 
     rows, physical, logical, outputs = 512, 3328, 3200, 512
 
@@ -1116,7 +1228,11 @@ def _run_prefix_linear_case(monkeypatch, *, mode):
         )
         observed.assert_nothing_emitted()
         return
-    observed.assert_emitted_in_lx(expected_plans=1)
+    if mode == "demoted":
+        assert rejected and restored and final_kernels
+        assert observed.demotions and not observed.emitted and not observed.emitted_ops
+    else:
+        observed.assert_emitted_in_lx(expected_plans=1)
     (plan,) = observed.plans
     assert plan.num_cores == plan.destination_view.num_cores == 32
     assert observed.source_layouts[plan.edge] == (

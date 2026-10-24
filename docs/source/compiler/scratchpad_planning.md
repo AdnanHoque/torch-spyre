@@ -382,6 +382,21 @@ LX`: both hold only while the op is untiled. The buffer carries the reason as
 `untiled_bar` instead, and the CP-SAT solve keeps it out of LX unless it tiles
 the op.
 
+### Prefix demotion contract
+
+If preparation rejects a prefix gather, scheduling retries after clearing the
+source and copy LX allocations, their physical LX views and their relayout
+registry entry. The ordinary HBM clone remains. It has one writer and keeps the
+full physical extent and stride. Its consumers keep valid reads from that clone.
+Preparation discards the rejected kernels and builds kernels for the HBM path.
+Unrelated LX allocations stay unchanged.
+
+This is an amendment to D6-2 in the merge plan. It does not remove the clone or
+restore the original graph topology. It is not plan-exact rollback. The focused
+test checks finite and NaN unused tails against the existing exact reference.
+A bitwise HBM-placement comparison requires a matched same-division control;
+this test does not force an allocator result to create one.
+
 ### Certified exception contracts
 
 The generated table names each exception, its certificate, its required
