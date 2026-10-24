@@ -504,10 +504,8 @@ def _movement_supported(
     fanout = [0] * source_num_cores
     fanin = [0] * destination_num_cores
     for src, dst in edges:
-        for core in range(source_num_cores):
-            fanout[core] += src == core
-        for core in range(destination_num_cores):
-            fanin[core] += dst == core
+        fanout[src] += 1
+        fanin[dst] += 1
 
     # Every source sends to the same number of destination cores.
     if len(set(fanout)) != 1:
@@ -790,22 +788,9 @@ def _persistent_scatter_consumer(
     # FixedTiledLayout is fresh storage, but aliases introduced by other ops
     # could still mutate it or extend its lifetime behind the planner's back.
     # Reject those graphs rather than infer safety from a solver placement.
-    for op in operations:
-        try:
-            if (
-                source_name in op.get_mutation_names()
-                or source_name in op.get_inputs_that_alias_output()
-                or (
-                    op is not producer
-                    and any(
-                        dep.name == source_name for dep in op_read_writes(op).writes
-                    )
-                )
-            ):
-                return False
-        except NotImplementedError:
-            return False
-    return True
+    if source_name != producer.get_name():
+        return False
+    return storage_has_single_writer(graph, producer)
 
 
 def _supported_consumer_layout(graph, producer, consumer, source_name) -> bool:
@@ -1566,8 +1551,6 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
     editor = GraphEditor(graph)
     setattr(graph, _REGISTRY, copies)
     for plan in plans:
-        if plan.source_address is None or plan.destination_address is None:
-            raise RuntimeError("LX relayout plan is missing an allocated address")
         source = cast(ComputedBuffer, graph.get_buffer(plan.source_name))
         if plan.source_view.same_partition(plan.destination_view):
             raise RuntimeError("LX relayout plan has identical source and destination")
@@ -1589,13 +1572,6 @@ def materialize_lx_relayouts(graph: GraphLowering, plans: list[LXRelayoutPlan]) 
                     or dict(plan.destination_view.work_slice_dims).get(axis, 1) != 1
                 ):
                     raise RuntimeError("padded LX gather lost its full-K read contract")
-            if not (
-                plan.source_address + plan.source_footprint_bytes
-                <= plan.destination_address
-                or plan.destination_address + plan.destination_footprint_bytes
-                <= plan.source_address
-            ):
-                raise RuntimeError("padded LX gather source and destination overlap")
         mutations = []
         for consumer in consumers:
             if isinstance(consumer.layout, MutationLayoutSHOULDREMOVE):
