@@ -58,7 +58,7 @@ from ..lx_read_contracts import (
 from ..ir import FixedTiledLayout, SpyreConstantFallback
 from ..loop_info import CoarseTileInfo
 from ..logging_utils import get_inductor_logger
-from ..op_spec import TensorArg, TensorWorkDivision
+from ..op_spec import TensorWorkDivision
 from ..padding import is_restickify_op
 from ..pass_utils import (
     PerCoreView,

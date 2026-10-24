@@ -1095,7 +1095,6 @@ def core_slices(view: PerCoreView, num_cores: int) -> dict[int, dict[int, int]]:
     return dict(enumerate(rows))
 
 
-
 def work_division_from_view(
     view: PerCoreView | None,
     device_size: Sequence[int],
