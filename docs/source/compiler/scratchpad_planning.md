@@ -835,7 +835,6 @@ no local-read certificate is reused across demotion.
 The earlier materialized-relayout registry still certifies copy identities.
 This interface does not alter that contract or add a new attention operation.
 
-
 ### Matched OFF-plan comparison
 
 Use `tools/run_off_plan_capture.py` on the same existing fixture at each adjacent
@@ -859,7 +858,6 @@ The pre-flag reference is #5160 at `525dfd8c`. Only that verified source and its
 matching config file may omit `lx_extended_ownership`; it represents the OFF
 baseline. Other missing settings stop capture. Iteration-axis order remains
 significant in the saved plan.
-
 
 ### Cumulative local-read rollout
 
