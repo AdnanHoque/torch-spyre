@@ -396,7 +396,7 @@ existing order; this table does not add a separate rule engine.
 
 | Admission check | Permitted case | Required proof and storage conditions | Covering tests |
 |---|---|---|---|
-| `partial/offset read`, `lx back gap` | Zero-offset linear prefix | `prefix_lx_contraction_axis` proves the physical stride and complete-stick prefix. `prefix_lx_gather_source` requires one reader and a single writer. Residency requires a served full-backing copy with unsplit K and disjoint LX spans. | `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather` |
+| `partial/offset read`, `lx back gap` | Zero-offset linear prefix | `prefix_lx_contraction_axis` proves the physical stride and complete-stick prefix. `prefix_lx_gather_source` requires one reader and a single writer. Residency requires a served full-backing copy with unsplit K and disjoint LX spans. | `test_prefix_lx_contraction_requires_exact_backing_stride`; `test_prefix_linear_reads_a_separate_full_backing_lx_gather`; `test_prefix_linear_without_served_copy_spills_the_source`; `test_prefix_linear_scheduler_demotion_retains_valid_hbm_clone` |
 
 The untiled prefix case does not depend on same-tile-group search. Later
 ownership exceptions must retain this contract and add their own rows.
