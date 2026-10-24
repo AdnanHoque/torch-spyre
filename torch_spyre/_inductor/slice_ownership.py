@@ -14,7 +14,10 @@
 
 """Pure coordinate proofs for tensor-slice ownership."""
 
-from collections.abc import Mapping
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
 import sympy
 
@@ -134,6 +137,52 @@ def project_floor_affine_slice_axis(
     return loop, coordinate.xreplace(dict.fromkeys(symbols - {loop}, sympy.S.Zero))
 
 
+@dataclass(frozen=True)
+class SliceOwnershipProof:
+    name: str
+    certificate: str
+    prove: Callable[..., tuple[sympy.Symbol, sympy.Expr] | None]
+    floor_recovery: bool
+    requires: tuple[str, ...]
+    tests: tuple[str, ...]
+
+
+SLICE_OWNERSHIP_PROOFS = (
+    SliceOwnershipProof(
+        "Affine rectangle containment",
+        "project_affine_slice_axis",
+        project_affine_slice_axis,
+        False,
+        (
+            "one contained loop partition",
+            "complete read rectangle",
+            "unchanged physical coordinates",
+        ),
+        (
+            "test_q_rope_ownership_keeps_the_whole_pair_in_its_slice",
+            "test_q_projection_rope_handoff_preserves_pairs_and_other_consumer",
+            "test_ownership_callers_keep_their_admission_policy",
+        ),
+    ),
+    SliceOwnershipProof(
+        "Floor-affine rectangle containment",
+        "project_floor_affine_slice_axis",
+        project_floor_affine_slice_axis,
+        True,
+        (
+            "one ascending affine floor",
+            "complete physical read rectangle",
+            "unchanged coordinates and caller admission",
+        ),
+        (
+            "test_floor_slice_projection_rejects_unproven_access",
+            "test_attention_output_repack_handoff",
+            "test_ownership_callers_keep_their_admission_policy",
+        ),
+    ),
+)
+
+
 def project_slice_axis(
     coordinate: sympy.Expr,
     device_extent: int,
@@ -143,12 +192,26 @@ def project_slice_axis(
     floor_only: bool = False,
 ) -> tuple[sympy.Symbol, sympy.Expr] | None:
     """Apply the caller's containment policy without changing its access."""
-    if not floor_only:
-        projected = project_affine_slice_axis(
-            coordinate, device_extent, split, iteration_space
-        )
+    for proof in SLICE_OWNERSHIP_PROOFS:
+        if floor_only and not proof.floor_recovery:
+            continue
+        projected = proof.prove(coordinate, device_extent, split, iteration_space)
         if projected is not None:
             return projected
-    return project_floor_affine_slice_axis(
-        coordinate, device_extent, split, iteration_space
-    )
+    return None
+
+
+def ownership_proofs_markdown() -> str:
+    """Describe the exact proof order and the restricted recovery policy."""
+    lines = [
+        "| Ownership proof | Certificate | Requires | Covering tests |",
+        "|---|---|---|---|",
+    ]
+    for proof in SLICE_OWNERSHIP_PROOFS:
+        policy = "; floor-only recovery" if proof.floor_recovery else "; emitted access"
+        tests = "; ".join(f"`{test}`" for test in proof.tests)
+        lines.append(
+            f"| {proof.name}{policy} | `{proof.certificate}` | "
+            f"{', '.join(proof.requires)} | {tests} |"
+        )
+    return "\n".join(lines) + "\n"
