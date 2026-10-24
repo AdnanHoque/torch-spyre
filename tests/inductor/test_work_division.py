@@ -4492,6 +4492,7 @@ class TestResidencyRuleRegistry(unittest.TestCase):
 
     def test_transfer_certificate_references_resolve(self):
         import ast
+        from importlib import import_module
         from pathlib import Path
         from torch_spyre._inductor.scratchpad.residency_rules import (
             TRANSFER_CERTIFICATES,
@@ -4503,7 +4504,7 @@ class TestResidencyRuleRegistry(unittest.TestCase):
         )
         for row in TRANSFER_CERTIFICATES:
             module, function = row.certificate.rsplit(".", 1)
-            tree = ast.parse((root / (module.replace(".", "/") + ".py")).read_text())
+            tree = ast.parse(Path(import_module(module).__file__).read_text())
             self.assertIn(
                 function, {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
             )
