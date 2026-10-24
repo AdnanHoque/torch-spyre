@@ -4469,3 +4469,27 @@ class TestResidencyRuleRegistry(unittest.TestCase):
             .split("<!-- END GENERATED BUFFER RESIDENCY RULES -->", 1)[0]
         )
         self.assertEqual(body, residency_rules_markdown())
+
+    def test_transfer_certificate_references_resolve(self):
+        import ast
+        from pathlib import Path
+        from torch_spyre._inductor.scratchpad.residency_rules import (
+            TRANSFER_CERTIFICATES,
+        )
+
+        root = Path(__file__).resolve().parents[2]
+        self.assertEqual(
+            len({row.name for row in TRANSFER_CERTIFICATES}), len(TRANSFER_CERTIFICATES)
+        )
+        for row in TRANSFER_CERTIFICATES:
+            module, function = row.certificate.rsplit(".", 1)
+            tree = ast.parse((root / (module.replace(".", "/") + ".py")).read_text())
+            self.assertIn(
+                function, {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+            )
+            for test in row.predicate_tests + row.integration_tests:
+                filename, name = test.split("::")
+                tree = ast.parse((root / "tests/inductor" / filename).read_text())
+                self.assertIn(
+                    name, {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+                )
