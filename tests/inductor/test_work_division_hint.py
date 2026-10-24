@@ -2520,7 +2520,7 @@ def test_relayout_codegen_wraps_only_a_contracted_operation_frame(
     """Keep tensor domains distinct while scheduling every required core.
 
     C4 tracks replacing this shape-derived frame correction with explicit
-    domains end-to-end in torch-spyre#5575.
+    domains end-to-end in torch-spyre#5716.
     """
     row, feature = Symbol("row"), Symbol("feature")
     source = TensorWorkDivision(
@@ -2588,6 +2588,79 @@ def test_relayout_codegen_wraps_only_a_contracted_operation_frame(
     # The certificate and per-tensor-ownership guard remain mandatory.
     with pytest.raises(AssertionError, match="per-tensor ownership"):
         parse_op_spec(replace(spec, op_info={}))
+
+
+@pytest.mark.parametrize(
+    "source_cores,destination_cores", [(32, 16), (16, 16), (16, 32)]
+)
+def test_relayout_operation_frame_keeps_tensor_domains(source_cores, destination_cores):
+    """Contraction repeats the operation frame, not tensor ownership domains."""
+    from torch_spyre._inductor.core_mapping import owner_slots, transfer_edges
+
+    row, lane = Symbol("frame_row"), Symbol("frame_lane")
+    source_owner = (
+        source_cores - 1 - _CORE_ID if source_cores == destination_cores else _CORE_ID
+    )
+    source = _view({0: source_cores}, {0: source_owner}, source_cores)
+    destination = _view({0: destination_cores}, {0: _CORE_ID}, destination_cores)
+    source_rows = owner_slots(
+        dict(source.core_to_slot), dict(source.work_slice_dims), source_cores
+    )
+    destination_rows = owner_slots(
+        dict(destination.core_to_slot),
+        dict(destination.work_slice_dims),
+        destination_cores,
+    )
+    routes = sorted(
+        transfer_edges(
+            dict(source.work_slice_dims),
+            dict(destination.work_slice_dims),
+            dict(enumerate(source_rows)),
+            dict(enumerate(destination_rows)),
+        )
+    )
+    assert {source for source, _ in routes} == set(range(source_cores))
+    assert {destination for _, destination in routes} == set(range(destination_cores))
+    # Ordinary copies do not select terminal reduction producers. Production
+    # leaves this field empty; route edges can repeat a source on expansion.
+    spec = _completed_route_spec(
+        source,
+        destination,
+        [512, 64],
+        [row, lane],
+        {row: (512, destination_cores), lane: (64, 1)},
+        (),
+        65536,
+    )
+    assert spec.completed_producer_cores == ()
+    simplify_op_spec(spec)
+    operation_cores = math.prod(count for _, count in spec.iteration_space.values())
+    original_tensor_domains = [arg.work_division.num_cores for arg in spec.args]
+    parsed, _ = parse_op_spec(spec)
+    assert operation_cores == destination_cores
+    assert parsed.num_cores == max(source_cores, destination_cores)
+    assert (
+        [arg.work_division.num_cores for arg in parsed.args]
+        == original_tensor_domains
+        == [source_cores, destination_cores]
+    )
+    (split_dim,) = [dim for dim, count in parsed.work_slices.items() if count > 1]
+    owner = parsed.core_id_to_work_slice[split_dim]
+    assert [int(owner.subs(_CORE_ID, core)) for core in range(parsed.num_cores)] == [
+        core % destination_cores for core in range(parsed.num_cores)
+    ]
+    for argument, physical_count, expected in zip(
+        parsed.args, [source_cores, destination_cores], [source_owner, _CORE_ID]
+    ):
+        (dimension,) = [
+            dim
+            for dim, count in argument.work_division.work_slices.items()
+            if count > 1
+        ]
+        formula = argument.work_division.core_id_to_work_slice[dimension]
+        assert [
+            int(formula.subs(_CORE_ID, core)) for core in range(physical_count)
+        ] == [int(expected.subs(_CORE_ID, core)) for core in range(physical_count)]
 
 
 @pytest.mark.parametrize("enabled", [False, True])

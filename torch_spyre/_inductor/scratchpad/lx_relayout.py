@@ -37,24 +37,25 @@ from torch_spyre._C import ElementArrangement
 
 from .. import config
 from ..core_mapping import (
-    certify_dense_subrange_transfer,
+    work_division_from_view as physical_work_division_from_view,
+    dense_read_rectangle as _dense_read_rectangle,
     DenseSubrangeTransfer,
-    core_mappings_equal,
-    local_subrange_byte_offset,
     owner_slots,
     partition_lx_size_bytes,
-    _loop_regions,
-    _LOOP_POINT,
-    _MAX_EXACT_DIRECT_AXIS_POINTS,
-    _MAX_EXACT_OWNERSHIP_POINTS,
     _EVALUATION_ERRORS,
     _MAX_SHUFFLE_FANIN,
     select_unique_partition_division,
     transfer_edges,
 )
 from ..cost_model import CostParams, relayout_ns
-from ..dump_cost_model import relayout_cost_features
-from ..slice_ownership import factor_slice_axis, project_slice_axis
+from ..cost_features import relayout_cost_features
+from ..lx_read_contracts import (
+    LocalReadGeometry,
+    LocalReadEmission,
+    has_partial_read,
+    local_read_certificate,
+    normalize_local_read,
+)
 from ..ir import FixedTiledLayout, SpyreConstantFallback
 from ..loop_info import CoarseTileInfo
 from ..logging_utils import get_inductor_logger
@@ -324,198 +325,14 @@ def work_division_from_view(
     device_coordinates: Sequence[sympy.Expr],
     iteration_space: Mapping[sympy.Symbol, sympy.Expr],
 ) -> TensorWorkDivision | None:
-    """Interpret physical slices through an access, without choosing new owners."""
-    if view is None:
-        return None
-    n = view.num_cores
-    if n is None or n <= 0:
-        raise ValueError("LX ownership must carry its physical core domain")
-    if len(device_size) != len(device_coordinates):
-        raise ValueError("sizes and coordinates differ in rank")
-    physical_splits, slots = dict(view.work_slice_dims), dict(view.core_to_slot)
-    if len(physical_splits) != len(view.work_slice_dims) or len(slots) != len(
-        view.core_to_slot
-    ):
-        raise ValueError("duplicate physical dimensions")
-    rows = owner_slots(slots, physical_splits, n)
-    axes_by_loop: dict[sympy.Symbol, list[int]] = {}
-    # Only the local proof coordinates may be reduced. Callers and emitted
-    # tensor accesses retain the original multi-loop coordinate expressions.
-    proof_coordinates = list(device_coordinates)
-    for axis, split in physical_splits.items():
-        if (
-            not 0 <= axis < len(device_size)
-            or sympy.sympify(device_size[axis]).is_Integer is not True
-            or device_size[axis] <= 0
-            or device_size[axis] % split
-        ):
-            raise ValueError(
-                f"unsupported ownership input: axis {axis} not divisible by {split}"
-            )
-        symbols = device_coordinates[axis].free_symbols
-        if len(symbols) == 1 and symbols <= iteration_space.keys():
-            loop = next(iter(symbols))
-        else:
-            if not config.lx_extended_ownership:
-                raise ValueError(f"cannot map device dimension {axis} to one loop")
-            projected = project_slice_axis(
-                device_coordinates[axis], int(device_size[axis]), split, iteration_space
-            )
-            if projected is None:
-                # Keep the physical stick axis intact. Expand only the local
-                # proof frame, then reuse the exact loop-region proof below.
-                factors = (
-                    factor_slice_axis(
-                        device_coordinates[axis],
-                        int(device_size[axis]),
-                        split,
-                        slots[axis],
-                        iteration_space,
-                    )
-                    if axis != len(device_size) - 1
-                    else None
-                )
-                if factors is None:
-                    raise ValueError(f"cannot map device dimension {axis} to one loop")
-                shift = len(factors) - 1
-                new_splits, new_slots = {}, {}
-                for a, count in physical_splits.items():
-                    if a != axis:
-                        new_axis = a + shift if a > axis else a
-                        new_splits[new_axis], new_slots[new_axis] = count, slots[a]
-                for offset, (_, _, count, owner) in enumerate(factors):
-                    if count > 1:
-                        new_splits[axis + offset] = count
-                        new_slots[axis + offset] = owner
-                return work_division_from_view(
-                    PerCoreView(
-                        tuple(sorted(new_splits.items())),
-                        tuple(sorted(new_slots.items())),
-                        num_cores=n,
-                    ),
-                    [
-                        *device_size[:axis],
-                        *(f[0] for f in factors),
-                        *device_size[axis + 1 :],
-                    ],
-                    [
-                        *device_coordinates[:axis],
-                        *(f[1] for f in factors),
-                        *device_coordinates[axis + 1 :],
-                    ],
-                    iteration_space,
-                )
-            loop, proof_coordinates[axis] = projected
-        axes_by_loop.setdefault(loop, []).append(axis)
-
-    any_fused = any(len(axes) > 1 for axes in axes_by_loop.values())
-    splits, owners, expected = {}, {}, {}
-    fused_states = 0
-    for loop, axes in axes_by_loop.items():
-        extent = iteration_space[loop]
-        extent = sympy.sympify(extent[0] if isinstance(extent, tuple) else extent)
-        if extent.is_Integer is not True or extent <= 0:
-            raise ValueError(
-                f"unsupported ownership input: loop extent {extent} is not concrete"
-            )
-        extent = int(extent)
-        first = axes[0]
-        same = all(
-            physical_splits[a] == physical_splits[first]
-            and core_mappings_equal({loop: slots[a]}, {loop: slots[first]}, n)
-            for a in axes
-        )
-        split = (
-            physical_splits[first]
-            if same
-            else math.prod(physical_splits[a] for a in axes)
-        )
-        splits[loop] = split
-        if len(axes) == 1:
-            stick = len(device_size) - 1
-            if (
-                first != stick
-                and stick not in physical_splits
-                and loop in device_coordinates[-1].free_symbols
-            ):
-                padded = int(device_size[first] * device_size[-1])
-                if padded - device_size[-1] < extent <= padded:
-                    extent = padded
-            if extent > _MAX_EXACT_DIRECT_AXIS_POINTS:
-                raise ValueError(
-                    f"proof limit: direct axis needs {extent} points; limit is {_MAX_EXACT_DIRECT_AXIS_POINTS}"
-                )
-        else:
-            fused_states += extent + split
-            if fused_states > _MAX_EXACT_OWNERSHIP_POINTS:
-                raise ValueError(
-                    f"proof limit: fused axes need {fused_states} states; limit is {_MAX_EXACT_OWNERSHIP_POINTS}"
-                )
-        if extent % split:
-            raise ValueError(
-                f"unsupported ownership input: loop {loop} not divisible by {split}"
-            )
-        try:
-            bounds = _loop_regions(
-                extent,
-                tuple(proof_coordinates[a].xreplace({loop: _LOOP_POINT}) for a in axes),
-                tuple(int(device_size[a]) for a in axes),
-                split,
-            )
-        except _EVALUATION_ERRORS as exc:
-            raise ValueError(
-                f"unsupported ownership evaluation: {type(exc).__name__}: {exc}"
-            ) from exc
-        widths = [int(device_size[a]) // physical_splits[a] for a in axes]
-        signatures = [
-            tuple(low // width for (low, _), width in zip(region, widths))
-            for region in bounds
-        ]
-        if any(
-            low // width != high // width
-            for region in bounds
-            for (low, high), width in zip(region, widths)
-        ):
-            raise ValueError(
-                "ownership mismatch: one loop partition crosses physical slices"
-            )
-        if len(set(signatures)) != split:
-            raise ValueError(
-                "ownership mismatch: loop partitions do not cover distinct physical slices"
-            )
-        try:
-            table = tuple(signatures.index(tuple(row[a] for a in axes)) for row in rows)
-        except ValueError:
-            raise ValueError(
-                "ownership mismatch: a core owns slices no loop partition covers"
-            ) from None
-        if set(table) != set(range(split)) or (
-            not any_fused and signatures != [(p,) for p in range(split)]
-        ):
-            raise ValueError(
-                "ownership mismatch: loop and physical slices have different core owners"
-            )
-        expected[loop] = table
-        owners[loop] = slots[first]
-
-    if not any_fused:
-        return TensorWorkDivision(splits, owners, num_cores=n)
-    # The physical slices already determine every loop owner. Search only for
-    # the existing supported spelling, never re-prove the access per candidate.
-    expected_rows = tuple(
-        {loop: table[core] for loop, table in expected.items()} for core in range(n)
+    """Keep the planner's explicit rollout policy outside physical geometry."""
+    return physical_work_division_from_view(
+        view,
+        device_size,
+        device_coordinates,
+        iteration_space,
+        allow_extended=config.lx_extended_ownership,
     )
-    candidate = select_unique_partition_division(
-        tuple(loop for loop in iteration_space if loop in splits),
-        splits,
-        n,
-        lambda division: (
-            owner_slots(division.core_id_to_work_slice, splits, n) == expected_rows
-        ),
-    )
-    if candidate is None:
-        raise ValueError("no unique certified canonical mapping for fused ownership")
-    return candidate
 
 
 def materialized_lx_relayouts(
@@ -1308,50 +1125,6 @@ def is_partial_lx_read(producer: Operation, dep: MemoryDep) -> bool:
         return True
 
 
-def _dense_read_rectangle(device_size, coordinates, iteration_space):
-    """Prove an injective physical rectangle using the existing loop parser.
-
-    Each coordinate may depend on one loop. Coupled coordinates, padding,
-    broadcasts and symbolic bounds are deliberately outside this local path.
-    """
-    shape = tuple(device_size)
-    if len(shape) != len(coordinates) or any(
-        sympy.sympify(size).is_Integer is not True or size <= 0 for size in shape
-    ):
-        raise ValueError("local read needs a static physical shape")
-    origin, extent, axes = [0] * len(shape), [1] * len(shape), {}
-    for axis, coordinate in enumerate(coordinates):
-        coordinate = sympy.sympify(coordinate)
-        symbols = coordinate.free_symbols
-        if not symbols:
-            if coordinate.is_Integer is not True or not 0 <= coordinate < shape[axis]:
-                raise ValueError("local read constant is outside its parent")
-            origin[axis] = int(coordinate)
-        elif len(symbols) == 1 and symbols <= iteration_space.keys():
-            axes.setdefault(next(iter(symbols)), []).append(axis)
-        else:
-            raise ValueError("local read needs independent physical coordinates")
-    for loop, size in iteration_space.items():
-        size = sympy.sympify(size)
-        if size.is_Integer is not True or not 0 < size <= _MAX_EXACT_DIRECT_AXIS_POINTS:
-            raise ValueError("local read loop exceeds the static proof domain")
-        if loop not in axes:
-            if size != 1:
-                raise ValueError("local read broadcasts an iteration axis")
-            continue
-        active = axes[loop]
-        (bounds,) = _loop_regions(
-            int(size),
-            tuple(coordinates[a].xreplace({loop: _LOOP_POINT}) for a in active),
-            tuple(int(shape[a]) for a in active),
-            1,
-            rectangles=True,
-        )
-        for axis, (low, high) in zip(active, bounds):
-            origin[axis], extent[axis] = low, high - low + 1
-    return tuple(origin), tuple(extent)
-
-
 def _local_lx_parent_read(graph, producer, consumer):
     """Select one parent read; other reads must be immutable scalar literals.
 
@@ -1609,46 +1382,35 @@ def local_lx_subrange_geometry(graph, producer, consumer):
         return None
 
 
+def local_lx_read_geometry(graph, producer, consumer) -> LocalReadGeometry | None:
+    """Check graph and storage permission before exporting immutable geometry."""
+    try:
+        reads = [
+            dep
+            for dep in op_read_writes(consumer).reads
+            if dep.name == producer.get_name()
+        ]
+        if not has_partial_read(producer.layout.size, reads):
+            return None
+        rectangle = local_lx_subrange_geometry(graph, producer, consumer)
+        if rectangle is None:
+            return None
+        return LocalReadGeometry(
+            tuple(map(int, producer.layout.device_layout.device_size)),
+            tuple(rectangle[0]),
+            tuple(rectangle[1]),
+            producer.get_dtype().itemsize,
+        )
+    except (*_EVALUATION_ERRORS, NotImplementedError):
+        return None
+
+
 def local_lx_subrange_certificate(
     graph, producer, consumer, source_view, read_view
 ) -> DenseSubrangeTransfer | None:
-    """Certify the live parent and child domains without creating a copy plan."""
-    rectangle = local_lx_subrange_geometry(graph, producer, consumer)
-    if (
-        rectangle is None
-        or source_view is None
-        or read_view is None
-        or not source_view.same_partition(read_view)
-    ):
-        return None
-    try:
-        shape = tuple(map(int, producer.layout.device_layout.device_size))
-        maps = [
-            dict(
-                enumerate(
-                    owner_slots(
-                        dict(view.core_to_slot),
-                        dict(view.work_slice_dims),
-                        view.num_cores,
-                    )
-                )
-            )
-            for view in (source_view, read_view)
-        ]
-        certificate = certify_dense_subrange_transfer(
-            shape,
-            rectangle[0],
-            rectangle[1],
-            dict(source_view.work_slice_dims),
-            dict(read_view.work_slice_dims),
-            maps[0],
-            maps[1],
-            element_bytes=producer.get_dtype().itemsize,
-        )
-        local_subrange_byte_offset(certificate)
-        return certificate
-    except (*_EVALUATION_ERRORS, NotImplementedError):
-        return None
+    return local_read_certificate(
+        local_lx_read_geometry(graph, producer, consumer), source_view, read_view
+    )
 
 
 def local_lx_subrange_source(graph, name: str, uses: list[int]) -> bool:
@@ -1691,31 +1453,19 @@ def _local_lx_emission_view(op, dep, name):
     return _per_core_view_on_buf(op, dep, name, ownership_override=ownership)
 
 
-def normalize_local_lx_subrange(
-    graph, name, consumer, argument: TensorArg, iteration_space
-) -> TensorArg:
-    """Rebase only an emitted input; keep the full parent IR and allocation.
-
-    Recompute the certificate from the committed writer and reader, then
-    compare it with the final access before the aligner changes its frame.
-    No generic shuffle masks, name-only rewrites or shared child storage.
-    """
-    if (
-        not config.lx_planner_relayout
-        or config.ktir_emitter
-        or not argument.is_input
-        or "lx" not in argument.allocation
-    ):
-        return argument
+def local_lx_emission_contract(graph, name, consumer) -> LocalReadEmission | None:
+    """Recheck the live graph at the actual read, then export immutable facts."""
+    if not config.lx_planner_relayout or config.ktir_emitter:
+        return None
     producer = graph.get_buffer(name)
     reads = [dep for dep in op_read_writes(consumer).reads if dep.name == name]
     if not any(is_partial_lx_read(producer, dep) for dep in reads):
-        return argument
+        return None
     # Existing full-buffer prefix gathers have their own matmul emission.
     if not isinstance(consumer, ComputedBuffer) or not isinstance(
         consumer.data, Pointwise
     ):
-        return argument
+        return None
     rectangle = local_lx_subrange_geometry(graph, producer, consumer)
     if rectangle is None or len(reads) != 1:
         raise ValueError(f"{name}: partial LX input lacks a local certificate")
@@ -1736,50 +1486,44 @@ def normalize_local_lx_subrange(
     certificate = local_lx_subrange_certificate(
         graph, producer, consumer, source_view, read_view
     )
-    if (
-        certificate is None
-        or tuple(argument.device_size) != certificate.parent_shape
-        or argument.device_dtype != layout.device_layout.device_dtype
-        or argument.element_arrangement != ElementArrangement.STANDARD
-        or argument.allocation != layout.allocation
-        or set(argument.allocation) != {"lx"}
-        or argument.device_tile_advance_expr is not None
-        or _dense_read_rectangle(
-            argument.device_size, argument.device_coordinates, iteration_space
-        )
-        != rectangle
-    ):
+    if certificate is None:
         raise ValueError(f"{name}: emitted LX access differs from its certificate")
-    base = argument.allocation["lx"]
-    if type(base) is not int or base < 0 or base % 128:
-        raise ValueError(f"{name}: local LX base is not a concrete stick address")
-    child_allocation = getattr(consumer.layout, "allocation", {})
-    if "lx" in child_allocation:
-        child_base = child_allocation["lx"]
-        if (
-            base < child_base + certificate.destination_reservation_bytes
-            and child_base < base + certificate.source_reservation_bytes
-        ):
-            raise ValueError(f"{name}: compact child overlaps its live parent")
-    coordinates = [
-        coordinate - start
-        for coordinate, start in zip(argument.device_coordinates, certificate.origin)
-    ]
-    division = work_division_from_view(
-        layout.lx_view, certificate.extent, coordinates, iteration_space
+    return LocalReadEmission(
+        certificate=certificate,
+        source_view=layout.lx_view,
+        device_dtype=layout.device_layout.device_dtype,
+        element_arrangement=ElementArrangement.STANDARD,
+        source_allocation=tuple(layout.allocation.items()),
+        consumer_name=consumer.get_name(),
+        consumer_allocation=tuple(
+            getattr(consumer.layout, "allocation", {}).items()
+        ),
     )
+
+
+def normalize_local_lx_subrange(
+    graph, name, consumer, argument: TensorArg, iteration_space
+) -> TensorArg:
+    """Compatibility entry point; storage permission remains planner-owned."""
     if (
-        argument.work_division is None
-        or division is None
-        or not argument.work_division.same_ownership(division)
+        not config.lx_planner_relayout
+        or config.ktir_emitter
+        or not argument.is_input
+        or "lx" not in argument.allocation
+        or not isinstance(consumer, ComputedBuffer)
+        or not isinstance(consumer.data, Pointwise)
     ):
-        raise ValueError(f"{name}: rebasing changed the committed LX ownership")
-    return dataclasses.replace(
+        return argument
+    producer = graph.get_buffer(name)
+    reads = [dep for dep in op_read_writes(consumer).reads if dep.name == name]
+    if not has_partial_read(producer.layout.size, reads):
+        return argument
+    return normalize_local_read(
+        local_lx_emission_contract(graph, name, consumer),
+        name,
         argument,
-        device_size=list(certificate.extent),
-        device_coordinates=coordinates,
-        allocation={"lx": base + local_subrange_byte_offset(certificate)},
-        work_division=division,
+        iteration_space,
+        allow_extended=config.lx_extended_ownership,
     )
 
 

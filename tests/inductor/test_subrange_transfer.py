@@ -276,14 +276,14 @@ def test_legacy_transfer_edges_keep_exact_partition_semantics():
 
 def test_local_cache_heads_keep_the_full_parent_reservation():
     from sympy import Mod, Symbol, floor
-    from torch_spyre._inductor.scratchpad.lx_relayout import _dense_read_rectangle
+    from torch_spyre._inductor.core_mapping import dense_read_rectangle
 
     row, feature = (
         Symbol(name, integer=True, nonnegative=True) for name in ("row", "feature")
     )
     for head in range(2):
         coordinates = (floor(feature / 64) + 2 * head, row, Mod(feature, 64))
-        origin, extent = _dense_read_rectangle(
+        origin, extent = dense_read_rectangle(
             (4, 512, 64), coordinates, {row: 512, feature: 128}
         )
         certificate = _certificate(
