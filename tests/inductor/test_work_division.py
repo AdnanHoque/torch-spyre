@@ -203,6 +203,160 @@ class TestLoopCarryLxEligibility(unittest.TestCase):
     def setUp(self):
         self.allocator = ScratchpadAllocator(GreedyLayoutSolver, 2**20)
 
+    def test_shared_residency_facts_are_lazy_and_local_to_one_check(self):
+        from torch_spyre._inductor.scratchpad.allocator import _BufferResidencyChecks
+
+        op = _computed_buffer((64, 64), name="buf")
+        self.allocator._decides_lx_relayouts = True
+        checks = _BufferResidencyChecks(
+            allocator=self.allocator,
+            graph=_residency_graph(op),
+            name="buf",
+            uses=[0, 1],
+            op=op,
+            mutated_buffers={"buf"},
+            graph_output_names={"buf"},
+            reinterpret_output_names=set(),
+            ncores={"buf": 32},
+            ncores_reasons={},
+            division_is_fixed=False,
+            buf_user_deps={},
+            planned_lx_buffers=frozenset(),
+            lx_relayout_plans=(),
+            drain_plans=(),
+            tileable=False,
+        )
+        with (
+            allocator_module.config.patch(lx_planner_relayout=True, ktir_emitter=False),
+            patch.object(
+                allocator_module, "clone_at_graph_boundaries", return_value=True
+            ) as clone,
+            patch.object(
+                allocator_module, "prefix_lx_gather_source", return_value=True
+            ) as prefix,
+            patch.object(
+                allocator_module, "buffer_not_read_in_full", return_value=False
+            ),
+        ):
+            clone.assert_not_called()
+            prefix.assert_not_called()
+            # These consumers can request their facts before the other rules.
+            self.assertEqual(
+                checks.mutated_output(), "graph output mutated after production"
+            )
+            self.assertTrue(checks.prefix_gather())
+            self.assertIsNone(checks.reinterpret_output())
+            self.assertIsNone(checks.partial_read())
+            clone.assert_called_once_with()
+            prefix.assert_called_once_with(checks.graph, "buf", [0, 1])
+            fresh = dataclasses.replace(checks)
+            self.assertEqual(
+                fresh.mutated_output(), "graph output mutated after production"
+            )
+            self.assertTrue(fresh.prefix_gather())
+            self.assertEqual(clone.call_count, 2)
+            self.assertEqual(prefix.call_count, 2)
+
+    def test_buffer_residency_adapter_rejection_strings(self):
+        cases = (
+            ("sized", None, "unsized (no device layout)"),
+            ("advancing", "_is_tiled_advancing", "tiled (advancing)"),
+            (
+                "extern",
+                "_extern_kernel_in_live_range",
+                "extern kernel user or live across extern kernel",
+            ),
+            (
+                "multi_output_extern",
+                "_multi_output_extern_kernel_in_live_range",
+                "live across multi-output extern kernel",
+            ),
+            (
+                "indirect",
+                "_is_index_or_indirectly_accessed",
+                "index tensor or indirectly accessed",
+            ),
+            ("reinterpret_output", None, "graph output is a ReinterpretView"),
+            ("partial_read", "buffer_not_read_in_full", "partial/offset read"),
+            ("back_gap", "_would_produce_lx_back_gap", "lx back gap"),
+        )
+        for rule, predicate, expected in cases:
+            with self.subTest(rule=rule), ExitStack() as stack:
+                op = _computed_buffer((64, 64), name="buf")
+                common = dict(
+                    graph=_residency_graph(op),
+                    name="buf",
+                    uses=[0, 1],
+                    op=op,
+                    mutated_buffers=set(),
+                    graph_output_names=set(),
+                    reinterpret_output_names=set(),
+                    ncores={"buf": 32},
+                    ncores_reasons={},
+                    division_is_fixed=True,
+                    buf_user_deps={},
+                )
+                stack.enter_context(
+                    allocator_module.config.patch(
+                        lx_planner_relayout=False,
+                        enable_lx_context_switching=rule == "multi_output_extern",
+                    )
+                )
+                for name in (
+                    "is_empty_tiled_layout",
+                    "_is_tiled_advancing",
+                    "_is_read_advancing_anywhere",
+                    "_extern_kernel_in_live_range",
+                    "_multi_output_extern_kernel_in_live_range",
+                    "buffer_not_read_in_full",
+                    "_would_produce_lx_back_gap",
+                ):
+                    stack.enter_context(
+                        patch.object(allocator_module, name, return_value=False)
+                    )
+                for name, value in (
+                    ("_op_output_good_for_lx_reuse", True),
+                    ("_is_index_or_indirectly_accessed", False),
+                    ("_restickify_barrier", None),
+                ):
+                    stack.enter_context(
+                        patch.object(self.allocator, name, return_value=value)
+                    )
+                stack.enter_context(
+                    patch.object(
+                        allocator_module, "clone_at_graph_boundaries", return_value=True
+                    )
+                )
+                self.assertIsNone(self.allocator._buffer_residency_reason(**common))
+                late = stack.enter_context(
+                    patch.object(
+                        allocator_module,
+                        "_would_produce_lx_back_gap",
+                        return_value=True,
+                    )
+                )
+                if rule == "sized":
+                    op.layout = FixedLayout(
+                        torch.device("cpu"), torch.float16, [64, 64]
+                    )
+                elif rule == "reinterpret_output":
+                    common["graph_output_names"].add("buf")
+                    common["reinterpret_output_names"].add("buf")
+                elif predicate != "_would_produce_lx_back_gap":
+                    owner = (
+                        self.allocator
+                        if predicate == "_is_index_or_indirectly_accessed"
+                        else allocator_module
+                    )
+                    stack.enter_context(
+                        patch.object(owner, predicate, return_value=True)
+                    )
+                self.assertEqual(
+                    self.allocator._buffer_residency_reason(**common), expected
+                )
+                if rule != "back_gap":
+                    late.assert_not_called()
+
     @staticmethod
     def _tagged_carry(name="carry"):
         op = _computed_buffer((64, 64), name=name)
@@ -4453,10 +4607,18 @@ class TestResidencyRuleRegistry(unittest.TestCase):
         self.assertEqual(buffer_residency_reason(checks), "core div mismatch: reader")
         checks.prefix_gather = lambda: False
         self.assertEqual(buffer_residency_reason(checks), "partial/offset read")
+        checks.mutated_output = lambda: "graph output mutated after production"
+        checks.drain = lambda: True
+        self.assertEqual(buffer_residency_reason(checks), "partial/offset read")
+        checks.drain = lambda: False
+        self.assertEqual(
+            buffer_residency_reason(checks), "graph output mutated after production"
+        )
 
     def test_registry_documentation_matches_runtime_rules(self):
         from pathlib import Path
         from torch_spyre._inductor.scratchpad.residency_rules import (
+            BUFFER_RESIDENCY_RULES,
             residency_rules_markdown,
         )
 
@@ -4469,6 +4631,8 @@ class TestResidencyRuleRegistry(unittest.TestCase):
             .split("<!-- END GENERATED BUFFER RESIDENCY RULES -->", 1)[0]
         )
         self.assertEqual(body, residency_rules_markdown())
+        self.assertIn("| Why |", body)
+        self.assertTrue(all(rule.why.strip() for rule in BUFFER_RESIDENCY_RULES))
 
     def test_transfer_certificate_references_resolve(self):
         import ast
