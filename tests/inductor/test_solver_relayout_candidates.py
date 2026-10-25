@@ -745,8 +745,11 @@ def test_persistent_scatter_requires_independent_immutable_source(
         ) is (enabled and violation is None)
 
 
-@pytest.mark.parametrize("invalid", [None, "offset", "compact_stride", "inner_tail"])
+@pytest.mark.parametrize(
+    "invalid", [None, "offset", "compact_stride", "inner_tail", "second_reader"]
+)
 def test_prefix_lx_contraction_requires_exact_backing_stride(invalid):
+    from dataclasses import replace
     import torch
     from torch._inductor.dependencies import MemoryDep, ReadWrites
     from torch._inductor.ir import ComputedBuffer, Pointwise, Reduction
@@ -802,4 +805,21 @@ def test_prefix_lx_contraction_requires_exact_backing_stride(invalid):
         OrderedSet([read, weight]), OrderedSet([write]), OrderedSet()
     )
     axis = lx_relayout.prefix_lx_contraction_axis(source, consumer)
-    assert axis == (0 if invalid is None else None)
+    assert axis == (0 if invalid in (None, "second_reader") else None)
+    if invalid == "second_reader":
+        other = replace(consumer, name="other", layout=layout.unallocated_copy())
+        other.get_read_writes = lambda: ReadWrites(
+            OrderedSet([read, weight]),
+            OrderedSet([MemoryDep("other", n * a + b, (a, b), (m, n))]),
+            OrderedSet(),
+        )
+        graph = SimpleNamespace(
+            operations=[source, consumer],
+            get_buffer=lambda name: source,
+            get_output_names=lambda: [],
+        )
+        assert lx_relayout.prefix_lx_gather_source(graph, "source", [0, 1])
+        graph.operations = [source, other]
+        assert lx_relayout.prefix_lx_gather_source(graph, "source", [0, 1])
+        graph.operations = [source, consumer, other]
+        assert not lx_relayout.prefix_lx_gather_source(graph, "source", [0, 1, 2])
