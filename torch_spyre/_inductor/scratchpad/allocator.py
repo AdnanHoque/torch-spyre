@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, cast, NamedTuple, Optional
 
 import sympy
@@ -67,7 +68,6 @@ from torch_spyre._inductor.errors import Unsupported
 from torch_spyre._inductor.work_division_constraints import (
     JOINT_TILING_AND_DIVISION_ATTR,
 )
-from torch_spyre._inductor.scratchpad.residency_rules import buffer_residency_reason
 from torch_spyre._inductor.scratchpad.plan_solver import (
     ceil_div,
     cost_expr_record,
@@ -85,6 +85,7 @@ from torch_spyre._inductor.scratchpad.plan_solver import (
     relayout_copy_name,
 )
 from torch_spyre._inductor.scratchpad.greedy_solver import GreedyLayoutSolver
+from torch_spyre._inductor.scratchpad.residency_rules import buffer_residency_reason
 from torch_spyre._inductor.scratchpad.firstfit_bestfit_solver import (
     BestFitLayoutSolver,
     FirstFitLayoutSolver,
@@ -763,7 +764,11 @@ class ScratchpadOptimizationPass(ABC):
 
 @dataclass
 class _BufferResidencyChecks:
-    """Graph facts for the ordered output-buffer residency rules."""
+    """Facts for one synchronous residency check, before any graph edit.
+
+    Cached facts belong to this call only. Later solver passes create a new
+    adapter; they must not reuse it after changing graph or layout metadata.
+    """
 
     allocator: "ScratchpadAllocator"
     graph: GraphLowering
@@ -782,8 +787,6 @@ class _BufferResidencyChecks:
     drain_plans: Collection[str]
     tileable: bool
     _loop_carry: bool = False
-    _cloned_output: bool = False
-    _prefix_gather: bool = False
 
     def op_allowed(self) -> Optional[str]:
         if self.op is None or not self.allocator._op_output_good_for_lx_reuse(
@@ -850,10 +853,11 @@ class _BufferResidencyChecks:
             return "index tensor or indirectly accessed"
         return None
 
+    @cached_property
+    def _cloned_output(self) -> bool:
+        return self.name in self.graph_output_names and clone_at_graph_boundaries()
+
     def reinterpret_output(self) -> Optional[str]:
-        self._cloned_output = (
-            self.name in self.graph_output_names and clone_at_graph_boundaries()
-        )
         if self._cloned_output and self.name in self.reinterpret_output_names:
             return "graph output is a ReinterpretView"
         return None
@@ -866,17 +870,14 @@ class _BufferResidencyChecks:
     def drain(self) -> bool:
         return self.name in self.drain_plans
 
-    def partial_read(self) -> Optional[str]:
-        # Prepare the certificate at the same point as the original checks.
-        self._prefix_gather = (
+    @cached_property
+    def _prefix_gather(self) -> bool:
+        return (
             config.lx_planner_relayout
             and not config.ktir_emitter
             and prefix_lx_gather_source(self.graph, self.name, self.uses)
             and (
-                (
-                    not self.division_is_fixed
-                    and getattr(self.allocator, "_decides_lx_relayouts", False)
-                )
+                (not self.division_is_fixed and self.allocator._decides_lx_relayouts)
                 or (
                     self.division_is_fixed
                     and any(
@@ -885,6 +886,10 @@ class _BufferResidencyChecks:
                 )
             )
         )
+
+    def partial_read(self) -> Optional[str]:
+        # Keep the original evaluation point, even when the read is complete.
+        _ = self._prefix_gather
         return (
             "partial/offset read"
             if buffer_not_read_in_full(self.graph, self.name)
@@ -917,6 +922,8 @@ class ScratchpadAllocator:
     """
     Class for allocating on scratchpad
     """
+
+    _decides_lx_relayouts: bool = False
 
     def __init__(
         self,

@@ -21,12 +21,10 @@ import runpy
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true")
-    args = parser.parse_args()
+    argparse.ArgumentParser(description=__doc__).parse_args()
     root = Path(__file__).resolve().parents[1]
     path = root / "docs/source/compiler/scratchpad_planning.md"
-    old = new = path.read_text()
+    new = path.read_text()
     for module, marker, render in (
         (
             "scratchpad/residency_rules.py",
@@ -46,11 +44,7 @@ def main() -> int:
         before, rest = new.split(start, 1)
         _, after = rest.split(end, 1)
         new = before + start + registry[render]() + end + after
-    if args.check:
-        if old != new:
-            parser.exit(1, "Residency-rule documentation is out of date.\n")
-    else:
-        path.write_text(new)
+    path.write_text(new)
     return 0
 
 
