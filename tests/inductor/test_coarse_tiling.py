@@ -10171,6 +10171,7 @@ class TestCollectiveStageCurrentUses(unittest.TestCase):
         gap_solver.alignment = 64
         gap_solver._pick_gap.return_value = SimpleNamespace(start=0)
         with (
+            allocator_module.config.patch(lx_collective_output_staging=True),
             patch.object(
                 allocator_module, "clone_at_graph_boundaries", return_value=True
             ),
@@ -10216,6 +10217,45 @@ class TestCollectiveStageCurrentUses(unittest.TestCase):
             )
         self.assertEqual(buffer.uses, [0, 1])
         return allocator, buffer, graph, collective, external, gap, views
+
+    def test_staging_switch_declines_before_placement(self):
+        from torch_spyre._inductor.scratchpad import allocator as allocator_module
+        from torch_spyre._inductor.scratchpad.allocator import CoOptimizingAllocator
+        from torch_spyre._inductor.scratchpad.plan_solver import LifetimeBoundBuffer
+
+        allocator = CoOptimizingAllocator.__new__(CoOptimizingAllocator)
+        allocator.size = 1024
+        allocator._collective_output_stages = {"stale": object()}
+        held = LifetimeBoundBuffer("held", 128, [0], address=64)
+        with (
+            allocator_module.config.patch(lx_collective_output_staging=False),
+            patch.object(
+                allocator_module, "calculate_liveness", return_value={}
+            ) as live,
+            patch.object(allocator_module, "FirstFitLayoutSolver") as gaps,
+            patch.object(
+                allocator_module, "clone_at_graph_boundaries", return_value=True
+            ) as clone,
+        ):
+            self.assertFalse(
+                allocator_module.config.save_config_portable()[
+                    "lx_collective_output_staging"
+                ]
+            )
+            allocator._stage_collective_outputs(
+                SimpleNamespace(get_output_names=lambda: []), [held], []
+            )
+        self.assertEqual(allocator._collective_output_stages, {})
+        self.assertEqual(held.address, 64)
+        live.assert_not_called()
+        gaps.assert_not_called()
+        clone.assert_not_called()
+        with allocator_module.config.patch(lx_collective_output_staging=True):
+            self.assertTrue(
+                allocator_module.config.save_config_portable()[
+                    "lx_collective_output_staging"
+                ]
+            )
 
     def test_inserted_operation_does_not_hide_eligible_stage(self):
         allocator, buffer, graph, collective, external, gap, views = self._run_stage()

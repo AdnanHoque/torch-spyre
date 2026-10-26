@@ -324,9 +324,25 @@ chosen relayout copy. Enabling another relayout can remove a free gap and change
 which outputs are staged. This is a performance dependency, not a reason to
 relax either path's safety checks.
 
+Staging is a named post-solve exception to ordinary buffer residency. It requires
+one fresh, untiled matmul output, one bare all-reduce reader, private single-writer
+storage, complete reads and an accepted ownership view. Other opaque users,
+aliases, unsupported back gaps and K-split writers are refused. The selected
+collective uses the HBM clone. It does not read LX directly.
+
+`test_real_gap_solver_keeps_stages_disjoint_or_declines` checks full placed spans,
+including reduction splits and relayout copies. The captured-graph test
+`test_stage_push_rewrites_a_captured_matmul_collective` checks the clone and rewire.
+
+Set `SPYRE_LX_COLLECTIVE_OUTPUT_STAGING=0` to disable staging independently of
+ownership certificates. The switch clears staging state before placement and
+leaves solver allocations and ordinary output clones unchanged. Its value is
+part of the compile cache key. `test_staging_switch_declines_before_placement`
+checks this boundary.
+
 ### Declarative exclusion
 
-Eligibility is decided in exactly one place, `ScratchpadAllocator._residency_reasons`
+The ordinary pre-solve verdict is computed in `ScratchpadAllocator._residency_reasons`
 in `allocator.py`, and carried
 to the solver as a single field, `LifetimeBoundBuffer.residency_reason`:
 `None` means the buffer may be pinned, any string is the reason it may not.

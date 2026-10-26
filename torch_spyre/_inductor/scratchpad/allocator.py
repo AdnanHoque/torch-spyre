@@ -3404,7 +3404,7 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         qualifies; aliases, graph outputs and other readers retain HBM.
         """
         self._collective_output_stages = {}
-        if not clone_at_graph_boundaries():
+        if not config.lx_collective_output_staging or not clone_at_graph_boundaries():
             return
         # Chosen tilings can insert operations after the solve. Read current
         # graph positions without changing the solver's lifetime records.
