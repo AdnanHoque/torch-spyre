@@ -817,11 +817,6 @@ interpretation. Symbolic projections stay in `slice_ownership.py`. A caller
 passes its rollout choice explicitly. Geometry cannot grant storage permission.
 The old `pass_utils.PerCoreView` name remains an import alias.
 
-The dense subrange certificate records physical domains, byte offsets, strides
-and fragment coverage. It does not allocate storage, approve a reader or emit a
-native shuffle. The planner must still check storage, writers, aliases,
-lifetimes and supported emission.
-
 `cost_features.py` owns feature extraction. Planning and reporting use the same
 functions. `dump_cost_model.py` keeps diagnostic output and latest-report state.
 This extraction does not change coefficients, units or physical core domains.
