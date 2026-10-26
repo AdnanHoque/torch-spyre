@@ -799,7 +799,7 @@ bugs that the hand-written cases miss.
 
 ### Matched OFF-plan comparison
 
-Use `tools/run_off_plan_capture.py` on the same existing fixture at each adjacent
+Use `tools/lx_planning/run_off_plan_capture.py` on the same existing fixture at each adjacent
 source pair. Set `SPYRE_LX_EXTENDED_OWNERSHIP=0` before either process starts.
 Use fresh compile caches and the same upstream commit, inputs, hints, planner
 seed, worker count and other compiler settings. The contract records the
@@ -811,7 +811,7 @@ argument binding and HBM pool size. It does not force a layout or a division.
 Unknown fields stop capture. Empty captures and cache hits cannot pass.
 Buffer names and program order remain significant; differences require review.
 
-Compare the two saved records with `tools/lx_semantic_plan.py`. Repeat the
+Compare the two saved records with `tools/lx_planning/lx_semantic_plan.py`. Repeat the
 adjacent OFF/OFF comparison through the final stack, then compare its OFF plan
 with the matched #5160 OFF plan. Numerical checks remain separate. Host tests
 of the recorder do not establish that these native comparisons have passed.

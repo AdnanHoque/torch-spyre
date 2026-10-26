@@ -20,7 +20,7 @@ from dataclasses import dataclass
 import pytest
 import sympy
 
-from tools.lx_semantic_plan import compare_plans, freeze, validate_contract
+from tools.lx_planning.lx_semantic_plan import compare_plans, freeze, validate_contract
 
 
 def _contract():
@@ -172,7 +172,7 @@ def test_driver_writes_only_after_the_entire_fixture_passes(
     from pathlib import Path
     import sys
 
-    import tools.lx_semantic_plan as recorder
+    import tools.lx_planning.lx_semantic_plan as recorder
 
     path = Path(recorder.__file__).with_name("run_off_plan_capture.py")
     monkeypatch.syspath_prepend(str(path.parent))
@@ -235,7 +235,7 @@ def test_only_the_verified_pre_flag_baseline_may_omit_its_switch(monkeypatch, tm
     import hashlib
     from types import SimpleNamespace
 
-    import tools.lx_semantic_plan as recorder
+    import tools.lx_planning.lx_semantic_plan as recorder
 
     source = tmp_path / "config.py"
     source.write_text("verified pre-flag source\n")
