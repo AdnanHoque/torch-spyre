@@ -355,7 +355,7 @@ The checks, in evaluation order (the first failure is the reason reported):
 <!-- END GENERATED BUFFER RESIDENCY RULES -->
 
 This table comes from `BUFFER_RESIDENCY_RULES` in
-`scratchpad/residency_rules.py`. Run `python tools/generate_residency_rules.py`
+`scratchpad/residency_rules.py`. Run `python tools/lx_planning/generate_residency_rules.py`
 to update it. The allocator evaluates these rules in this order. An exception
 clears only its own rule. Storage, lifetime, capacity and later rules still apply.
 Reason labels group related diagnostics. A returned reason can include more
