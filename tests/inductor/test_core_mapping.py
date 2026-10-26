@@ -1482,6 +1482,28 @@ def test_geometry_and_feature_import_layers():
             for node in ast.walk(tree)
         ), path
     tree = ast.parse((root / "core_mapping.py").read_text())
+    bindings = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+    }
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            bindings.update(
+                child.id
+                for child in ast.walk(node)
+                if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store)
+            )
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            bindings.update(
+                alias.asname or alias.name.split(".")[0] for alias in node.names
+            )
+    for path in root.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith(
+                "core_mapping"
+            ):
+                assert {alias.name for alias in node.names} <= bindings, path
     assert not any(
         isinstance(node, ast.ImportFrom)
         and node.module is not None

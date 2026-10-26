@@ -36,6 +36,10 @@ from .slice_ownership import factor_slice_axis, project_slice_axis
 _MAX_OWNER_PERMUTATION_DIMS = 5
 
 
+# Conservative physical incoming-fragment bound; not a measured cost limit.
+_MAX_SHUFFLE_FANIN = 8
+
+
 _MAX_EXACT_OWNERSHIP_POINTS = 1024
 
 
