@@ -258,7 +258,12 @@ class TestLoopCarryLxEligibility(unittest.TestCase):
             self.assertEqual(prefix.call_count, 2)
 
     def test_buffer_residency_adapter_rejection_strings(self):
+        from torch_spyre._inductor.scratchpad.residency_rules import (
+            BUFFER_RESIDENCY_RULES,
+        )
+
         cases = (
+            ("op_allowed", None, "op not allowed"),
             ("sized", None, "unsized (no device layout)"),
             ("advancing", "_is_tiled_advancing", "tiled (advancing)"),
             (
@@ -278,10 +283,16 @@ class TestLoopCarryLxEligibility(unittest.TestCase):
             ),
             ("reinterpret_output", None, "graph output is a ReinterpretView"),
             ("partial_read", "buffer_not_read_in_full", "partial/offset read"),
+            ("core_division", None, "core div mismatch: reader"),
+            ("untiled", None, "graph output (no clone)"),
+            ("untiled", None, "no consumer reads it from LX"),
             ("back_gap", "_would_produce_lx_back_gap", "lx back gap"),
         )
         for rule, predicate, expected in cases:
-            with self.subTest(rule=rule), ExitStack() as stack:
+            with self.subTest(rule=rule, expected=expected), ExitStack() as stack:
+                if rule not in ("core_division", "untiled"):
+                    metadata = next(r for r in BUFFER_RESIDENCY_RULES if r.name == rule)
+                    self.assertEqual(expected, metadata.reason)
                 op = _computed_buffer((64, 64), name="buf")
                 common = dict(
                     graph=_residency_graph(op),
@@ -335,7 +346,30 @@ class TestLoopCarryLxEligibility(unittest.TestCase):
                         return_value=True,
                     )
                 )
-                if rule == "sized":
+                if rule == "op_allowed":
+                    stack.enter_context(
+                        patch.object(
+                            self.allocator,
+                            "_op_output_good_for_lx_reuse",
+                            return_value=False,
+                        )
+                    )
+                elif rule == "core_division":
+                    common["ncores"]["buf"] = -1
+                    common["ncores_reasons"]["buf"] = "reader"
+                elif rule == "untiled":
+                    if expected == "graph output (no clone)":
+                        common["graph_output_names"].add("buf")
+                        stack.enter_context(
+                            patch.object(
+                                allocator_module,
+                                "clone_at_graph_boundaries",
+                                return_value=False,
+                            )
+                        )
+                    else:
+                        common["uses"] = [0]
+                elif rule == "sized":
                     op.layout = FixedLayout(
                         torch.device("cpu"), torch.float16, [64, 64]
                     )

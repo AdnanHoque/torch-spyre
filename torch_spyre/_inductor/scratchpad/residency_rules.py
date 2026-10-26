@@ -91,7 +91,10 @@ BUFFER_RESIDENCY_RULES = (
             "external storage; the debug flag only bypasses the operation-name "
             "denylist."
         ),
-        ("TestLoopCarryLxEligibility",),
+        (
+            "TestLoopCarryLxEligibility",
+            "test_buffer_residency_adapter_rejection_strings",
+        ),
     ),
     ResidencyRule(
         "sized",
@@ -228,7 +231,7 @@ BUFFER_RESIDENCY_RULES = (
             "Sliced or multi-offset LX reads can address the wrong data. A "
             "certified zero-offset prefix needs a served full-backing gather."
         ),
-        ("TestRestickifyBarrierDeferredOnJointPath",),
+        ("test_buffer_residency_adapter_rejection_strings",),
         (PREFIX_GATHER,),
     ),
     ResidencyRule(
@@ -240,7 +243,7 @@ BUFFER_RESIDENCY_RULES = (
             "Fixed divisions must agree across users. The joint solver chooses "
             "compatible divisions instead of rejecting a provisional mismatch."
         ),
-        ("TestRestickifyBarrierDeferredOnJointPath",),
+        ("test_buffer_residency_adapter_rejection_strings",),
     ),
     ResidencyRule(
         "untiled",
@@ -251,7 +254,10 @@ BUFFER_RESIDENCY_RULES = (
             "Without a boundary clone, a graph output must land in HBM. Residency "
             "also saves no reads when the producer has no LX consumer."
         ),
-        ("TestLoopCarryLxEligibility",),
+        (
+            "TestLoopCarryLxEligibility",
+            "test_buffer_residency_adapter_rejection_strings",
+        ),
     ),
     ResidencyRule(
         "back_gap",
@@ -263,7 +269,10 @@ BUFFER_RESIDENCY_RULES = (
             "needs a full-backing copy, an unsplit-K reader and a uniform per-core "
             "gap."
         ),
-        ("test_prefix_linear_reads_a_separate_full_backing_lx_gather",),
+        (
+            "test_prefix_linear_reads_a_separate_full_backing_lx_gather",
+            "test_buffer_residency_adapter_rejection_strings",
+        ),
         (PREFIX_GATHER,),
     ),
 )
