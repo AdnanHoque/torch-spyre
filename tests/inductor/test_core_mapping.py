@@ -40,6 +40,7 @@ from torch_spyre._inductor.core_mapping import (
     derive_partition_mapping,
     derive_operation_mapping,
     finalize_tensor_work_divisions,
+    matmul_reduction_dim,
     select_unique_partition_division,
 )
 from torch_spyre._inductor.op_spec import (
@@ -778,6 +779,57 @@ def test_planner_and_sdsc_use_the_same_mapping(
     if dim_splits[:2] == (1, 1):
         assert planner_view.work_slice_dims == ()
         assert not planner_view.same_partition(PerCoreView((), (), num_cores=1))
+
+
+def test_matmul_reduction_dim_is_found_by_identity():
+    """Alignment appends range-1 loops after K, so the last loop is not K."""
+    mb, out, reduction, restored = sympy.symbols("mb out reduction restored")
+    space = {mb: (512, 2), out: (12800, 4), reduction: (4096, 4), restored: (1, 1)}
+
+    def args(*output_coordinates):
+        operand = SimpleNamespace(is_input=True, device_coordinates=[mb, reduction])
+        output = SimpleNamespace(is_input=False, device_coordinates=output_coordinates)
+        return [operand, output]
+
+    found = matmul_reduction_dim(space, args(restored, mb, sympy.Mod(out, 64)))
+    assert found == reduction
+    # K is K whatever its split; an integer coordinate indexes no loop.
+    unsplit = {**space, reduction: (4096, 1)}
+    found = matmul_reduction_dim(unsplit, args(sympy.Integer(0), restored, mb, out))
+    assert found == reduction
+    # Two loops the output does not index: no single K.
+    assert matmul_reduction_dim(space, args(restored, mb)) is None
+
+
+def test_unsplit_k_keeps_the_default_core_order():
+    """Naming an unsplit K as the contiguous dim leaves the core order unchanged."""
+    mb, out, reduction = sympy.symbols("mb out reduction")
+    space = {mb: (512, 8), out: (12800, 4), reduction: (4096, 1)}
+    default = derive_operation_mapping(space)
+    assert derive_operation_mapping(space, contiguous_dim=reduction) == default
+
+
+@pytest.mark.parametrize("op", [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP])
+def test_k_split_partners_stay_neighbours_after_a_restored_loop(monkeypatch, op):
+    """A range-1 loop restored after K must not move the K partners apart."""
+    monkeypatch.setattr(
+        spyre_kernel_module._spyre_config, "core_id_k_fast_emission", True
+    )
+    op_spec = _bmm_op_spec(op)
+    mb, out, reduction = op_spec.iteration_space
+    restored = sympy.Symbol("restored")
+    # Alignment restores an elided size-1 device dimension on every tensor and
+    # appends its loop after the existing ones.
+    op_spec.iteration_space = {**op_spec.iteration_space, restored: (1, 1)}
+    for arg in op_spec.args:
+        arg.device_size = [1, *arg.device_size]
+        arg.device_coordinates = [restored, *arg.device_coordinates]
+    spyre_kernel_module._finalize_core_mapping(op_spec)
+    coordinates = _mapping_coordinates(
+        op_spec.core_id_to_work_slice, (mb, out, reduction), 32
+    )
+    # The four K slices of each output slice sit on four neighbouring cores.
+    assert coordinates == [(core // 4 % 2, core // 8, core % 4) for core in range(32)]
 
 
 def test_flattened_iteration_span_is_not_a_single_axis_view():

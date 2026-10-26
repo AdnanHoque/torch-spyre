@@ -54,6 +54,7 @@ from . import config as _spyre_config
 from .core_mapping import (
     derive_operation_mapping,
     finalize_tensor_work_divisions,
+    matmul_reduction_dim,
     remap_work_division,
 )
 from .errors import Unsupported
@@ -1994,11 +1995,10 @@ def _finalize_core_mapping(
 ) -> None:
     """Assign physical cores from an OpSpec's final aligned dimensions."""
 
+    # An unsplit K is a no-op here: core_to_slice_mapping only moves a split dim.
     contiguous_dim = (
-        next(reversed(op_spec.iteration_space))
-        if op_spec.iteration_space
-        and op_spec.op in MATMUL_REDUCTION_OPS
-        and _spyre_config.core_id_k_fast_emission
+        matmul_reduction_dim(op_spec.iteration_space, op_spec.args)
+        if op_spec.op in MATMUL_REDUCTION_OPS and _spyre_config.core_id_k_fast_emission
         else None
     )
     op_spec.core_id_to_work_slice = derive_operation_mapping(

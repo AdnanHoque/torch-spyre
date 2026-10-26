@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from functools import lru_cache
 from itertools import permutations
 from typing import Any, Callable
@@ -26,7 +26,7 @@ from sympy import Expr, Integer, Mod, Symbol, floor, sympify
 from sympy.utilities.misc import as_int
 
 from torch_spyre._C import DataFormats, get_device_size_in_bytes
-from .op_spec import TensorWorkDivision
+from .op_spec import TensorArg, TensorWorkDivision
 
 
 # pass_utils imports this module; keep its PerCoreView type out of this layer.
@@ -582,6 +582,26 @@ def core_to_slice_mapping(
         result[dims[dim]] = coordinate
         stride *= split
     return result
+
+
+def matmul_reduction_dim(
+    iteration_space: Iterable[Symbol], args: Iterable[TensorArg]
+) -> Symbol | None:
+    """Return a matmul's reduction loop K: the one loop its output does not index.
+
+    Find K by identity, not by position: alignment appends range-1 loops for
+    elided device dimensions after K, so the last loop need not be K. Returns
+    None unless exactly one loop qualifies.
+    """
+    indexed = {
+        symbol
+        for arg in args
+        if not arg.is_input
+        for coordinate in arg.device_coordinates
+        for symbol in sympify(coordinate).free_symbols
+    }
+    reduced = [dim for dim in iteration_space if dim not in indexed]
+    return reduced[0] if len(reduced) == 1 else None
 
 
 def derive_core_mapping(
