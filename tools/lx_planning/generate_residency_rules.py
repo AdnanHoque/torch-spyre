@@ -22,7 +22,7 @@ import runpy
 
 def main() -> int:
     argparse.ArgumentParser(description=__doc__).parse_args()
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     registry = runpy.run_path(
         str(root / "torch_spyre/_inductor/scratchpad/residency_rules.py")
     )
