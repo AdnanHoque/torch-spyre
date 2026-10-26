@@ -22,7 +22,7 @@ import runpy
 
 def main() -> int:
     argparse.ArgumentParser(description=__doc__).parse_args()
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     path = root / "docs/source/compiler/scratchpad_planning.md"
     new = path.read_text()
     for module, marker, render in (
