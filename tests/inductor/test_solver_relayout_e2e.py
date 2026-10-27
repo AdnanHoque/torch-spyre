@@ -1225,7 +1225,9 @@ def test_attention_output_repack_handoff(monkeypatch, rows):
     assert torch.equal(side.cpu(), -divided)
 
 
-def _assert_cache_update_persistence(specs, cache_writes, source_address, elements):
+def _assert_cache_update_persistence(
+    specs, cache_writes, source_address, elements, *, later_write=False
+):
     """Require direct persistence or a complete ordered functionalized copyback."""
     from torch_spyre._inductor.constants import RESTICKIFY_OP
 
@@ -1238,10 +1240,25 @@ def _assert_cache_update_persistence(specs, cache_writes, source_address, elemen
     ]
     assert len(snapshots) == 1, "expected one persistent-cache snapshot"
     snapshot_index, cache = snapshots[0]
-    assert cache.arg_index >= 0 and cache.allocation == {"hbm": cache.arg_index}
     assert math.prod(cache.device_size) == elements
-    assert len(cache_writes) == 1, "expected one indexed persistent-cache update"
+    assert len(cache_writes) == 1 + int(later_write)
     assert set(cache_writes).issubset(map(id, specs))
+    if later_write:
+        writes = [
+            (i, cache_writes[id(spec)])
+            for i, spec in enumerate(specs)
+            if id(spec) in cache_writes
+        ]
+        assert len(writes) == 2, (
+            "expected indexed updates before and after the snapshot"
+        )
+        assert writes[0][0] < snapshot_index < writes[1][0]
+        assert all(set(arg.allocation) in ({"hbm"}, {"hbm_pool"}) for _, arg in writes)
+        # Functionalization can snapshot the first pooled version and copy the
+        # second version back later. Exact outputs and the returned alias below
+        # check both versions, including untouched history in the final cache.
+        return
+    assert cache.arg_index >= 0 and cache.allocation == {"hbm": cache.arg_index}
     for i, spec in enumerate(specs):
         if id(spec) not in cache_writes:
             continue
@@ -1304,8 +1321,12 @@ def _assert_cache_update_persistence(specs, cache_writes, source_address, elemen
         assert pool_writers == [init_index, i], "cache history has an unrelated writer"
 
 
-@pytest.mark.parametrize("rows", [512, 128, 64])
-def test_attention_cache_transpose_handoff(monkeypatch, rows):
+@pytest.mark.parametrize(
+    "rows,later_write",
+    [(512, False), (128, False), (64, False), (512, True)],
+    ids=["512", "128", "64", "512-later-write"],
+)
+def test_attention_cache_transpose_handoff(monkeypatch, rows, later_write):
     """Update persistent K, restickify its prefix, gather, then run two QKs.
 
     The original cache holds history and has twice the attended capacity.
@@ -1345,6 +1366,10 @@ def test_attention_cache_transpose_handoff(monkeypatch, rows):
             cache.index_copy_(2, indices, fresh)
         with spyre_hint(work_div={"S": 2}, named_dims=["KV", "D", "S"]):
             transposed = cache[0, :, :512, :].transpose(-1, -2).contiguous()
+        if later_write:
+            # The immutable snapshot must keep the first update, not these values.
+            with spyre_hint(work_div={"R": rows // 32}):
+                cache.index_copy_(2, indices, keys)
         transposed = transposed.unsqueeze(0).unsqueeze(2)
         with spyre_hint(work_div={"R": 32}):
             query = torch.neg(queries)
@@ -1385,6 +1410,8 @@ def test_attention_cache_transpose_handoff(monkeypatch, rows):
         3,
         other_selectors[..., None].expand(1, 2, 4, rows, 512),
     )
+    if later_write:
+        expected_cache.index_copy_(2, indices, keys)
     for name, size in (
         ("KV", 2),
         ("C", 1024),
@@ -1422,7 +1449,11 @@ def test_attention_cache_transpose_handoff(monkeypatch, rows):
         for args in restick_allocations
     ), "the transpose must read HBM cache and write the planned LX source"
     _assert_cache_update_persistence(
-        list(parsed_specs.values()), cache_writes, plan.source_address, cache.numel()
+        list(parsed_specs.values()),
+        cache_writes,
+        plan.source_address,
+        cache.numel(),
+        later_write=later_write,
     )
     assert (
         plan.source_address + plan.source_footprint_bytes <= plan.destination_address

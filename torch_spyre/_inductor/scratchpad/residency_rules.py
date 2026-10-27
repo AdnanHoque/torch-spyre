@@ -316,7 +316,7 @@ def residency_rules_markdown() -> str:
 
 @dataclass(frozen=True)
 class TransferCertificate:
-    """Describe an existing proof; these rows never dispatch admission."""
+    """Describe transfer and shortlist checks; these rows never dispatch admission."""
 
     name: str
     certificate: str
@@ -326,6 +326,27 @@ class TransferCertificate:
 
 
 TRANSFER_CERTIFICATES = (
+    TransferCertificate(
+        "Full-replica gather",
+        "torch_spyre._inductor.scratchpad.lx_relayout._movement_supported",
+        "ownership flag ON; complete source partition; one destination slice; "
+        "uniform fan-in/out; all source fragments; shuffle fan-in budget",
+        (
+            "test_work_division_hint.py::test_full_replica_movement_tracks_ownership_flag",
+            "test_work_division_hint.py::test_movement_rule_reads_the_owner_maps",
+        ),
+        ("test_solver_relayout_e2e.py::test_attention_cache_transpose_handoff",),
+    ),
+    TransferCertificate(
+        "Full-replica shortlist reservation",
+        "torch_spyre._inductor.scratchpad.allocator.CoOptimizingAllocator._cap_relayout_groups",
+        "ownership flag ON; cheapest priced full replica; an existing unpinned "
+        "slot; sibling pins, prices and cap preserved; solver may decline the copy",
+        (
+            "test_solver_relayout_decision.py::test_relayout_full_replica_preserves_sibling_pins",
+        ),
+        ("test_solver_relayout_e2e.py::test_attention_cache_transpose_handoff",),
+    ),
     TransferCertificate(
         "Updated-input cache snapshot",
         "torch_spyre._inductor.scratchpad.lx_relayout._is_activation_source",
