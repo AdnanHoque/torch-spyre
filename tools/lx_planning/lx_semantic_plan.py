@@ -82,7 +82,11 @@ _PRE_FLAG_MAIN_BASELINE = "10f409548e575dd30833f168d82d98b719def2f4"
 _PRE_FLAG_CONFIG_SHA256 = (
     "8bc7e038c6b9b3c984d0a4f337428e9bb6818d5f5a4f8fb4036d9fce2846b236"
 )
-_MAIN_REFS = ("refs/heads/main", "refs/remotes/origin/main", "refs/remotes/upstream/main")
+_MAIN_REFS = (
+    "refs/heads/main",
+    "refs/remotes/origin/main",
+    "refs/remotes/upstream/main",
+)
 
 
 def _is_pre_flag_baseline(config, compiler_head):
