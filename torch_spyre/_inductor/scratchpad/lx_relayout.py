@@ -605,6 +605,7 @@ def movement_supported(
     destination_num_cores: int,
 ) -> bool:
     """Check transfer geometry with the current ownership rollout policy."""
+    # Include the rollout flag in the memo key so toggling it cannot reuse ON results.
     return _movement_supported(
         source,
         destination,
