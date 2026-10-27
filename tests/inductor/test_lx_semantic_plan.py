@@ -231,7 +231,10 @@ def test_reordered_iteration_axes_cannot_pass():
         compare_plans(left, right)
 
 
-def test_only_the_verified_pre_flag_baseline_may_omit_its_switch(monkeypatch, tmp_path):
+@pytest.mark.parametrize("baseline", ["_PRE_FLAG_BASELINE", "_PRE_FLAG_MAIN_BASELINE"])
+def test_only_the_verified_pre_flag_baseline_may_omit_its_switch(
+    monkeypatch, tmp_path, baseline
+):
     import hashlib
     from types import SimpleNamespace
 
@@ -245,18 +248,75 @@ def test_only_the_verified_pre_flag_baseline_may_omit_its_switch(monkeypatch, tm
         hashlib.sha256(source.read_bytes()).hexdigest(),
     )
     config = SimpleNamespace(__file__=str(source), num_cpus=1)
-    assert (
-        recorder._live_setting(
-            config, "lx_extended_ownership", recorder._PRE_FLAG_BASELINE
-        )
-        is False
-    )
+    head = getattr(recorder, baseline)
+    assert recorder._live_setting(config, "lx_extended_ownership", head) is False
     with pytest.raises(AttributeError, match="missing compiler setting"):
         recorder._live_setting(config, "lx_extended_ownership", "another-source")
     with pytest.raises(AttributeError, match="missing compiler setting"):
-        recorder._live_setting(config, "sencores", recorder._PRE_FLAG_BASELINE)
+        recorder._live_setting(config, "sencores", head)
     source.write_text("different source\n")
     with pytest.raises(ValueError, match="does not match"):
+        recorder._live_setting(config, "lx_extended_ownership", head)
+
+
+def test_later_pre_flag_baseline_requires_actual_unchanged_main_checkout(
+    monkeypatch, tmp_path
+):
+    import hashlib
+    import subprocess
+    from types import SimpleNamespace
+
+    import tools.lx_planning.lx_semantic_plan as recorder
+
+    def git(*args):
+        return subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "-c",
+                "user.name=Recorder test",
+                "-c",
+                "user.email=recorder@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                *args,
+            ],
+            text=True,
+        ).strip()
+
+    git("init", "-b", "main")
+    source = tmp_path / "config.py"
+    source.write_text("verified pre-flag source\n")
+    git("add", "config.py")
+    git("commit", "-m", "pre-flag main")
+    base = git("rev-parse", "HEAD")
+    monkeypatch.setattr(recorder, "_PRE_FLAG_MAIN_BASELINE", base)
+    monkeypatch.setattr(
+        recorder,
+        "_PRE_FLAG_CONFIG_SHA256",
+        hashlib.sha256(source.read_bytes()).hexdigest(),
+    )
+    git("commit", "--allow-empty", "-m", "later main")
+    head = git("rev-parse", "HEAD")
+    config = SimpleNamespace(__file__=str(source))
+    assert recorder._live_setting(config, "lx_extended_ownership", head) is False
+    with pytest.raises(AttributeError, match="missing compiler setting"):
+        recorder._live_setting(config, "lx_extended_ownership", "0" * 40)
+    source.write_text("different source\n")
+    with pytest.raises(ValueError, match="does not match"):
+        recorder._live_setting(config, "lx_extended_ownership", head)
+    source.write_text("verified pre-flag source\n")
+    git("checkout", "-b", "feature")
+    git("commit", "--allow-empty", "-m", "not on main")
+    with pytest.raises(AttributeError, match="missing compiler setting"):
         recorder._live_setting(
-            config, "lx_extended_ownership", recorder._PRE_FLAG_BASELINE
+            config, "lx_extended_ownership", git("rev-parse", "HEAD")
+        )
+    git("checkout", "--orphan", "unrelated")
+    git("commit", "-m", "unrelated history")
+    git("branch", "-f", "main", "HEAD")
+    with pytest.raises(AttributeError, match="missing compiler setting"):
+        recorder._live_setting(
+            config, "lx_extended_ownership", git("rev-parse", "HEAD")
         )
