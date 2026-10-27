@@ -88,7 +88,6 @@ class SliceOwnershipProof:
     name: str
     certificate: str
     prove: Callable[..., tuple[sympy.Symbol, sympy.Expr] | None]
-    floor_recovery: bool
     requires: tuple[str, ...]
     tests: tuple[str, ...]
 
@@ -98,7 +97,6 @@ SLICE_OWNERSHIP_PROOFS = (
         "Affine rectangle containment",
         "project_affine_slice_axis",
         project_affine_slice_axis,
-        False,
         (
             "one contained loop partition",
             "complete read rectangle",
@@ -118,13 +116,9 @@ def project_slice_axis(
     device_extent: int,
     split: int,
     iteration_space: Mapping[sympy.Symbol, sympy.Expr],
-    *,
-    floor_only: bool = False,
 ) -> tuple[sympy.Symbol, sympy.Expr] | None:
     """Apply the caller's containment policy without changing its access."""
     for proof in SLICE_OWNERSHIP_PROOFS:
-        if floor_only and not proof.floor_recovery:
-            continue
         projected = proof.prove(coordinate, device_extent, split, iteration_space)
         if projected is not None:
             return projected
@@ -132,16 +126,15 @@ def project_slice_axis(
 
 
 def ownership_proofs_markdown() -> str:
-    """Describe the exact proof order and the restricted recovery policy."""
+    """Describe the exact emitted-access proof order."""
     lines = [
         "| Ownership proof | Certificate | Requires | Covering tests |",
         "|---|---|---|---|",
     ]
     for proof in SLICE_OWNERSHIP_PROOFS:
-        policy = "; floor-only recovery" if proof.floor_recovery else "; emitted access"
         tests = "; ".join(f"`{test}`" for test in proof.tests)
         lines.append(
-            f"| {proof.name}{policy} | `{proof.certificate}` | "
+            f"| {proof.name}; emitted access | `{proof.certificate}` | "
             f"{', '.join(proof.requires)} | {tests} |"
         )
     return "\n".join(lines) + "\n"

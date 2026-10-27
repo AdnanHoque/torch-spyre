@@ -28,6 +28,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import subprocess
 from unittest.mock import patch
 
 import sympy
@@ -77,16 +78,56 @@ def freeze(value):
 
 
 _PRE_FLAG_BASELINE = "525dfd8ca6f6acc639238610e23e1483e06f5854"
+_PRE_FLAG_MAIN_BASELINE = "10f409548e575dd30833f168d82d98b719def2f4"
 _PRE_FLAG_CONFIG_SHA256 = (
     "8bc7e038c6b9b3c984d0a4f337428e9bb6818d5f5a4f8fb4036d9fce2846b236"
 )
+_MAIN_REFS = ("refs/heads/main", "refs/remotes/origin/main", "refs/remotes/upstream/main")
+
+
+def _is_pre_flag_baseline(config, compiler_head):
+    if compiler_head in {_PRE_FLAG_BASELINE, _PRE_FLAG_MAIN_BASELINE}:
+        return True
+    # Later baselines must be the actual checkout on a known main line, not
+    # merely any feature branch descended from the squash merge.
+    directory = str(Path(config.__file__).resolve().parent)
+    commands = (
+        ["rev-parse", "HEAD"],
+        ["merge-base", "--is-ancestor", _PRE_FLAG_MAIN_BASELINE, compiler_head],
+        [
+            "for-each-ref",
+            "--contains",
+            compiler_head,
+            "--format=%(refname)",
+            *_MAIN_REFS,
+        ],
+    )
+    try:
+        results = [
+            subprocess.run(
+                ["git", "-C", directory, *command],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            for command in commands
+        ]
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return (
+        all(result.returncode == 0 for result in results)
+        and results[0].stdout.strip() == compiler_head
+        and bool(set(results[2].stdout.splitlines()) & set(_MAIN_REFS))
+    )
 
 
 def _live_setting(config, key, compiler_head):
-    """Only the pinned pre-flag source may omit the rollout switch."""
+    """Only verified, unchanged pre-flag sources may omit the rollout switch."""
     if hasattr(config, key):
         return getattr(config, key)
-    if key != "lx_extended_ownership" or compiler_head != _PRE_FLAG_BASELINE:
+    if key != "lx_extended_ownership" or not _is_pre_flag_baseline(
+        config, compiler_head
+    ):
         raise AttributeError(f"missing compiler setting: {key}")
     digest = hashlib.sha256(Path(config.__file__).read_bytes()).hexdigest()
     if digest != _PRE_FLAG_CONFIG_SHA256:
