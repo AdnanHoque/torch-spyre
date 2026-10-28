@@ -2544,6 +2544,9 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
             # per-tensor maps below keep the exact source and destination
             # domains. Example: with 16 output row slices, source core 16 must
             # not become row 16.
+            # Core-domain admission rejects contraction when
+            # lx_extended_ownership is OFF. This frame patch relies on that
+            # earlier gate; it has no separate flag check.
             # Explicit core domains:
             # https://github.com/torch-spyre/torch-spyre/issues/5716
             core_id_to_work_slice = {

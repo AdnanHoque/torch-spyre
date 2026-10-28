@@ -411,6 +411,8 @@ The symbolic proof registry below is separate from storage permission. It
 selects the existing containment proofs in order. The view-recovery caller
 keeps its floor-only, single-driven-axis restriction. An emitted-access proof
 alone does not authorize a recovery candidate.
+`factor_slice_axis` is listed as "Factored ownership" in the transfer-certificate
+table below. It is separate from `SLICE_OWNERSHIP_PROOFS`.
 
 <!-- BEGIN GENERATED OWNERSHIP PROOFS -->
 | Ownership proof | Certificate | Requires | Covering tests |

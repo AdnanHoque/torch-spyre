@@ -989,7 +989,7 @@ def test_complete_partition_expansion_fires_and_preserves_values(
 
 @pytest.mark.parametrize(
     "rows,inner,strided",
-    [(64, 65, True)],
+    [(512, 4096, False), (64, 4096, False), (128, 4096, False), (64, 65, True)],
 )
 def test_q_projection_rope_handoff_preserves_pairs_and_other_consumer(
     monkeypatch, rows, inner, strided
@@ -1118,7 +1118,7 @@ def _check_projection_rope_handoff(
     assert torch.equal(side.cpu(), q_ref + 1)
 
 
-@pytest.mark.parametrize("rows", [512])
+@pytest.mark.parametrize("rows", [512, 128, 64])
 def test_attention_output_repack_handoff(monkeypatch, rows):
     """Produce softmax/PV/divide before repack/O; no implicit LX live-in.
 
