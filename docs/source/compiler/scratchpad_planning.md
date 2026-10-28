@@ -816,6 +816,17 @@ bugs that the hand-written cases miss.
   complementary device-memory pass, which packs every intermediate that
   LX planning did not claim into a shared HBM segment.
 
+### Physical geometry and feature extraction
+
+`core_mapping.py` owns immutable `PerCoreView` values and physical owner
+interpretation. Symbolic projections stay in `slice_ownership.py`. A caller
+passes its rollout choice explicitly. Geometry cannot grant storage permission.
+The old `pass_utils.PerCoreView` name remains an import alias.
+
+`cost_features.py` owns feature extraction. Planning and reporting use the same
+functions. `dump_cost_model.py` keeps diagnostic output and latest-report state.
+This extraction does not change coefficients, units or physical core domains.
+
 ### Matched OFF-plan comparison
 
 Use `tools/lx_planning/run_off_plan_capture.py` on the same existing fixture at each adjacent
