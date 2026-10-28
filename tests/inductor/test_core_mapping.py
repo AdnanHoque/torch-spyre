@@ -832,6 +832,62 @@ def test_k_split_partners_stay_neighbours_after_a_restored_loop(monkeypatch, op)
     assert coordinates == [(core // 4 % 2, core // 8, core % 4) for core in range(32)]
 
 
+@pytest.mark.parametrize("op", [BATCH_MATMUL_OP, BATCH_MATMUL_FP8_OP])
+def test_matmul_labels_follow_roles_after_a_restored_loop(op):
+    """A range-1 loop restored after K must not take K's ``in`` label."""
+    plain = _bmm_op_spec(op)
+    mb, out, reduction = plain.iteration_space
+    plain.core_id_to_work_slice = derive_operation_mapping(
+        plain.iteration_space, contiguous_dim=reduction
+    )
+    _, plain_labels = parse_op_spec(plain)
+    assert {dim: str(plain_labels[dim]) for dim in (mb, out, reduction)} == {
+        mb: "mb",
+        out: "out",
+        reduction: "in",
+    }
+
+    op_spec = _bmm_op_spec(op)
+    restored = sympy.Symbol("restored")
+    # Alignment restores an elided size-1 device dimension on every tensor and
+    # appends its loop after the existing ones.
+    op_spec.iteration_space = {**op_spec.iteration_space, restored: (1, 1)}
+    for arg in op_spec.args:
+        arg.device_size = [1, *arg.device_size]
+        arg.device_coordinates = [restored, *arg.device_coordinates]
+    op_spec.core_id_to_work_slice = derive_operation_mapping(
+        op_spec.iteration_space, contiguous_dim=reduction
+    )
+    sdsc_spec, labels = parse_op_spec(op_spec)
+    assert {dim: str(labels[dim]) for dim in (restored, mb, out, reduction)} == {
+        restored: "x",
+        mb: "mb",
+        out: "out",
+        reduction: "in",
+    }
+    # The SDSC lists the dims in the label order of any other batched matmul.
+    assert [str(label) for label in sdsc_spec.iteration_space] == [
+        "x",
+        "mb",
+        "out",
+        "in",
+    ]
+    # The caller's loop order is untouched; only the SDSC is written in role order.
+    assert list(op_spec.iteration_space) == [mb, out, reduction, restored]
+
+
+def test_matmul_role_order_keeps_other_loop_orders():
+    """Inductor's own order, and a loop after K that is not a batch loop, stay."""
+    op_spec = _bmm_op_spec(BATCH_MATMUL_OP)
+    assert superdsc_module._matmul_role_order(op_spec) is op_spec
+    # A loop after K that the output and x index but y does not: not a batch loop.
+    extra = sympy.Symbol("extra")
+    op_spec.iteration_space = {**op_spec.iteration_space, extra: (1, 1)}
+    for arg in (op_spec.args[0], op_spec.args[-1]):
+        arg.device_coordinates = [extra, *arg.device_coordinates]
+    assert superdsc_module._matmul_role_order(op_spec) is op_spec
+
+
 def test_flattened_iteration_span_is_not_a_single_axis_view():
     heads, flat = sympy.symbols("heads flat")
     prep = _view_prep(

@@ -48,6 +48,7 @@ from torch_spyre._inductor.constants import (
     TOPK_OPS,
     KEEP_BY_INDEX_OP,
 )
+from torch_spyre._inductor.core_mapping import matmul_reduction_dim
 from torch_spyre._inductor.dtype_ops import DtypeOpTable
 from torch_spyre._inductor.indirect_access import (
     compute_indirect_max_dim_sizes,
@@ -1172,6 +1173,40 @@ def _get_op_dim_labels(ndim: int, is_matmul: bool, is_conv2d: bool) -> list[str]
         return INPUT_DIM_LABELS[: ndim - 1] + OUTPUT_DIM_LABELS[:1]
 
 
+def _matmul_role_order(op_spec: OpSpec) -> OpSpec:
+    """Move batch loops that alignment restored after K back in front of a matmul.
+
+    MATMUL_DIM_LABELS are positional over Inductor's matmul loop order: batch
+    loops first, then M and N, and the reduction K (``in``) last. Alignment
+    appends a range-1 loop for each elided device dimension after K. Such a loop
+    indexes both operands and the output, which makes it a batch loop, so it goes
+    in front. K is found by identity (``matmul_reduction_dim``). The SDSC then
+    lists the dims in the same label order as any other matmul. Any other loop
+    order is returned unchanged, and the caller's OpSpec is not changed.
+    """
+    reduction = matmul_reduction_dim(op_spec.iteration_space, op_spec.args)
+    if reduction is None:
+        logger.debug("%s: no single reduction loop; positional labels", op_spec.op)
+        return op_spec
+    dims = list(op_spec.iteration_space)
+    trailing = dims[dims.index(reduction) + 1 :]
+    if not trailing:
+        return op_spec
+    operands = (op_spec.args[0], op_spec.args[1], op_spec.args[-1])
+    indexed = [set(_ordered_arg_symbols(arg)) for arg in operands]
+    if any(dim not in syms for dim in trailing for syms in indexed):
+        logger.debug(
+            "%s: loops %s after K are not batch loops; positional labels",
+            op_spec.op,
+            trailing,
+        )
+        return op_spec
+    order = trailing + dims[: dims.index(reduction) + 1]
+    return dataclasses.replace(
+        op_spec, iteration_space={dim: op_spec.iteration_space[dim] for dim in order}
+    )
+
+
 def _first_free_dim_label(taken: Iterable[Symbol]) -> Symbol:
     names = {sym.name for sym in taken}
     return Symbol(next(lbl for lbl in INPUT_DIM_LABELS if lbl not in names))
@@ -2064,6 +2099,8 @@ def _finalize_tensor_work_divisions(
 
 def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     is_matmul = _is_matmul(op_spec.op)
+    if is_matmul:
+        op_spec = _matmul_role_order(op_spec)
     is_conv2d = _is_conv(op_spec.op)
     is_relayout = is_lx_relayout_identity(op_spec.op, op_spec.args, op_spec.op_info)
     is_restickify = op_spec.op == RESTICKIFY_OP

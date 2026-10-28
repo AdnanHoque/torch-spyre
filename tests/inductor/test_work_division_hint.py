@@ -1782,6 +1782,7 @@ def test_unhinted_moe_down_route_preserves_the_chosen_split(enabled):
     with (
         config.patch(lx_planner_relayout=enabled, core_id_k_fast_emission=True),
         _emitted_kernels() as kernels,
+        _capture_backend_output_dirs() as directories,
     ):
         actual, _ = run_and_get_code(
             torch.compile(
@@ -1823,6 +1824,15 @@ def test_unhinted_moe_down_route_preserves_the_chosen_split(enabled):
         partners.setdefault(owner, []).append(core)
     pairs = [[core, core + 1] for core in range(0, config.sencores, 2)]
     assert sorted(partners.values()) == pairs
+    # The emitted SDSC gives K's split to `in`, not to the restored unit loop.
+    (bmm_sdsc,) = [
+        root
+        for directory in directories
+        for path in directory.glob("sdsc_*.json")
+        for name, root in json.loads(path.read_text()).items()
+        if name.endswith(BATCH_MATMUL_OP)
+    ]
+    assert bmm_sdsc["numWkSlicesPerDim_"]["in"] == 2
     if enabled:
         copies = [spec for spec in specs if spec.completed_producer_cores]
         assert len(copies) == 1

@@ -547,7 +547,9 @@ k-fast was also a planner. The permutation runs whenever any planner
 picks a K-split. Codegen finds K by identity: it is the one loop that the
 matmul's output does not index (`matmul_reduction_dim`). Loop position is not
 used, because alignment can append range-1 loops for elided device dimensions
-after K (for example, a batch-1 matmul inside a `for_each_tile` body).
+after K (for example, a batch-1 matmul inside a `for_each_tile` body). The SDSC
+dimension labels follow the same roles: K is labelled `in`, and such a restored
+loop is labelled and listed as a batch loop.
 
 :::{figure} ../_static/images/work-division/core-id-k-mapping.svg
 :alt: Default core order places the two K slices of one output tile four cores apart; contiguous_dim on K places them on adjacent cores.
