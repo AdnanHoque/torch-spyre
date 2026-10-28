@@ -1967,6 +1967,8 @@ def simplify_op_spec(
                 c.xreplace(indirect_access_subs) for c in arg.device_coordinates
             ]
 
+    if op_spec.op in MATMUL_REDUCTION_OPS:
+        _restore_matmul_loop_order(op_spec)
     _finalize_tensor_work_divisions(op_spec)
     is_relayout = is_lx_relayout_identity(op_spec.op, op_spec.args, op_spec.op_info)
     if is_relayout:
@@ -1978,6 +1980,44 @@ def simplify_op_spec(
         _finalize_core_mapping(op_spec, use_tensor_constraints=True)
         for arg in op_spec.args:
             arg.work_division = None
+
+
+def _restore_matmul_loop_order(op_spec: OpSpec) -> None:
+    """Make a matmul's reduction loop K its last loop again after alignment.
+
+    Inductor orders matmul loops batch, M, N, K. The K-fast core order, the SDSC
+    dim labels and the kernel provenance take K as the last loop. Alignment adds
+    a range-1 loop after K for each elided device dimension, and it puts this
+    loop in every tensor. Such a loop is a batch loop, so this step moves it to
+    the front. ``matmul_reduction_dim`` finds K from its role. The order does not
+    change when there is no single K, or when a tensor does not index a loop
+    after K. The readers then take the last loop as K.
+    """
+    reduction = matmul_reduction_dim(op_spec.iteration_space, op_spec.args)
+    if reduction is None:
+        logger.debug("%s: no single reduction loop; loop order kept", op_spec.op)
+        return
+    dims = list(op_spec.iteration_space)
+    trailing = dims[dims.index(reduction) + 1 :]
+    if not trailing:
+        return
+    for arg in op_spec.args:
+        indexed = {
+            symbol
+            for coordinate in arg.device_coordinates
+            for symbol in sympy.sympify(coordinate).free_symbols
+        }
+        if not indexed.issuperset(trailing):
+            logger.debug(
+                "%s: loops %s after K are not in every tensor; loop order kept",
+                op_spec.op,
+                trailing,
+            )
+            return
+    op_spec.iteration_space = {
+        dim: op_spec.iteration_space[dim]
+        for dim in trailing + dims[: dims.index(reduction) + 1]
+    }
 
 
 def _finalize_tensor_work_divisions(op_spec: OpSpec) -> None:
@@ -1995,10 +2035,11 @@ def _finalize_core_mapping(
 ) -> None:
     """Assign physical cores from an OpSpec's final aligned dimensions."""
 
-    # An unsplit K is a no-op here: core_to_slice_mapping only moves a split dim.
     contiguous_dim = (
-        matmul_reduction_dim(op_spec.iteration_space, op_spec.args)
-        if op_spec.op in MATMUL_REDUCTION_OPS and _spyre_config.core_id_k_fast_emission
+        next(reversed(op_spec.iteration_space))
+        if op_spec.iteration_space
+        and op_spec.op in MATMUL_REDUCTION_OPS
+        and _spyre_config.core_id_k_fast_emission
         else None
     )
     op_spec.core_id_to_work_slice = derive_operation_mapping(

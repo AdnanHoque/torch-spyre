@@ -544,12 +544,9 @@ ring positions. The permutation is implemented in
 runtime. The flag `SPYRE_CORE_ID_K_FAST_EMISSION` (default on)
 controls this codegen-side permutation. The name is legacy from when
 k-fast was also a planner. The permutation runs whenever any planner
-picks a K-split. Codegen finds K by identity: it is the one loop that the
-matmul's output does not index (`matmul_reduction_dim`). Loop position is not
-used, because alignment can append range-1 loops for elided device dimensions
-after K (for example, a batch-1 matmul inside a `for_each_tile` body). The SDSC
-dimension labels follow the same roles: K is labelled `in`, and such a restored
-loop is labelled and listed as a batch loop.
+picks a K-split. It takes K as the matmul's last loop. Alignment can add
+range-1 loops after K, for example for a batch-1 matmul in a `for_each_tile`
+body. `simplify_op_spec` moves these batch loops to the front, so K stays last.
 
 :::{figure} ../_static/images/work-division/core-id-k-mapping.svg
 :alt: Default core order places the two K slices of one output tile four cores apart; contiguous_dim on K places them on adjacent cores.
@@ -610,12 +607,7 @@ Completed-result copies use the same intersections, subject to the limits below.
 - The producer must have a supported native reduction and a proven finished
   core for each output piece. This path admits single-corelet matmuls with contiguous K-fast
   groups; other reductions need their own finished-producer rule, not a new
-  copying mechanism. DeepTools (from its PR 4892, master commit `f1c4eae5a1`)
-  splits a split-K matmul across both corelets only when the output goes to
-  HBM; corelet 1 then adds the slices in the other direction and finishes on
-  the first core of each group. An output pinned in LX, as on this path, stays
-  on one corelet. The last-core rule depends on that DeepTools behaviour: if
-  DeepTools also splits an LX-pinned output, this rule must change with it.
+  copying mechanism.
 - Every consumer must receive its requested pieces exactly once. Each
   consumer must use the same number of producers, and each finished producer
   must serve the same number of consumers. Uneven cases are not supported.

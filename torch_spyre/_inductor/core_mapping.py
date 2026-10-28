@@ -587,20 +587,30 @@ def core_to_slice_mapping(
 def matmul_reduction_dim(
     iteration_space: Iterable[Symbol], args: Iterable[TensorArg]
 ) -> Symbol | None:
-    """Return a matmul's reduction loop K: the one loop its output does not index.
+    """Return a matmul's reduction loop K: both inputs index it, the output does not.
 
-    Find K by identity, not by position: alignment appends range-1 loops for
-    elided device dimensions after K, so the last loop need not be K. Returns
-    None unless exactly one loop qualifies.
+    Find K by identity, not by position: alignment adds range-1 loops for
+    elided device dimensions after K, so the last loop is not always K. The
+    test on the inputs excludes an M or N of 1 that the output folds away.
+    Returns None if no loop or more than one loop agrees with the rule.
     """
-    indexed = {
-        symbol
-        for arg in args
-        if not arg.is_input
-        for coordinate in arg.device_coordinates
-        for symbol in sympify(coordinate).free_symbols
-    }
-    reduced = [dim for dim in iteration_space if dim not in indexed]
+    inputs: list[set[Symbol]] = []
+    outputs: set[Symbol] = set()
+    for arg in args:
+        indexed = {
+            symbol
+            for coordinate in arg.device_coordinates
+            for symbol in sympify(coordinate).free_symbols
+        }
+        if arg.is_input:
+            inputs.append(indexed)
+        else:
+            outputs |= indexed
+    reduced = [
+        dim
+        for dim in iteration_space
+        if dim not in outputs and all(dim in indexed for indexed in inputs)
+    ]
     return reduced[0] if len(reduced) == 1 else None
 
 

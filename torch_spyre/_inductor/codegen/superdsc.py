@@ -1173,40 +1173,6 @@ def _get_op_dim_labels(ndim: int, is_matmul: bool, is_conv2d: bool) -> list[str]
         return INPUT_DIM_LABELS[: ndim - 1] + OUTPUT_DIM_LABELS[:1]
 
 
-def _matmul_role_order(op_spec: OpSpec) -> OpSpec:
-    """Move batch loops that alignment restored after K back in front of a matmul.
-
-    MATMUL_DIM_LABELS are positional over Inductor's matmul loop order: batch
-    loops first, then M and N, and the reduction K (``in``) last. Alignment
-    appends a range-1 loop for each elided device dimension after K. Such a loop
-    indexes both operands and the output, which makes it a batch loop, so it goes
-    in front. K is found by identity (``matmul_reduction_dim``). The SDSC then
-    lists the dims in the same label order as any other matmul. Any other loop
-    order is returned unchanged, and the caller's OpSpec is not changed.
-    """
-    reduction = matmul_reduction_dim(op_spec.iteration_space, op_spec.args)
-    if reduction is None:
-        logger.debug("%s: no single reduction loop; positional labels", op_spec.op)
-        return op_spec
-    dims = list(op_spec.iteration_space)
-    trailing = dims[dims.index(reduction) + 1 :]
-    if not trailing:
-        return op_spec
-    operands = (op_spec.args[0], op_spec.args[1], op_spec.args[-1])
-    indexed = [set(_ordered_arg_symbols(arg)) for arg in operands]
-    if any(dim not in syms for dim in trailing for syms in indexed):
-        logger.debug(
-            "%s: loops %s after K are not batch loops; positional labels",
-            op_spec.op,
-            trailing,
-        )
-        return op_spec
-    order = trailing + dims[: dims.index(reduction) + 1]
-    return dataclasses.replace(
-        op_spec, iteration_space={dim: op_spec.iteration_space[dim] for dim in order}
-    )
-
-
 def _first_free_dim_label(taken: Iterable[Symbol]) -> Symbol:
     names = {sym.name for sym in taken}
     return Symbol(next(lbl for lbl in INPUT_DIM_LABELS if lbl not in names))
@@ -1897,35 +1863,28 @@ def _extend_matmul_k_to_padded(
     - Strides are computed against K_padded → correct for K_padded-extended iteration.
     - _get_padded_iteration_space becomes a no-op for K (already aligned).
 
-    K is identified as the symbol that appears in y's (non-stick) device_coordinates
-    but NOT in the output's device_coordinates.  This is the reduction symbol and is
-    layout-position agnostic: it works regardless of how MATMUL_DIM_LABELS maps the
-    iteration symbols for this particular ndim.
+    ``matmul_reduction_dim`` finds K from its role: the one loop that both inputs
+    index and the output does not. The result does not depend on how
+    MATMUL_DIM_LABELS maps the loops for this ndim. The padding pass pads K as
+    rows of y, so K must be a non-stick dim of y. If it is not, nothing is padded.
     """
-    # y is always args[1]; output is always args[-1] for matmul.
+    # y is always args[1] for matmul.
     y_arg = op_spec.args[1]
-    out_arg = op_spec.args[-1]
+    reduction = matmul_reduction_dim(op_spec.iteration_space, op_spec.args)
+    k_sym = symbol_mapping.get(reduction)
 
     # Collect non-stick symbols in y's device_coordinates (after symbol_mapping).
     y_dim_order, y_stick_dim = _get_device_dim_order(y_arg, symbol_mapping)
     # y_stick_dim is the within-stick symbol; the remaining dims include K.
     y_non_stick_syms: set = set(y_dim_order) - ({y_stick_dim} if y_stick_dim else set())
-
-    # Collect all symbols in the output's device_coordinates.
-    out_dim_order, _ = _get_device_dim_order(out_arg, symbol_mapping)
-    out_syms: set = set(out_dim_order)
-
-    # K is in y but not in the output (it's reduced).
-    k_candidates = y_non_stick_syms - out_syms
-    if not k_candidates:
+    if k_sym not in y_non_stick_syms:
         logger.warning(
-            "_extend_matmul_k_to_padded: could not identify K symbol "
-            "(y_non_stick=%s, out_syms=%s), skipping",
+            "_extend_matmul_k_to_padded: K symbol %s is not a non-stick dim of y "
+            "(y_non_stick=%s), skipping",
+            k_sym,
             y_non_stick_syms,
-            out_syms,
         )
         return
-    k_sym = min(k_candidates, key=str)
 
     if k_sym not in sdsc_iteration_space:
         logger.warning(
@@ -2099,8 +2058,6 @@ def _finalize_tensor_work_divisions(
 
 def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     is_matmul = _is_matmul(op_spec.op)
-    if is_matmul:
-        op_spec = _matmul_role_order(op_spec)
     is_conv2d = _is_conv(op_spec.op)
     is_relayout = is_lx_relayout_identity(op_spec.op, op_spec.args, op_spec.op_info)
     is_restickify = op_spec.op == RESTICKIFY_OP
