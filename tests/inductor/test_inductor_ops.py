@@ -13204,6 +13204,37 @@ class TestOps(unittest.TestCase, metaclass=ParameterizedTestMeta):
         """
         self.compare_with_cpu(lambda x: x.unfold(dimension, size, step), x)
 
+    def test_unfold_sliced_reduction(self):
+        """A row offset before an overlapping unfold must keep exact reads."""
+        x = torch.arange(17, dtype=torch.float16).view(1, 17, 1)
+        x = x.expand(8, 17, 6).clone()
+
+        def fn(t):
+            return t[:, 1:17].unfold(1, 4, 2).sum(dim=0)
+
+        self.compare_with_cpu(fn, x, atol=0, rtol=0, run_eager=False)
+
+    def test_unfold_window_reduction(self):
+        """A whole window per core must pin every larger-stride input axis."""
+        x = torch.arange(16, dtype=torch.float16).view(1, 16, 1)
+        x = x.expand(4, 16, 6).clone()
+
+        def fn(t):
+            return t.unfold(1, 4, 2).sum(dim=-1)
+
+        self.compare_with_cpu(fn, x, atol=0, rtol=0, run_eager=False)
+
+    def test_unfold_step_one_window_reduction(self):
+        """A step-one unfold reduces each complete window on one core."""
+        rows = torch.arange(10, dtype=torch.float16).view(10, 1)
+        cols = torch.arange(6, dtype=torch.float16).view(1, 6)
+        x = rows * 8 + cols
+
+        def fn(t):
+            return t.unfold(0, 3, 1).sum(dim=-1)
+
+        self.compare_with_cpu(fn, x, atol=0, rtol=0, run_eager=False)
+
     def test_unbind_cpu(self, dim: int, x):
         self.compare_with_cpu(lambda a: torch.unbind(a, dim=dim), x)
 
