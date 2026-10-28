@@ -56,12 +56,12 @@ from .core_mapping import (
     finalize_tensor_work_divisions,
     matmul_reduction_dim,
     remap_work_division,
+    work_division_from_view,
 )
 from .errors import Unsupported
 from .ir import FixedTiledLayout, SpyreConstantFallback
 from .scratchpad.lx_relayout import (
     materialized_lx_relayout_for_destination,
-    work_division_from_view,
 )
 from .pass_utils import (
     concretize_expr,
@@ -892,6 +892,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             tensor.layout.device_layout.device_size,
             device_coords,
             it_space,
+            allow_extended=_spyre_config.lx_extended_ownership,
         )
         tensor_arg = TensorArg(
             is_input,
