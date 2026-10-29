@@ -395,6 +395,38 @@ TRANSFER_CERTIFICATES = (
         ),
     ),
     TransferCertificate(
+        "Contained local LX read",
+        "torch_spyre._inductor.scratchpad.lx_relayout.local_lx_emission_contract",
+        "ownership flag ON; shared graph and compact-read geometry gate; "
+        "same-core byte certificate; fresh final access; disjoint live allocations",
+        (
+            "test_lx_read_contracts.py::test_stale_or_unsafe_final_facts_are_rejected",
+            "test_work_division_hint.py::test_local_read_rollout_declines_before_graph_access",
+        ),
+        ("test_solver_relayout_e2e.py::test_gate_up_full_parent_repartition",),
+    ),
+    TransferCertificate(
+        "Full-parent copy for local subranges",
+        "torch_spyre._inductor.scratchpad.lx_relayout.materialize_lx_relayouts",
+        "complete parent copied once per destination group; every partial reader "
+        "re-certified against the destination view; positive disjoint LX spans",
+        (
+            "test_subrange_transfer.py::test_gate_up_siblings_have_distinct_copy_identity",
+            "test_solver_relayout_decision.py::test_copy_is_sized_by_the_destination_span_not_the_source_share",
+        ),
+        ("test_solver_relayout_e2e.py::test_gate_up_full_parent_repartition",),
+    ),
+    TransferCertificate(
+        "Pointwise persistent-scatter materializer",
+        "torch_spyre._inductor.scratchpad.lx_relayout._pointwise_scatter_materializer",
+        "ownership flag ON; one certified compact parent subrange; complete "
+        "scatter read; persistent-scatter storage, alias and ordering checks",
+        (
+            "test_solver_relayout_candidates.py::test_pointwise_scatter_materializer_admission",
+        ),
+        (),
+    ),
+    TransferCertificate(
         "Factored ownership",
         "torch_spyre._inductor.slice_ownership.factor_slice_axis",
         "exact zero-origin dense product; independent digits; "

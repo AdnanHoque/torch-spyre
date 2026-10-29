@@ -437,6 +437,12 @@ conditions and its tests. Add later ownership exceptions to the registry.
 An ownership proof does not replace storage, lifetime or capacity checks.
 The untiled prefix case does not require same-tile-group search.
 
+The planner and final emitter share the `local_lx_subrange_geometry` gate.
+Work division receives immutable facts through `local_lx_read_geometry`.
+At emission, `local_lx_emission_contract` repeats the gate on the live graph.
+Keep these paths on the same gate. A geometry certificate does not replace
+storage, alias, lifetime or allocation checks.
+
 The symbolic proof registry below is separate from storage permission. It
 selects the existing containment proofs in order. The view-recovery caller
 keeps its floor-only, single-driven-axis restriction. An emitted-access proof
@@ -463,6 +469,9 @@ slot is a search heuristic, not an ownership proof or a performance guarantee.
 | Updated-input cache snapshot | `torch_spyre._inductor.scratchpad.lx_relayout._is_activation_source` | earlier direct cache mutation; immutable restickified snapshot; original cache load and dependencies preserved | `test_work_division_hint.py::test_lx_relayout_activation_policy_is_source_wide` | `test_solver_relayout_e2e.py::test_attention_cache_transpose_handoff` |
 | Fewer-core complete partitions | `torch_spyre._inductor.scratchpad.lx_relayout.core_domain_rejection` | integral core ratio; complete disjoint partitions; larger domain uses every compute core; physical spans stay separate | `test_solver_relayout_candidates.py::test_consumer_rules_are_shared_with_the_committed_collector` | `test_solver_relayout_e2e.py::test_k_projection_rope_complete_contraction` |
 | Persistent external cache scatter | `torch_spyre._inductor.scratchpad.lx_relayout._persistent_scatter_consumer` | fresh immutable matmul source; one external indirect overwrite; no source alias or cache read; mutation order and lifetime preserved | `test_solver_relayout_candidates.py::test_persistent_scatter_requires_independent_immutable_source` | `test_solver_relayout_e2e.py::test_v_projection_cache_handoff_preserves_persistent_alias` |
+| Contained local LX read | `torch_spyre._inductor.scratchpad.lx_relayout.local_lx_emission_contract` | ownership flag ON; shared graph and compact-read geometry gate; same-core byte certificate; fresh final access; disjoint live allocations | `test_lx_read_contracts.py::test_stale_or_unsafe_final_facts_are_rejected`; `test_work_division_hint.py::test_local_read_rollout_declines_before_graph_access` | `test_solver_relayout_e2e.py::test_gate_up_full_parent_repartition` |
+| Full-parent copy for local subranges | `torch_spyre._inductor.scratchpad.lx_relayout.materialize_lx_relayouts` | complete parent copied once per destination group; every partial reader re-certified against the destination view; positive disjoint LX spans | `test_subrange_transfer.py::test_gate_up_siblings_have_distinct_copy_identity`; `test_solver_relayout_decision.py::test_copy_is_sized_by_the_destination_span_not_the_source_share` | `test_solver_relayout_e2e.py::test_gate_up_full_parent_repartition` |
+| Pointwise persistent-scatter materializer | `torch_spyre._inductor.scratchpad.lx_relayout._pointwise_scatter_materializer` | ownership flag ON; one certified compact parent subrange; complete scatter read; persistent-scatter storage, alias and ordering checks | `test_solver_relayout_candidates.py::test_pointwise_scatter_materializer_admission` | None |
 | Factored ownership | `torch_spyre._inductor.slice_ownership.factor_slice_axis` | exact zero-origin dense product; independent digits; complete rectangular slices; no address rewrite or storage permission | `test_work_division_hint.py::test_factored_slice_rejects_inexact_products` | `test_solver_relayout_e2e.py::test_k_projection_rope_complete_contraction` |
 <!-- END GENERATED TRANSFER CERTIFICATES -->
 
