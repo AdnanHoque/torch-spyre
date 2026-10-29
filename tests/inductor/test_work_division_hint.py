@@ -2540,6 +2540,77 @@ def test_contraction_requires_disjoint_full_physical_spans(
 @pytest.mark.parametrize(
     "source_cores,destination_cores", [(32, 16), (16, 16), (16, 32)]
 )
+def test_relayout_codegen_wraps_only_a_contracted_operation_frame(
+    source_cores, destination_cores
+):
+    """Keep tensor domains distinct while scheduling every required core.
+
+    C4 tracks replacing this shape-derived frame correction with explicit
+    domains end-to-end in torch-spyre#5716.
+    """
+    row, feature = Symbol("row"), Symbol("feature")
+    source = TensorWorkDivision(
+        {row: source_cores // 2, feature: 2},
+        {row: floor(_CORE_ID / 2), feature: Mod(_CORE_ID, 2)},
+        num_cores=source_cores,
+    )
+    destination = TensorWorkDivision(
+        {row: destination_cores, feature: 1},
+        {row: _CORE_ID, feature: Integer(0)},
+        num_cores=destination_cores,
+    )
+    base = TensorArg(
+        True,
+        -1,
+        DataFormats.SEN169_FP16,
+        [512, 2, 64],
+        [row, floor(feature / 64), Mod(feature, 64)],
+        {"lx": 0},
+    )
+    spec = OpSpec(
+        IDENTITY_OP,
+        False,
+        {row: (512, destination_cores), feature: (128, 1)},
+        [
+            replace(base, work_division=source),
+            replace(
+                base,
+                is_input=False,
+                allocation={"lx": 8192},
+                work_division=destination,
+            ),
+        ],
+        {LX_RELAYOUT_INFO_KEY: True},
+        core_id_to_work_slice={row: _CORE_ID, feature: Integer(0)},
+    )
+    parsed, renamed = parse_op_spec(spec)
+    r, f = renamed[row], renamed[feature]
+    assert parsed.opfunc == "shuffle", "unequal ownership became an ordinary identity"
+    assert parsed.num_cores == max(source_cores, destination_cores)
+    assert parsed.work_slices == {r: destination_cores, f: 1}
+    assert parsed.core_id_to_work_slice[f] == 0
+    actual_source, actual_destination = [arg.work_division for arg in parsed.args]
+    assert actual_source.num_cores == source_cores
+    assert actual_source.work_slices == {r: source_cores // 2, f: 2}
+    assert actual_source.core_id_to_work_slice == {
+        r: floor(_CORE_ID / 2),
+        f: Mod(_CORE_ID, 2),
+    }
+    assert actual_destination.num_cores == destination_cores
+    assert actual_destination.work_slices == {r: destination_cores, f: 1}
+    assert actual_destination.core_id_to_work_slice == {r: _CORE_ID, f: 0}
+    assert not actual_source.same_ownership(actual_destination)
+    assert spec.core_id_to_work_slice == {row: _CORE_ID, feature: 0}
+    assert spec.args[0].work_division is source
+    assert spec.args[1].work_division is destination
+    # The certificate and per-tensor-ownership guard remain mandatory.
+    with pytest.raises(AssertionError, match="per-tensor ownership"):
+        parse_op_spec(replace(spec, op_info={}))
+
+
+@pytest.mark.parametrize(
+    "source_cores,destination_cores", [(32, 16), (16, 16), (16, 32)]
+)
 def test_relayout_operation_frame_keeps_tensor_domains(source_cores, destination_cores):
     """Contraction repeats the operation frame, not tensor ownership domains."""
     from torch_spyre._inductor.core_mapping import owner_slots, transfer_edges
@@ -2633,3 +2704,28 @@ def test_local_read_rollout_declines_before_graph_access(enabled):
             assert not lx_relayout_module.local_lx_subrange_source(
                 Graph(), "source", []
             )
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_hinted_reader_rollout_declines_before_fx_access(enabled):
+    from torch_spyre._inductor.materialize_hinted_views import materialize_hinted_views
+
+    class GraphAccess(Exception):
+        pass
+
+    class Graph:
+        @property
+        def nodes(self):
+            raise GraphAccess
+
+    with config.patch(
+        lx_extended_ownership=enabled,
+        lx_planning=True,
+        co_optimizing_lx_planning=True,
+        lx_planner_relayout=True,
+    ):
+        if enabled:
+            with pytest.raises(GraphAccess):
+                materialize_hinted_views(Graph())
+        else:
+            assert materialize_hinted_views(Graph()) is None

@@ -665,8 +665,9 @@ def test_persistent_scatter_requires_independent_immutable_source(
     from types import SimpleNamespace
     from torch_spyre._inductor.scratchpad import utils as scratchpad_utils
 
-    class Input(SimpleNamespace):
-        pass
+    import torch
+    from torch._inductor.ir import FixedLayout, InputBuffer, MutationLayoutSHOULDREMOVE
+    from torch._inductor.virtualized import V
 
     class Pointwise(SimpleNamespace):
         pass
@@ -679,11 +680,17 @@ def test_persistent_scatter_requires_independent_immutable_source(
             return self.indirect
 
     source = SimpleNamespace(layout=Fixed(), get_name=lambda: "value")
-    cache = Input(
-        get_name=lambda: "cache", get_layout=lambda: Fixed(allocation={"hbm": 0})
+    cache = InputBuffer(
+        name="cache",
+        layout=FixedLayout(device=torch.device("cpu"), dtype=torch.float16, size=[64]),
     )
+    mutated = []
+    with V.set_graph_handler(SimpleNamespace(mark_buffer_mutated=mutated.append)):
+        mutation_layout = MutationLayoutSHOULDREMOVE(target=cache)
+    assert mutated == ["cache"]
+    cache.get_layout = lambda: Fixed(allocation={"hbm": 0})
     update = SimpleNamespace(
-        layout=SimpleNamespace(target=cache),
+        layout=mutation_layout,
         data=Pointwise(),
         get_name=lambda: "update",
     )
@@ -732,7 +739,6 @@ def test_persistent_scatter_requires_independent_immutable_source(
             raise NotImplementedError
 
         later.get_inputs_that_alias_output = unknown
-    monkeypatch.setattr(lx_relayout, "InputBuffer", Input)
     monkeypatch.setattr(lx_relayout, "Pointwise", Pointwise)
     monkeypatch.setattr(lx_relayout, "FixedTiledLayout", Fixed)
     monkeypatch.setattr(lx_relayout, "MemoryDep", Dep)
