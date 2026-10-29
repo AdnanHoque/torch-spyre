@@ -1901,11 +1901,6 @@ def _extend_matmul_k_to_padded(
     - y's dev_dim_size for K == it_dim_size → backGap branch never fires for y.
     - Strides are computed against K_padded → correct for K_padded-extended iteration.
     - _get_padded_iteration_space becomes a no-op for K (already aligned).
-
-    ``matmul_reduction_dim`` finds K from its role: the one loop that both inputs
-    index and the output does not. The result does not depend on how
-    MATMUL_DIM_LABELS maps the loops for this ndim. The padding pass pads K as
-    rows of y, so K must be a non-stick dim of y. If it is not, nothing is padded.
     """
     # y is always args[1] for matmul.
     y_arg = op_spec.args[1]
