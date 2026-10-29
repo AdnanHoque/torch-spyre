@@ -427,6 +427,18 @@ TRANSFER_CERTIFICATES = (
         (),
     ),
     TransferCertificate(
+        "Direct cache-snapshot subrange read",
+        "torch_spyre._inductor.scratchpad.lx_relayout._local_lx_scatter_geometry",
+        "single-writer complete immutable snapshot; one direct partial read; "
+        "other reads are scatter indices; standard 128-byte sticks; "
+        "zero inner origin and exact rectangle size; external mutation target "
+        "and final same-core ownership checks preserved",
+        (
+            "test_solver_relayout_candidates.py::test_direct_cache_snapshot_scatter_geometry",
+        ),
+        (),
+    ),
+    TransferCertificate(
         "Factored ownership",
         "torch_spyre._inductor.slice_ownership.factor_slice_axis",
         "exact zero-origin dense product; independent digits; "

@@ -2545,8 +2545,9 @@ def test_relayout_codegen_wraps_only_a_contracted_operation_frame(
 ):
     """Keep tensor domains distinct while scheduling every required core.
 
-    C4 tracks replacing this shape-derived frame correction with explicit
-    domains end-to-end in torch-spyre#5716.
+    This regression covers the existing codegen behavior on main. This PR
+    does not change that path. C4 tracks replacing the shape-derived frame
+    correction with explicit domains end-to-end in torch-spyre#5716.
     """
     row, feature = Symbol("row"), Symbol("feature")
     source = TensorWorkDivision(
@@ -2729,3 +2730,111 @@ def test_hinted_reader_rollout_declines_before_fx_access(enabled):
                 materialize_hinted_views(Graph())
         else:
             assert materialize_hinted_views(Graph()) is None
+
+
+@pytest.mark.parametrize("leading_batch", [False, True])
+@pytest.mark.parametrize(
+    "violation",
+    [
+        None,
+        "parent_output",
+        "parent_write",
+        "width",
+        "row_split",
+        "marked",
+        "no_hint",
+        "off",
+    ],
+)
+def test_hinted_view_fx_rewrite_and_refusals(monkeypatch, leading_batch, violation):
+    """Run the real FX pass with CPU tensor values and an explicit device boundary.
+
+    Only DEVICE_NAME is changed to CPU. The pass, storage checks, hint checks,
+    graph edits, and graph execution use their actual implementations.
+    """
+    import copy
+
+    import torch
+    from torch.fx import Graph, GraphModule
+    from torch_spyre._inductor import materialize_hinted_views as pass_module
+
+    monkeypatch.setattr(pass_module, "DEVICE_NAME", "cpu")
+    graph = Graph()
+    rows, features = 6, 256
+    width = 96 if violation == "width" else 128
+    shape = ([1] if leading_batch else []) + [rows, 2, width // 2]
+    inputs = (
+        torch.arange(rows * 64, dtype=torch.float16).reshape(rows, 64) / 1024,
+        torch.arange(64 * features, dtype=torch.float16).reshape(64, features) / 32768,
+    )
+    left, right = graph.placeholder("left"), graph.placeholder("right")
+    left.meta["val"], right.meta["val"] = inputs
+
+    def call(target, args, value):
+        node = graph.call_function(target, args)
+        node.meta["val"] = value
+        return node
+
+    parent = call(torch.ops.aten.mm.default, (left, right), inputs[0] @ inputs[1])
+    selected = call(
+        torch.ops.aten.slice.Tensor,
+        (parent, 1, 64, 64 + width),
+        parent.meta["val"][:, 64 : 64 + width],
+    )
+    view = call(
+        torch.ops.aten.view.default, (selected, shape), selected.meta["val"].view(shape)
+    )
+    names = (["batch"] if leading_batch else []) + ["row", "head", "lane"]
+    hint = {
+        "named_dims": names,
+        "work_div": {"row": 4 if violation == "row_split" else 2},
+    }
+    if violation != "no_hint":
+        view.meta["custom"] = {"_hint_work_division": hint}
+    if violation == "marked":
+        view.meta["spyre_compact_reader"] = True
+    if violation == "parent_write":
+        call(torch.ops.aten.add_.Tensor, (parent, 1), parent.meta["val"] + 1)
+    result = call(torch.ops.aten.add.Tensor, (view, 1), view.meta["val"] + 1)
+    graph.output((result, parent) if violation == "parent_output" else result)
+    graph.lint()
+    before = str(graph)
+    original_hint = copy.deepcopy(view.meta.get("custom"))
+    expected = GraphModule({}, graph)(*inputs)
+
+    with config.patch(
+        lx_planning=True,
+        co_optimizing_lx_planning=True,
+        lx_planner_relayout=True,
+        lx_extended_ownership=violation != "off",
+    ):
+        pass_module.materialize_hinted_views(graph)
+        clones = [
+            node for node in graph.nodes if node.target == torch.ops.aten.clone.default
+        ]
+        if violation is not None:
+            assert str(graph) == before
+            assert not clones
+            return
+        assert len(clones) == 1
+        compact = clones[0]
+        flat = compact.args[0]
+        restored = result.args[0]
+        assert flat.target == restored.target == torch.ops.aten.view.default
+        assert flat.args == (view, [rows, width])
+        assert restored.args == (compact, shape)
+        assert compact.meta["val"].is_contiguous()
+        assert (
+            compact.meta["val"].untyped_storage()._cdata
+            != view.meta["val"].untyped_storage()._cdata
+        )
+        assert view.meta["custom"] == original_hint
+        assert compact.meta["custom"]["_hint_work_division"]["named_dims"] == [
+            "row",
+            f"_untracked_compact_width_{width}",
+        ]
+        assert view.meta["spyre_compact_reader"] is True
+        assert torch.equal(GraphModule({}, graph)(*inputs), expected)
+        rewritten = str(graph)
+        pass_module.materialize_hinted_views(graph)
+        assert str(graph) == rewritten, "A second pass duplicated the materialization"
