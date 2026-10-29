@@ -37,6 +37,7 @@ class ResidencyChecks(Protocol):
     def loop_carry(self) -> bool: ...
     def drain(self) -> bool: ...
     def prefix_gather(self) -> bool: ...
+    def local_subrange(self) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -159,7 +160,7 @@ BUFFER_RESIDENCY_RULES = (
             "solver checks each candidate division, so the committed-division "
             "barrier can reject a valid candidate (#4655)."
         ),
-        ("TestRestickifyBarrierDeferredOnJointPath",),
+        ("test_buffer_residency_adapter_rejection_strings",),
     ),
     ResidencyRule(
         "extern",
@@ -232,7 +233,21 @@ BUFFER_RESIDENCY_RULES = (
             "certified zero-offset prefix needs a served full-backing gather."
         ),
         ("test_buffer_residency_adapter_rejection_strings",),
-        (PREFIX_GATHER,),
+        (
+            PREFIX_GATHER,
+            ResidencyException(
+                "Contained local read",
+                "local_lx_subrange_source",
+                lambda c: c.local_subrange(),
+                (
+                    "rollout enabled",
+                    "existing compact materializer",
+                    "storage and lifetime permission",
+                    "exact local byte coverage",
+                ),
+                ("test_registry_exception_keeps_later_guards",),
+            ),
+        ),
     ),
     ResidencyRule(
         "core_division",
